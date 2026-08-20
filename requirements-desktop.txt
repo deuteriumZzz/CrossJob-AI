@@ -1,0 +1,9 @@
+# Дополнительные зависимости для веб-дашборда/десктоп-приложения
+# (python desktop_app.py) поверх requirements.txt — не нужны для
+# чистого CLI/cron-использования (main.py --auto/--daemon).
+fastapi==0.110.2
+uvicorn==0.30.6
+pywebview==5.3.2
+# Только для сборки exe (pip install -r requirements-desktop.txt уже
+# достаточно для запуска desktop_app.py напрямую из исходников).
+pyinstaller==6.10.0

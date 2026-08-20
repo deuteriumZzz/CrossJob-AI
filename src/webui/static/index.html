@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<title>CrossJob-AI</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<header>
+  <h1>CrossJob-AI</h1>
+  <div class="daemon-controls">
+    <span id="daemon-badge" class="badge off">демон остановлен</span>
+    <button id="daemon-start">Запустить</button>
+    <button id="daemon-stop">Остановить</button>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button data-tab="overview" class="active">Обзор</button>
+  <button data-tab="history">История</button>
+  <button data-tab="replies">Ответы</button>
+  <button data-tab="analytics">Аналитика</button>
+  <button data-tab="settings">Настройки</button>
+  <button data-tab="logs">Логи</button>
+</nav>
+
+<main>
+  <section id="view-overview" class="view active">
+    <div id="stats-row" class="stats-row"></div>
+    <div class="filters">
+      <button id="run-now">Запустить выбранные сейчас</button>
+      <span id="run-now-status" class="muted"></span>
+    </div>
+    <div id="source-grid" class="source-grid"></div>
+  </section>
+
+  <section id="view-history" class="view">
+    <div class="filters">
+      <select id="filter-source">
+        <option value="">Все площадки</option>
+        <option value="headhunter">HeadHunter</option>
+        <option value="superjob">SuperJob</option>
+        <option value="zarplata">Zarplata.ru</option>
+        <option value="geekjob">geekjob.ru</option>
+        <option value="rabota_ru">rabota.ru</option>
+        <option value="telegram">Telegram</option>
+        <option value="getmatch">GetMatch</option>
+        <option value="linkedin">LinkedIn</option>
+      </select>
+      <select id="filter-status">
+        <option value="">Любой статус</option>
+        <option value="applied">applied</option>
+        <option value="dry_run">dry_run</option>
+        <option value="skipped_low_fit">skipped_low_fit</option>
+      </select>
+      <input id="filter-query" type="text" placeholder="Поиск по компании/названию" />
+      <button id="history-apply-filters">Применить</button>
+    </div>
+    <table>
+      <thead>
+        <tr><th>Дата</th><th>Площадка</th><th>Компания</th><th>Вакансия</th><th>Статус</th><th>Балл</th></tr>
+      </thead>
+      <tbody id="history-rows"></tbody>
+    </table>
+  </section>
+
+  <section id="view-replies" class="view">
+    <table>
+      <thead>
+        <tr><th>Дата</th><th>Площадка</th><th>Вакансия</th><th>Статус переговоров</th></tr>
+      </thead>
+      <tbody id="replies-rows"></tbody>
+    </table>
+  </section>
+
+  <section id="view-analytics" class="view">
+    <h3>Чаще всего не хватает</h3>
+    <ul id="gaps-list"></ul>
+
+    <h3>Кандидаты на чёрный список компаний</h3>
+    <p class="muted">3+ отклика без единого ответа.</p>
+    <div id="blacklist-candidates"></div>
+    <button id="blacklist-add">Добавить отмеченные</button>
+  </section>
+
+  <section id="view-settings" class="view">
+    <div class="filters">
+      <button id="notif-test">Отправить тестовое уведомление в Telegram</button>
+      <span id="notif-test-status" class="muted"></span>
+    </div>
+    <table class="settings-table">
+      <thead>
+        <tr><th>Площадка</th><th>В расписании демона</th><th>Интервал, ч</th><th>auto_apply</th><th></th></tr>
+      </thead>
+      <tbody id="settings-rows"></tbody>
+    </table>
+  </section>
+
+  <section id="view-logs" class="view">
+    <div class="filters">
+      <select id="log-source">
+        <option value="">Все источники</option>
+        <option value="headhunter">HeadHunter</option>
+        <option value="superjob">SuperJob</option>
+        <option value="zarplata">Zarplata.ru</option>
+        <option value="geekjob">geekjob.ru</option>
+        <option value="rabota_ru">rabota.ru</option>
+        <option value="telegram">Telegram</option>
+        <option value="getmatch">GetMatch</option>
+        <option value="linkedin">LinkedIn</option>
+      </select>
+    </div>
+    <pre id="log-output" class="logs"></pre>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>
