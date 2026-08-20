@@ -1,6 +1,7 @@
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from src.scheduler import Scheduler
 from src.scheduler_state import load_state
@@ -88,9 +89,32 @@ def test_run_once_records_error_and_does_not_raise():
         assert "network down" in state["headhunter"]["last_error"]
 
 
+def test_run_once_notifies_on_failure():
+    with tempfile.TemporaryDirectory() as tmp:
+
+        def boom(p, k):
+            raise RuntimeError("network down")
+
+        scheduler = _make_scheduler(
+            tmp,
+            parameters={"headhunter": {"schedule_enabled": True}},
+            source_map={"headhunter": boom},
+        )
+
+        with patch("src.scheduler.notify_from_secrets") as mock_notify:
+            scheduler.run_once()
+
+        mock_notify.assert_called_once()
+        args, _ = mock_notify.call_args
+        assert args[0] is scheduler.parameters
+        assert "headhunter" in args[1]
+        assert "network down" in args[1]
+
+
 if __name__ == "__main__":
     test_due_sources_skips_disabled_sources()
     test_due_sources_respects_next_run()
     test_run_once_advances_next_run_by_interval_hours()
     test_run_once_records_error_and_does_not_raise()
+    test_run_once_notifies_on_failure()
     print("All tests passed.")

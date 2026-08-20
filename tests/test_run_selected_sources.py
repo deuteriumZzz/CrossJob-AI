@@ -38,6 +38,22 @@ def test_run_selected_sources_continues_after_one_source_fails():
     assert calls == ["ok"]
 
 
+def test_run_selected_sources_notifies_on_failure():
+    def fake_fail(parameters, llm_api_key):
+        raise RuntimeError("boom")
+
+    with patch.object(
+        main, "ALL_SOURCES", [("fail", fake_fail)]
+    ), patch.object(main, "notify") as mock_notify:
+        main.run_selected_sources(["fail"], {}, "key")
+
+    mock_notify.assert_called_once()
+    args, _ = mock_notify.call_args
+    assert args[0] == {}
+    assert "fail" in args[1]
+    assert "boom" in args[1]
+
+
 def test_run_selected_sources_ignores_unknown_names():
     calls = []
 
@@ -55,5 +71,6 @@ def test_run_selected_sources_ignores_unknown_names():
 if __name__ == "__main__":
     test_run_selected_sources_runs_only_named_sources_in_order()
     test_run_selected_sources_continues_after_one_source_fails()
+    test_run_selected_sources_notifies_on_failure()
     test_run_selected_sources_ignores_unknown_names()
     print("All tests passed.")

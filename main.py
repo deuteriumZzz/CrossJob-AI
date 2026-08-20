@@ -63,7 +63,7 @@ from src.job_sources.superjob.client import SuperJobClient
 from src.job_sources.superjob.source import SuperJobSource
 from src.job_sources.telegram.client import TelegramSourceClient
 from src.job_sources.telegram.source import TelegramSource
-from src.job_sources.telegram_notify import send_notification
+from src.job_sources.telegram_notify import notify_from_secrets
 from src.job_sources.zarplata.auth import ZarplataAuth
 from src.job_sources.zarplata.client import ZarplataClient
 from src.job_sources.zarplata.source import ZarplataSource
@@ -1108,6 +1108,11 @@ def search_geekjob(parameters: dict, llm_api_key: str):
     except PlatformBlockedError as e:
         logger.error(f"geekjob.ru appears to have blocked us: {e}")
         mark_blocked(output_folder, "geekjob")
+        notify(
+            parameters,
+            f"geekjob.ru: похоже на блокировку ({e}). "
+            "Площадка поставлена на паузу на 24ч.",
+        )
         return
     logger.info(f"Found {len(jobs)} matching geekjob.ru vacancies.")
 
@@ -1194,6 +1199,11 @@ def search_rabota_ru(parameters: dict, llm_api_key: str):
     except PlatformBlockedError as e:
         logger.error(f"rabota.ru appears to have blocked us: {e}")
         mark_blocked(output_folder, "rabota_ru")
+        notify(
+            parameters,
+            f"rabota.ru: похоже на блокировку ({e}). "
+            "Площадка поставлена на паузу на 24ч.",
+        )
         return
     logger.info(f"Found {len(jobs)} matching rabota.ru vacancies.")
 
@@ -1376,6 +1386,11 @@ def search_getmatch(parameters: dict, llm_api_key: str):
     except PlatformBlockedError as e:
         logger.error(f"GetMatch appears to have blocked us: {e}")
         mark_blocked(output_folder, "getmatch")
+        notify(
+            parameters,
+            f"GetMatch: похоже на блокировку ({e}). "
+            "Площадка поставлена на паузу на 24ч.",
+        )
         return
     logger.info(f"Found {len(jobs)} matching GetMatch vacancies.")
 
@@ -1620,6 +1635,7 @@ def run_selected_sources(
             search_fn(parameters, llm_api_key)
         except Exception as e:
             logger.exception(f"{name} failed, continuing with the rest: {e}")
+            notify(parameters, f"CrossJob-AI: {name} упал — {e}")
 
         if index < len(selected) - 1:
             wait_between_sources()
@@ -1644,17 +1660,10 @@ def run_all_sources(parameters: dict, llm_api_key: str) -> None:
 def notify(parameters: dict, text: str) -> None:
     """Best-effort уведомление в Telegram — отсутствие настроенного
     бота или сетевая ошибка не должны ронять прогон, только
-    залогироваться."""
-    try:
-        secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
-        notifications = secrets.get("notifications") or {}
-        bot_token = notifications.get("telegram_bot_token")
-        chat_id = notifications.get("telegram_chat_id")
-        if not bot_token or not chat_id:
-            return
-        send_notification(bot_token, chat_id, text)
-    except Exception as e:
-        logger.warning(f"Failed to send Telegram notification: {e}")
+    залогироваться. Реализация в telegram_notify.notify_from_secrets
+    (общая с src.scheduler.Scheduler, чтобы не тянуть main.py туда
+    циклическим импортом)."""
+    notify_from_secrets(parameters, text)
 
 
 def _answer_headhunter_messages(

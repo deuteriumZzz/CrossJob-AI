@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Optional
 
+from src.job_sources.telegram_notify import notify_from_secrets
 from src.logging import logger
 from src.scheduler_state import get_next_run, record_run_result
 
@@ -64,6 +65,11 @@ class Scheduler:
                     next_run,
                     run_at,
                     error=str(e),
+                )
+                notify_from_secrets(
+                    self.parameters,
+                    f"CrossJob-AI (демон): {name} упал во время "
+                    f"планового запуска — {e}",
                 )
                 continue
             record_run_result(self.output_folder, name, "ok", next_run, run_at)
