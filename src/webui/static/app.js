@@ -26,6 +26,49 @@ function fmtTime(iso) {
   return d.toLocaleString();
 }
 
+const REDUCE_MOTION = window.matchMedia(
+  "(prefers-reduced-motion: reduce)"
+).matches;
+
+function countUp(el, target, duration = 700) {
+  if (REDUCE_MOTION) {
+    el.textContent = target;
+    return;
+  }
+  const start = 0;
+  const startTime = performance.now();
+  const ease = (t) => 1 - Math.pow(1 - t, 3);
+  function tick(now) {
+    const progress = Math.min(1, (now - startTime) / duration);
+    const value = Math.round(start + (target - start) * ease(progress));
+    el.textContent = value;
+    if (progress < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+const revealObserver = new IntersectionObserver(
+  (entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add("in-view");
+        revealObserver.unobserve(entry.target);
+      }
+    });
+  },
+  { threshold: 0.1 }
+);
+
+function observeReveal(container) {
+  container.querySelectorAll(".reveal").forEach((el) => {
+    revealObserver.observe(el);
+  });
+}
+
+function staggerDelay(index, step = 40) {
+  return `${Math.min(index * step, 400)}ms`;
+}
+
 async function api(path, options) {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json" },
@@ -48,8 +91,41 @@ function switchTab(name) {
   render[name]?.();
 }
 
+let overviewLoaded = false;
+
+function skeletonStats() {
+  return Array.from(
+    { length: 3 },
+    () => `<div class="stat-card"><div class="skeleton" style="height:26px;width:40px;margin-bottom:6px"></div><div class="skeleton" style="height:11px;width:70px"></div></div>`
+  ).join("");
+}
+
+function skeletonSourceGrid() {
+  return Array.from(
+    { length: 8 },
+    () => `<div class="source-card skeleton-card"><div class="skeleton" style="height:100%"></div></div>`
+  ).join("");
+}
+
+function skeletonRows(rows, cols) {
+  const cells = Array.from(
+    { length: cols },
+    () => `<td><div class="skeleton"></div></td>`
+  ).join("");
+  return Array.from(
+    { length: rows },
+    () => `<tr class="skeleton-row">${cells}</tr>`
+  ).join("");
+}
+
 const render = {
   async overview() {
+    if (!overviewLoaded) {
+      document.getElementById("stats-row").innerHTML = skeletonStats();
+      document.getElementById("source-grid").innerHTML =
+        skeletonSourceGrid();
+    }
+
     const [status, stats] = await Promise.all([
       api("/api/status"),
       api("/api/stats"),
@@ -64,14 +140,18 @@ const render = {
     document.getElementById("daemon-start").disabled = status.daemon_running;
     document.getElementById("daemon-stop").disabled = !status.daemon_running;
 
-    document.getElementById("stats-row").innerHTML = `
-      <div class="stat-card"><div class="value">${stats.day}</div><div class="label">Сегодня</div></div>
-      <div class="stat-card"><div class="value">${stats.week}</div><div class="label">За неделю</div></div>
-      <div class="stat-card"><div class="value">${stats.month}</div><div class="label">За месяц</div></div>
+    const statsRow = document.getElementById("stats-row");
+    statsRow.innerHTML = `
+      <div class="stat-card"><div class="value" data-target="${stats.day}">0</div><div class="label">Сегодня</div></div>
+      <div class="stat-card"><div class="value" data-target="${stats.week}">0</div><div class="label">За неделю</div></div>
+      <div class="stat-card"><div class="value" data-target="${stats.month}">0</div><div class="label">За месяц</div></div>
     `;
+    statsRow.querySelectorAll(".value").forEach((el) => {
+      countUp(el, parseInt(el.dataset.target, 10));
+    });
 
     document.getElementById("source-grid").innerHTML = status.sources
-      .map((s) => {
+      .map((s, i) => {
         const dot = STATUS_DOT[s.status] || "never_run";
         const ratio = s.daily_limit
           ? Math.min(1, s.applied_today / s.daily_limit)
@@ -79,7 +159,7 @@ const render = {
         const barClass =
           ratio >= 1 ? "full" : ratio >= 0.7 ? "warn" : "";
         return `
-        <div class="source-card">
+        <div class="source-card stagger-item" style="animation-delay:${staggerDelay(i)}">
           <h3>
             <input type="checkbox" class="run-now-check" value="${s.name}" title="Выбрать для запуска сейчас" />
             <span class="dot ${dot}"></span> ${sourceLabel(s.name)}
@@ -94,6 +174,7 @@ const render = {
       })
       .join("");
 
+    overviewLoaded = true;
     await render.runNowStatus();
   },
 
@@ -122,14 +203,20 @@ const render = {
     if (status) params.set("status", status);
     if (q) params.set("q", q);
 
-    const entries = await api(`/api/applications?${params}`);
     const tbody = document.getElementById("history-rows");
+    tbody.innerHTML = skeletonRows(6, 6);
+
+    const entries = await api(`/api/applications?${params}`);
+    if (!entries.length) {
+      tbody.innerHTML = `<tr><td colspan="6" class="muted">Ничего не найдено.</td></tr>`;
+      return;
+    }
     tbody.innerHTML = entries
       .slice()
       .reverse()
       .map(
-        (e) => `
-      <tr>
+        (e, i) => `
+      <tr class="reveal" style="transition-delay:${staggerDelay(i, 25)}">
         <td>${fmtTime(e.applied_at)}</td>
         <td>${sourceLabel(e.source)}</td>
         <td>${e.company}</td>
@@ -139,19 +226,22 @@ const render = {
       </tr>`
       )
       .join("");
+    observeReveal(tbody);
   },
 
   async replies() {
-    const entries = await api("/api/replies");
     const tbody = document.getElementById("replies-rows");
+    tbody.innerHTML = skeletonRows(3, 4);
+
+    const entries = await api("/api/replies");
     if (!entries.length) {
       tbody.innerHTML = `<tr><td colspan="4" class="muted">Пока нет ответов.</td></tr>`;
       return;
     }
     tbody.innerHTML = entries
       .map(
-        (e) => `
-      <tr>
+        (e, i) => `
+      <tr class="reveal" style="transition-delay:${staggerDelay(i, 25)}">
         <td>${fmtTime(e.applied_at)}</td>
         <td>${sourceLabel(e.source)}</td>
         <td><a href="${e.link}" target="_blank" rel="noopener">${e.company} — ${e.title}</a></td>
@@ -159,6 +249,7 @@ const render = {
       </tr>`
       )
       .join("");
+    observeReveal(tbody);
   },
 
   async analytics() {
@@ -169,7 +260,12 @@ const render = {
 
     const gapsEl = document.getElementById("gaps-list");
     gapsEl.innerHTML = gaps.length
-      ? gaps.map(([gap, count]) => `<li>${gap} — ${count}</li>`).join("")
+      ? gaps
+          .map(
+            ([gap, count], i) =>
+              `<li class="stagger-item" style="animation-delay:${staggerDelay(i)}">${gap} — ${count}</li>`
+          )
+          .join("")
       : `<li class="muted">Пока нет данных.</li>`;
 
     const candidatesEl = document.getElementById("blacklist-candidates");
@@ -179,8 +275,8 @@ const render = {
     }
     candidatesEl.innerHTML = candidates
       .map(
-        (c) => `
-      <div class="candidate-row">
+        (c, i) => `
+      <div class="candidate-row stagger-item" style="animation-delay:${staggerDelay(i)}">
         <input type="checkbox" value="${c}" class="blacklist-check" />
         <span>${c}</span>
       </div>`
@@ -193,8 +289,8 @@ const render = {
     const tbody = document.getElementById("settings-rows");
     tbody.innerHTML = status.sources
       .map(
-        (s) => `
-      <tr data-source="${s.name}">
+        (s, i) => `
+      <tr data-source="${s.name}" class="reveal" style="transition-delay:${staggerDelay(i, 25)}">
         <td>${sourceLabel(s.name)}</td>
         <td><input type="checkbox" class="s-schedule" ${s.schedule_enabled ? "checked" : ""} /></td>
         <td><input type="number" class="s-interval" min="1" value="${s.interval_hours ?? 3}" /></td>
@@ -203,6 +299,7 @@ const render = {
       </tr>`
       )
       .join("");
+    observeReveal(tbody);
 
     tbody.querySelectorAll(".s-save").forEach((btn) => {
       btn.addEventListener("click", async (ev) => {
@@ -228,8 +325,10 @@ const render = {
     const source = document.getElementById("log-source").value;
     const params = new URLSearchParams({ lines: "300" });
     if (source) params.set("source", source);
-    const data = await api(`/api/logs?${params}`);
     const pre = document.getElementById("log-output");
+    pre.innerHTML = `<div class="skeleton" style="height:14px;width:90%;margin-bottom:8px"></div><div class="skeleton" style="height:14px;width:75%;margin-bottom:8px"></div><div class="skeleton" style="height:14px;width:85%"></div>`;
+
+    const data = await api(`/api/logs?${params}`);
     if (data.note) {
       pre.textContent = data.note;
       return;
