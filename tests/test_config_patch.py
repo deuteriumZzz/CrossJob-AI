@@ -1,7 +1,7 @@
 import tempfile
 from pathlib import Path
 
-from src.config_patch import set_source_field
+from src.config_patch import set_source_field, set_top_level_field
 
 
 def test_set_source_field_updates_existing_value():
@@ -62,8 +62,51 @@ def test_set_source_field_creates_block_if_missing():
         assert "schedule_enabled: true" in text
 
 
+def test_set_top_level_field_updates_existing_value():
+    with tempfile.TemporaryDirectory() as tmp:
+        config_file = Path(tmp) / "secrets.yaml"
+        config_file.write_text(
+            "llm_api_key: 'old-key'\n\nheadhunter:\n  client_id: ''\n",
+            encoding="utf-8",
+        )
+
+        set_top_level_field(config_file, "llm_api_key", "sk-new")
+
+        text = config_file.read_text(encoding="utf-8")
+        assert "llm_api_key: 'sk-new'" in text
+        # остальной файл не тронут
+        assert "headhunter:\n  client_id: ''" in text
+
+
+def test_set_top_level_field_inserts_when_missing():
+    with tempfile.TemporaryDirectory() as tmp:
+        config_file = Path(tmp) / "secrets.yaml"
+        config_file.write_text(
+            "headhunter:\n  client_id: ''\n", encoding="utf-8"
+        )
+
+        set_top_level_field(config_file, "llm_api_key", "sk-fresh")
+
+        text = config_file.read_text(encoding="utf-8")
+        assert text.splitlines()[0] == "llm_api_key: 'sk-fresh'"
+
+
+def test_set_top_level_field_escapes_single_quotes():
+    with tempfile.TemporaryDirectory() as tmp:
+        config_file = Path(tmp) / "secrets.yaml"
+        config_file.write_text("llm_api_key: ''\n", encoding="utf-8")
+
+        set_top_level_field(config_file, "llm_api_key", "sk-o'brien")
+
+        text = config_file.read_text(encoding="utf-8")
+        assert "llm_api_key: 'sk-o''brien'" in text
+
+
 if __name__ == "__main__":
     test_set_source_field_updates_existing_value()
     test_set_source_field_adds_field_to_existing_block()
     test_set_source_field_creates_block_if_missing()
+    test_set_top_level_field_updates_existing_value()
+    test_set_top_level_field_inserts_when_missing()
+    test_set_top_level_field_escapes_single_quotes()
     print("All tests passed.")

@@ -49,10 +49,18 @@
 
 ```bash
 pip install -r requirements.txt
+python main.py
+```
+
+При первом запуске без `data_folder/` бот сам предложит создать его
+из шаблона и попросит ключ LLM (Enter — чтобы пропустить и вписать
+позже). Остальное (площадки, резюме) — вручную по шагам ниже или по
+[docs/GUIDE.md](docs/GUIDE.md). Тот же результат руками:
+
+```bash
 cp -r data_folder_example data_folder
 # заполните data_folder/secrets.yaml и data_folder/work_preferences.yaml
 # положите своё резюме как data_folder/resume.pdf
-python main.py
 ```
 
 Неинтерактивный запуск (для cron):

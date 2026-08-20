@@ -1,6 +1,7 @@
 import base64
 import binascii
 import re
+import shutil
 import traceback
 from pathlib import Path
 from typing import Literal, Optional, Tuple
@@ -17,6 +18,7 @@ from config import (
     JOB_SUITABILITY_SCORE,
     LINKEDIN_DAILY_APPLICATION_LIMIT,
 )
+from src.config_patch import set_top_level_field
 from src.job_sources.applied_log import AppliedLog
 from src.job_sources.apply_pacing import (
     randomized_daily_limit,
@@ -343,6 +345,71 @@ class FileManager:
             app_data_folder / PLAIN_TEXT_RESUME_YAML,
             output_folder,
         )
+
+
+def run_setup_wizard(data_folder: Path) -> bool:
+    """Гостевой мастер первого запуска — вызывается из main(), когда
+    data_folder или secrets.yaml ещё не существуют. Копирует
+    data_folder_example как основу и спрашивает только критичный
+    минимум (llm_api_key для OpenAI, провайдер по умолчанию) —
+    площадки/резюме/переключение на другого LLM-провайдера (правка
+    LLM_MODEL_TYPE в config.py) пользователь заполняет вручную по
+    docs/GUIDE.md: полный визард под все 8 площадок сразу и
+    программная правка config.py — избыточны для одного захода и
+    рискованны (Python-файл, не YAML). Возвращает False, если
+    пользователь отказался — тогда main() останавливается, не пытаясь
+    продолжить с неполным data_folder."""
+    print("\nПохоже, это первый запуск — data_folder ещё не настроен.\n")
+    if not inquirer.confirm(
+        message=(
+            "Создать data_folder из шаблона и задать API-ключ LLM " "сейчас?"
+        ),
+        default=True,
+    ):
+        print(
+            "Ок. Вручную: скопируйте data_folder_example в data_folder "
+            "и заполните secrets.yaml/work_preferences.yaml — см. "
+            "docs/GUIDE.md."
+        )
+        return False
+
+    example = Path("data_folder_example")
+    if not data_folder.exists():
+        shutil.copytree(example, data_folder)
+        print(f"Создано: {data_folder}/ (копия {example}/)")
+    else:
+        for name in FileManager.REQUIRED_FILES:
+            target = data_folder / name
+            if not target.exists():
+                shutil.copy(example / name, target)
+                print(f"Создано: {target}")
+
+    api_key = inquirer.text(
+        message=(
+            "API-ключ OpenAI (llm_api_key) — Enter, чтобы пропустить и "
+            "вписать позже вручную"
+        )
+    )
+    if api_key:
+        set_top_level_field(data_folder / SECRETS_YAML, "llm_api_key", api_key)
+        print("llm_api_key записан в data_folder/secrets.yaml.")
+    else:
+        print(
+            "Пропущено — впишите llm_api_key в "
+            "data_folder/secrets.yaml вручную."
+        )
+
+    print(
+        "\nДалее вручную (подробности — docs/GUIDE.md):\n"
+        "  1. Положите резюме как data_folder/resume.pdf\n"
+        "  2. В data_folder/work_preferences.yaml укажите позиции/"
+        "локации\n"
+        "  3. Заполните ключи нужных площадок в "
+        "data_folder/secrets.yaml\n"
+        "  4. Если провайдер LLM не OpenAI — поменяйте "
+        "LLM_MODEL_TYPE/LLM_MODEL в config.py\n"
+    )
+    return True
 
 
 def ensure_plain_text_resume(parameters: dict, llm_api_key: str) -> Path:
@@ -2228,8 +2295,20 @@ def main(auto: Optional[str], daemon: bool):
             "--daemon", "--daemon and --auto are mutually exclusive."
         )
     try:
-        # Определяем и проверяем папку с данными
+        # Определяем и проверяем папку с данными. Мастер первого
+        # запуска — только в интерактивном режиме (без --auto/--daemon,
+        # чтобы не повесить cron/демон на inquirer.confirm() без stdin).
         data_folder = Path("data_folder")
+        if (
+            auto is None
+            and not daemon
+            and (
+                not data_folder.exists()
+                or not (data_folder / SECRETS_YAML).exists()
+            )
+        ):
+            if not run_setup_wizard(data_folder):
+                return
         secrets_file, config_file, plain_text_resume_file, output_folder = (
             FileManager.validate_data_folder(data_folder)
         )
