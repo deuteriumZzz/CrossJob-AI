@@ -367,12 +367,21 @@ def ensure_plain_text_resume(parameters: dict, llm_api_key: str) -> Path:
     return plain_text_resume_file
 
 
-def create_cover_letter(parameters: dict, llm_api_key: str):
+def create_cover_letter(
+    parameters: dict,
+    llm_api_key: str,
+    style_name: Optional[str] = None,
+    job_url: Optional[str] = None,
+) -> Optional[Path]:
     """
     Ручной прогон по одной вставленной ссылке на вакансию — через
     старый ResumeFacade+Selenium, а не через
     LLM-конвейер score_job_fit/generate_cover_letter_for_job,
     которым пользуются функции search_and_apply_*.
+
+    style_name/job_url заданы явно — используются как есть (вызов из
+    веб-дашборда, где спрашивать через терминал нельзя); не заданы —
+    как раньше, спрашивает через inquirer в консоли.
     """
     try:
         logger.info("Generating a CV based on provided parameters.")
@@ -391,6 +400,8 @@ def create_cover_letter(parameters: dict, llm_api_key: str):
             logger.warning(
                 "No styles available. Proceeding without style selection."
             )
+        elif style_name:
+            style_manager.set_selected_style(style_name)
         else:
             # Предлагаем пользователю выбрать стиль
             choices = style_manager.format_choices(available_styles)
@@ -404,26 +415,27 @@ def create_cover_letter(parameters: dict, llm_api_key: str):
             style_answer = inquirer.prompt(questions)
             if style_answer and "style" in style_answer:
                 selected_choice = style_answer["style"]
-                for style_name, (
+                for name, (
                     file_name,
                     author_link,
                 ) in available_styles.items():
-                    if selected_choice.startswith(style_name):
-                        style_manager.set_selected_style(style_name)
-                        logger.info(f"Selected style: {style_name}")
+                    if selected_choice.startswith(name):
+                        style_manager.set_selected_style(name)
+                        logger.info(f"Selected style: {name}")
                         break
             else:
                 logger.warning(
                     "No style selected. Proceeding with default style."
                 )
-        questions = [
-            inquirer.Text(
-                "job_url",
-                message="Please enter the URL of the job description:",
-            )
-        ]
-        answers = inquirer.prompt(questions)
-        job_url = answers.get("job_url")
+        if not job_url:
+            questions = [
+                inquirer.Text(
+                    "job_url",
+                    message="Please enter the URL of the job description:",
+                )
+            ]
+            answers = inquirer.prompt(questions)
+            job_url = answers.get("job_url")
         resume_generator = ResumeGenerator()
         resume_object = Resume(plain_text_resume)
         driver = init_browser()
@@ -468,12 +480,18 @@ def create_cover_letter(parameters: dict, llm_api_key: str):
         except IOError as e:
             logger.error("Error writing file: %s", e)
             raise
+        return output_path
     except Exception as e:
         logger.exception(f"An error occurred while creating the CV: {e}")
         raise
 
 
-def create_resume_pdf_job_tailored(parameters: dict, llm_api_key: str):
+def create_resume_pdf_job_tailored(
+    parameters: dict,
+    llm_api_key: str,
+    style_name: Optional[str] = None,
+    job_url: Optional[str] = None,
+) -> Optional[Path]:
     """
     То же самое, что create_cover_letter, но результат —
     резюме под конкретную вакансию, а не сопроводительное письмо.
@@ -495,6 +513,8 @@ def create_resume_pdf_job_tailored(parameters: dict, llm_api_key: str):
             logger.warning(
                 "No styles available. Proceeding without style selection."
             )
+        elif style_name:
+            style_manager.set_selected_style(style_name)
         else:
             # Предлагаем пользователю выбрать стиль
             choices = style_manager.format_choices(available_styles)
@@ -508,26 +528,27 @@ def create_resume_pdf_job_tailored(parameters: dict, llm_api_key: str):
             style_answer = inquirer.prompt(questions)
             if style_answer and "style" in style_answer:
                 selected_choice = style_answer["style"]
-                for style_name, (
+                for name, (
                     file_name,
                     author_link,
                 ) in available_styles.items():
-                    if selected_choice.startswith(style_name):
-                        style_manager.set_selected_style(style_name)
-                        logger.info(f"Selected style: {style_name}")
+                    if selected_choice.startswith(name):
+                        style_manager.set_selected_style(name)
+                        logger.info(f"Selected style: {name}")
                         break
             else:
                 logger.warning(
                     "No style selected. Proceeding with default style."
                 )
-        questions = [
-            inquirer.Text(
-                "job_url",
-                message="Please enter the URL of the job description:",
-            )
-        ]
-        answers = inquirer.prompt(questions)
-        job_url = answers.get("job_url")
+        if not job_url:
+            questions = [
+                inquirer.Text(
+                    "job_url",
+                    message="Please enter the URL of the job description:",
+                )
+            ]
+            answers = inquirer.prompt(questions)
+            job_url = answers.get("job_url")
         resume_generator = ResumeGenerator()
         resume_object = Resume(plain_text_resume)
         driver = init_browser()
@@ -574,12 +595,17 @@ def create_resume_pdf_job_tailored(parameters: dict, llm_api_key: str):
         except IOError as e:
             logger.error("Error writing file: %s", e)
             raise
+        return output_path
     except Exception as e:
         logger.exception(f"An error occurred while creating the CV: {e}")
         raise
 
 
-def create_resume_pdf(parameters: dict, llm_api_key: str):
+def create_resume_pdf(
+    parameters: dict,
+    llm_api_key: str,
+    style_name: Optional[str] = None,
+) -> Optional[Path]:
     """
     Базовое резюме без привязки к вакансии — тот же
     ResumeFacade+Selenium, но без job_url и без обращения к LLM
@@ -603,6 +629,8 @@ def create_resume_pdf(parameters: dict, llm_api_key: str):
             logger.warning(
                 "No styles available. Proceeding without style selection."
             )
+        elif style_name:
+            style_manager.set_selected_style(style_name)
         else:
             # Предлагаем пользователю выбрать стиль
             choices = style_manager.format_choices(available_styles)
@@ -616,13 +644,13 @@ def create_resume_pdf(parameters: dict, llm_api_key: str):
             style_answer = inquirer.prompt(questions)
             if style_answer and "style" in style_answer:
                 selected_choice = style_answer["style"]
-                for style_name, (
+                for name, (
                     file_name,
                     author_link,
                 ) in available_styles.items():
-                    if selected_choice.startswith(style_name):
-                        style_manager.set_selected_style(style_name)
-                        logger.info(f"Selected style: {style_name}")
+                    if selected_choice.startswith(name):
+                        style_manager.set_selected_style(name)
+                        logger.info(f"Selected style: {name}")
                         break
             else:
                 logger.warning(
@@ -665,6 +693,7 @@ def create_resume_pdf(parameters: dict, llm_api_key: str):
         except IOError as e:
             logger.error("Error writing file: %s", e)
             raise
+        return output_path
     except Exception as e:
         logger.exception(f"An error occurred while creating the CV: {e}")
         raise

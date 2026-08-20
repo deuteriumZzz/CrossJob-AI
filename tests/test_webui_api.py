@@ -211,3 +211,77 @@ def test_daemon_start_and_stop(client):
 
     stop = client.post("/api/daemon/stop")
     assert stop.json() == {"running": False}
+
+
+def test_generate_styles_returns_style_names(client):
+    response = client.get("/api/generate/styles")
+    assert response.status_code == 200
+    assert "Default" in response.json()
+
+
+def test_generate_resume_tailored_requires_job_url(client):
+    response = client.post("/api/generate/resume-tailored", json={})
+    assert response.status_code == 400
+
+
+def test_generate_unknown_kind_is_404(client):
+    response = client.post("/api/generate/not-a-kind", json={})
+    assert response.status_code == 404
+
+
+def test_generate_resume_runs_and_reports_status(client):
+    release = threading.Event()
+    calls = []
+
+    def fake_create_resume_pdf(config, llm_api_key, style_name=None):
+        calls.append(style_name)
+        release.wait(timeout=5)
+        return Path("/tmp/resume_base.pdf")
+
+    with patch(
+        "src.webui.api._create_resume_pdf",
+        side_effect=fake_create_resume_pdf,
+    ):
+        response = client.post(
+            "/api/generate/resume", json={"style_name": "Default"}
+        )
+        assert response.status_code == 200
+
+        status = client.get("/api/generate/status").json()
+        assert status["running"] is True
+
+        conflict = client.post("/api/generate/resume", json={})
+        assert conflict.status_code == 409
+
+        release.set()
+
+    for _ in range(50):
+        if not client.get("/api/generate/status").json()["running"]:
+            break
+        time.sleep(0.05)
+    assert calls == ["Default"]
+    final = client.get("/api/generate/status").json()
+    assert final["ready"] is True
+    assert final["path"] == "/tmp/resume_base.pdf"
+
+
+def test_generate_reports_error_from_generator(client):
+    def fake_create_resume_pdf(config, llm_api_key, style_name=None):
+        raise RuntimeError("Selenium boom")
+
+    with patch(
+        "src.webui.api._create_resume_pdf",
+        side_effect=fake_create_resume_pdf,
+    ):
+        client.post("/api/generate/resume", json={})
+        for _ in range(50):
+            if not client.get("/api/generate/status").json()["running"]:
+                break
+            time.sleep(0.05)
+    final = client.get("/api/generate/status").json()
+    assert final["error"] == "Selenium boom"
+
+
+def test_generate_download_without_result_is_404(client):
+    response = client.get("/api/generate/download")
+    assert response.status_code == 404

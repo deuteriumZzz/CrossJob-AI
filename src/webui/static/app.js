@@ -337,6 +337,49 @@ const render = {
   },
 };
 
+async function pollGenerateStatus() {
+  const statusEl = document.getElementById("gen-status");
+  const downloadEl = document.getElementById("gen-download");
+  for (;;) {
+    const result = await api("/api/generate/status");
+    if (!result.running) {
+      if (result.error) {
+        statusEl.textContent = `Ошибка: ${result.error}`;
+        downloadEl.style.display = "none";
+      } else if (result.ready) {
+        statusEl.textContent = "Готово.";
+        downloadEl.style.display = "";
+      }
+      return;
+    }
+    statusEl.textContent = "Генерация (может занять до минуты)...";
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+
+async function startGenerate(kind) {
+  const statusEl = document.getElementById("gen-status");
+  const downloadEl = document.getElementById("gen-download");
+  const styleName = document.getElementById("gen-style").value || null;
+  const jobUrl = document.getElementById("gen-job-url").value.trim() || null;
+  if (kind !== "resume" && !jobUrl) {
+    alert("Укажите ссылку на вакансию.");
+    return;
+  }
+  downloadEl.style.display = "none";
+  statusEl.textContent = "Запуск...";
+  try {
+    await api(`/api/generate/${kind}`, {
+      method: "POST",
+      body: JSON.stringify({ style_name: styleName, job_url: jobUrl }),
+    });
+  } catch (e) {
+    statusEl.textContent = `Ошибка: ${e.message}`;
+    return;
+  }
+  pollGenerateStatus();
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll("nav.tabs button").forEach((b) => {
     b.addEventListener("click", () => switchTab(b.dataset.tab));
@@ -397,6 +440,21 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       render.analytics();
     });
+
+  api("/api/generate/styles").then((styles) => {
+    document.getElementById("gen-style").innerHTML = styles
+      .map((s) => `<option value="${s}">${s}</option>`)
+      .join("");
+  });
+  document
+    .getElementById("gen-resume")
+    .addEventListener("click", () => startGenerate("resume"));
+  document
+    .getElementById("gen-resume-tailored")
+    .addEventListener("click", () => startGenerate("resume-tailored"));
+  document
+    .getElementById("gen-cover-letter")
+    .addEventListener("click", () => startGenerate("cover-letter"));
 
   switchTab("overview");
   setInterval(() => {

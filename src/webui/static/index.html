@@ -181,6 +181,24 @@
           <span id="notif-test-status" class="muted small"></span>
         </div>
       </div>
+
+      <div class="panel">
+        <h3>Резюме и сопроводительное письмо</h3>
+        <p class="muted small">Рендерится через Selenium (то же, что в консольном меню) — может занять до минуты.</p>
+        <div class="filters">
+          <select id="gen-style"></select>
+          <input id="gen-job-url" type="text" placeholder="Ссылка на вакансию (для резюме/письма под вакансию)" />
+        </div>
+        <div class="filters">
+          <button id="gen-resume" class="btn btn-secondary">Резюме (общее)</button>
+          <button id="gen-resume-tailored" class="btn btn-secondary">Резюме под вакансию</button>
+          <button id="gen-cover-letter" class="btn btn-secondary">Сопроводительное письмо</button>
+        </div>
+        <div class="filters">
+          <span id="gen-status" class="muted small"></span>
+          <a id="gen-download" class="btn btn-accent" style="display:none" href="/api/generate/download" download>Скачать PDF</a>
+        </div>
+      </div>
       <div class="table-wrap">
         <table class="settings-table">
           <thead>

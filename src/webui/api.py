@@ -5,16 +5,21 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from config import DAILY_APPLICATION_LIMIT, LOG_TO_FILE
 from main import ALL_SOURCES, ConfigValidator, FileManager
 from main import append_to_company_blacklist as _append_to_blacklist
+from main import create_cover_letter as _create_cover_letter
+from main import create_resume_pdf as _create_resume_pdf
+from main import create_resume_pdf_job_tailored as _create_resume_tailored
 from main import run_selected_sources
 from src.config_patch import set_source_field
 from src.job_sources.applied_log import AppliedLog
 from src.job_sources.telegram_notify import send_notification
+from src.libs.resume_and_cover_builder import StyleManager
 from src.scheduler import Scheduler
 from src.scheduler_state import load_state
 
@@ -49,6 +54,8 @@ class AppContext:
         self.scheduler_thread: Optional[threading.Thread] = None
         self.run_now_thread: Optional[threading.Thread] = None
         self.run_now_sources: list[str] = []
+        self.generate_thread: Optional[threading.Thread] = None
+        self.generate_result: dict = {}
 
     def reload_config(self) -> None:
         fresh = ConfigValidator.validate_config(self.config_file)
@@ -297,6 +304,81 @@ def post_test_notification(ctx: AppContext = Depends(get_ctx)) -> dict:
     except Exception as e:
         raise HTTPException(502, f"Не удалось отправить: {e}")
     return {"sent": True}
+
+
+@app.get("/api/generate/styles")
+def get_generate_styles() -> list[str]:
+    return list(StyleManager().get_styles().keys())
+
+
+class GenerateRequest(BaseModel):
+    style_name: Optional[str] = None
+    job_url: Optional[str] = None
+
+
+_GENERATORS = {
+    "resume": lambda ctx, body: _create_resume_pdf(
+        ctx.config, ctx.llm_api_key, style_name=body.style_name
+    ),
+    "resume-tailored": lambda ctx, body: _create_resume_tailored(
+        ctx.config,
+        ctx.llm_api_key,
+        style_name=body.style_name,
+        job_url=body.job_url,
+    ),
+    "cover-letter": lambda ctx, body: _create_cover_letter(
+        ctx.config,
+        ctx.llm_api_key,
+        style_name=body.style_name,
+        job_url=body.job_url,
+    ),
+}
+
+
+@app.post("/api/generate/{kind}")
+def post_generate(
+    kind: str, body: GenerateRequest, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Резюме/сопроводительное под конкретную вакансию — тот же
+    ResumeFacade+Selenium, что и в консольном меню (Generate Resume /
+    Generate Resume Tailored / Generate Tailored Cover Letter), но
+    вызывается с явными style_name/job_url вместо inquirer-промптов,
+    т.к. дашборд не может отвечать на вопросы в терминале. Рендер PDF
+    через Selenium небыстрый — гоняем в фоновом потоке, как run-now."""
+    if kind not in _GENERATORS:
+        raise HTTPException(404, f"Unknown generator: {kind}")
+    if kind in ("resume-tailored", "cover-letter") and not body.job_url:
+        raise HTTPException(400, "job_url is required for this generator.")
+    if ctx.generate_thread is not None and ctx.generate_thread.is_alive():
+        raise HTTPException(409, "A generation is already in progress.")
+
+    def _run() -> None:
+        try:
+            path = _GENERATORS[kind](ctx, body)
+            ctx.generate_result = {"ready": True, "path": str(path)}
+        except Exception as e:
+            ctx.generate_result = {"ready": True, "error": str(e)}
+
+    ctx.generate_result = {}
+    ctx.generate_thread = threading.Thread(target=_run, daemon=True)
+    ctx.generate_thread.start()
+    return {"started": True, "kind": kind}
+
+
+@app.get("/api/generate/status")
+def get_generate_status(ctx: AppContext = Depends(get_ctx)) -> dict:
+    running = (
+        ctx.generate_thread is not None and ctx.generate_thread.is_alive()
+    )
+    return {"running": running, **ctx.generate_result}
+
+
+@app.get("/api/generate/download")
+def get_generate_download(ctx: AppContext = Depends(get_ctx)) -> FileResponse:
+    path = ctx.generate_result.get("path")
+    if not path or not Path(path).exists():
+        raise HTTPException(404, "No generated file available.")
+    return FileResponse(path, filename=Path(path).name)
 
 
 if STATIC_DIR.exists():
