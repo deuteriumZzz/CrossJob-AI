@@ -55,15 +55,12 @@ const render = {
       api("/api/stats"),
     ]);
 
-    document.getElementById("daemon-badge").textContent = status.daemon_running
-      ? "демон работает"
-      : "демон остановлен";
-    document
-      .getElementById("daemon-badge")
-      .classList.toggle("on", status.daemon_running);
-    document
-      .getElementById("daemon-badge")
-      .classList.toggle("off", !status.daemon_running);
+    const badge = document.getElementById("daemon-badge");
+    badge.innerHTML = `<span class="badge-dot"></span>${
+      status.daemon_running ? "демон работает" : "демон остановлен"
+    }`;
+    badge.classList.toggle("on", status.daemon_running);
+    badge.classList.toggle("off", !status.daemon_running);
     document.getElementById("daemon-start").disabled = status.daemon_running;
     document.getElementById("daemon-stop").disabled = !status.daemon_running;
 
@@ -76,17 +73,23 @@ const render = {
     document.getElementById("source-grid").innerHTML = status.sources
       .map((s) => {
         const dot = STATUS_DOT[s.status] || "never_run";
+        const ratio = s.daily_limit
+          ? Math.min(1, s.applied_today / s.daily_limit)
+          : 0;
+        const barClass =
+          ratio >= 1 ? "full" : ratio >= 0.7 ? "warn" : "";
         return `
         <div class="source-card">
           <h3>
-            <input type="checkbox" class="run-now-check" value="${s.name}" />
+            <input type="checkbox" class="run-now-check" value="${s.name}" title="Выбрать для запуска сейчас" />
             <span class="dot ${dot}"></span> ${sourceLabel(s.name)}
           </h3>
-          <div class="row">Расписание: ${s.schedule_enabled ? `каждые ${s.interval_hours}ч` : "выключено"}</div>
-          <div class="row">Последний запуск: ${fmtTime(s.last_run)}</div>
-          <div class="row">Следующий запуск: ${fmtTime(s.next_run)}</div>
-          <div class="row">Откликов сегодня: ${s.applied_today}/${s.daily_limit}</div>
-          ${s.last_error ? `<div class="row" style="color:var(--err)">Ошибка: ${s.last_error}</div>` : ""}
+          <div class="row"><span>Расписание</span><span>${s.schedule_enabled ? `каждые ${s.interval_hours}ч` : "выключено"}</span></div>
+          <div class="row"><span>Последний запуск</span><span>${fmtTime(s.last_run)}</span></div>
+          <div class="row"><span>Следующий запуск</span><span>${fmtTime(s.next_run)}</span></div>
+          <div class="row"><span>Откликов сегодня</span><span>${s.applied_today}/${s.daily_limit}</span></div>
+          <div class="limit-bar"><div class="limit-bar-fill ${barClass}" style="width:${Math.round(ratio * 100)}%"></div></div>
+          ${s.last_error ? `<div class="error-row">${s.last_error}</div>` : ""}
         </div>`;
       })
       .join("");
@@ -196,7 +199,7 @@ const render = {
         <td><input type="checkbox" class="s-schedule" ${s.schedule_enabled ? "checked" : ""} /></td>
         <td><input type="number" class="s-interval" min="1" value="${s.interval_hours ?? 3}" /></td>
         <td><input type="checkbox" class="s-auto" ${s.auto_apply ? "checked" : ""} /></td>
-        <td><button class="s-save">Сохранить</button></td>
+        <td><button class="btn btn-secondary s-save">Сохранить</button></td>
       </tr>`
       )
       .join("");
