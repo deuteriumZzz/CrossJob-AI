@@ -1,0 +1,84 @@
+remote: true
+hybrid: true
+onsite: true
+
+experience_level:
+  internship: false
+  entry: true
+  associate: true
+  mid_senior_level: true
+  director: false
+  executive: false
+
+job_types:
+  full_time: true
+  contract: false
+  part_time: false
+  temporary: true
+  internship: false
+  other: false
+  volunteer: true
+
+date:
+  all_time: false
+  month: false
+  week: false
+  24_hours: true
+
+# Leave empty ("positions: []") to auto-infer 2-4 positions from
+# data_folder/resume.pdf via LLM instead of listing them by hand.
+positions:
+  - Software engineer
+
+locations:
+  - Germany
+
+apply_once_at_company: true
+
+distance: 100
+
+company_blacklist:
+  - wayfair
+  - Crossover
+
+title_blacklist:
+  - word1
+  - word2
+
+location_blacklist:
+  - Brazil
+
+# Optional: only needed for the "Search & Apply on HeadHunter" action.
+headhunter:
+  # Set to true to actually submit applications instead of a dry run.
+  auto_apply: false
+  # An existing resume ID from your hh.ru profile (used as-is, not regenerated).
+  resume_id: "your-hh-ru-resume-id"
+
+# Optional: only needed for the "Search & Apply on SuperJob" action.
+superjob:
+  auto_apply: false
+  # An existing resume ID from your superjob.ru profile (used as-is, not regenerated).
+  resume_id: "your-superjob-ru-resume-id"
+
+# Optional: only needed for the "Search & Apply on Zarplata.ru" action.
+zarplata:
+  auto_apply: false
+  # An existing resume ID from your zarplata.ru profile (used as-is, not regenerated).
+  resume_id: "your-zarplata-ru-resume-id"
+
+# Optional: only needed for the "Search Telegram channels" action.
+# `positions` above is reused as the search keywords.
+telegram:
+  channels:
+    - some_public_job_channel
+  messages_per_channel: 100
+
+# Optional: only needed for the "Search & Apply on LinkedIn" action.
+# Keep auto_apply: false until you've reviewed a dry run's generated
+# screening-question answers — this flow is unverified against a live
+# LinkedIn account, see docs/GUIDE.md.
+linkedin:
+  auto_apply: false
+  location: "Germany"
+

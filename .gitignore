@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.mypy_cache/
+.pytest_cache/
+.serena/
+.claude/
+
+# Real user data — secrets, resume, generated output. Never commit this;
+# only data_folder_example/ is meant to be shared.
+data_folder/
+log/
