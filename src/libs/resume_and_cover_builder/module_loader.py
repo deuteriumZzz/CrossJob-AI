@@ -1,6 +1,6 @@
 """
 Загружает модуль по пути к файлу, а не по имени пакета: файлы
-strings_feder-cr.py в разных подпапках (resume_prompt,
+strings.py в разных подпапках (resume_prompt,
 resume_job_description_prompt, cover_letter_prompt) называются
 одинаково, и обычный import их бы перепутал.
 """
