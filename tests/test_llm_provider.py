@@ -1,5 +1,8 @@
+from pathlib import Path
+
 import pytest
 
+from src.job_sources import llm_usage
 from src.job_sources.llm_provider import get_chat_llm
 
 
@@ -7,6 +10,25 @@ def test_default_provider_is_openai():
     llm = get_chat_llm("sk-test")
     assert type(llm).__name__ == "ChatOpenAI"
     assert llm.model_name == "gpt-4o-mini"
+
+
+def test_no_usage_callback_when_output_folder_unset():
+    llm_usage.set_output_folder(None)
+    llm = get_chat_llm("sk-test")
+    assert not llm.callbacks
+
+
+def test_usage_callback_attached_when_output_folder_set():
+    llm_usage.set_output_folder(Path("/tmp/example"))
+    try:
+        llm = get_chat_llm("sk-test", model="gpt-4o")
+        assert len(llm.callbacks) == 1
+        callback = llm.callbacks[0]
+        assert callback.provider == "openai"
+        assert callback.model == "gpt-4o"
+        assert callback.output_folder == Path("/tmp/example")
+    finally:
+        llm_usage.set_output_folder(None)
 
 
 def test_openai_provider_uses_given_model():

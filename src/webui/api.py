@@ -18,6 +18,10 @@ from main import create_resume_pdf_job_tailored as _create_resume_tailored
 from main import run_selected_sources
 from src.config_patch import set_source_field
 from src.job_sources.applied_log import AppliedLog
+from src.job_sources.llm_usage import (
+    set_output_folder as set_llm_usage_output_folder,
+)
+from src.job_sources.llm_usage import summarize_usage
 from src.job_sources.telegram_notify import send_notification
 from src.libs.resume_and_cover_builder import StyleManager
 from src.scheduler import Scheduler
@@ -49,6 +53,7 @@ class AppContext:
         self.config["outputFileDirectory"] = self.output_folder
         self.config["dataFolder"] = data_folder
         self.config["secretsFile"] = self.secrets_file
+        set_llm_usage_output_folder(self.output_folder)
         self.applied_log = AppliedLog(self.output_folder / "applied_log.json")
         self.scheduler: Optional[Scheduler] = None
         self.scheduler_thread: Optional[threading.Thread] = None
@@ -146,6 +151,11 @@ def get_replies(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
         if e.get("last_known_state")
     ]
     return sorted(entries, key=lambda e: e["applied_at"], reverse=True)
+
+
+@app.get("/api/usage")
+def get_usage(ctx: AppContext = Depends(get_ctx)) -> dict:
+    return summarize_usage(ctx.output_folder)
 
 
 @app.get("/api/analytics/gaps")

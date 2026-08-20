@@ -286,6 +286,23 @@ const render = {
 
   async settings() {
     const status = await api("/api/status");
+
+    api("/api/usage").then((usage) => {
+      const fmtTokens = (n) => n.toLocaleString("ru-RU");
+      const fmtCost = (c) =>
+        c === null ? "" : ` (~$${c.toFixed(3)})`;
+      document.getElementById("usage-summary").textContent =
+        `Сегодня: ${fmtTokens(usage.today_tokens)} токенов` +
+        `${fmtCost(usage.today_cost_usd)} · Всего: ` +
+        `${fmtTokens(usage.total_tokens)} токенов` +
+        `${fmtCost(usage.total_cost_usd)}`;
+      document.getElementById("usage-note").textContent = usage.partial
+        ? "$-оценка неполная: часть моделей не в прайс-листе (только некоторые модели OpenAI)."
+        : usage.total_cost_usd === null && usage.total_tokens > 0
+          ? "$-оценка недоступна для используемой модели/провайдера — показаны только токены."
+          : "";
+    });
+
     const tbody = document.getElementById("settings-rows");
     tbody.innerHTML = status.sources
       .map(

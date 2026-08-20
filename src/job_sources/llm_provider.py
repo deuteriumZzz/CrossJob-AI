@@ -3,6 +3,8 @@ from typing import Optional
 from langchain_core.language_models import BaseChatModel
 from pydantic import SecretStr
 
+from src.job_sources.llm_usage import UsageCallback, get_output_folder
+
 
 def get_chat_llm(
     api_key: str,
@@ -21,41 +23,54 @@ def get_chat_llm(
     if provider == "groq":
         from langchain_groq import ChatGroq
 
-        return ChatGroq(
-            model=model or "llama-3.3-70b-versatile",
+        resolved_model = model or "llama-3.3-70b-versatile"
+        llm: BaseChatModel = ChatGroq(
+            model=resolved_model,
             api_key=SecretStr(api_key),
             temperature=temperature,
         )
-    if provider == "gemini":
+    elif provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        return ChatGoogleGenerativeAI(
-            model=model or "gemini-1.5-flash",
+        resolved_model = model or "gemini-1.5-flash"
+        llm = ChatGoogleGenerativeAI(
+            model=resolved_model,
             google_api_key=SecretStr(api_key),
             temperature=temperature,
         )
-    if provider == "deepseek":
+    elif provider == "deepseek":
         from langchain_openai import ChatOpenAI
 
-        return ChatOpenAI(
-            model=model or "deepseek-chat",
+        resolved_model = model or "deepseek-chat"
+        llm = ChatOpenAI(
+            model=resolved_model,
             api_key=SecretStr(api_key),
             base_url=base_url or "https://api.deepseek.com",
             temperature=temperature,
         )
-    if provider == "ollama":
+    elif provider == "ollama":
         from langchain_ollama import ChatOllama
 
-        return ChatOllama(
-            model=model or "llama3",
+        resolved_model = model or "llama3"
+        llm = ChatOllama(
+            model=resolved_model,
             base_url=base_url,
             temperature=temperature,
         )
+    else:
+        from langchain_openai import ChatOpenAI
 
-    from langchain_openai import ChatOpenAI
+        provider = "openai"
+        resolved_model = model or "gpt-4o-mini"
+        llm = ChatOpenAI(
+            model=resolved_model,
+            api_key=SecretStr(api_key),
+            temperature=temperature,
+        )
 
-    return ChatOpenAI(
-        model=model or "gpt-4o-mini",
-        api_key=SecretStr(api_key),
-        temperature=temperature,
-    )
+    output_folder = get_output_folder()
+    if output_folder is not None:
+        llm.callbacks = [
+            UsageCallback(output_folder, provider, resolved_model)
+        ]
+    return llm

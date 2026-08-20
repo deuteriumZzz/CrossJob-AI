@@ -43,6 +43,9 @@ from src.job_sources.linkedin.answerer import EasyApplyAnswerer
 from src.job_sources.linkedin.auth import LinkedInSession
 from src.job_sources.linkedin.easy_apply import run_easy_apply
 from src.job_sources.linkedin.source import LinkedInSource
+from src.job_sources.llm_usage import (
+    set_output_folder as set_llm_usage_output_folder,
+)
 from src.job_sources.rabota_ru.client import RabotaRuClient
 from src.job_sources.rabota_ru.source import RabotaRuSource
 from src.job_sources.reply_answerer import (
@@ -2242,6 +2245,7 @@ def main(auto: Optional[str], daemon: bool):
         config["outputFileDirectory"] = output_folder
         config["dataFolder"] = data_folder
         config["secretsFile"] = secrets_file
+        set_llm_usage_output_folder(output_folder)
 
         # Позиции не заданы — один раз выводим их из resume.pdf,
         # чтобы каждый источник (HH/SuperJob/Zarplata/geekjob/

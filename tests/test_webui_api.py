@@ -285,3 +285,9 @@ def test_generate_reports_error_from_generator(client):
 def test_generate_download_without_result_is_404(client):
     response = client.get("/api/generate/download")
     assert response.status_code == 404
+
+
+def test_usage_endpoint_reports_zero_when_no_calls_made(client):
+    response = client.get("/api/usage")
+    assert response.status_code == 200
+    assert response.json()["today_tokens"] == 0
