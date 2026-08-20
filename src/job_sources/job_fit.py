@@ -1,12 +1,13 @@
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 from pdfminer.high_level import extract_text
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field
 
+from config import LLM_API_URL, LLM_MODEL, LLM_MODEL_TYPE
 from src.job import Job
+from src.job_sources.llm_provider import get_chat_llm
 
 _SCORE_PROMPT = ChatPromptTemplate.from_template(
     """
@@ -58,14 +59,16 @@ def score_job_fit(
     fail open: считаем матч хорошим и без пробелов, чтобы кривой ответ
     модели не заблокировал молча все отклики."""
     resume_text = extract_text(str(resume_pdf_path))
-    llm = ChatOpenAI(
-        model="gpt-4o-mini",
-        api_key=SecretStr(llm_api_key),
+    llm = get_chat_llm(
+        llm_api_key,
+        provider=LLM_MODEL_TYPE,
+        model=LLM_MODEL,
         temperature=0,
+        base_url=LLM_API_URL or None,
     )
     chain = _SCORE_PROMPT | llm.with_structured_output(FitAssessment)
     try:
-        return chain.invoke(
+        result = chain.invoke(
             {
                 "resume_text": resume_text,
                 "job_title": job.role,
@@ -73,5 +76,6 @@ def score_job_fit(
                 "job_description": job.description,
             }
         )
+        return cast(FitAssessment, result)
     except Exception:
         return FitAssessment(score=10, gaps=[])

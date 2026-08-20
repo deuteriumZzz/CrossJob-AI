@@ -3,7 +3,7 @@ import binascii
 import re
 import traceback
 from pathlib import Path
-from typing import Dict, Literal, Optional, Tuple
+from typing import Literal, Optional, Tuple
 
 import click
 import inquirer
@@ -13,39 +13,57 @@ from pdfminer.high_level import extract_text as extract_pdf_text
 from config import (
     DAILY_APPLICATION_LIMIT,
     JOB_MAX_APPLICATIONS,
+    JOB_MIN_SCORE,
     JOB_SUITABILITY_SCORE,
     LINKEDIN_DAILY_APPLICATION_LIMIT,
 )
 from src.job_sources.applied_log import AppliedLog
 from src.job_sources.apply_pacing import (
+    randomized_daily_limit,
     wait_before_apply,
     wait_between_sources,
+)
+from src.job_sources.base import JobSource
+from src.job_sources.block_detection import (
+    PlatformBlockedError,
+    is_still_blocked,
+    mark_blocked,
 )
 from src.job_sources.cover_letter import generate_cover_letter_for_job
 from src.job_sources.geekjob.client import GeekjobClient
 from src.job_sources.geekjob.source import GeekjobSource
 from src.job_sources.getmatch.client import GetMatchClient
 from src.job_sources.getmatch.source import GetMatchSource
+from src.job_sources.github_context import fetch_github_summary
 from src.job_sources.headhunter.auth import HHAuth
 from src.job_sources.headhunter.client import HeadHunterClient
 from src.job_sources.headhunter.source import HeadHunterSource
-from src.job_sources.job_fit import score_job_fit
+from src.job_sources.job_fit import classify_fit, score_job_fit
 from src.job_sources.linkedin.answerer import EasyApplyAnswerer
 from src.job_sources.linkedin.auth import LinkedInSession
 from src.job_sources.linkedin.easy_apply import run_easy_apply
 from src.job_sources.linkedin.source import LinkedInSource
 from src.job_sources.rabota_ru.client import RabotaRuClient
 from src.job_sources.rabota_ru.source import RabotaRuSource
+from src.job_sources.reply_answerer import (
+    build_hh_resume_summary,
+    build_preferences_summary,
+    generate_reply,
+)
 from src.job_sources.reply_check import (
     print_negotiation_replies,
     print_superjob_replies,
 )
-from src.job_sources.resume_profile import infer_positions_from_resume
+from src.job_sources.resume_profile import (
+    extract_plain_text_resume,
+    infer_positions_from_resume,
+)
 from src.job_sources.superjob.auth import SuperJobAuth
 from src.job_sources.superjob.client import SuperJobClient
 from src.job_sources.superjob.source import SuperJobSource
 from src.job_sources.telegram.client import TelegramSourceClient
 from src.job_sources.telegram.source import TelegramSource
+from src.job_sources.telegram_notify import send_notification
 from src.job_sources.zarplata.auth import ZarplataAuth
 from src.job_sources.zarplata.client import ZarplataClient
 from src.job_sources.zarplata.source import ZarplataSource
@@ -57,6 +75,7 @@ from src.libs.resume_and_cover_builder import (
 from src.logging import logger
 from src.resume_schemas.job_application_profile import JobApplicationProfile
 from src.resume_schemas.resume import Resume
+from src.scheduler import Scheduler
 from src.utils.chrome_utils import HTML_to_PDF, init_browser
 from src.utils.constants import (
     PLAIN_TEXT_RESUME_YAML,
@@ -287,7 +306,6 @@ class FileManager:
     REQUIRED_FILES = [
         SECRETS_YAML,
         WORK_PREFERENCES_YAML,
-        PLAIN_TEXT_RESUME_YAML,
     ]
 
     @staticmethod
@@ -323,25 +341,36 @@ class FileManager:
             output_folder,
         )
 
-    @staticmethod
-    def get_uploads(plain_text_resume_file: Path) -> Dict[str, Path]:
-        """Оборачивает путь к резюме в dict с ключом plainTextResume —
-        именно такую форму (uploads['plainTextResume']) ждут функции
-        генерации резюме и cover letter дальше по коду."""
-        if not plain_text_resume_file.exists():
+
+def ensure_plain_text_resume(parameters: dict, llm_api_key: str) -> Path:
+    """plain_text_resume.yaml нужен только трём старым пунктам меню
+    (Generate Resume*), поэтому не блокирует запуск всего приложения
+    (см. FileManager.REQUIRED_FILES) — генерируется через LLM из
+    resume.pdf лениво, при первом обращении к одному из этих
+    пунктов, и переиспользуется дальше без повторной генерации."""
+    plain_text_resume_file: Path = parameters["plainTextResumeFile"]
+    if not plain_text_resume_file.exists():
+        resume_pdf_path = parameters["dataFolder"] / RESUME_PDF
+        if not resume_pdf_path.exists():
             raise FileNotFoundError(
-                f"Plain text resume file not found: {plain_text_resume_file}"
+                f"Neither {plain_text_resume_file} nor {resume_pdf_path} "
+                "found — need at least one to generate a resume."
             )
-
-        uploads = {"plainTextResume": plain_text_resume_file}
-
-        return uploads
+        logger.info(
+            f"{plain_text_resume_file} not found — extracting it from "
+            f"{resume_pdf_path} via LLM."
+        )
+        plain_text_resume_file.write_text(
+            extract_plain_text_resume(resume_pdf_path, llm_api_key),
+            encoding="utf-8",
+        )
+    return plain_text_resume_file
 
 
 def create_cover_letter(parameters: dict, llm_api_key: str):
     """
     Ручной прогон по одной вставленной ссылке на вакансию — через
-    старый ResumeFacade+Selenium (наследие AIHawk), а не через
+    старый ResumeFacade+Selenium, а не через
     LLM-конвейер score_job_fit/generate_cover_letter_for_job,
     которым пользуются функции search_and_apply_*.
     """
@@ -349,9 +378,10 @@ def create_cover_letter(parameters: dict, llm_api_key: str):
         logger.info("Generating a CV based on provided parameters.")
 
         # Загружаем резюме в виде обычного текста
-        with open(
-            parameters["uploads"]["plainTextResume"], "r", encoding="utf-8"
-        ) as file:
+        plain_text_resume_file = ensure_plain_text_resume(
+            parameters, llm_api_key
+        )
+        with open(plain_text_resume_file, "r", encoding="utf-8") as file:
             plain_text_resume = file.read()
 
         style_manager = StyleManager()
@@ -452,9 +482,10 @@ def create_resume_pdf_job_tailored(parameters: dict, llm_api_key: str):
         logger.info("Generating a CV based on provided parameters.")
 
         # Загружаем резюме в виде обычного текста
-        with open(
-            parameters["uploads"]["plainTextResume"], "r", encoding="utf-8"
-        ) as file:
+        plain_text_resume_file = ensure_plain_text_resume(
+            parameters, llm_api_key
+        )
+        with open(plain_text_resume_file, "r", encoding="utf-8") as file:
             plain_text_resume = file.read()
 
         style_manager = StyleManager()
@@ -558,9 +589,10 @@ def create_resume_pdf(parameters: dict, llm_api_key: str):
         logger.info("Generating a CV based on provided parameters.")
 
         # Загружаем резюме в виде обычного текста
-        with open(
-            parameters["uploads"]["plainTextResume"], "r", encoding="utf-8"
-        ) as file:
+        plain_text_resume_file = ensure_plain_text_resume(
+            parameters, llm_api_key
+        )
+        with open(plain_text_resume_file, "r", encoding="utf-8") as file:
             plain_text_resume = file.read()
 
         # Инициализируем StyleManager
@@ -677,9 +709,11 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
     client = HeadHunterClient(auth.get_access_token())
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
-    jobs = HeadHunterSource(client).search(parameters)
+    source: JobSource = HeadHunterSource(client)
+    jobs = source.search(parameters)
     logger.info(f"Found {len(jobs)} matching HeadHunter vacancies.")
 
+    daily_limit = randomized_daily_limit(DAILY_APPLICATION_LIMIT)
     sent_count = 0
     for job in jobs:
         if sent_count >= JOB_MAX_APPLICATIONS:
@@ -702,26 +736,46 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
             continue
         if (
             auto_apply
-            and applied_log.applied_today_count(job.source)
-            >= DAILY_APPLICATION_LIMIT
+            and applied_log.applied_today_count(job.source) >= daily_limit
         ):
             logger.info(
-                f"Reached DAILY_APPLICATION_LIMIT "
-                f"({DAILY_APPLICATION_LIMIT}) for {job.source} today."
+                f"Reached daily application limit "
+                f"({daily_limit}) for {job.source} today."
+            )
+            notify(
+                parameters,
+                f"Дневной лимит откликов ({daily_limit}) достигнут "
+                f"для {job.source}.",
             )
             break
 
-        fit_score = score_job_fit(resume_pdf_path, job, llm_api_key)
-        if fit_score < JOB_SUITABILITY_SCORE:
+        fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+        tier = classify_fit(fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE)
+        if tier == "skip":
             logger.info(
                 f"Skipping {job.role} at {job.company}: fit score "
-                f"{fit_score}/10 below threshold."
+                f"{fit.score}/10 below minimum."
+            )
+            applied_log.record(
+                job, "", "", "skipped_low_fit", fit.score, fit.gaps
             )
             continue
+        if tier == "weak":
+            logger.info(
+                f"{job.role} at {job.company}: weak fit "
+                f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
+            )
 
-        cover_letter = generate_cover_letter_for_job(
-            resume_pdf_path, job, llm_api_key
-        )
+        try:
+            cover_letter = generate_cover_letter_for_job(
+                resume_pdf_path, job, llm_api_key
+            )
+        except Exception as e:
+            logger.exception(
+                f"Failed to generate cover letter for {job.role} at "
+                f"{job.company}, skipping this vacancy: {e}"
+            )
+            continue
 
         if auto_apply:
             wait_before_apply()
@@ -735,7 +789,9 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
                 f"({job.link})"
             )
 
-        applied_log.record(job, cover_letter, resume_id or "", status)
+        applied_log.record(
+            job, cover_letter, resume_id or "", status, fit.score, fit.gaps
+        )
         sent_count += 1
 
 
@@ -780,9 +836,11 @@ def search_and_apply_superjob(parameters: dict, llm_api_key: str):
     client = SuperJobClient(auth.get_access_token(), client_secret)
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
-    jobs = SuperJobSource(client).search(parameters)
+    source: JobSource = SuperJobSource(client)
+    jobs = source.search(parameters)
     logger.info(f"Found {len(jobs)} matching SuperJob vacancies.")
 
+    daily_limit = randomized_daily_limit(DAILY_APPLICATION_LIMIT)
     sent_count = 0
     for job in jobs:
         if sent_count >= JOB_MAX_APPLICATIONS:
@@ -805,26 +863,46 @@ def search_and_apply_superjob(parameters: dict, llm_api_key: str):
             continue
         if (
             auto_apply
-            and applied_log.applied_today_count(job.source)
-            >= DAILY_APPLICATION_LIMIT
+            and applied_log.applied_today_count(job.source) >= daily_limit
         ):
             logger.info(
-                f"Reached DAILY_APPLICATION_LIMIT "
-                f"({DAILY_APPLICATION_LIMIT}) for {job.source} today."
+                f"Reached daily application limit "
+                f"({daily_limit}) for {job.source} today."
+            )
+            notify(
+                parameters,
+                f"Дневной лимит откликов ({daily_limit}) достигнут "
+                f"для {job.source}.",
             )
             break
 
-        fit_score = score_job_fit(resume_pdf_path, job, llm_api_key)
-        if fit_score < JOB_SUITABILITY_SCORE:
+        fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+        tier = classify_fit(fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE)
+        if tier == "skip":
             logger.info(
                 f"Skipping {job.role} at {job.company}: fit score "
-                f"{fit_score}/10 below threshold."
+                f"{fit.score}/10 below minimum."
+            )
+            applied_log.record(
+                job, "", "", "skipped_low_fit", fit.score, fit.gaps
             )
             continue
+        if tier == "weak":
+            logger.info(
+                f"{job.role} at {job.company}: weak fit "
+                f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
+            )
 
-        cover_letter = generate_cover_letter_for_job(
-            resume_pdf_path, job, llm_api_key
-        )
+        try:
+            cover_letter = generate_cover_letter_for_job(
+                resume_pdf_path, job, llm_api_key
+            )
+        except Exception as e:
+            logger.exception(
+                f"Failed to generate cover letter for {job.role} at "
+                f"{job.company}, skipping this vacancy: {e}"
+            )
+            continue
 
         if auto_apply:
             wait_before_apply()
@@ -838,7 +916,9 @@ def search_and_apply_superjob(parameters: dict, llm_api_key: str):
                 f"({job.link})"
             )
 
-        applied_log.record(job, cover_letter, resume_id or "", status)
+        applied_log.record(
+            job, cover_letter, resume_id or "", status, fit.score, fit.gaps
+        )
         sent_count += 1
 
 
@@ -883,9 +963,11 @@ def search_and_apply_zarplata(parameters: dict, llm_api_key: str):
     client = ZarplataClient(auth.get_access_token())
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
-    jobs = ZarplataSource(client).search(parameters)
+    source: JobSource = ZarplataSource(client)
+    jobs = source.search(parameters)
     logger.info(f"Found {len(jobs)} matching zarplata.ru vacancies.")
 
+    daily_limit = randomized_daily_limit(DAILY_APPLICATION_LIMIT)
     sent_count = 0
     for job in jobs:
         if sent_count >= JOB_MAX_APPLICATIONS:
@@ -908,26 +990,46 @@ def search_and_apply_zarplata(parameters: dict, llm_api_key: str):
             continue
         if (
             auto_apply
-            and applied_log.applied_today_count(job.source)
-            >= DAILY_APPLICATION_LIMIT
+            and applied_log.applied_today_count(job.source) >= daily_limit
         ):
             logger.info(
-                f"Reached DAILY_APPLICATION_LIMIT "
-                f"({DAILY_APPLICATION_LIMIT}) for {job.source} today."
+                f"Reached daily application limit "
+                f"({daily_limit}) for {job.source} today."
+            )
+            notify(
+                parameters,
+                f"Дневной лимит откликов ({daily_limit}) достигнут "
+                f"для {job.source}.",
             )
             break
 
-        fit_score = score_job_fit(resume_pdf_path, job, llm_api_key)
-        if fit_score < JOB_SUITABILITY_SCORE:
+        fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+        tier = classify_fit(fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE)
+        if tier == "skip":
             logger.info(
                 f"Skipping {job.role} at {job.company}: fit score "
-                f"{fit_score}/10 below threshold."
+                f"{fit.score}/10 below minimum."
+            )
+            applied_log.record(
+                job, "", "", "skipped_low_fit", fit.score, fit.gaps
             )
             continue
+        if tier == "weak":
+            logger.info(
+                f"{job.role} at {job.company}: weak fit "
+                f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
+            )
 
-        cover_letter = generate_cover_letter_for_job(
-            resume_pdf_path, job, llm_api_key
-        )
+        try:
+            cover_letter = generate_cover_letter_for_job(
+                resume_pdf_path, job, llm_api_key
+            )
+        except Exception as e:
+            logger.exception(
+                f"Failed to generate cover letter for {job.role} at "
+                f"{job.company}, skipping this vacancy: {e}"
+            )
+            continue
 
         if auto_apply:
             wait_before_apply()
@@ -941,7 +1043,9 @@ def search_and_apply_zarplata(parameters: dict, llm_api_key: str):
                 f"({job.link})"
             )
 
-        applied_log.record(job, cover_letter, resume_id or "", status)
+        applied_log.record(
+            job, cover_letter, resume_id or "", status, fit.score, fit.gaps
+        )
         sent_count += 1
 
 
@@ -965,7 +1069,17 @@ def search_geekjob(parameters: dict, llm_api_key: str):
     output_folder: Path = parameters["outputFileDirectory"]
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
-    jobs = GeekjobSource(GeekjobClient()).search(parameters)
+    if is_still_blocked(output_folder, "geekjob"):
+        logger.warning("geekjob.ru is cooling down after a block — skipping.")
+        return
+
+    source: JobSource = GeekjobSource(GeekjobClient())
+    try:
+        jobs = source.search(parameters)
+    except PlatformBlockedError as e:
+        logger.error(f"geekjob.ru appears to have blocked us: {e}")
+        mark_blocked(output_folder, "geekjob")
+        return
     logger.info(f"Found {len(jobs)} matching geekjob.ru vacancies.")
 
     sent_count = 0
@@ -979,22 +1093,45 @@ def search_geekjob(parameters: dict, llm_api_key: str):
         if applied_log.already_applied(job):
             continue
 
-        fit_score = score_job_fit(resume_pdf_path, job, llm_api_key)
-        if fit_score < JOB_SUITABILITY_SCORE:
+        fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+        tier = classify_fit(fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE)
+        if tier == "skip":
             logger.info(
                 f"Skipping {job.role} at {job.company}: fit score "
-                f"{fit_score}/10 below threshold."
+                f"{fit.score}/10 below minimum."
+            )
+            applied_log.record(
+                job, "", "", "skipped_low_fit", fit.score, fit.gaps
             )
             continue
+        if tier == "weak":
+            logger.info(
+                f"{job.role} at {job.company}: weak fit "
+                f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
+            )
 
-        cover_letter = generate_cover_letter_for_job(
-            resume_pdf_path, job, llm_api_key
-        )
+        try:
+            cover_letter = generate_cover_letter_for_job(
+                resume_pdf_path, job, llm_api_key
+            )
+        except Exception as e:
+            logger.exception(
+                f"Failed to generate cover letter for {job.role} at "
+                f"{job.company}, skipping this vacancy: {e}"
+            )
+            continue
         logger.info(
             f"[manual apply needed] {job.role} at {job.company} ({job.link})"
         )
 
-        applied_log.record(job, cover_letter, resume_id="", status="dry_run")
+        applied_log.record(
+            job,
+            cover_letter,
+            resume_id="",
+            status="dry_run",
+            score=fit.score,
+            gaps=fit.gaps,
+        )
         sent_count += 1
 
 
@@ -1018,7 +1155,17 @@ def search_rabota_ru(parameters: dict, llm_api_key: str):
     output_folder: Path = parameters["outputFileDirectory"]
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
-    jobs = RabotaRuSource(RabotaRuClient()).search(parameters)
+    if is_still_blocked(output_folder, "rabota_ru"):
+        logger.warning("rabota.ru is cooling down after a block — skipping.")
+        return
+
+    source: JobSource = RabotaRuSource(RabotaRuClient())
+    try:
+        jobs = source.search(parameters)
+    except PlatformBlockedError as e:
+        logger.error(f"rabota.ru appears to have blocked us: {e}")
+        mark_blocked(output_folder, "rabota_ru")
+        return
     logger.info(f"Found {len(jobs)} matching rabota.ru vacancies.")
 
     sent_count = 0
@@ -1032,22 +1179,45 @@ def search_rabota_ru(parameters: dict, llm_api_key: str):
         if applied_log.already_applied(job):
             continue
 
-        fit_score = score_job_fit(resume_pdf_path, job, llm_api_key)
-        if fit_score < JOB_SUITABILITY_SCORE:
+        fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+        tier = classify_fit(fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE)
+        if tier == "skip":
             logger.info(
                 f"Skipping {job.role} at {job.company}: fit score "
-                f"{fit_score}/10 below threshold."
+                f"{fit.score}/10 below minimum."
+            )
+            applied_log.record(
+                job, "", "", "skipped_low_fit", fit.score, fit.gaps
             )
             continue
+        if tier == "weak":
+            logger.info(
+                f"{job.role} at {job.company}: weak fit "
+                f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
+            )
 
-        cover_letter = generate_cover_letter_for_job(
-            resume_pdf_path, job, llm_api_key
-        )
+        try:
+            cover_letter = generate_cover_letter_for_job(
+                resume_pdf_path, job, llm_api_key
+            )
+        except Exception as e:
+            logger.exception(
+                f"Failed to generate cover letter for {job.role} at "
+                f"{job.company}, skipping this vacancy: {e}"
+            )
+            continue
         logger.info(
             f"[manual apply needed] {job.role} at {job.company} ({job.link})"
         )
 
-        applied_log.record(job, cover_letter, resume_id="", status="dry_run")
+        applied_log.record(
+            job,
+            cover_letter,
+            resume_id="",
+            status="dry_run",
+            score=fit.score,
+            gaps=fit.gaps,
+        )
         sent_count += 1
 
 
@@ -1090,7 +1260,8 @@ def search_telegram(parameters: dict, llm_api_key: str):
     with TelegramSourceClient(
         int(api_id), api_hash, output_folder / ".telegram_session"
     ) as client:
-        jobs = TelegramSource(client).search(parameters)
+        source: JobSource = TelegramSource(client)
+        jobs = source.search(parameters)
 
     logger.info(f"Found {len(jobs)} matching Telegram posts.")
 
@@ -1105,20 +1276,43 @@ def search_telegram(parameters: dict, llm_api_key: str):
         if applied_log.already_applied(job):
             continue
 
-        fit_score = score_job_fit(resume_pdf_path, job, llm_api_key)
-        if fit_score < JOB_SUITABILITY_SCORE:
+        fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+        tier = classify_fit(fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE)
+        if tier == "skip":
             logger.info(
                 f"Skipping {job.role} at {job.company}: fit score "
-                f"{fit_score}/10 below threshold."
+                f"{fit.score}/10 below minimum."
+            )
+            applied_log.record(
+                job, "", "", "skipped_low_fit", fit.score, fit.gaps
             )
             continue
+        if tier == "weak":
+            logger.info(
+                f"{job.role} at {job.company}: weak fit "
+                f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
+            )
 
-        cover_letter = generate_cover_letter_for_job(
-            resume_pdf_path, job, llm_api_key
-        )
+        try:
+            cover_letter = generate_cover_letter_for_job(
+                resume_pdf_path, job, llm_api_key
+            )
+        except Exception as e:
+            logger.exception(
+                f"Failed to generate cover letter for {job.role} at "
+                f"{job.company}, skipping this vacancy: {e}"
+            )
+            continue
         logger.info(f"[manual reply needed] {job.role} ({job.link})")
 
-        applied_log.record(job, cover_letter, resume_id="", status="dry_run")
+        applied_log.record(
+            job,
+            cover_letter,
+            resume_id="",
+            status="dry_run",
+            score=fit.score,
+            gaps=fit.gaps,
+        )
         sent_count += 1
 
 
@@ -1142,7 +1336,18 @@ def search_getmatch(parameters: dict, llm_api_key: str):
     output_folder: Path = parameters["outputFileDirectory"]
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
-    jobs = GetMatchSource(GetMatchClient()).search(parameters)
+    if is_still_blocked(output_folder, "getmatch"):
+        logger.warning("GetMatch is cooling down after a block — skipping.")
+        return
+
+    profile_dir = output_folder / ".chrome_profile_getmatch"
+    source: JobSource = GetMatchSource(GetMatchClient(profile_dir))
+    try:
+        jobs = source.search(parameters)
+    except PlatformBlockedError as e:
+        logger.error(f"GetMatch appears to have blocked us: {e}")
+        mark_blocked(output_folder, "getmatch")
+        return
     logger.info(f"Found {len(jobs)} matching GetMatch vacancies.")
 
     sent_count = 0
@@ -1156,34 +1361,46 @@ def search_getmatch(parameters: dict, llm_api_key: str):
         if applied_log.already_applied(job):
             continue
 
-        fit_score = score_job_fit(resume_pdf_path, job, llm_api_key)
-        if fit_score < JOB_SUITABILITY_SCORE:
+        fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+        tier = classify_fit(fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE)
+        if tier == "skip":
             logger.info(
                 f"Skipping {job.role} at {job.company}: fit score "
-                f"{fit_score}/10 below threshold."
+                f"{fit.score}/10 below minimum."
+            )
+            applied_log.record(
+                job, "", "", "skipped_low_fit", fit.score, fit.gaps
             )
             continue
+        if tier == "weak":
+            logger.info(
+                f"{job.role} at {job.company}: weak fit "
+                f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
+            )
 
-        cover_letter = generate_cover_letter_for_job(
-            resume_pdf_path, job, llm_api_key
-        )
+        try:
+            cover_letter = generate_cover_letter_for_job(
+                resume_pdf_path, job, llm_api_key
+            )
+        except Exception as e:
+            logger.exception(
+                f"Failed to generate cover letter for {job.role} at "
+                f"{job.company}, skipping this vacancy: {e}"
+            )
+            continue
         logger.info(
             f"[manual apply needed] {job.role} at {job.company} ({job.link})"
         )
 
-        applied_log.record(job, cover_letter, resume_id="", status="dry_run")
+        applied_log.record(
+            job,
+            cover_letter,
+            resume_id="",
+            status="dry_run",
+            score=fit.score,
+            gaps=fit.gaps,
+        )
         sent_count += 1
-
-
-ALL_SOURCES = [
-    ("headhunter", search_and_apply_headhunter),
-    ("superjob", search_and_apply_superjob),
-    ("zarplata", search_and_apply_zarplata),
-    ("geekjob", search_geekjob),
-    ("rabota_ru", search_rabota_ru),
-    ("telegram", search_telegram),
-    ("getmatch", search_getmatch),
-]
 
 
 def search_and_apply_linkedin(parameters: dict, llm_api_key: str):
@@ -1235,10 +1452,12 @@ def search_and_apply_linkedin(parameters: dict, llm_api_key: str):
 
     try:
         session.ensure_logged_in(email, password)
-        jobs = LinkedInSource(session.driver).search(parameters)
+        source: JobSource = LinkedInSource(session.driver)
+        jobs = source.search(parameters)
         logger.info(f"Found {len(jobs)} matching LinkedIn Easy Apply jobs.")
 
         resume_text = extract_pdf_text(str(resume_pdf_path))
+        daily_limit = randomized_daily_limit(LINKEDIN_DAILY_APPLICATION_LIMIT)
         sent_count = 0
 
         for job in jobs:
@@ -1262,22 +1481,37 @@ def search_and_apply_linkedin(parameters: dict, llm_api_key: str):
                 continue
             if (
                 auto_apply
-                and applied_log.applied_today_count("linkedin")
-                >= LINKEDIN_DAILY_APPLICATION_LIMIT
+                and applied_log.applied_today_count("linkedin") >= daily_limit
             ):
                 logger.info(
-                    f"Reached LINKEDIN_DAILY_APPLICATION_LIMIT "
-                    f"({LINKEDIN_DAILY_APPLICATION_LIMIT}) for today."
+                    f"Reached daily application limit ({daily_limit}) "
+                    "for LinkedIn today."
+                )
+                notify(
+                    parameters,
+                    f"Дневной лимит откликов ({daily_limit}) достигнут "
+                    "для LinkedIn.",
                 )
                 break
 
-            fit_score = score_job_fit(resume_pdf_path, job, llm_api_key)
-            if fit_score < JOB_SUITABILITY_SCORE:
+            fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+            tier = classify_fit(
+                fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE
+            )
+            if tier == "skip":
                 logger.info(
                     f"Skipping {job.role} at {job.company}: fit "
-                    f"score {fit_score}/10 below threshold."
+                    f"score {fit.score}/10 below minimum."
+                )
+                applied_log.record(
+                    job, "", "", "skipped_low_fit", fit.score, fit.gaps
                 )
                 continue
+            if tier == "weak":
+                logger.info(
+                    f"{job.role} at {job.company}: weak fit "
+                    f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
+                )
 
             if auto_apply:
                 wait_before_apply()
@@ -1295,39 +1529,218 @@ def search_and_apply_linkedin(parameters: dict, llm_api_key: str):
             if not submitted:
                 continue
 
-            cover_letter = generate_cover_letter_for_job(
-                resume_pdf_path, job, llm_api_key
-            )
+            try:
+                cover_letter = generate_cover_letter_for_job(
+                    resume_pdf_path, job, llm_api_key
+                )
+            except Exception as e:
+                logger.exception(
+                    f"Failed to generate cover letter for {job.role} at "
+                    f"{job.company}, skipping this vacancy: {e}"
+                )
+                continue
             status: Literal["applied", "dry_run"] = (
                 "applied" if auto_apply else "dry_run"
             )
-            applied_log.record(job, cover_letter, resume_id="", status=status)
+            applied_log.record(
+                job,
+                cover_letter,
+                resume_id="",
+                status=status,
+                score=fit.score,
+                gaps=fit.gaps,
+            )
             sent_count += 1
     finally:
         session.quit()
 
 
-def run_all_sources(parameters: dict, llm_api_key: str) -> None:
-    """Прогоняет все источники подряд, изолированно друг от друга
-    (падение одного не останавливает остальные), с небольшой
+ALL_SOURCES = [
+    ("headhunter", search_and_apply_headhunter),
+    ("superjob", search_and_apply_superjob),
+    ("zarplata", search_and_apply_zarplata),
+    ("geekjob", search_geekjob),
+    ("rabota_ru", search_rabota_ru),
+    ("telegram", search_telegram),
+    ("getmatch", search_getmatch),
+    ("linkedin", search_and_apply_linkedin),
+]
+
+
+def run_selected_sources(
+    names: list[str], parameters: dict, llm_api_key: str
+) -> None:
+    """Прогоняет выбранные источники подряд, изолированно друг от
+    друга (падение одного не останавливает остальные), с небольшой
     паузой между источниками — чтобы переключение между
     площадками подряд не выглядело скриптованным."""
-    for index, (name, search_fn) in enumerate(ALL_SOURCES):
+    source_map = dict(ALL_SOURCES)
+    selected = [
+        (name, source_map[name]) for name in names if name in source_map
+    ]
+    output_folder = parameters.get("outputFileDirectory")
+    before = (
+        AppliedLog(output_folder / "applied_log.json").count_in_period("day")
+        if output_folder
+        else 0
+    )
+
+    for index, (name, search_fn) in enumerate(selected):
         logger.info(f"=== {name} ===")
         try:
             search_fn(parameters, llm_api_key)
         except Exception as e:
             logger.exception(f"{name} failed, continuing with the rest: {e}")
 
-        if index < len(ALL_SOURCES) - 1:
+        if index < len(selected) - 1:
             wait_between_sources()
 
+    if output_folder:
+        after = AppliedLog(output_folder / "applied_log.json").count_in_period(
+            "day"
+        )
+        notify(
+            parameters,
+            f"Прогон завершён: отправлено {after - before} откликов "
+            f"({', '.join(name for name, _ in selected)}).",
+        )
 
-def check_headhunter_replies(parameters: dict):
+
+def run_all_sources(parameters: dict, llm_api_key: str) -> None:
+    run_selected_sources(
+        [name for name, _ in ALL_SOURCES], parameters, llm_api_key
+    )
+
+
+def notify(parameters: dict, text: str) -> None:
+    """Best-effort уведомление в Telegram — отсутствие настроенного
+    бота или сетевая ошибка не должны ронять прогон, только
+    залогироваться."""
+    try:
+        secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
+        notifications = secrets.get("notifications") or {}
+        bot_token = notifications.get("telegram_bot_token")
+        chat_id = notifications.get("telegram_chat_id")
+        if not bot_token or not chat_id:
+            return
+        send_notification(bot_token, chat_id, text)
+    except Exception as e:
+        logger.warning(f"Failed to send Telegram notification: {e}")
+
+
+def _answer_headhunter_messages(
+    parameters: dict,
+    client: HeadHunterClient,
+    applied_log: AppliedLog,
+    llm_api_key: str,
+) -> None:
+    """Автоответ на сообщения работодателя в переписке HH — НЕ
+    проверено на живом аккаунте (см. докстринги
+    HeadHunterClient.list_negotiation_messages/
+    send_negotiation_message). Выключено по умолчанию: включается
+    через headhunter.auto_reply в work_preferences.yaml, как и
+    остальные auto_*-флаги в проекте."""
+    hh_preferences = parameters.get("headhunter") or {}
+    if not hh_preferences.get("auto_reply"):
+        return
+
+    data_folder: Path = parameters["dataFolder"]
+    resume_pdf_path = data_folder / RESUME_PDF
+    if not resume_pdf_path.exists():
+        return
+
+    resume_id = hh_preferences.get("resume_id")
+    hh_resume_summary = "Недоступно."
+    if resume_id:
+        try:
+            hh_resume_summary = build_hh_resume_summary(
+                client.get_resume(resume_id)
+            )
+        except Exception as e:
+            logger.warning(f"Failed to fetch HH resume for context: {e}")
+
+    secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
+    github_config = secrets.get("github") or {}
+    github_summary = ""
+    if github_config.get("username"):
+        github_summary = fetch_github_summary(
+            github_config["username"], github_config.get("token")
+        )
+        if github_summary:
+            github_summary = f"GitHub-профиль кандидата:\n{github_summary}"
+
+    preferences_summary = build_preferences_summary(parameters)
+
+    for negotiation in client.list_negotiations():
+        vacancy = negotiation.get("vacancy") or {}
+        external_id = str(vacancy.get("id") or "")
+        negotiation_id = str(negotiation.get("id") or "")
+        if not external_id or not negotiation_id:
+            continue
+
+        entry = applied_log.find_by_source_and_external_id(
+            "headhunter", external_id
+        )
+        if entry is None or entry["status"] != "applied":
+            continue
+
+        try:
+            messages = client.list_negotiation_messages(negotiation_id)
+        except Exception as e:
+            logger.warning(
+                f"Failed to fetch messages for {entry['company']}: {e}"
+            )
+            continue
+        if not messages:
+            continue
+
+        last_message = messages[-1]
+        message_id = str(last_message.get("id") or "")
+        author_type = (last_message.get("author") or {}).get(
+            "participant_type"
+        )
+        message_text = last_message.get("text") or ""
+        if (
+            not message_id
+            or not message_text
+            or author_type == "applicant"
+            or message_id == entry.get("last_replied_message_id")
+        ):
+            continue
+
+        try:
+            reply_text = generate_reply(
+                resume_pdf_path,
+                message_text,
+                entry["title"],
+                entry["company"],
+                preferences_summary,
+                llm_api_key,
+                hh_resume_summary=hh_resume_summary,
+                github_summary=github_summary,
+            )
+            client.send_negotiation_message(negotiation_id, reply_text)
+        except Exception as e:
+            logger.exception(
+                f"Failed to auto-reply to {entry['company']}: {e}"
+            )
+            continue
+
+        applied_log.mark_replied("headhunter", external_id, message_id)
+        logger.info(f"Auto-replied to {entry['company']} — {entry['title']}")
+        notify(
+            parameters,
+            f"Автоответ отправлен: {entry['company']} — {entry['title']}",
+        )
+
+
+def check_headhunter_replies(parameters: dict, llm_api_key: str):
     """
     Сверяет ваши реальные отклики на HeadHunter с текущим статусом
     переговоров в HH — чтобы видеть ответ работодателя, не заходя
-    на hh.ru. Только чтение — внешние формы ATS, куда может вести
+    на hh.ru. Плюс — если headhunter.auto_reply: true — автоматически
+    отвечает на новые сообщения работодателя (см.
+    _answer_headhunter_messages). Внешние формы ATS, куда может вести
     ответ работодателя, эта функция не трогает; там всё вручную.
     """
     secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
@@ -1345,8 +1758,16 @@ def check_headhunter_replies(parameters: dict):
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
     print_negotiation_replies(
-        "headhunter", client.list_negotiations(), applied_log
+        "headhunter",
+        client.list_negotiations(),
+        applied_log,
+        on_new_reply=lambda entry, state: notify(
+            parameters,
+            f"Новый ответ: {entry['company']} — {entry['title']}: {state}",
+        ),
     )
+
+    _answer_headhunter_messages(parameters, client, applied_log, llm_api_key)
 
 
 def check_zarplata_replies(parameters: dict):
@@ -1369,7 +1790,13 @@ def check_zarplata_replies(parameters: dict):
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
     print_negotiation_replies(
-        "zarplata", client.list_negotiations(), applied_log
+        "zarplata",
+        client.list_negotiations(),
+        applied_log,
+        on_new_reply=lambda entry, state: notify(
+            parameters,
+            f"Новый ответ: {entry['company']} — {entry['title']}: {state}",
+        ),
     )
 
 
@@ -1395,7 +1822,14 @@ def check_superjob_replies(parameters: dict):
     client = SuperJobClient(auth.get_access_token(), client_secret)
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
-    print_superjob_replies(client.list_messages(), applied_log)
+    print_superjob_replies(
+        client.list_messages(),
+        applied_log,
+        on_new_reply=lambda entry, state: notify(
+            parameters,
+            f"Новый ответ: {entry['company']} — {entry['title']}: {state}",
+        ),
+    )
 
 
 def show_application_history(parameters: dict):
@@ -1485,6 +1919,53 @@ def export_application_history(parameters: dict):
     print(f"Exported: {out_path}")
 
 
+def append_to_company_blacklist(
+    config_file: Path, companies: list[str]
+) -> None:
+    """Дописывает компании в company_blacklist текстово (не через
+    yaml.safe_dump всего файла), чтобы не потерять комментарии и
+    форматирование, которые уже есть в work_preferences.yaml."""
+    text = config_file.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    new_entries = [f"  - {company}" for company in companies]
+    for index, line in enumerate(lines):
+        if line.strip() == "company_blacklist:":
+            insert_at = index + 1
+            lines[insert_at:insert_at] = new_entries
+            config_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            return
+    text += "\n\ncompany_blacklist:\n" + "\n".join(new_entries) + "\n"
+    config_file.write_text(text, encoding="utf-8")
+
+
+def suggest_blacklist_additions(
+    config_file: Path, output_folder: Path
+) -> None:
+    """Не добавляет автоматически — только предлагает через чекбокс
+    компании без единого ответа за min_attempts+ реальных откликов
+    (см. AppliedLog.suggest_blacklist_candidates)."""
+    applied_log = AppliedLog(output_folder / "applied_log.json")
+    candidates = applied_log.suggest_blacklist_candidates()
+    if not candidates:
+        return
+    answer = inquirer.prompt(
+        [
+            inquirer.Checkbox(
+                "companies",
+                message=(
+                    f"{len(candidates)} компаний без единого ответа за "
+                    "3+ откликов — добавить в company_blacklist?"
+                ),
+                choices=candidates,
+            )
+        ]
+    )
+    chosen = (answer or {}).get("companies") or []
+    if chosen:
+        append_to_company_blacklist(config_file, chosen)
+        logger.info(f"Added to company_blacklist: {', '.join(chosen)}")
+
+
 def handle_inquiries(
     selected_actions: str, parameters: dict, llm_api_key: str
 ):
@@ -1560,11 +2041,15 @@ def handle_inquiries(
                 logger.info("Searching LinkedIn Easy Apply jobs...")
                 search_and_apply_linkedin(parameters, llm_api_key)
 
-            if "Search all sources" == selected_actions:
-                run_all_sources(parameters, llm_api_key)
+            if "Search selected sources" == selected_actions:
+                names = prompt_selected_sources()
+                if names:
+                    run_selected_sources(names, parameters, llm_api_key)
+                else:
+                    logger.warning("No sources selected.")
 
             if "Check HeadHunter replies" == selected_actions:
-                check_headhunter_replies(parameters)
+                check_headhunter_replies(parameters, llm_api_key)
 
             if "Check SuperJob replies" == selected_actions:
                 check_superjob_replies(parameters)
@@ -1608,7 +2093,7 @@ def prompt_user_action() -> str:
                     "Search Telegram channels (manual reply)",
                     "Search on GetMatch (manual apply)",
                     "Search & Apply on LinkedIn",
-                    "Search all sources",
+                    "Search selected sources",
                     "Check HeadHunter replies",
                     "Check SuperJob replies",
                     "Check Zarplata replies",
@@ -1627,33 +2112,80 @@ def prompt_user_action() -> str:
         return ""
 
 
+def prompt_selected_sources() -> list[str]:
+    """Checkbox вместо жёстко зафиксированного "все источники сразу" —
+    пользователь сам решает, что запускать за один прогон."""
+    questions = [
+        inquirer.Checkbox(
+            "sources",
+            message=(
+                "Select sources to search "
+                "(space to toggle, enter to confirm)"
+            ),
+            choices=[
+                ("HeadHunter", "headhunter"),
+                ("SuperJob", "superjob"),
+                ("Zarplata.ru", "zarplata"),
+                ("geekjob.ru (manual apply)", "geekjob"),
+                ("rabota.ru (manual apply)", "rabota_ru"),
+                ("Telegram channels (manual reply)", "telegram"),
+                ("GetMatch (manual apply)", "getmatch"),
+                (
+                    "LinkedIn (experimental, not verified live)",
+                    "linkedin",
+                ),
+            ],
+        ),
+    ]
+    answer = inquirer.prompt(questions)
+    return (answer or {}).get("sources") or []
+
+
 @click.command()
 @click.option(
     "--auto",
-    type=click.Choice(
-        [
-            "headhunter",
-            "superjob",
-            "zarplata",
-            "geekjob",
-            "rabota_ru",
-            "telegram",
-            "getmatch",
-            "linkedin",
-            "all",
-            "check_hh_replies",
-            "check_sj_replies",
-            "check_zp_replies",
-        ]
-    ),
+    type=str,
     default=None,
     help=(
-        "Run one source non-interactively (for cron) instead of "
-        "showing the menu."
+        "Run non-interactively (for cron) instead of showing the menu: "
+        "one of headhunter/superjob/zarplata/geekjob/rabota_ru/telegram/"
+        "getmatch/linkedin/all/check_hh_replies/check_sj_replies/"
+        "check_zp_replies, or 'selected:hh,superjob' for a comma-"
+        "separated subset of sources."
     ),
 )
-def main(auto: Optional[str]):
-    """Точка входа AIHawk Job Application Bot."""
+@click.option(
+    "--daemon",
+    is_flag=True,
+    default=False,
+    help=(
+        "Run the built-in scheduler in the foreground instead of "
+        "showing the menu — replaces external cron. Which sources run "
+        "and how often is controlled by schedule_enabled/"
+        "interval_hours in each source's block in "
+        "work_preferences.yaml."
+    ),
+)
+def main(auto: Optional[str], daemon: bool):
+    """Точка входа CrossJob-AI."""
+    non_source_auto_values = {
+        "all",
+        "check_hh_replies",
+        "check_sj_replies",
+        "check_zp_replies",
+    }
+    if auto is not None and not (
+        auto in non_source_auto_values
+        or auto in dict(ALL_SOURCES)
+        or auto.startswith("selected:")
+    ):
+        raise click.BadOptionUsage(
+            "--auto", f"Invalid value for --auto: {auto!r}"
+        )
+    if daemon and auto is not None:
+        raise click.BadOptionUsage(
+            "--daemon", "--daemon and --auto are mutually exclusive."
+        )
     try:
         # Определяем и проверяем папку с данными
         data_folder = Path("data_folder")
@@ -1665,8 +2197,10 @@ def main(auto: Optional[str]):
         config = ConfigValidator.validate_config(config_file)
         llm_api_key = ConfigValidator.validate_secrets(secrets_file)
 
-        # Готовим параметры
-        config["uploads"] = FileManager.get_uploads(plain_text_resume_file)
+        # Готовим параметры. plain_text_resume.yaml не обязателен на
+        # старте — ensure_plain_text_resume() сгенерирует его лениво,
+        # только если выбран один из пунктов Generate Resume*.
+        config["plainTextResumeFile"] = plain_text_resume_file
         config["outputFileDirectory"] = output_folder
         config["dataFolder"] = data_folder
         config["secretsFile"] = secrets_file
@@ -1721,8 +2255,17 @@ def main(auto: Optional[str]):
             run_all_sources(config, llm_api_key)
             return
 
+        if auto is not None and auto.startswith("selected:"):
+            names = [
+                name.strip()
+                for name in auto.removeprefix("selected:").split(",")
+                if name.strip()
+            ]
+            run_selected_sources(names, config, llm_api_key)
+            return
+
         if auto == "check_hh_replies":
-            check_headhunter_replies(config)
+            check_headhunter_replies(config, llm_api_key)
             return
 
         if auto == "check_sj_replies":
@@ -1733,7 +2276,19 @@ def main(auto: Optional[str]):
             check_zarplata_replies(config)
             return
 
+        if daemon:
+            scheduler = Scheduler(
+                dict(ALL_SOURCES), config, llm_api_key, output_folder
+            )
+            try:
+                scheduler.run_forever()
+            except KeyboardInterrupt:
+                scheduler.stop()
+                logger.info("Daemon stopped.")
+            return
+
         # Интерактивный запрос действия у пользователя
+        suggest_blacklist_additions(config_file, output_folder)
         selected_actions = prompt_user_action()
 
         # Обрабатываем выбранное действие
@@ -1743,8 +2298,7 @@ def main(auto: Optional[str]):
         logger.error(f"Configuration error: {ce}")
         logger.error(
             "Refer to the configuration guide for troubleshooting: "
-            "https://github.com/feder-cr/Auto_Jobs_Applier_AIHawk"
-            "?tab=readme-ov-file#configuration"
+            "docs/GUIDE.md"
         )
     except FileNotFoundError as fnf:
         logger.error(f"File not found: {fnf}")

@@ -20,9 +20,9 @@ def generate_cover_letter_for_job(
     resume_pdf_path: Path, job: Job, llm_api_key: str
 ) -> str:
     global_config.STRINGS_MODULE_COVER_LETTER_JOB_DESCRIPTION_PATH = (
-        _LIB_DIR / "cover_letter_prompt/strings_feder-cr.py"
+        _LIB_DIR / "cover_letter_prompt/strings.py"
     )
-    global_config.STRINGS_MODULE_NAME = "strings_feder_cr"
+    global_config.STRINGS_MODULE_NAME = "strings"
     global_config.API_KEY = llm_api_key
 
     resume_text = extract_text(str(resume_pdf_path))

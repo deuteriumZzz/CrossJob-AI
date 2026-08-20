@@ -1,5 +1,7 @@
 import time
 import urllib
+from pathlib import Path
+from typing import Optional
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -9,7 +11,13 @@ from webdriver_manager.chrome import ChromeDriverManager
 from src.logging import logger
 
 
-def chrome_browser_options():
+def chrome_browser_options(profile_dir: Optional[Path] = None):
+    """`--incognito` раньше стоял всегда — но постоянно новый, пустой
+    отпечаток браузера на каждый запуск выглядит подозрительнее для
+    анти-бот защиты площадок, чем обычный профиль с историей.
+    profile_dir (если передан) вместо этого даёт Chrome постоянную
+    папку профиля через --user-data-dir, как уже делает
+    src/job_sources/linkedin/browser.py::init_linkedin_browser."""
     logger.debug("Setting Chrome browser options")
     options = Options()
     options.add_argument("--start-maximized")
@@ -32,21 +40,23 @@ def chrome_browser_options():
     options.add_argument("--disable-plugins")
     options.add_argument("--disable-animations")
     options.add_argument("--disable-cache")
-    options.add_argument("--incognito")
     options.add_argument(
         "--allow-file-access-from-files"
     )  # Разрешает доступ к локальным файлам
     options.add_argument(
         "--disable-web-security"
     )  # Отключает веб-безопасность
-    logger.debug("Using Chrome in incognito mode")
+    if profile_dir is not None:
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        options.add_argument(f"--user-data-dir={profile_dir}")
+        logger.debug(f"Using persistent Chrome profile at {profile_dir}")
 
     return options
 
 
-def init_browser() -> webdriver.Chrome:
+def init_browser(profile_dir: Optional[Path] = None) -> webdriver.Chrome:
     try:
-        options = chrome_browser_options()
+        options = chrome_browser_options(profile_dir)
         # webdriver_manager сам скачивает и обновляет подходящий
         # ChromeDriver, не требуя ручного управления версиями
         driver = webdriver.Chrome(

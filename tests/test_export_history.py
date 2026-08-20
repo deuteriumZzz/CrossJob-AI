@@ -24,6 +24,8 @@ def test_export_application_history_writes_txt_with_salary_and_site():
             cover_letter="x",
             resume_id="r1",
             status="applied",
+            score=8,
+            gaps=[],
         )
 
         with patch.object(

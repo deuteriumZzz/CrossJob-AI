@@ -29,3 +29,12 @@ def wait_between_sources() -> None:
     delay = random.uniform(MIN_SOURCE_DELAY_SECONDS, MAX_SOURCE_DELAY_SECONDS)
     logger.debug(f"Waiting {delay:.0f}s before next source...")
     time.sleep(delay)
+
+
+def randomized_daily_limit(base: int) -> int:
+    """base * случайный множитель 0.7-1.0, округлённый вниз (минимум
+    1) — вызывается один раз за запуск источника, а не при каждой
+    проверке лимита, иначе дневной лимит "плавал" бы посреди одного
+    прогона. Идеально одинаковый DAILY_APPLICATION_LIMIT каждый день
+    сам по себе выглядит как признак бота."""
+    return max(1, int(base * random.uniform(0.7, 1.0)))

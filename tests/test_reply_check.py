@@ -23,6 +23,8 @@ def test_print_negotiation_replies_matches_by_vacancy_id(capsys):
             cover_letter="x",
             resume_id="r1",
             status="applied",
+            score=8,
+            gaps=[],
         )
         negotiations = [
             {"vacancy": {"id": 1}, "state": {"name": "приглашение"}}
@@ -50,8 +52,48 @@ def test_print_superjob_replies_falls_back_to_unknown_without_matching_vacancy(
             cover_letter="x",
             resume_id="r1",
             status="applied",
+            score=8,
+            gaps=[],
         )
 
         print_superjob_replies(messages=[], applied_log=applied_log)
         out = capsys.readouterr().out
         assert "не найден в текущих откликах" in out
+
+
+def test_print_negotiation_replies_fires_on_new_reply_only_once(capsys):
+    with tempfile.TemporaryDirectory() as tmp:
+        applied_log = AppliedLog(Path(tmp) / "applied_log.json")
+        applied_log.record(
+            Job(
+                role="Backend Dev",
+                company="Acme",
+                link="https://hh.ru/vacancy/1",
+                source="headhunter",
+                external_id="1",
+            ),
+            cover_letter="x",
+            resume_id="r1",
+            status="applied",
+            score=8,
+            gaps=[],
+        )
+        negotiations = [
+            {"vacancy": {"id": 1}, "state": {"name": "приглашение"}}
+        ]
+        calls = []
+
+        print_negotiation_replies(
+            "headhunter",
+            negotiations,
+            applied_log,
+            on_new_reply=lambda entry, state: calls.append(state),
+        )
+        print_negotiation_replies(
+            "headhunter",
+            negotiations,
+            applied_log,
+            on_new_reply=lambda entry, state: calls.append(state),
+        )
+
+        assert calls == ["приглашение"]

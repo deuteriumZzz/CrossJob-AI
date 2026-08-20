@@ -33,6 +33,11 @@ positions:
 locations:
   - Germany
 
+# Optional: used only for auto-replying to employer messages
+# (headhunter.auto_reply) — gives the LLM a concrete number instead
+# of guessing when asked about salary expectations.
+salary_expectations: "250000-300000 RUR"
+
 apply_once_at_company: true
 
 distance: 100
@@ -48,24 +53,42 @@ title_blacklist:
 location_blacklist:
   - Brazil
 
+# schedule_enabled/interval_hours (опционально, для `python main.py
+# --daemon` вместо внешнего cron) можно добавить в блок ЛЮБОГО
+# источника, включая те, у которых своего блока ниже ещё нет (geekjob,
+# rabota_ru, getmatch) — просто впишите блок с этими двумя полями.
+# По умолчанию schedule_enabled: false — демон не трогает источник,
+# пока его явно не включили.
+
 # Optional: only needed for the "Search & Apply on HeadHunter" action.
 headhunter:
   # Set to true to actually submit applications instead of a dry run.
   auto_apply: false
   # An existing resume ID from your hh.ru profile (used as-is, not regenerated).
   resume_id: "your-hh-ru-resume-id"
+  schedule_enabled: false
+  interval_hours: 3
+  # Optional: auto-reply to employer messages in the negotiation
+  # thread (salary questions, screening questions) via LLM. Off by
+  # default like every other auto_* flag — read docs/GUIDE.md first,
+  # this hits a not-yet-verified-live part of the HH API.
+  auto_reply: false
 
 # Optional: only needed for the "Search & Apply on SuperJob" action.
 superjob:
   auto_apply: false
   # An existing resume ID from your superjob.ru profile (used as-is, not regenerated).
   resume_id: "your-superjob-ru-resume-id"
+  schedule_enabled: false
+  interval_hours: 3
 
 # Optional: only needed for the "Search & Apply on Zarplata.ru" action.
 zarplata:
   auto_apply: false
   # An existing resume ID from your zarplata.ru profile (used as-is, not regenerated).
   resume_id: "your-zarplata-ru-resume-id"
+  schedule_enabled: false
+  interval_hours: 3
 
 # Optional: only needed for the "Search Telegram channels" action.
 # `positions` above is reused as the search keywords.
