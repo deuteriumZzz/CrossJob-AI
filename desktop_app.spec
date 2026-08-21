@@ -16,9 +16,26 @@ a = Analysis(
     datas=[
         ("src/webui/static", "src/webui/static"),
         ("data_folder_example", "data_folder_example"),
+        # Всё, что ResumeFacade/StyleManager грузят по прямому пути
+        # (importlib.util.spec_from_file_location для strings.py,
+        # обычное чтение файлов для CSS) — PyInstaller не видит такую
+        # динамическую загрузку при анализе импортов, поэтому эти
+        # директории нужно бандлить явно как data-файлы.
         (
             "src/libs/resume_and_cover_builder/resume_style",
             "src/libs/resume_and_cover_builder/resume_style",
+        ),
+        (
+            "src/libs/resume_and_cover_builder/resume_prompt",
+            "src/libs/resume_and_cover_builder/resume_prompt",
+        ),
+        (
+            "src/libs/resume_and_cover_builder/resume_job_description_prompt",
+            "src/libs/resume_and_cover_builder/resume_job_description_prompt",
+        ),
+        (
+            "src/libs/resume_and_cover_builder/cover_letter_prompt",
+            "src/libs/resume_and_cover_builder/cover_letter_prompt",
         ),
     ],
     hiddenimports=[

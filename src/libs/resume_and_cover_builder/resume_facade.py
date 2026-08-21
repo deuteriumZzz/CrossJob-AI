@@ -6,6 +6,7 @@
 
 # app/libs/resume_and_cover_builder/manager_facade.py
 import hashlib
+import sys
 from pathlib import Path
 
 import inquirer
@@ -33,7 +34,16 @@ class ResumeFacade:
         LLM-классы ниже по стеку не принимали их отдельно в каждом
         вызове.
         """
-        lib_directory = Path(__file__).resolve().parent
+        # В PyInstaller-сборке (desktop_app.spec) __file__ этого
+        # модуля не указывает на реальную папку с забандленными
+        # prompt-шаблонами/стилями — они распакованы в sys._MEIPASS
+        # (тот же приём, что main._project_root()/StyleManager).
+        meipass = getattr(sys, "_MEIPASS", None)
+        lib_directory = (
+            Path(meipass) / "src" / "libs" / "resume_and_cover_builder"
+            if meipass
+            else Path(__file__).resolve().parent
+        )
         global_config.STRINGS_MODULE_RESUME_PATH = (
             lib_directory / "resume_prompt/strings.py"
         )
