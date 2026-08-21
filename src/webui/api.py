@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import threading
 from pathlib import Path
 from typing import Optional
@@ -30,7 +31,18 @@ from src.scheduler import Scheduler
 from src.scheduler_state import load_state
 from src.utils.constants import SECRETS_YAML
 
-STATIC_DIR = Path(__file__).parent / "static"
+# В PyInstaller-сборке (desktop_app.spec) __file__ не указывает на
+# реальную папку с забандленным src/webui/static — она распакована в
+# sys._MEIPASS (тот же приём, что main._project_root() и другие
+# места этого семейства). Ниже это только `if STATIC_DIR.exists()` —
+# без фикса дашборд молча не смонтировал бы статику, без единой
+# ошибки в логах: просто пустое окно.
+_MEIPASS = getattr(sys, "_MEIPASS", None)
+STATIC_DIR = (
+    Path(_MEIPASS) / "src" / "webui" / "static"
+    if _MEIPASS
+    else Path(__file__).parent / "static"
+)
 LOG_FILE = Path("log/app.log")
 
 

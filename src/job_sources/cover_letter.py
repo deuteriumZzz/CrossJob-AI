@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from pdfminer.high_level import extract_text
@@ -9,8 +10,18 @@ from src.libs.resume_and_cover_builder.llm import (
 )
 from src.libs.resume_and_cover_builder.module_loader import load_module
 
+# В PyInstaller-сборке (desktop_app.spec) __file__ не указывает на
+# реальную папку с забандленным cover_letter_prompt/strings.py — он
+# распакован в sys._MEIPASS (тот же приём, что main._project_root()/
+# StyleManager/ResumeFacade). Без этого фикса сопроводительное письмо
+# не сгенерировалось бы вообще ни для одной вакансии ни на одной
+# площадке в собранном .exe/.app — это основной, а не только
+# дашбордовый путь генерации писем.
+_MEIPASS = getattr(sys, "_MEIPASS", None)
 _LIB_DIR = (
-    Path(__file__).resolve().parent.parent
+    Path(_MEIPASS) / "src" / "libs" / "resume_and_cover_builder"
+    if _MEIPASS
+    else Path(__file__).resolve().parent.parent
     / "libs"
     / "resume_and_cover_builder"
 )
