@@ -7,16 +7,12 @@ requirements-desktop.txt (fastapi/uvicorn/pywebview), которые не
 from __future__ import annotations
 
 import socket
-import sys
 import threading
 import time
-from pathlib import Path
 
 import httpx
 import uvicorn
 import webview
-
-DATA_FOLDER = Path("data_folder")
 
 
 def _free_port() -> int:
@@ -37,14 +33,12 @@ def _wait_until_ready(url: str, timeout: float = 15.0) -> None:
 
 
 def main() -> None:
-    if not DATA_FOLDER.is_dir():
-        print(
-            f"Data folder not found: {DATA_FOLDER}. Copy "
-            "data_folder_example to data_folder and fill it in first "
-            "(see docs/GUIDE.md)."
-        )
-        sys.exit(1)
-
+    # Нет проверки data_folder здесь — если его ещё нет, дашборд сам
+    # покажет экран первого запуска (GET /api/setup/status), как и в
+    # обычном браузере. Раньше это место жёстко завершало процесс
+    # ДО того, как окно вообще открывалось — для упакованного .app
+    # без видимого терминала пользователь просто не понимал, почему
+    # приложение мгновенно закрывается.
     port = _free_port()
     server_config = uvicorn.Config(
         "src.webui.api:app", host="127.0.0.1", port=port, log_level="warning"
@@ -54,7 +48,10 @@ def main() -> None:
     server_thread.start()
 
     url = f"http://127.0.0.1:{port}/"
-    _wait_until_ready(f"{url}api/status")
+    # /api/setup/status, не /api/status — последний требует
+    # настроенный data_folder (иначе 428), а на первом запуске его
+    # ещё нет, и проверка готовности никогда бы не прошла.
+    _wait_until_ready(f"{url}api/setup/status")
 
     webview.create_window(
         "CrossJob-AI", url, width=1200, height=800, min_size=(900, 600)
