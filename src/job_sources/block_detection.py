@@ -4,6 +4,8 @@ import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from src.utils.file_lock import state_file_lock
+
 BLOCK_COOLDOWN_HOURS = 24
 _BLOCK_KEYWORDS = ("captcha", "подозрительная активность")
 
@@ -36,13 +38,18 @@ def mark_blocked(output_folder: Path, source: str) -> None:
     следующий запуск (в т.ч. из cron) пропустит его вместо того,
     чтобы долбить капчу повторно."""
     path = _blocked_until_path(output_folder)
-    data = (
-        json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    )
-    until = datetime.now().astimezone() + timedelta(hours=BLOCK_COOLDOWN_HOURS)
-    data[source] = until.isoformat()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    with state_file_lock(path):
+        data = (
+            json.loads(path.read_text(encoding="utf-8"))
+            if path.exists()
+            else {}
+        )
+        until = datetime.now().astimezone() + timedelta(
+            hours=BLOCK_COOLDOWN_HOURS
+        )
+        data[source] = until.isoformat()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def is_still_blocked(output_folder: Path, source: str) -> bool:

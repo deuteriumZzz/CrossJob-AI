@@ -4,10 +4,11 @@ import json
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 from src.job import Job
 from src.job_sources.html_report import render_applications_html
+from src.utils.file_lock import state_file_lock
 
 Status = Literal["applied", "dry_run", "skipped_low_fit"]
 Period = Literal["day", "week", "month"]
@@ -26,6 +27,28 @@ class AppliedLog:
 
     def _key(self, job: Job) -> tuple[str, str]:
         return (job.source, job.external_id)
+
+    def _write_locked(self, mutate: Callable[[dict], None]) -> None:
+        """Читает актуальные данные с диска под блокировкой (не
+        self._data, который мог устареть с момента __init__, если
+        файл поменял другой поток — демон/ручной запуск/генерация
+        резюме в дашборде работают в отдельных потоках), применяет
+        mutate() и пишет обратно; self._data обновляется тем же
+        результатом, чтобы последующие чтения в этом же прогоне
+        оставались согласованы с диском."""
+        with state_file_lock(self.path):
+            fresh = (
+                json.loads(self.path.read_text(encoding="utf-8"))
+                if self.path.exists()
+                else {"applications": []}
+            )
+            mutate(fresh)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(
+                json.dumps(fresh, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        self._data = fresh
 
     def already_applied(self, job: Job) -> bool:
         key = self._key(job)
@@ -81,14 +104,17 @@ class AppliedLog:
         """Запоминает id последнего сообщения работодателя, на
         которое уже отправлен автоответ — чтобы не отвечать на одно
         и то же сообщение повторно на каждый прогон."""
-        entry = self.find_by_source_and_external_id(source, external_id)
-        if entry is None:
-            return
-        entry["last_replied_message_id"] = message_id
-        self.path.write_text(
-            json.dumps(self._data, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+
+        def _mutate(data: dict) -> None:
+            for entry in data["applications"]:
+                if (
+                    entry["source"] == source
+                    and entry["external_id"] == external_id
+                ):
+                    entry["last_replied_message_id"] = message_id
+                    return
+
+        self._write_locked(_mutate)
 
     def update_reply_state(
         self, source: str, external_id: str, state: str
@@ -98,19 +124,23 @@ class AppliedLog:
         прошлой проверки (в т.ч. первый раз, когда оно появилось),
         чтобы reply_check.py мог уведомлять только о НОВЫХ ответах, а
         не повторно на каждый запуск check_*_replies."""
-        for entry in self._data["applications"]:
-            if entry["source"] == source and entry["external_id"] == (
-                external_id
-            ):
-                if entry.get("last_known_state") == state:
-                    return False
-                entry["last_known_state"] = state
-                self.path.write_text(
-                    json.dumps(self._data, indent=2, ensure_ascii=False),
-                    encoding="utf-8",
-                )
-                return True
-        return False
+        changed = False
+
+        def _mutate(data: dict) -> None:
+            nonlocal changed
+            for entry in data["applications"]:
+                if (
+                    entry["source"] == source
+                    and entry["external_id"] == external_id
+                ):
+                    if entry.get("last_known_state") == state:
+                        return
+                    entry["last_known_state"] = state
+                    changed = True
+                    return
+
+        self._write_locked(_mutate)
+        return changed
 
     def count_in_period(
         self, period: Period, source: str | None = None
@@ -146,28 +176,26 @@ class AppliedLog:
         score: int,
         gaps: list[str],
     ) -> None:
-        self._data["applications"].append(
-            {
-                "source": job.source,
-                "external_id": job.external_id,
-                "company": job.company,
-                "title": job.role,
-                "link": job.link,
-                "salary": job.salary,
-                "company_url": job.company_url,
-                "cover_letter": cover_letter,
-                "resume_id": resume_id,
-                "status": status,
-                "score": score,
-                "gaps": gaps,
-                "applied_at": datetime.now().astimezone().isoformat(),
-            }
-        )
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
-            json.dumps(self._data, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        entry = {
+            "source": job.source,
+            "external_id": job.external_id,
+            "company": job.company,
+            "title": job.role,
+            "link": job.link,
+            "salary": job.salary,
+            "company_url": job.company_url,
+            "cover_letter": cover_letter,
+            "resume_id": resume_id,
+            "status": status,
+            "score": score,
+            "gaps": gaps,
+            "applied_at": datetime.now().astimezone().isoformat(),
+        }
+
+        def _mutate(data: dict) -> None:
+            data["applications"].append(entry)
+
+        self._write_locked(_mutate)
 
         periods: tuple[Period, Period, Period] = ("day", "week", "month")
         stats = {period: self.count_in_period(period) for period in periods}

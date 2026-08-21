@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, Optional
 
+from src.utils.file_lock import state_file_lock
+
 RunStatus = Literal["ok", "error", "blocked"]
 
 
@@ -35,15 +37,19 @@ def record_run_result(
 ) -> None:
     """Фиксирует результат одного тика планировщика для источника —
     читает web UI (Фаза B), чтобы показать 🟢/🟡/🔴 и время следующего
-    запуска без парсинга логов."""
-    state = load_state(output_folder)
-    state[source] = {
-        "last_run": run_at.isoformat(),
-        "next_run": next_run.isoformat(),
-        "status": status,
-        "last_error": error,
-    }
-    _save_state(output_folder, state)
+    запуска без парсинга логов. Заблокировано на время
+    read-modify-write — демон/ручной запуск/генерация резюме в
+    дашборде работают в отдельных потоках и могут писать почти
+    одновременно."""
+    with state_file_lock(_state_path(output_folder)):
+        state = load_state(output_folder)
+        state[source] = {
+            "last_run": run_at.isoformat(),
+            "next_run": next_run.isoformat(),
+            "status": status,
+            "last_error": error,
+        }
+        _save_state(output_folder, state)
 
 
 def get_next_run(output_folder: Path, source: str) -> Optional[datetime]:

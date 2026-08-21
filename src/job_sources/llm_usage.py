@@ -18,6 +18,8 @@ from uuid import UUID
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.outputs import LLMResult
 
+from src.utils.file_lock import state_file_lock
+
 # $ за 1M токенов (prompt, completion), актуально на 21.08.2026.
 _OPENAI_PRICING: dict[str, tuple[float, float]] = {
     "gpt-4o-mini": (0.15, 0.60),
@@ -55,18 +57,21 @@ def record_usage(
     if not prompt_tokens and not completion_tokens:
         return
     path = _usage_path(output_folder)
-    data = (
-        json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    )
-    day = datetime.now(timezone.utc).date().isoformat()
-    key = f"{provider}:{model}"
-    entry = data.setdefault(day, {}).setdefault(
-        key, {"prompt_tokens": 0, "completion_tokens": 0}
-    )
-    entry["prompt_tokens"] += prompt_tokens
-    entry["completion_tokens"] += completion_tokens
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data), encoding="utf-8")
+    with state_file_lock(path):
+        data = (
+            json.loads(path.read_text(encoding="utf-8"))
+            if path.exists()
+            else {}
+        )
+        day = datetime.now(timezone.utc).date().isoformat()
+        key = f"{provider}:{model}"
+        entry = data.setdefault(day, {}).setdefault(
+            key, {"prompt_tokens": 0, "completion_tokens": 0}
+        )
+        entry["prompt_tokens"] += prompt_tokens
+        entry["completion_tokens"] += completion_tokens
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data), encoding="utf-8")
 
 
 def estimate_cost_usd(
