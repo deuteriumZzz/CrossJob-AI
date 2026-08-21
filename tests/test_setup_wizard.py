@@ -72,6 +72,32 @@ def test_accepting_wizard_fills_only_missing_required_files():
         ).read_text(encoding="utf-8")
 
 
+def test_bootstrap_data_folder_uses_meipass_when_frozen():
+    """Регрессия: в PyInstaller-сборке (desktop_app.spec) datas
+    (data_folder_example) распаковываются в sys._MEIPASS, а не рядом
+    с main.py — _project_root() должен предпочесть sys._MEIPASS,
+    когда он выставлен (имитирует замороженный exe), а не всегда
+    смотреть рядом с исходником."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fake_bundle = Path(tmp) / "bundle"
+        bundled_example = fake_bundle / "data_folder_example"
+        bundled_example.mkdir(parents=True)
+        (bundled_example / "secrets.yaml").write_text(
+            "llm_api_key: 'from-bundle'\n", encoding="utf-8"
+        )
+        (bundled_example / "work_preferences.yaml").write_text(
+            "positions: []\n", encoding="utf-8"
+        )
+
+        data_folder = Path(tmp) / "data_folder"
+        with patch.object(main.sys, "_MEIPASS", str(fake_bundle), create=True):
+            main.bootstrap_data_folder(data_folder)
+
+        assert "from-bundle" in (data_folder / "secrets.yaml").read_text(
+            encoding="utf-8"
+        )
+
+
 def test_bootstrap_data_folder_works_regardless_of_process_cwd():
     """Регрессия: раньше data_folder_example искался как путь
     относительно CWD, что ломалось всегда, когда сервер (веб-

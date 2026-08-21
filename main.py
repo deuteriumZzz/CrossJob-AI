@@ -2,6 +2,7 @@ import base64
 import binascii
 import re
 import shutil
+import sys
 import traceback
 from pathlib import Path
 from typing import Literal, Optional, Tuple
@@ -347,6 +348,16 @@ class FileManager:
         )
 
 
+def _project_root() -> Path:
+    """В PyInstaller-сборке (desktop_app.spec) __file__ не указывает
+    на реальную папку с забандленными datas — data_folder_example
+    распаковывается во временный sys._MEIPASS, а не рядом с этим
+    файлом. Из исходников (python main.py / python desktop_app.py)
+    sys._MEIPASS не существует — используем расположение main.py."""
+    meipass = getattr(sys, "_MEIPASS", None)
+    return Path(meipass) if meipass else Path(__file__).resolve().parent
+
+
 def bootstrap_data_folder(
     data_folder: Path, api_key: Optional[str] = None
 ) -> dict:
@@ -356,11 +367,11 @@ def bootstrap_data_folder(
     src/webui/api.py), чтобы не дублировать копирование шаблона в
     двух местах. Возвращает, что реально было сделано.
 
-    Путь к шаблону — относительно расположения main.py, а не текущей
-    рабочей директории: у веб-дашборда/десктоп-приложения CWD может
-    быть чем угодно (не обязательно корнем проекта), в отличие от
-    CLI, который всегда запускают из корня."""
-    example = Path(__file__).resolve().parent / "data_folder_example"
+    Путь к шаблону — через _project_root(), а не текущую рабочую
+    директорию: у веб-дашборда/десктоп-приложения (в т.ч. собранного
+    PyInstaller-exe) CWD может быть чем угодно, в отличие от CLI,
+    который всегда запускают из корня."""
+    example = _project_root() / "data_folder_example"
     created_folder = not data_folder.exists()
     if created_folder:
         shutil.copytree(example, data_folder)
