@@ -113,11 +113,18 @@ function applyLLMSelection(provider, currentModel) {
   modelSelect.innerHTML = models
     .map(
       (m) =>
-        `<option value="${m.id}">${m.id}${m.free ? " · бесплатно" : ""}</option>`
+        `<option value="${m.id}">${m.recommended ? "👑 " : ""}${m.id}${m.free ? " · бесплатно" : ""}</option>`
     )
     .join("");
+  const recommended = models.find((m) => m.recommended);
   if (currentModel && models.some((m) => m.id === currentModel)) {
     modelSelect.value = currentModel;
+  } else if (recommended) {
+    // Свежее переключение провайдера без сохранённой модели — сразу
+    // подставляем рекомендованную (👑), а не первую по силе: для
+    // наших задач (оценка вакансии, письма) это лучший выбор
+    // цена/скорость/качество, не обязательно самая мощная модель.
+    modelSelect.value = recommended.id;
   }
 
   document.getElementById("llm-key-provider-label").textContent =

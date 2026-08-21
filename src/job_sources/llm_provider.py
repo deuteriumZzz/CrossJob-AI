@@ -12,30 +12,40 @@ _base_url_override: Optional[str] = None
 
 # ponytail: free/paid — static approximation of each provider's public
 # free tier as of 2026, not live pricing. Upgrade to a fetched/pricing-
-# API source if this drifts noticeably.
+# API source if this drifts noticeably. Каждый список — от самой
+# сильной модели к самой слабой; "recommended" — не всегда самая
+# сильная, а та, что лучше всего подходит под наши задачи (оценка
+# вакансии, сопроводительное письмо, разбор резюме — короткие
+# структурированные ответы, не многошаговые рассуждения), с поправкой
+# на скорость/цену/бесплатный лимит.
 PROVIDER_MODELS: dict = {
     "openai": [
-        {"id": "gpt-4o-mini", "free": False},
-        {"id": "gpt-4o", "free": False},
-        {"id": "gpt-4.1-mini", "free": False},
+        {"id": "gpt-4o", "free": False, "recommended": False},
+        {"id": "gpt-4.1", "free": False, "recommended": False},
+        {"id": "gpt-4.1-mini", "free": False, "recommended": False},
+        {"id": "gpt-4o-mini", "free": False, "recommended": True},
+        {"id": "gpt-4.1-nano", "free": False, "recommended": False},
     ],
     "groq": [
-        {"id": "llama-3.3-70b-versatile", "free": True},
-        {"id": "llama-3.1-8b-instant", "free": True},
-        {"id": "mixtral-8x7b-32768", "free": True},
+        {"id": "llama-3.3-70b-versatile", "free": True, "recommended": True},
+        {"id": "mixtral-8x7b-32768", "free": True, "recommended": False},
+        {"id": "gemma2-9b-it", "free": True, "recommended": False},
+        {"id": "llama-3.1-8b-instant", "free": True, "recommended": False},
     ],
     "gemini": [
-        {"id": "gemini-1.5-flash", "free": True},
-        {"id": "gemini-1.5-pro", "free": False},
+        {"id": "gemini-1.5-pro", "free": False, "recommended": False},
+        {"id": "gemini-1.5-flash", "free": True, "recommended": True},
+        {"id": "gemini-1.5-flash-8b", "free": True, "recommended": False},
     ],
     "deepseek": [
-        {"id": "deepseek-chat", "free": False},
-        {"id": "deepseek-reasoner", "free": False},
+        {"id": "deepseek-reasoner", "free": False, "recommended": False},
+        {"id": "deepseek-chat", "free": False, "recommended": True},
     ],
     "ollama": [
-        {"id": "llama3", "free": True},
-        {"id": "mistral", "free": True},
-        {"id": "qwen2.5", "free": True},
+        {"id": "llama3.1", "free": True, "recommended": True},
+        {"id": "qwen2.5", "free": True, "recommended": False},
+        {"id": "mistral", "free": True, "recommended": False},
+        {"id": "phi3", "free": True, "recommended": False},
     ],
 }
 

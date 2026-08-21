@@ -125,7 +125,12 @@ def test_provider_models_catalog_covers_known_providers():
     for provider in ("openai", "groq", "gemini", "deepseek", "ollama"):
         models = PROVIDER_MODELS[provider]
         assert models
-        assert all("id" in m and "free" in m for m in models)
+        assert all(
+            "id" in m and "free" in m and "recommended" in m for m in models
+        )
+        # Ровно одна рекомендованная модель на провайдера — иначе
+        # корону в UI получит первая по списку, а не задуманная.
+        assert sum(m["recommended"] for m in models) == 1
 
 
 if __name__ == "__main__":
