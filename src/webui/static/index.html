@@ -194,6 +194,32 @@
           <p class="muted">Расписание, автоотклик и уведомления</p>
         </div>
       </div>
+
+      <div class="panel">
+        <h3>Лимиты откликов</h3>
+        <div class="risk-banner">
+          ⚠️ Официальных цифр лимитов не публикует ни одна площадка — заданные здесь значения только уменьшают риск, но не гарантируют, что бота не заметят. Чем выше лимиты и чем ближе они к количеству найденных вакансий, тем больше активность похожа на бота. Повышайте постепенно, начните с малого. LinkedIn блокирует автоматизацию агрессивнее остальных — держите его лимит ниже.
+        </div>
+        <div class="limits-grid">
+          <label class="limit-field">
+            <span>Дневной лимит — HH / SuperJob / Zarplata</span>
+            <input id="limit-daily" type="number" min="1" />
+          </label>
+          <label class="limit-field">
+            <span>Дневной лимит — LinkedIn</span>
+            <input id="limit-linkedin" type="number" min="1" />
+          </label>
+          <label class="limit-field">
+            <span>Откликов за один прогон (все площадки)</span>
+            <input id="limit-per-run" type="number" min="1" />
+          </label>
+        </div>
+        <div class="filters">
+          <button id="limits-save" class="btn btn-primary">Сохранить</button>
+          <span id="limits-status" class="muted small"></span>
+        </div>
+      </div>
+
       <div class="panel">
         <h3>Telegram</h3>
         <div class="filters">

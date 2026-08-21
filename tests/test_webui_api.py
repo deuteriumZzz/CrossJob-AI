@@ -368,3 +368,51 @@ def test_setup_init_creates_data_folder_and_becomes_ready():
             assert "llm_api_key: 'sk-web-wizard'" in secrets_text
         finally:
             api.set_data_folder(Path("data_folder"))
+
+
+def test_get_limits_settings_defaults_to_config_values(client):
+    from config import DAILY_APPLICATION_LIMIT
+
+    response = client.get("/api/settings/limits")
+    assert response.status_code == 200
+    assert response.json()["daily_application_limit"] == (
+        DAILY_APPLICATION_LIMIT
+    )
+
+
+def test_post_limits_settings_updates_and_persists(client):
+    response = client.post(
+        "/api/settings/limits",
+        json={
+            "daily_application_limit": 30,
+            "linkedin_daily_application_limit": 10,
+            "job_max_applications": 9,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["daily_application_limit"] == 30
+    assert body["linkedin_daily_application_limit"] == 10
+    assert body["job_max_applications"] == 9
+
+    follow_up = client.get("/api/settings/limits")
+    assert follow_up.json() == body
+
+
+def test_post_limits_settings_rejects_values_below_one(client):
+    response = client.post(
+        "/api/settings/limits", json={"job_max_applications": 0}
+    )
+    assert response.status_code == 400
+
+
+def test_post_limits_settings_partial_update_leaves_others_unchanged(
+    client,
+):
+    client.post("/api/settings/limits", json={"daily_application_limit": 25})
+    response = client.post(
+        "/api/settings/limits", json={"job_max_applications": 7}
+    )
+    body = response.json()
+    assert body["daily_application_limit"] == 25
+    assert body["job_max_applications"] == 7

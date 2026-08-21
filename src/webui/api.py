@@ -10,7 +10,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from config import DAILY_APPLICATION_LIMIT, LOG_TO_FILE
+from config import (
+    DAILY_APPLICATION_LIMIT,
+    JOB_MAX_APPLICATIONS,
+    LINKEDIN_DAILY_APPLICATION_LIMIT,
+    LOG_TO_FILE,
+)
 from main import ALL_SOURCES, ConfigError, ConfigValidator, FileManager
 from main import append_to_company_blacklist as _append_to_blacklist
 from main import bootstrap_data_folder as _bootstrap_data_folder
@@ -263,6 +268,55 @@ def post_settings(
             set_source_field(ctx.config_file, body.source, field, value)
     ctx.reload_config()
     return {"source": body.source, "updated": True}
+
+
+class LimitsSettingsUpdate(BaseModel):
+    daily_application_limit: Optional[int] = None
+    linkedin_daily_application_limit: Optional[int] = None
+    job_max_applications: Optional[int] = None
+
+
+def _limits_snapshot(ctx: AppContext) -> dict:
+    limits = ctx.config.get("limits") or {}
+    return {
+        "daily_application_limit": limits.get(
+            "daily_application_limit", DAILY_APPLICATION_LIMIT
+        ),
+        "linkedin_daily_application_limit": limits.get(
+            "linkedin_daily_application_limit",
+            LINKEDIN_DAILY_APPLICATION_LIMIT,
+        ),
+        "job_max_applications": limits.get(
+            "job_max_applications", JOB_MAX_APPLICATIONS
+        ),
+    }
+
+
+@app.get("/api/settings/limits")
+def get_limits_settings(ctx: AppContext = Depends(get_ctx)) -> dict:
+    return _limits_snapshot(ctx)
+
+
+@app.post("/api/settings/limits")
+def post_limits_settings(
+    body: LimitsSettingsUpdate, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """limits — такой же плоский top-level блок в
+    work_preferences.yaml, как headhunter:/superjob:, поэтому пишется
+    той же текстовой правкой (set_source_field), не yaml.safe_dump
+    всего файла — чтобы не терять комментарии пользователя."""
+    for field in (
+        "daily_application_limit",
+        "linkedin_daily_application_limit",
+        "job_max_applications",
+    ):
+        value = getattr(body, field)
+        if value is not None:
+            if value < 1:
+                raise HTTPException(400, f"{field} must be >= 1")
+            set_source_field(ctx.config_file, "limits", field, value)
+    ctx.reload_config()
+    return _limits_snapshot(ctx)
 
 
 @app.get("/api/logs")

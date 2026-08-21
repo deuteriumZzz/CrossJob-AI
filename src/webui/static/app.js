@@ -287,6 +287,15 @@ const render = {
   async settings() {
     const status = await api("/api/status");
 
+    api("/api/settings/limits").then((limits) => {
+      document.getElementById("limit-daily").value =
+        limits.daily_application_limit;
+      document.getElementById("limit-linkedin").value =
+        limits.linkedin_daily_application_limit;
+      document.getElementById("limit-per-run").value =
+        limits.job_max_applications;
+    });
+
     api("/api/usage").then((usage) => {
       const fmtTokens = (n) => n.toLocaleString("ru-RU");
       const fmtCost = (c) =>
@@ -485,6 +494,34 @@ function initDashboard() {
         status.textContent = `Ошибка: ${e.message}`;
       }
     });
+
+  document.getElementById("limits-save").addEventListener("click", async () => {
+    const status = document.getElementById("limits-status");
+    const daily = parseInt(document.getElementById("limit-daily").value, 10);
+    const linkedin = parseInt(
+      document.getElementById("limit-linkedin").value,
+      10
+    );
+    const perRun = parseInt(
+      document.getElementById("limit-per-run").value,
+      10
+    );
+    status.textContent = "Сохранение...";
+    try {
+      await api("/api/settings/limits", {
+        method: "POST",
+        body: JSON.stringify({
+          daily_application_limit: daily,
+          linkedin_daily_application_limit: linkedin,
+          job_max_applications: perRun,
+        }),
+      });
+      status.textContent = "Сохранено.";
+      setTimeout(() => (status.textContent = ""), 2000);
+    } catch (e) {
+      status.textContent = `Ошибка: ${e.message}`;
+    }
+  });
 
   switchTab("overview");
   setInterval(() => {

@@ -891,3 +891,44 @@ pre.logs {
   font-size: 13px;
   font-family: inherit;
 }
+
+/* ---------- Application limits ---------- */
+
+.risk-banner {
+  background: rgba(224, 192, 90, 0.1);
+  border: 1px solid rgba(224, 192, 90, 0.35);
+  color: var(--warn);
+  border-radius: var(--radius-sm);
+  padding: 10px 13px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  margin-bottom: 16px;
+}
+
+.limits-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.limit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.limit-field span {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.limit-field input[type="number"] {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  font-size: 13px;
+  font-family: inherit;
+}
