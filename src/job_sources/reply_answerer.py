@@ -6,7 +6,6 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from pdfminer.high_level import extract_text
 
-from config import LLM_API_URL, LLM_MODEL, LLM_MODEL_TYPE
 from src.job_sources.llm_provider import get_chat_llm
 
 _REPLY_PROMPT = ChatPromptTemplate.from_template(
@@ -96,10 +95,7 @@ def generate_reply(
     resume_text = extract_text(str(resume_pdf_path))
     llm = get_chat_llm(
         llm_api_key,
-        provider=LLM_MODEL_TYPE,
-        model=LLM_MODEL,
         temperature=0.3,
-        base_url=LLM_API_URL or None,
     )
     chain = _REPLY_PROMPT | llm | StrOutputParser()
     output = chain.invoke(

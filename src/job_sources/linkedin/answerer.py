@@ -3,7 +3,6 @@ from typing import Optional
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
-from config import LLM_API_URL, LLM_MODEL, LLM_MODEL_TYPE
 from src.job import Job
 from src.job_sources.llm_provider import get_chat_llm
 from src.resume_schemas.job_application_profile import JobApplicationProfile
@@ -43,10 +42,7 @@ class EasyApplyAnswerer:
         self.job = job
         llm = get_chat_llm(
             llm_api_key,
-            provider=LLM_MODEL_TYPE,
-            model=LLM_MODEL,
             temperature=0.2,
-            base_url=LLM_API_URL or None,
         )
         self.chain = _ANSWER_PROMPT | llm | StrOutputParser()
 

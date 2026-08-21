@@ -13,7 +13,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_text_splitters import TokenTextSplitter
 from loguru import logger
 
-from config import LLM_API_URL, LLM_MODEL, LLM_MODEL_TYPE
 from src.job_sources.llm_provider import get_chat_llm
 from src.libs.resume_and_cover_builder.utils import LoggerChatModel
 
@@ -39,10 +38,7 @@ class LLMParser:
         self.llm = LoggerChatModel(
             get_chat_llm(
                 openai_api_key,
-                provider=LLM_MODEL_TYPE,
-                model=LLM_MODEL,
                 temperature=0.4,
-                base_url=LLM_API_URL or None,
             )
         )
         self.llm_embeddings = OpenAIEmbeddings(

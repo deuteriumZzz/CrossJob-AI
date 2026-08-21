@@ -92,6 +92,39 @@ function switchTab(name) {
 }
 
 let overviewLoaded = false;
+let llmCatalog = { models: {}, api_key_previews: {} };
+
+function providerLabel(provider) {
+  const card = document.querySelector(
+    `#provider-grid .provider-card[data-provider="${provider}"]`
+  );
+  return card ? card.querySelector("span").textContent : provider;
+}
+
+function applyLLMSelection(provider, currentModel) {
+  document
+    .querySelectorAll("#provider-grid .provider-card")
+    .forEach((card) => {
+      card.classList.toggle("active", card.dataset.provider === provider);
+    });
+
+  const modelSelect = document.getElementById("llm-model");
+  const models = llmCatalog.models[provider] || [];
+  modelSelect.innerHTML = models
+    .map(
+      (m) =>
+        `<option value="${m.id}">${m.id}${m.free ? " · бесплатно" : ""}</option>`
+    )
+    .join("");
+  if (currentModel && models.some((m) => m.id === currentModel)) {
+    modelSelect.value = currentModel;
+  }
+
+  document.getElementById("llm-key-provider-label").textContent =
+    providerLabel(provider);
+  document.getElementById("llm-key-preview").textContent =
+    llmCatalog.api_key_previews[provider] || "—";
+}
 
 function skeletonStats() {
   return Array.from(
@@ -286,6 +319,15 @@ const render = {
 
   async settings() {
     const status = await api("/api/status");
+
+    api("/api/settings/llm").then((llm) => {
+      llmCatalog = {
+        models: llm.models || {},
+        api_key_previews: llm.api_key_previews || {},
+      };
+      applyLLMSelection(llm.provider, llm.model);
+      document.getElementById("llm-base-url").value = llm.base_url || "";
+    });
 
     api("/api/settings/limits").then((limits) => {
       document.getElementById("limit-daily").value =
@@ -555,6 +597,84 @@ function initDashboard() {
         });
         status.textContent = "Сохранено.";
         setTimeout(() => (status.textContent = ""), 2000);
+      } catch (e) {
+        status.textContent = `Ошибка: ${e.message}`;
+      }
+    });
+
+  document.querySelectorAll("#provider-grid .provider-card").forEach((card) => {
+    card.addEventListener("click", () => {
+      // Модель и ключ привязаны к провайдеру — переключение карточки
+      // сразу подставляет список моделей и превью ключа именно этого
+      // провайдера, а не оставляет значения от предыдущего (иначе,
+      // например, gpt-4o-mini тихо отправился бы в запрос к Groq).
+      applyLLMSelection(card.dataset.provider, null);
+    });
+  });
+
+  document
+    .getElementById("llm-provider-save")
+    .addEventListener("click", async () => {
+      const status = document.getElementById("llm-provider-status");
+      const active = document.querySelector(
+        "#provider-grid .provider-card.active"
+      );
+      if (!active) {
+        status.textContent = "Выберите провайдера.";
+        return;
+      }
+      const model = document.getElementById("llm-model").value.trim();
+      const baseUrl = document.getElementById("llm-base-url").value.trim();
+      status.textContent = "Сохранение...";
+      try {
+        await api("/api/settings/llm", {
+          method: "POST",
+          body: JSON.stringify({
+            provider: active.dataset.provider,
+            model: model || null,
+            base_url: baseUrl || null,
+          }),
+        });
+        status.textContent = "Сохранено — применено сразу.";
+        setTimeout(() => (status.textContent = ""), 2500);
+      } catch (e) {
+        status.textContent = `Ошибка: ${e.message}`;
+      }
+    });
+
+  document
+    .getElementById("llm-key-save")
+    .addEventListener("click", async () => {
+      const status = document.getElementById("llm-key-status");
+      const input = document.getElementById("llm-key-input");
+      const active = document.querySelector(
+        "#provider-grid .provider-card.active"
+      );
+      const key = input.value.trim();
+      if (!active) {
+        status.textContent = "Выберите провайдера.";
+        return;
+      }
+      if (!key) {
+        status.textContent = "Вставьте ключ.";
+        return;
+      }
+      status.textContent = "Сохранение...";
+      try {
+        const result = await api("/api/settings/llm-key", {
+          method: "POST",
+          body: JSON.stringify({
+            provider: active.dataset.provider,
+            api_key: key,
+          }),
+        });
+        llmCatalog.api_key_previews[result.provider] =
+          result.api_key_preview;
+        document.getElementById("llm-key-preview").textContent =
+          result.api_key_preview;
+        input.value = "";
+        status.textContent = "Ключ сохранён.";
+        setTimeout(() => (status.textContent = ""), 2500);
       } catch (e) {
         status.textContent = `Ошибка: ${e.message}`;
       }

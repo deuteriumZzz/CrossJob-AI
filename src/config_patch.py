@@ -32,16 +32,26 @@ def set_top_level_field(config_file: Path, key: str, value: str) -> None:
 
 
 def set_source_field(
-    config_file: Path, source: str, key: str, value: object
+    config_file: Path,
+    source: str,
+    key: str,
+    value: object,
+    quote: bool = False,
 ) -> None:
-    """Точечно правит одно поле (bool/число) внутри блока источника в
-    work_preferences.yaml — текстовая правка одной строки, а не
-    yaml.safe_dump всего файла, чтобы не терять комментарии (тот же
-    подход, что уже main.append_to_company_blacklist использует для
-    company_blacklist)."""
+    """Точечно правит одно поле (bool/число/строка) внутри блока
+    источника в work_preferences.yaml/secrets.yaml — текстовая правка
+    одной строки, а не yaml.safe_dump всего файла, чтобы не терять
+    комментарии (тот же подход, что уже main.
+    append_to_company_blacklist использует для company_blacklist).
+    quote=True для значений, которые могут содержать YAML-спецсимволы
+    (API-ключи) — та же кавычечная техника, что set_top_level_field."""
     text = config_file.read_text(encoding="utf-8")
     lines = text.splitlines()
-    value_text = _format_yaml_scalar(value)
+    value_text = (
+        "'" + str(value).replace("'", "''") + "'"
+        if quote
+        else _format_yaml_scalar(value)
+    )
 
     block_start = None
     for index, line in enumerate(lines):

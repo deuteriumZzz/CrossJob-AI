@@ -932,3 +932,60 @@ pre.logs {
   font-size: 13px;
   font-family: inherit;
 }
+
+.limit-field input[type="text"],
+.limit-field input[type="password"],
+.limit-field select {
+  width: 100%;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+/* ---------- LLM provider picker ---------- */
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.provider-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel-2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 8px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 550;
+  transition: border-color 0.15s var(--ease-out),
+    background 0.15s var(--ease-out), color 0.15s var(--ease-out),
+    transform 0.2s var(--spring);
+}
+
+.provider-card svg {
+  width: 24px;
+  height: 24px;
+}
+
+.provider-card:hover {
+  border-color: var(--accent-dim);
+  color: var(--text);
+  transform: translateY(-2px);
+}
+
+.provider-card.active {
+  border-color: var(--accent);
+  background: rgba(122, 184, 255, 0.1);
+  color: var(--accent);
+}

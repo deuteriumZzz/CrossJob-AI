@@ -18,6 +18,7 @@ from config import (
     JOB_MIN_SCORE,
     JOB_SUITABILITY_SCORE,
     LINKEDIN_DAILY_APPLICATION_LIMIT,
+    LLM_MODEL_TYPE,
 )
 from src.config_patch import set_top_level_field
 from src.job_sources.applied_log import AppliedLog
@@ -46,6 +47,12 @@ from src.job_sources.linkedin.answerer import EasyApplyAnswerer
 from src.job_sources.linkedin.auth import LinkedInSession
 from src.job_sources.linkedin.easy_apply import run_easy_apply
 from src.job_sources.linkedin.source import LinkedInSource
+from src.job_sources.llm_provider import (
+    get_active_provider as get_active_llm_provider,
+)
+from src.job_sources.llm_provider import (
+    set_provider_override as set_llm_provider_override,
+)
 from src.job_sources.llm_usage import check_and_mark_alert
 from src.job_sources.llm_usage import (
     set_output_folder as set_llm_usage_output_folder,
@@ -285,24 +292,41 @@ class ConfigValidator:
                 parameters[blacklist] = []
 
     @staticmethod
-    def validate_secrets(secrets_yaml_path: Path) -> str:
+    def validate_secrets(
+        secrets_yaml_path: Path, provider: Optional[str] = None
+    ) -> str:
         """Падает сразу, если ключа LLM нет или он пустой — вместо
-        непонятного 401 где-то посреди прогона."""
+        непонятного 401 где-то посреди прогона. provider (текущий
+        активный провайдер — см. llm_provider.get_active_provider())
+        — сначала ищет ключ в llm_api_keys.<provider> (дашборд:
+        отдельный ключ на каждого провайдера), затем падает назад на
+        общий llm_api_key (совместимость со старыми secrets.yaml,
+        где был только один ключ)."""
         secrets = ConfigValidator.load_yaml(secrets_yaml_path)
-        mandatory_secrets = ["llm_api_key"]
-
-        for secret in mandatory_secrets:
-            if secret not in secrets:
-                raise ConfigError(
-                    f"Missing secret '{secret}' in {secrets_yaml_path}"
-                )
-
-            if not secrets[secret]:
-                raise ConfigError(
-                    f"Secret '{secret}' cannot be empty in {secrets_yaml_path}"
-                )
-
-        return secrets["llm_api_key"]
+        per_provider_key = (
+            (secrets.get("llm_api_keys") or {}).get(provider)
+            if provider
+            else None
+        )
+        # Общий (старый) llm_api_key годится только как ключ для
+        # LLM_MODEL_TYPE — того единственного провайдера, для
+        # которого он и заводился раньше. Для любого другого
+        # провайдера падать на него означало бы тихо слать чужой
+        # (например OpenAI-) ключ в Groq/Gemini/DeepSeek API.
+        legacy_applies = provider is None or provider == LLM_MODEL_TYPE
+        key = per_provider_key or (
+            secrets.get("llm_api_key") if legacy_applies else None
+        )
+        if not key:
+            label = (
+                f"llm_api_keys.{provider}' or 'llm_api_key"
+                if provider
+                else "llm_api_key"
+            )
+            raise ConfigError(
+                f"Missing secret '{label}' in {secrets_yaml_path}"
+            )
+        return key
 
 
 class FileManager:
@@ -826,6 +850,22 @@ def create_resume_pdf(
     except Exception as e:
         logger.exception(f"An error occurred while creating the CV: {e}")
         raise
+
+
+def apply_llm_provider_override(parameters: dict) -> None:
+    """Читает опциональный блок llm: в work_preferences.yaml
+    (дашборд — иконки провайдера в настройках) и прокидывает его в
+    llm_provider.set_provider_override(), чтобы все 8 мест, что зовут
+    get_chat_llm(), забрали новый провайдер без перезапуска процесса.
+    llm: отсутствует или пуст — override сбрасывается (провайдер по
+    умолчанию — config.LLM_MODEL_TYPE), а не остаётся зависшим от
+    предыдущего вызова."""
+    llm_config = parameters.get("llm") or {}
+    set_llm_provider_override(
+        llm_config.get("provider"),
+        llm_config.get("model"),
+        llm_config.get("base_url"),
+    )
 
 
 def _daily_limit(parameters: dict, source: Optional[str] = None) -> int:
@@ -2446,7 +2486,6 @@ def main(auto: Optional[str], daemon: bool):
 
         # Проверяем конфигурацию и секреты
         config = ConfigValidator.validate_config(config_file)
-        llm_api_key = ConfigValidator.validate_secrets(secrets_file)
 
         # Готовим параметры. plain_text_resume.yaml не обязателен на
         # старте — ensure_plain_text_resume() сгенерирует его лениво,
@@ -2456,6 +2495,13 @@ def main(auto: Optional[str], daemon: bool):
         config["dataFolder"] = data_folder
         config["secretsFile"] = secrets_file
         set_llm_usage_output_folder(output_folder)
+        apply_llm_provider_override(config)
+        # Провайдер должен быть применён (строкой выше) до резолва
+        # ключа — иначе llm_api_keys.<provider> в secrets.yaml не
+        # находится, и всегда берётся общий llm_api_key.
+        llm_api_key = ConfigValidator.validate_secrets(
+            secrets_file, get_active_llm_provider()
+        )
 
         # Позиции не заданы — один раз выводим их из resume.pdf,
         # чтобы каждый источник (HH/SuperJob/Zarplata/geekjob/

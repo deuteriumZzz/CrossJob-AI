@@ -3,7 +3,18 @@ from pathlib import Path
 import pytest
 
 from src.job_sources import llm_usage
-from src.job_sources.llm_provider import get_chat_llm
+from src.job_sources.llm_provider import (
+    PROVIDER_MODELS,
+    get_active_provider,
+    get_chat_llm,
+    set_provider_override,
+)
+
+
+@pytest.fixture(autouse=True)
+def _reset_provider_override():
+    yield
+    set_provider_override(None)
 
 
 def test_default_provider_is_openai():
@@ -60,6 +71,61 @@ def test_ollama_provider_requires_langchain_ollama():
         "", provider="ollama", base_url="http://localhost:11434"
     )
     assert type(llm).__name__ == "ChatOllama"
+
+
+def test_provider_override_switches_default_provider():
+    set_provider_override("groq")
+    pytest.importorskip("langchain_groq")
+    llm = get_chat_llm("gsk-test")
+    assert type(llm).__name__ == "ChatGroq"
+
+
+def test_provider_override_does_not_leak_config_model():
+    """Переключение провайдера без явной модели не должно протекать
+    моделью другого провайдера (config.LLM_MODEL == 'gpt-4o-mini')."""
+    set_provider_override("groq")
+    pytest.importorskip("langchain_groq")
+    llm = get_chat_llm("gsk-test")
+    assert llm.model_name != "gpt-4o-mini"
+    assert llm.model_name == "llama-3.3-70b-versatile"
+
+
+def test_provider_override_with_explicit_model():
+    set_provider_override("groq", "custom-model")
+    pytest.importorskip("langchain_groq")
+    llm = get_chat_llm("gsk-test")
+    assert llm.model_name == "custom-model"
+
+
+def test_explicit_call_argument_wins_over_override():
+    set_provider_override("groq")
+    llm = get_chat_llm("sk-test", provider="openai", model="gpt-4o")
+    assert type(llm).__name__ == "ChatOpenAI"
+    assert llm.model_name == "gpt-4o"
+
+
+def test_provider_override_reset_returns_to_config_default():
+    set_provider_override("groq")
+    set_provider_override(None)
+    llm = get_chat_llm("sk-test")
+    assert type(llm).__name__ == "ChatOpenAI"
+    assert llm.model_name == "gpt-4o-mini"
+
+
+def test_get_active_provider_defaults_to_config():
+    assert get_active_provider() == "openai"
+
+
+def test_get_active_provider_reflects_override():
+    set_provider_override("groq")
+    assert get_active_provider() == "groq"
+
+
+def test_provider_models_catalog_covers_known_providers():
+    for provider in ("openai", "groq", "gemini", "deepseek", "ollama"):
+        models = PROVIDER_MODELS[provider]
+        assert models
+        assert all("id" in m and "free" in m for m in models)
 
 
 if __name__ == "__main__":

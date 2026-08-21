@@ -15,12 +15,16 @@ from config import (
     DAILY_APPLICATION_LIMIT,
     JOB_MAX_APPLICATIONS,
     LINKEDIN_DAILY_APPLICATION_LIMIT,
+    LLM_API_URL,
+    LLM_MODEL,
+    LLM_MODEL_TYPE,
     LOG_TO_FILE,
 )
 from main import ALL_SOURCES, ConfigError, ConfigValidator, FileManager
 from main import _daily_limit as _effective_daily_limit
 from main import _job_max_applications as _effective_job_max_applications
 from main import append_to_company_blacklist as _append_to_blacklist
+from main import apply_llm_provider_override
 from main import bootstrap_data_folder as _bootstrap_data_folder
 from main import create_cover_letter as _create_cover_letter
 from main import create_resume_pdf as _create_resume_pdf
@@ -29,6 +33,8 @@ from main import force_refresh_plain_text_resume as _refresh_plain_text
 from main import run_selected_sources
 from src.config_patch import set_source_field
 from src.job_sources.applied_log import AppliedLog
+from src.job_sources.llm_provider import PROVIDER_MODELS
+from src.job_sources.llm_provider import get_active_provider as _active_llm
 from src.job_sources.llm_usage import (
     set_output_folder as set_llm_usage_output_folder,
 )
@@ -72,12 +78,13 @@ class AppContext:
             self.output_folder,
         ) = FileManager.validate_data_folder(data_folder)
         self.config = ConfigValidator.validate_config(self.config_file)
-        self.llm_api_key = ConfigValidator.validate_secrets(self.secrets_file)
         self.config["outputFileDirectory"] = self.output_folder
         self.config["dataFolder"] = data_folder
         self.config["secretsFile"] = self.secrets_file
         self.config["plainTextResumeFile"] = self.plain_text_resume_file
         set_llm_usage_output_folder(self.output_folder)
+        apply_llm_provider_override(self.config)
+        self.llm_api_key = self._resolve_llm_api_key()
         self.applied_log = AppliedLog(self.output_folder / "applied_log.json")
         self.scheduler: Optional[Scheduler] = None
         self.scheduler_thread: Optional[threading.Thread] = None
@@ -89,6 +96,22 @@ class AppContext:
     def reload_config(self) -> None:
         fresh = ConfigValidator.validate_config(self.config_file)
         self.config.update(fresh)
+        apply_llm_provider_override(self.config)
+        self.llm_api_key = self._resolve_llm_api_key()
+
+    def _resolve_llm_api_key(self) -> str:
+        """Ключ для активного провайдера (llm_api_keys.<provider> в
+        secrets.yaml, с падением назад на общий llm_api_key) —
+        отдельная функция, не только validate_secrets(), потому что
+        здесь (в отличие от CLI-старта) отсутствие ключа для только
+        что выбранного в дашборде провайдера не должно ронять весь
+        процесс — пользователь ещё не успел вписать ключ для него."""
+        try:
+            return ConfigValidator.validate_secrets(
+                self.secrets_file, _active_llm()
+            )
+        except ConfigError:
+            return ""
 
 
 _data_folder = Path("data_folder")
@@ -369,6 +392,104 @@ def post_limits_settings(
         )
     ctx.reload_config()
     return _limits_snapshot(ctx)
+
+
+_KNOWN_LLM_PROVIDERS = {"openai", "groq", "gemini", "deepseek", "ollama"}
+
+
+def _mask_api_key(key: str) -> str:
+    if len(key) <= 8:
+        return "•" * len(key)
+    return f"{key[:4]}…{key[-4:]}"
+
+
+def _llm_snapshot(ctx: AppContext) -> dict:
+    llm_config = ctx.config.get("llm") or {}
+    provider = llm_config.get("provider") or LLM_MODEL_TYPE
+    # Дефолты из config.py (LLM_MODEL/LLM_API_URL) относятся к
+    # LLM_MODEL_TYPE — показывать их для другого провайдера вводило
+    # бы в заблуждение (например "gpt-4o-mini" рядом с активным
+    # Groq, хотя реально используется llama-3.3-70b-versatile).
+    is_config_default = provider == LLM_MODEL_TYPE
+    secrets = ConfigValidator.load_yaml(ctx.secrets_file)
+    stored_keys = secrets.get("llm_api_keys") or {}
+    key_previews = {
+        p: _mask_api_key(stored_keys[p])
+        for p in _KNOWN_LLM_PROVIDERS
+        if stored_keys.get(p)
+    }
+    # Легаси-ключ всегда относится к LLM_MODEL_TYPE (тому единственному
+    # провайдеру, для которого он заводился раньше) — вне зависимости
+    # от того, какой провайдер сейчас активен, чтобы карточка openai
+    # в UI показывала свой ключ, даже когда выбран, например, groq.
+    legacy_key = secrets.get("llm_api_key")
+    if legacy_key and LLM_MODEL_TYPE not in key_previews:
+        key_previews[LLM_MODEL_TYPE] = _mask_api_key(legacy_key)
+    return {
+        "provider": provider,
+        "model": llm_config.get("model")
+        or (LLM_MODEL if is_config_default else None),
+        "base_url": llm_config.get("base_url")
+        or (LLM_API_URL or None if is_config_default else None),
+        "models": PROVIDER_MODELS,
+        "api_key_previews": key_previews,
+    }
+
+
+@app.get("/api/settings/llm")
+def get_llm_settings(ctx: AppContext = Depends(get_ctx)) -> dict:
+    return _llm_snapshot(ctx)
+
+
+class LLMProviderUpdate(BaseModel):
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    base_url: Optional[str] = None
+
+
+@app.post("/api/settings/llm")
+def post_llm_settings(
+    body: LLMProviderUpdate, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """llm: — тот же плоский top-level блок в work_preferences.yaml,
+    что limits:/headhunter:, применяется сразу через
+    apply_llm_provider_override() внутри ctx.reload_config() — без
+    перезапуска процесса."""
+    if body.provider is not None:
+        if body.provider not in _KNOWN_LLM_PROVIDERS:
+            raise HTTPException(400, f"Unknown provider: {body.provider}")
+        set_source_field(ctx.config_file, "llm", "provider", body.provider)
+    if body.model is not None:
+        set_source_field(ctx.config_file, "llm", "model", body.model)
+    if body.base_url is not None:
+        set_source_field(ctx.config_file, "llm", "base_url", body.base_url)
+    ctx.reload_config()
+    return _llm_snapshot(ctx)
+
+
+class LLMKeyUpdate(BaseModel):
+    provider: str
+    api_key: str
+
+
+@app.post("/api/settings/llm-key")
+def post_llm_key(
+    body: LLMKeyUpdate, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Пишет ключ в llm_api_keys.<provider> — не в общий legacy
+    llm_api_key — чтобы ключи разных провайдеров не перезаписывали
+    друг друга (у каждого свой: OpenAI/Groq/Gemini/DeepSeek/...)."""
+    if body.provider not in _KNOWN_LLM_PROVIDERS:
+        raise HTTPException(400, f"Unknown provider: {body.provider}")
+    key = body.api_key.strip()
+    if not key:
+        raise HTTPException(400, "api_key must not be empty")
+    set_source_field(
+        ctx.secrets_file, "llm_api_keys", body.provider, key, quote=True
+    )
+    if _active_llm() == body.provider:
+        ctx.llm_api_key = key
+    return {"provider": body.provider, "api_key_preview": _mask_api_key(key)}
 
 
 @app.get("/api/logs")

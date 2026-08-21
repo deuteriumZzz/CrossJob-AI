@@ -478,3 +478,73 @@ def test_export_applied_log_downloads_json_backup(client):
     assert response.status_code == 200
     assert response.json() == {"applications": []}
     assert "applied_log_backup_" in response.headers["content-disposition"]
+
+
+def test_get_llm_settings_defaults_to_config(client):
+    response = client.get("/api/settings/llm")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == "openai"
+    assert body["model"] == "gpt-4o-mini"
+    assert "groq" in body["models"]
+    assert body["api_key_previews"]["openai"]
+    assert "sk-test" not in body["api_key_previews"]["openai"]
+
+
+def test_post_llm_settings_switches_provider(client):
+    response = client.post(
+        "/api/settings/llm",
+        json={"provider": "groq", "model": "llama-3.3-70b-versatile"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == "groq"
+    assert body["model"] == "llama-3.3-70b-versatile"
+
+    follow_up = client.get("/api/settings/llm")
+    assert follow_up.json()["provider"] == "groq"
+    # Легаси llm_api_key (secrets.yaml fixture, "sk-test") заведён для
+    # openai — переключение на groq без своего сохранённого ключа не
+    # должно тихо показывать/использовать чужой ключ.
+    assert "groq" not in follow_up.json()["api_key_previews"]
+
+
+def test_post_llm_settings_rejects_unknown_provider(client):
+    response = client.post(
+        "/api/settings/llm", json={"provider": "not-a-real-provider"}
+    )
+    assert response.status_code == 400
+
+
+def test_post_llm_key_updates_secrets_and_masks_response(client):
+    response = client.post(
+        "/api/settings/llm-key",
+        json={"provider": "groq", "api_key": "sk-brand-new-key-12345"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == "groq"
+    assert "sk-brand-new-key-12345" not in body["api_key_preview"]
+    assert body["api_key_preview"].startswith("sk-b")
+
+    secrets_text = api.get_ctx().secrets_file.read_text(encoding="utf-8")
+    assert "sk-brand-new-key-12345" in secrets_text
+    assert "llm_api_keys" in secrets_text
+
+    follow_up = client.get("/api/settings/llm")
+    assert follow_up.json()["api_key_previews"]["groq"].startswith("sk-b")
+
+
+def test_post_llm_key_rejects_empty_key(client):
+    response = client.post(
+        "/api/settings/llm-key", json={"provider": "groq", "api_key": "   "}
+    )
+    assert response.status_code == 400
+
+
+def test_post_llm_key_rejects_unknown_provider(client):
+    response = client.post(
+        "/api/settings/llm-key",
+        json={"provider": "not-a-real-provider", "api_key": "sk-x"},
+    )
+    assert response.status_code == 400
