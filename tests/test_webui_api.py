@@ -101,6 +101,37 @@ def test_settings_update_rejects_unknown_source(client):
     assert response.status_code == 400
 
 
+def test_settings_update_per_source_job_max_applications(client):
+    from config import JOB_MAX_APPLICATIONS
+
+    unset = client.get("/api/status").json()
+    hh = next(s for s in unset["sources"] if s["name"] == "headhunter")
+    sj = next(s for s in unset["sources"] if s["name"] == "superjob")
+    assert hh["job_max_applications"] == JOB_MAX_APPLICATIONS
+    assert sj["job_max_applications"] == JOB_MAX_APPLICATIONS
+
+    response = client.post(
+        "/api/settings",
+        json={"source": "headhunter", "job_max_applications": 20},
+    )
+    assert response.status_code == 200
+
+    status = client.get("/api/status").json()
+    hh = next(s for s in status["sources"] if s["name"] == "headhunter")
+    sj = next(s for s in status["sources"] if s["name"] == "superjob")
+    assert hh["job_max_applications"] == 20
+    # другая площадка не затронута
+    assert sj["job_max_applications"] == JOB_MAX_APPLICATIONS
+
+
+def test_settings_update_rejects_job_max_applications_below_one(client):
+    response = client.post(
+        "/api/settings",
+        json={"source": "headhunter", "job_max_applications": 0},
+    )
+    assert response.status_code == 400
+
+
 def test_run_now_starts_selected_sources_and_reports_status(client):
     release = threading.Event()
     calls = []

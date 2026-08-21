@@ -849,9 +849,18 @@ def _linkedin_daily_limit(parameters: dict) -> int:
     )
 
 
-def _job_max_applications(parameters: dict) -> int:
-    """Лимит откликов за один прогон, общий для всех площадок — см.
-    _daily_limit()."""
+def _job_max_applications(
+    parameters: dict, source: Optional[str] = None
+) -> int:
+    """Лимит откликов за один прогон. Приоритет: job_max_applications
+    внутри блока конкретной площадки (headhunter:/superjob:/...,
+    дашборд — колонка "Откликов за прогон" в таблице настроек) >
+    limits.job_max_applications (общий дефолт, дашборд — панель
+    "Лимиты откликов") > config.JOB_MAX_APPLICATIONS."""
+    if source:
+        source_config = parameters.get(source) or {}
+        if "job_max_applications" in source_config:
+            return int(source_config["job_max_applications"])
     return int(
         (parameters.get("limits") or {}).get(
             "job_max_applications", JOB_MAX_APPLICATIONS
@@ -904,11 +913,12 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
 
     daily_limit = randomized_daily_limit(_daily_limit(parameters))
     sent_count = 0
+    job_max_applications = _job_max_applications(parameters, "headhunter")
     for job in jobs:
-        if sent_count >= _job_max_applications(parameters):
+        if sent_count >= job_max_applications:
             logger.info(
                 f"Reached JOB_MAX_APPLICATIONS "
-                f"({_job_max_applications(parameters)}) for this run."
+                f"({job_max_applications}) for this run."
             )
             break
         if applied_log.already_applied(job):
@@ -1031,11 +1041,12 @@ def search_and_apply_superjob(parameters: dict, llm_api_key: str):
 
     daily_limit = randomized_daily_limit(_daily_limit(parameters))
     sent_count = 0
+    job_max_applications = _job_max_applications(parameters, "superjob")
     for job in jobs:
-        if sent_count >= _job_max_applications(parameters):
+        if sent_count >= job_max_applications:
             logger.info(
                 f"Reached JOB_MAX_APPLICATIONS "
-                f"({_job_max_applications(parameters)}) for this run."
+                f"({job_max_applications}) for this run."
             )
             break
         if applied_log.already_applied(job):
@@ -1158,11 +1169,12 @@ def search_and_apply_zarplata(parameters: dict, llm_api_key: str):
 
     daily_limit = randomized_daily_limit(_daily_limit(parameters))
     sent_count = 0
+    job_max_applications = _job_max_applications(parameters, "zarplata")
     for job in jobs:
-        if sent_count >= _job_max_applications(parameters):
+        if sent_count >= job_max_applications:
             logger.info(
                 f"Reached JOB_MAX_APPLICATIONS "
-                f"({_job_max_applications(parameters)}) for this run."
+                f"({job_max_applications}) for this run."
             )
             break
         if applied_log.already_applied(job):
@@ -1277,11 +1289,12 @@ def search_geekjob(parameters: dict, llm_api_key: str):
     logger.info(f"Found {len(jobs)} matching geekjob.ru vacancies.")
 
     sent_count = 0
+    job_max_applications = _job_max_applications(parameters, "geekjob")
     for job in jobs:
-        if sent_count >= _job_max_applications(parameters):
+        if sent_count >= job_max_applications:
             logger.info(
                 f"Reached JOB_MAX_APPLICATIONS "
-                f"({_job_max_applications(parameters)}) for this run."
+                f"({job_max_applications}) for this run."
             )
             break
         if applied_log.already_applied(job):
@@ -1368,11 +1381,12 @@ def search_rabota_ru(parameters: dict, llm_api_key: str):
     logger.info(f"Found {len(jobs)} matching rabota.ru vacancies.")
 
     sent_count = 0
+    job_max_applications = _job_max_applications(parameters, "rabota_ru")
     for job in jobs:
-        if sent_count >= _job_max_applications(parameters):
+        if sent_count >= job_max_applications:
             logger.info(
                 f"Reached JOB_MAX_APPLICATIONS "
-                f"({_job_max_applications(parameters)}) for this run."
+                f"({job_max_applications}) for this run."
             )
             break
         if applied_log.already_applied(job):
@@ -1465,11 +1479,12 @@ def search_telegram(parameters: dict, llm_api_key: str):
     logger.info(f"Found {len(jobs)} matching Telegram posts.")
 
     sent_count = 0
+    job_max_applications = _job_max_applications(parameters, "telegram")
     for job in jobs:
-        if sent_count >= _job_max_applications(parameters):
+        if sent_count >= job_max_applications:
             logger.info(
                 f"Reached JOB_MAX_APPLICATIONS "
-                f"({_job_max_applications(parameters)}) for this run."
+                f"({job_max_applications}) for this run."
             )
             break
         if applied_log.already_applied(job):
@@ -1555,11 +1570,12 @@ def search_getmatch(parameters: dict, llm_api_key: str):
     logger.info(f"Found {len(jobs)} matching GetMatch vacancies.")
 
     sent_count = 0
+    job_max_applications = _job_max_applications(parameters, "getmatch")
     for job in jobs:
-        if sent_count >= _job_max_applications(parameters):
+        if sent_count >= job_max_applications:
             logger.info(
                 f"Reached JOB_MAX_APPLICATIONS "
-                f"({_job_max_applications(parameters)}) for this run."
+                f"({job_max_applications}) for this run."
             )
             break
         if applied_log.already_applied(job):
@@ -1663,12 +1679,13 @@ def search_and_apply_linkedin(parameters: dict, llm_api_key: str):
         resume_text = extract_pdf_text(str(resume_pdf_path))
         daily_limit = randomized_daily_limit(_linkedin_daily_limit(parameters))
         sent_count = 0
+        job_max_applications = _job_max_applications(parameters, "linkedin")
 
         for job in jobs:
-            if sent_count >= _job_max_applications(parameters):
+            if sent_count >= job_max_applications:
                 logger.info(
                     f"Reached JOB_MAX_APPLICATIONS "
-                    f"({_job_max_applications(parameters)}) for this run."
+                    f"({job_max_applications}) for this run."
                 )
                 break
             if applied_log.already_applied(job):

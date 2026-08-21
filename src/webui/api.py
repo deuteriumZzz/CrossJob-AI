@@ -17,6 +17,9 @@ from config import (
     LOG_TO_FILE,
 )
 from main import ALL_SOURCES, ConfigError, ConfigValidator, FileManager
+from main import _daily_limit as _effective_daily_limit
+from main import _job_max_applications as _effective_job_max_applications
+from main import _linkedin_daily_limit as _effective_linkedin_daily_limit
 from main import append_to_company_blacklist as _append_to_blacklist
 from main import bootstrap_data_folder as _bootstrap_data_folder
 from main import create_cover_letter as _create_cover_letter
@@ -161,6 +164,11 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
     for name, _ in ALL_SOURCES:
         source_config = ctx.config.get(name) or {}
         entry = state.get(name) or {}
+        daily_limit = (
+            _effective_linkedin_daily_limit(ctx.config)
+            if name == "linkedin"
+            else _effective_daily_limit(ctx.config)
+        )
         sources.append(
             {
                 "name": name,
@@ -174,7 +182,10 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
                 "status": entry.get("status", "never_run"),
                 "last_error": entry.get("last_error"),
                 "applied_today": ctx.applied_log.applied_today_count(name),
-                "daily_limit": DAILY_APPLICATION_LIMIT,
+                "daily_limit": daily_limit,
+                "job_max_applications": _effective_job_max_applications(
+                    ctx.config, name
+                ),
             }
         )
     return {
@@ -254,6 +265,7 @@ class SourceSettingsUpdate(BaseModel):
     auto_apply: Optional[bool] = None
     schedule_enabled: Optional[bool] = None
     interval_hours: Optional[int] = None
+    job_max_applications: Optional[int] = None
 
 
 @app.post("/api/settings")
@@ -262,9 +274,16 @@ def post_settings(
 ) -> dict:
     if body.source not in dict(ALL_SOURCES):
         raise HTTPException(400, f"Unknown source: {body.source}")
-    for field in ("auto_apply", "schedule_enabled", "interval_hours"):
+    for field in (
+        "auto_apply",
+        "schedule_enabled",
+        "interval_hours",
+        "job_max_applications",
+    ):
         value = getattr(body, field)
         if value is not None:
+            if field == "job_max_applications" and value < 1:
+                raise HTTPException(400, "job_max_applications must be >= 1")
             set_source_field(ctx.config_file, body.source, field, value)
     ctx.reload_config()
     return {"source": body.source, "updated": True}

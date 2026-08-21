@@ -34,3 +34,36 @@ def test_limits_block_missing_entirely_does_not_error():
     parameters = {"limits": None}
     assert main._daily_limit(parameters) == main.DAILY_APPLICATION_LIMIT
     assert main._job_max_applications(parameters) == main.JOB_MAX_APPLICATIONS
+
+
+def test_job_max_applications_per_source_override_wins_over_global():
+    parameters = {
+        "limits": {"job_max_applications": 5},
+        "headhunter": {"job_max_applications": 15},
+    }
+    assert main._job_max_applications(parameters, "headhunter") == 15
+    # другая площадка без своего override — берёт общий дефолт
+    assert main._job_max_applications(parameters, "superjob") == 5
+
+
+def test_job_max_applications_per_source_falls_back_without_override():
+    parameters = {
+        "limits": {"job_max_applications": 7},
+        "headhunter": {"auto_apply": True},
+    }
+    assert main._job_max_applications(parameters, "headhunter") == 7
+
+
+def test_job_max_applications_per_source_falls_back_to_config_default():
+    parameters = {"headhunter": {"auto_apply": True}}
+    assert (
+        main._job_max_applications(parameters, "headhunter")
+        == main.JOB_MAX_APPLICATIONS
+    )
+
+
+def test_job_max_applications_no_source_uses_global_only():
+    parameters = {"headhunter": {"job_max_applications": 99}}
+    # без указания source override конкретной площадки не должен
+    # применяться — это поведение "общего" вызова
+    assert main._job_max_applications(parameters) == main.JOB_MAX_APPLICATIONS

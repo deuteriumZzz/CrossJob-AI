@@ -321,6 +321,7 @@ const render = {
         <td><input type="checkbox" class="s-schedule" ${s.schedule_enabled ? "checked" : ""} /></td>
         <td><input type="number" class="s-interval" min="1" value="${s.interval_hours ?? 3}" /></td>
         <td><input type="checkbox" class="s-auto" ${s.auto_apply ? "checked" : ""} /></td>
+        <td><input type="number" class="s-max-applications" min="1" value="${s.job_max_applications}" /></td>
         <td><button class="btn btn-secondary s-save">Сохранить</button></td>
       </tr>`
       )
@@ -336,6 +337,10 @@ const render = {
           schedule_enabled: row.querySelector(".s-schedule").checked,
           interval_hours: parseInt(row.querySelector(".s-interval").value, 10),
           auto_apply: row.querySelector(".s-auto").checked,
+          job_max_applications: parseInt(
+            row.querySelector(".s-max-applications").value,
+            10
+          ),
         };
         await api("/api/settings", {
           method: "POST",
