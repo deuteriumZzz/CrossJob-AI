@@ -87,7 +87,7 @@ def test_provider_override_does_not_leak_config_model():
     pytest.importorskip("langchain_groq")
     llm = get_chat_llm("gsk-test")
     assert llm.model_name != "gpt-4o-mini"
-    assert llm.model_name == "llama-3.3-70b-versatile"
+    assert llm.model_name == "openai/gpt-oss-120b"
 
 
 def test_provider_override_with_explicit_model():

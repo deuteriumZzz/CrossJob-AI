@@ -409,7 +409,7 @@ def _llm_snapshot(ctx: AppContext) -> dict:
     # Дефолты из config.py (LLM_MODEL/LLM_API_URL) относятся к
     # LLM_MODEL_TYPE — показывать их для другого провайдера вводило
     # бы в заблуждение (например "gpt-4o-mini" рядом с активным
-    # Groq, хотя реально используется llama-3.3-70b-versatile).
+    # Groq, хотя реально используется openai/gpt-oss-120b).
     is_config_default = provider == LLM_MODEL_TYPE
     secrets = ConfigValidator.load_yaml(ctx.secrets_file)
     stored_keys = secrets.get("llm_api_keys") or {}

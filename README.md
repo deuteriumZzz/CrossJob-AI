@@ -89,7 +89,7 @@ API-ключом на каждого — без правки `config.py`. Под
 
 ## Конфигурация
 
-- `data_folder/secrets.yaml` — ключ LLM (`llm_api_key`, по умолчанию для OpenAI) и, для каждой площадки, свои ключи (HeadHunter — https://dev.hh.ru/admin, SuperJob — https://api.superjob.ru/register/, Zarplata.ru — тот же принцип, что у HH, Telegram — https://my.telegram.org/apps, см. GUIDE.md). Провайдер LLM не обязан быть OpenAI — поддерживаются Groq/Gemini/DeepSeek/Ollama, каждый со своим ключом в блоке `llm_api_keys:` (переключение и ввод ключей — в дашборде, вкладка Настройки, без правки `config.py`).
+- `data_folder/secrets.yaml` — ключ LLM (`llm_api_key`, по умолчанию для OpenAI) и, для каждой площадки, свои ключи (HeadHunter — https://dev.hh.ru/admin, SuperJob — https://api.superjob.ru/register/, Zarplata.ru — тот же принцип, что у HH, Telegram — https://my.telegram.org/apps, см. GUIDE.md). Провайдер LLM не обязан быть OpenAI — поддерживаются Groq/Gemini/DeepSeek/Ollama, каждый со своим ключом в блоке `llm_api_keys:` (переключение, выбор модели и ввод ключей — в дашборде, вкладка Настройки, без правки `config.py`). **Рекомендация по умолчанию — Groq, модель `openai/gpt-oss-120b`** (помечена короной 👑 в выборе модели): бесплатно и достаточно для оценки вакансий/писем, при таком объёме вызовов LLM платный провайдер за день накапает заметный счёт.
 - `data_folder/work_preferences.yaml` — позиции (они же ключевые слова для Telegram), локации, чёрные списки компаний/названий/локаций, фильтры по опыту/типу занятости/дате, и опциональные блоки `headhunter:`/`superjob:`/`zarplata:` (`auto_apply`, `resume_id`) и `telegram:` (`channels`).
 - `data_folder/resume.pdf` — резюме как есть; используется только для генерации сопроводительных писем.
 

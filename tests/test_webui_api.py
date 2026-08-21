@@ -494,12 +494,12 @@ def test_get_llm_settings_defaults_to_config(client):
 def test_post_llm_settings_switches_provider(client):
     response = client.post(
         "/api/settings/llm",
-        json={"provider": "groq", "model": "llama-3.3-70b-versatile"},
+        json={"provider": "groq", "model": "openai/gpt-oss-120b"},
     )
     assert response.status_code == 200
     body = response.json()
     assert body["provider"] == "groq"
-    assert body["model"] == "llama-3.3-70b-versatile"
+    assert body["model"] == "openai/gpt-oss-120b"
 
     follow_up = client.get("/api/settings/llm")
     assert follow_up.json()["provider"] == "groq"

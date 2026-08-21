@@ -12,7 +12,7 @@ def test_record_usage_accumulates_per_day_and_model():
         out = Path(tmp)
         llm_usage.record_usage(out, "openai", "gpt-4o-mini", 100, 50)
         llm_usage.record_usage(out, "openai", "gpt-4o-mini", 200, 100)
-        llm_usage.record_usage(out, "groq", "llama-3.3-70b-versatile", 10, 5)
+        llm_usage.record_usage(out, "groq", "openai/gpt-oss-120b", 10, 5)
 
         summary = llm_usage.summarize_usage(out)
         assert summary["today_tokens"] == 465

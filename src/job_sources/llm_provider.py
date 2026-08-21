@@ -10,32 +10,40 @@ _provider_override: Optional[str] = None
 _model_override: Optional[str] = None
 _base_url_override: Optional[str] = None
 
-# ponytail: free/paid — static approximation of each provider's public
-# free tier as of 2026, not live pricing. Upgrade to a fetched/pricing-
-# API source if this drifts noticeably. Каждый список — от самой
-# сильной модели к самой слабой; "recommended" — не всегда самая
-# сильная, а та, что лучше всего подходит под наши задачи (оценка
-# вакансии, сопроводительное письмо, разбор резюме — короткие
-# структурированные ответы, не многошаговые рассуждения), с поправкой
-# на скорость/цену/бесплатный лимит.
+# ponytail: free/paid + актуальность ID — сверено веб-поиском 2026-08-21
+# (свежие модели/цены/депрекейшены меняются быстрее, чем стоит
+# перепроверять руками; если провайдер вернёт ошибку "model not
+# found", это первое место для проверки). "recommended" — не всегда
+# самая сильная модель, а та, что лучше всего подходит под наши
+# задачи (оценка вакансии, сопроводительное письмо, разбор резюме —
+# короткие структурированные ответы, не многошаговые рассуждения), с
+# поправкой на скорость/цену/бесплатный лимit.
 PROVIDER_MODELS: dict = {
     "openai": [
+        {"id": "gpt-5", "free": False, "recommended": False},
         {"id": "gpt-4o", "free": False, "recommended": False},
-        {"id": "gpt-4.1", "free": False, "recommended": False},
-        {"id": "gpt-4.1-mini", "free": False, "recommended": False},
-        {"id": "gpt-4o-mini", "free": False, "recommended": True},
-        {"id": "gpt-4.1-nano", "free": False, "recommended": False},
+        {"id": "gpt-5-mini", "free": False, "recommended": True},
+        {"id": "gpt-4o-mini", "free": False, "recommended": False},
+        {"id": "gpt-5-nano", "free": False, "recommended": False},
     ],
+    # Groq снял llama-3.3-70b-versatile и llama-3.1-8b-instant с
+    # бесплатного/developer-тира 2026-08-16 — ниже их официальная
+    # замена (console.groq.com/docs/deprecations).
     "groq": [
-        {"id": "llama-3.3-70b-versatile", "free": True, "recommended": True},
-        {"id": "mixtral-8x7b-32768", "free": True, "recommended": False},
-        {"id": "gemma2-9b-it", "free": True, "recommended": False},
-        {"id": "llama-3.1-8b-instant", "free": True, "recommended": False},
+        {"id": "openai/gpt-oss-120b", "free": True, "recommended": True},
+        {
+            "id": "meta-llama/llama-4-maverick-17b-128e-instruct",
+            "free": True,
+            "recommended": False,
+        },
+        {"id": "openai/gpt-oss-20b", "free": True, "recommended": False},
     ],
+    # Gemini 1.5 снят с прайс-листа (заменён 2.x/3.x); 2.5-flash
+    # уходит на пенсию 2026-10-16 — на замену уже есть 3.7-flash.
     "gemini": [
-        {"id": "gemini-1.5-pro", "free": False, "recommended": False},
-        {"id": "gemini-1.5-flash", "free": True, "recommended": True},
-        {"id": "gemini-1.5-flash-8b", "free": True, "recommended": False},
+        {"id": "gemini-3.7-flash", "free": False, "recommended": False},
+        {"id": "gemini-2.5-flash", "free": True, "recommended": True},
+        {"id": "gemini-2.5-flash-lite", "free": True, "recommended": False},
     ],
     "deepseek": [
         {"id": "deepseek-reasoner", "free": False, "recommended": False},
@@ -107,7 +115,7 @@ def get_chat_llm(
     if provider == "groq":
         from langchain_groq import ChatGroq
 
-        resolved_model = model or "llama-3.3-70b-versatile"
+        resolved_model = model or "openai/gpt-oss-120b"
         llm: BaseChatModel = ChatGroq(
             model=resolved_model,
             api_key=SecretStr(api_key),
@@ -116,7 +124,7 @@ def get_chat_llm(
     elif provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        resolved_model = model or "gemini-1.5-flash"
+        resolved_model = model or "gemini-2.5-flash"
         llm = ChatGoogleGenerativeAI(
             model=resolved_model,
             google_api_key=SecretStr(api_key),
