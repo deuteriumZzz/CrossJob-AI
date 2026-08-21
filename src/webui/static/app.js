@@ -294,6 +294,10 @@ const render = {
         limits.linkedin_daily_application_limit;
       document.getElementById("limit-per-run").value =
         limits.job_max_applications;
+      if (limits.llm_daily_cost_alert_usd != null) {
+        document.getElementById("llm-alert-usd").value =
+          limits.llm_daily_cost_alert_usd;
+      }
     });
 
     api("/api/usage").then((usage) => {
@@ -322,6 +326,7 @@ const render = {
         <td><input type="number" class="s-interval" min="1" value="${s.interval_hours ?? 3}" /></td>
         <td><input type="checkbox" class="s-auto" ${s.auto_apply ? "checked" : ""} /></td>
         <td><input type="number" class="s-max-applications" min="1" value="${s.job_max_applications}" /></td>
+        <td><input type="number" class="s-daily-limit" min="1" value="${s.daily_limit}" /></td>
         <td><button class="btn btn-secondary s-save">Сохранить</button></td>
       </tr>`
       )
@@ -339,6 +344,10 @@ const render = {
           auto_apply: row.querySelector(".s-auto").checked,
           job_max_applications: parseInt(
             row.querySelector(".s-max-applications").value,
+            10
+          ),
+          daily_application_limit: parseInt(
+            row.querySelector(".s-daily-limit").value,
             10
           ),
         };
@@ -527,6 +536,29 @@ function initDashboard() {
       status.textContent = `Ошибка: ${e.message}`;
     }
   });
+
+  document
+    .getElementById("llm-alert-save")
+    .addEventListener("click", async () => {
+      const status = document.getElementById("llm-alert-status");
+      const raw = document.getElementById("llm-alert-usd").value;
+      const value = raw ? parseFloat(raw) : null;
+      if (value === null) {
+        status.textContent = "Введите значение.";
+        return;
+      }
+      status.textContent = "Сохранение...";
+      try {
+        await api("/api/settings/limits", {
+          method: "POST",
+          body: JSON.stringify({ llm_daily_cost_alert_usd: value }),
+        });
+        status.textContent = "Сохранено.";
+        setTimeout(() => (status.textContent = ""), 2000);
+      } catch (e) {
+        status.textContent = `Ошибка: ${e.message}`;
+      }
+    });
 
   switchTab("overview");
   setInterval(() => {

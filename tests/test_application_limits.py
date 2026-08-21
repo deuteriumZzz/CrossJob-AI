@@ -67,3 +67,42 @@ def test_job_max_applications_no_source_uses_global_only():
     # без указания source override конкретной площадки не должен
     # применяться — это поведение "общего" вызова
     assert main._job_max_applications(parameters) == main.JOB_MAX_APPLICATIONS
+
+
+def test_daily_limit_per_source_override_wins_over_global():
+    parameters = {
+        "limits": {"daily_application_limit": 15},
+        "headhunter": {"daily_application_limit": 40},
+    }
+    assert main._daily_limit(parameters, "headhunter") == 40
+    assert main._daily_limit(parameters, "superjob") == 15
+
+
+def test_daily_limit_per_source_falls_back_to_config_default():
+    parameters = {"headhunter": {"auto_apply": True}}
+    assert (
+        main._daily_limit(parameters, "headhunter")
+        == main.DAILY_APPLICATION_LIMIT
+    )
+
+
+def test_linkedin_daily_limit_still_uses_own_default_via_daily_limit():
+    parameters = {}
+    assert (
+        main._daily_limit(parameters, "linkedin")
+        == main.LINKEDIN_DAILY_APPLICATION_LIMIT
+    )
+
+
+def test_linkedin_daily_limit_per_source_override():
+    parameters = {"linkedin": {"daily_application_limit": 3}}
+    assert main._daily_limit(parameters, "linkedin") == 3
+    # обёртка тоже видит override, раз делегирует в _daily_limit
+    assert main._linkedin_daily_limit(parameters) == 3
+
+
+def test_linkedin_daily_limit_wrapper_matches_daily_limit_with_source():
+    parameters = {"limits": {"linkedin_daily_application_limit": 11}}
+    assert main._linkedin_daily_limit(parameters) == main._daily_limit(
+        parameters, "linkedin"
+    )

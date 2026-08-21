@@ -46,6 +46,7 @@ from src.job_sources.linkedin.answerer import EasyApplyAnswerer
 from src.job_sources.linkedin.auth import LinkedInSession
 from src.job_sources.linkedin.easy_apply import run_easy_apply
 from src.job_sources.linkedin.source import LinkedInSource
+from src.job_sources.llm_usage import check_and_mark_alert
 from src.job_sources.llm_usage import (
     set_output_folder as set_llm_usage_output_folder,
 )
@@ -827,11 +828,25 @@ def create_resume_pdf(
         raise
 
 
-def _daily_limit(parameters: dict) -> int:
-    """Дневной лимит откликов (HH/SuperJob/Zarplata) — переопределяется
-    через limits.daily_application_limit в work_preferences.yaml
-    (дашборд: панель "Лимиты откликов"), иначе
-    config.DAILY_APPLICATION_LIMIT."""
+def _daily_limit(parameters: dict, source: Optional[str] = None) -> int:
+    """Дневной лимит откликов. Приоритет: daily_application_limit
+    внутри блока конкретной площадки (headhunter:/superjob:/...,
+    дашборд — колонка "Дневной лимит" в таблице настроек) >
+    глобальный дефолт (для LinkedIn —
+    limits.linkedin_daily_application_limit, для остальных —
+    limits.daily_application_limit, дашборд — панель "Лимиты
+    откликов") > соответствующая константа в config.py."""
+    if source:
+        source_config = parameters.get(source) or {}
+        if "daily_application_limit" in source_config:
+            return int(source_config["daily_application_limit"])
+    if source == "linkedin":
+        return int(
+            (parameters.get("limits") or {}).get(
+                "linkedin_daily_application_limit",
+                LINKEDIN_DAILY_APPLICATION_LIMIT,
+            )
+        )
     return int(
         (parameters.get("limits") or {}).get(
             "daily_application_limit", DAILY_APPLICATION_LIMIT
@@ -840,13 +855,9 @@ def _daily_limit(parameters: dict) -> int:
 
 
 def _linkedin_daily_limit(parameters: dict) -> int:
-    """Отдельный дневной лимит для LinkedIn — см. _daily_limit()."""
-    return int(
-        (parameters.get("limits") or {}).get(
-            "linkedin_daily_application_limit",
-            LINKEDIN_DAILY_APPLICATION_LIMIT,
-        )
-    )
+    """Тонкая обёртка над _daily_limit(parameters, "linkedin") — для
+    мест, которые явно про LinkedIn (дашборд: /api/status)."""
+    return _daily_limit(parameters, "linkedin")
 
 
 def _job_max_applications(
@@ -911,7 +922,9 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
     jobs = source.search(parameters)
     logger.info(f"Found {len(jobs)} matching HeadHunter vacancies.")
 
-    daily_limit = randomized_daily_limit(_daily_limit(parameters))
+    daily_limit = randomized_daily_limit(
+        _daily_limit(parameters, "headhunter")
+    )
     sent_count = 0
     job_max_applications = _job_max_applications(parameters, "headhunter")
     for job in jobs:
@@ -1039,7 +1052,7 @@ def search_and_apply_superjob(parameters: dict, llm_api_key: str):
     jobs = source.search(parameters)
     logger.info(f"Found {len(jobs)} matching SuperJob vacancies.")
 
-    daily_limit = randomized_daily_limit(_daily_limit(parameters))
+    daily_limit = randomized_daily_limit(_daily_limit(parameters, "superjob"))
     sent_count = 0
     job_max_applications = _job_max_applications(parameters, "superjob")
     for job in jobs:
@@ -1167,7 +1180,7 @@ def search_and_apply_zarplata(parameters: dict, llm_api_key: str):
     jobs = source.search(parameters)
     logger.info(f"Found {len(jobs)} matching zarplata.ru vacancies.")
 
-    daily_limit = randomized_daily_limit(_daily_limit(parameters))
+    daily_limit = randomized_daily_limit(_daily_limit(parameters, "zarplata"))
     sent_count = 0
     job_max_applications = _job_max_applications(parameters, "zarplata")
     for job in jobs:
@@ -1826,6 +1839,17 @@ def run_selected_sources(
             f"Прогон завершён: отправлено {after - before} откликов "
             f"({', '.join(name for name, _ in selected)}).",
         )
+
+    threshold = (parameters.get("limits") or {}).get(
+        "llm_daily_cost_alert_usd"
+    )
+    if threshold and output_folder:
+        if check_and_mark_alert(output_folder, float(threshold)):
+            notify(
+                parameters,
+                f"CrossJob-AI: расходы на LLM сегодня превысили "
+                f"${threshold}.",
+            )
 
 
 def run_all_sources(parameters: dict, llm_api_key: str) -> None:

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Optional
 
+from src.job_sources.llm_usage import check_and_mark_alert
 from src.job_sources.telegram_notify import notify_from_secrets
 from src.logging import logger
 from src.scheduler_state import get_next_run, record_run_result
@@ -73,6 +74,21 @@ class Scheduler:
                 )
                 continue
             record_run_result(self.output_folder, name, "ok", next_run, run_at)
+
+        self._check_llm_cost_alert()
+
+    def _check_llm_cost_alert(self) -> None:
+        threshold = (self.parameters.get("limits") or {}).get(
+            "llm_daily_cost_alert_usd"
+        )
+        if not threshold:
+            return
+        if check_and_mark_alert(self.output_folder, float(threshold)):
+            notify_from_secrets(
+                self.parameters,
+                f"CrossJob-AI: расходы на LLM сегодня превысили "
+                f"${threshold}.",
+            )
 
     def stop(self) -> None:
         self.stop_event.set()

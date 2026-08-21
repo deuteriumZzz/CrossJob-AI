@@ -138,6 +138,35 @@ def summarize_usage(output_folder: Path) -> dict:
     }
 
 
+def _alert_state_path(output_folder: Path) -> Path:
+    return output_folder / ".llm_usage_alert.json"
+
+
+def check_and_mark_alert(output_folder: Path, threshold_usd: float) -> bool:
+    """True, если сегодняшняя $-стоимость только что впервые за
+    сегодня превысила threshold_usd — вызывающий код должен отправить
+    уведомление ровно один раз. До конца дня дальше возвращает False,
+    даже если расходы продолжают расти (иначе демон спамил бы
+    уведомление на каждом тике, пока порог превышен)."""
+    cost = summarize_usage(output_folder)["today_cost_usd"]
+    if cost is None or cost < threshold_usd:
+        return False
+    path = _alert_state_path(output_folder)
+    today = datetime.now(timezone.utc).date().isoformat()
+    with state_file_lock(path):
+        data = (
+            json.loads(path.read_text(encoding="utf-8"))
+            if path.exists()
+            else {}
+        )
+        if data.get("last_alert_date") == today:
+            return False
+        data["last_alert_date"] = today
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data), encoding="utf-8")
+    return True
+
+
 class UsageCallback(BaseCallbackHandler):
     """Подвешивается на LLM в get_chat_llm() — считает токены с
     каждого .invoke()/.generate() автоматически, без правки call

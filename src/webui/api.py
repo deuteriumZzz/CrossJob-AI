@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -19,7 +20,6 @@ from config import (
 from main import ALL_SOURCES, ConfigError, ConfigValidator, FileManager
 from main import _daily_limit as _effective_daily_limit
 from main import _job_max_applications as _effective_job_max_applications
-from main import _linkedin_daily_limit as _effective_linkedin_daily_limit
 from main import append_to_company_blacklist as _append_to_blacklist
 from main import bootstrap_data_folder as _bootstrap_data_folder
 from main import create_cover_letter as _create_cover_letter
@@ -164,11 +164,6 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
     for name, _ in ALL_SOURCES:
         source_config = ctx.config.get(name) or {}
         entry = state.get(name) or {}
-        daily_limit = (
-            _effective_linkedin_daily_limit(ctx.config)
-            if name == "linkedin"
-            else _effective_daily_limit(ctx.config)
-        )
         sources.append(
             {
                 "name": name,
@@ -182,7 +177,7 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
                 "status": entry.get("status", "never_run"),
                 "last_error": entry.get("last_error"),
                 "applied_today": ctx.applied_log.applied_today_count(name),
-                "daily_limit": daily_limit,
+                "daily_limit": _effective_daily_limit(ctx.config, name),
                 "job_max_applications": _effective_job_max_applications(
                     ctx.config, name
                 ),
@@ -202,6 +197,23 @@ def get_stats(ctx: AppContext = Depends(get_ctx)) -> dict:
         "week": ctx.applied_log.count_in_period("week"),
         "month": ctx.applied_log.count_in_period("month"),
     }
+
+
+@app.get("/api/export/applied-log")
+def get_export_applied_log(
+    ctx: AppContext = Depends(get_ctx),
+) -> FileResponse:
+    """Бэкап сырого applied_log.json (не HTML-отчёт и не TXT/PDF-экспорт
+    из меню — тот же самый файл, что бот использует для дедупликации
+    по вакансиям, на случай если его нужно сохранить/перенести."""
+    if not ctx.applied_log.path.exists():
+        raise HTTPException(404, "applied_log.json ещё не создан.")
+    today = datetime.now().strftime("%Y-%m-%d")
+    return FileResponse(
+        ctx.applied_log.path,
+        filename=f"applied_log_backup_{today}.json",
+        media_type="application/json",
+    )
 
 
 @app.get("/api/applications")
@@ -266,6 +278,7 @@ class SourceSettingsUpdate(BaseModel):
     schedule_enabled: Optional[bool] = None
     interval_hours: Optional[int] = None
     job_max_applications: Optional[int] = None
+    daily_application_limit: Optional[int] = None
 
 
 @app.post("/api/settings")
@@ -279,11 +292,19 @@ def post_settings(
         "schedule_enabled",
         "interval_hours",
         "job_max_applications",
+        "daily_application_limit",
     ):
         value = getattr(body, field)
         if value is not None:
-            if field == "job_max_applications" and value < 1:
-                raise HTTPException(400, "job_max_applications must be >= 1")
+            if (
+                field
+                in (
+                    "job_max_applications",
+                    "daily_application_limit",
+                )
+                and value < 1
+            ):
+                raise HTTPException(400, f"{field} must be >= 1")
             set_source_field(ctx.config_file, body.source, field, value)
     ctx.reload_config()
     return {"source": body.source, "updated": True}
@@ -293,6 +314,7 @@ class LimitsSettingsUpdate(BaseModel):
     daily_application_limit: Optional[int] = None
     linkedin_daily_application_limit: Optional[int] = None
     job_max_applications: Optional[int] = None
+    llm_daily_cost_alert_usd: Optional[float] = None
 
 
 def _limits_snapshot(ctx: AppContext) -> dict:
@@ -308,6 +330,7 @@ def _limits_snapshot(ctx: AppContext) -> dict:
         "job_max_applications": limits.get(
             "job_max_applications", JOB_MAX_APPLICATIONS
         ),
+        "llm_daily_cost_alert_usd": limits.get("llm_daily_cost_alert_usd"),
     }
 
 
@@ -334,6 +357,16 @@ def post_limits_settings(
             if value < 1:
                 raise HTTPException(400, f"{field} must be >= 1")
             set_source_field(ctx.config_file, "limits", field, value)
+
+    if body.llm_daily_cost_alert_usd is not None:
+        if body.llm_daily_cost_alert_usd <= 0:
+            raise HTTPException(400, "llm_daily_cost_alert_usd must be > 0")
+        set_source_field(
+            ctx.config_file,
+            "limits",
+            "llm_daily_cost_alert_usd",
+            body.llm_daily_cost_alert_usd,
+        )
     ctx.reload_config()
     return _limits_snapshot(ctx)
 

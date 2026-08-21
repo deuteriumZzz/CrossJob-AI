@@ -447,3 +447,34 @@ def test_post_limits_settings_partial_update_leaves_others_unchanged(
     body = response.json()
     assert body["daily_application_limit"] == 25
     assert body["job_max_applications"] == 7
+
+
+def test_post_limits_settings_llm_cost_alert(client):
+    response = client.post(
+        "/api/settings/limits", json={"llm_daily_cost_alert_usd": 2.5}
+    )
+    assert response.status_code == 200
+    assert response.json()["llm_daily_cost_alert_usd"] == 2.5
+
+
+def test_post_limits_settings_rejects_zero_llm_cost_alert(client):
+    response = client.post(
+        "/api/settings/limits", json={"llm_daily_cost_alert_usd": 0}
+    )
+    assert response.status_code == 400
+
+
+def test_export_applied_log_returns_404_when_no_history(client):
+    response = client.get("/api/export/applied-log")
+    assert response.status_code == 404
+
+
+def test_export_applied_log_downloads_json_backup(client):
+    ctx = api.get_ctx()
+    ctx.applied_log.path.parent.mkdir(parents=True, exist_ok=True)
+    ctx.applied_log.path.write_text('{"applications": []}', encoding="utf-8")
+
+    response = client.get("/api/export/applied-log")
+    assert response.status_code == 200
+    assert response.json() == {"applications": []}
+    assert "applied_log_backup_" in response.headers["content-disposition"]

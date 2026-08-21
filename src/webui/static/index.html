@@ -117,6 +117,9 @@
           <h2>История откликов</h2>
           <p class="muted">Все отправленные и пропущенные вакансии</p>
         </div>
+        <div class="toolbar">
+          <a id="export-applied-log" class="btn btn-secondary" href="/api/export/applied-log" download>Скачать бэкап (JSON)</a>
+        </div>
       </div>
       <div class="filters">
         <select id="filter-source">
@@ -256,12 +259,20 @@
         <h3>Расходы на LLM</h3>
         <p id="usage-summary" class="muted small">Загрузка...</p>
         <p id="usage-note" class="muted small"></p>
+        <div class="filters">
+          <label class="limit-field" style="flex:0 0 260px">
+            <span>Уведомить, если расходы за день превысят ($)</span>
+            <input id="llm-alert-usd" type="number" min="0.01" step="0.01" placeholder="не задано" />
+          </label>
+          <button id="llm-alert-save" class="btn btn-secondary">Сохранить</button>
+          <span id="llm-alert-status" class="muted small"></span>
+        </div>
       </div>
 
       <div class="table-wrap">
         <table class="settings-table">
           <thead>
-            <tr><th>Площадка</th><th>В расписании</th><th>Интервал, ч</th><th>auto_apply</th><th>Откликов за прогон</th><th></th></tr>
+            <tr><th>Площадка</th><th>В расписании</th><th>Интервал, ч</th><th>auto_apply</th><th>Откликов за прогон</th><th>Дневной лимит</th><th></th></tr>
           </thead>
           <tbody id="settings-rows"></tbody>
         </table>
