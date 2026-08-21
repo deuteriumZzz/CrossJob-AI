@@ -16,6 +16,10 @@ a = Analysis(
     datas=[
         ("src/webui/static", "src/webui/static"),
         ("data_folder_example", "data_folder_example"),
+        (
+            "src/libs/resume_and_cover_builder/resume_style",
+            "src/libs/resume_and_cover_builder/resume_style",
+        ),
     ],
     hiddenimports=[
         "uvicorn.logging",

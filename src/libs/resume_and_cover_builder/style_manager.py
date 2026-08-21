@@ -1,4 +1,5 @@
 import logging
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -11,8 +12,16 @@ logging.basicConfig(
 class StyleManager:
     def __init__(self):
         self.selected_style: Optional[str] = None
-        current_file = Path(__file__).resolve()
-        project_root = current_file.parent.parent.parent.parent
+        # В PyInstaller-сборке (desktop_app.spec) __file__ этого
+        # модуля не указывает на реальную папку с забандленными CSS
+        # (resume_style) — они распакованы в sys._MEIPASS. Тот же
+        # приём, что main._project_root().
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            project_root = Path(meipass)
+        else:
+            current_file = Path(__file__).resolve()
+            project_root = current_file.parent.parent.parent.parent
         self.styles_directory = (
             project_root
             / "src"
