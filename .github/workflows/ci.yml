@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install fastapi==0.110.2 uvicorn==0.30.6
+          pip install black isort flake8 mypy
+
+      - name: black
+        run: black --line-length 79 --check .
+
+      - name: isort
+        run: isort --profile black --line-length 79 --check .
+
+      # --select=E,F only: this repo's local flake8 has isort/naming/
+      # return plugins installed that disagree with the isort/black
+      # settings actually used above (pre-existing noise, not real
+      # issues) — E/F (pyflakes + real pycodestyle errors) is the
+      # actual gate, same as every manual check this project runs.
+      # E704 ignored: black deliberately keeps `def f(...) -> T: ...`
+      # Protocol stubs on one line (verified — black reverts a
+      # multi-line split back). config.py's E501 is a URL inside a
+      # vendored HTML template string, not real code.
+      - name: flake8
+        run: |
+          flake8 --max-line-length=79 --select=E,F --extend-ignore=E704 \
+            --per-file-ignores="src/libs/resume_and_cover_builder/config.py:E501"
+
+      - name: mypy
+        run: mypy --ignore-missing-imports main.py src desktop_app.py
+
+      - name: pytest
+        run: pytest tests/ -q
