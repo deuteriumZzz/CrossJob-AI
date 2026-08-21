@@ -347,18 +347,51 @@ class FileManager:
         )
 
 
+def bootstrap_data_folder(
+    data_folder: Path, api_key: Optional[str] = None
+) -> dict:
+    """Чистая (без inquirer/print) логика создания data_folder из
+    шаблона + запись llm_api_key — общая для CLI-визарда
+    (run_setup_wizard) и веб-визарда (POST /api/setup/init в
+    src/webui/api.py), чтобы не дублировать копирование шаблона в
+    двух местах. Возвращает, что реально было сделано.
+
+    Путь к шаблону — относительно расположения main.py, а не текущей
+    рабочей директории: у веб-дашборда/десктоп-приложения CWD может
+    быть чем угодно (не обязательно корнем проекта), в отличие от
+    CLI, который всегда запускают из корня."""
+    example = Path(__file__).resolve().parent / "data_folder_example"
+    created_folder = not data_folder.exists()
+    if created_folder:
+        shutil.copytree(example, data_folder)
+    else:
+        for name in FileManager.REQUIRED_FILES:
+            target = data_folder / name
+            if not target.exists():
+                shutil.copy(example / name, target)
+
+    api_key_written = False
+    if api_key:
+        set_top_level_field(data_folder / SECRETS_YAML, "llm_api_key", api_key)
+        api_key_written = True
+
+    return {
+        "created_folder": created_folder,
+        "api_key_written": api_key_written,
+    }
+
+
 def run_setup_wizard(data_folder: Path) -> bool:
     """Гостевой мастер первого запуска — вызывается из main(), когда
-    data_folder или secrets.yaml ещё не существуют. Копирует
-    data_folder_example как основу и спрашивает только критичный
-    минимум (llm_api_key для OpenAI, провайдер по умолчанию) —
-    площадки/резюме/переключение на другого LLM-провайдера (правка
-    LLM_MODEL_TYPE в config.py) пользователь заполняет вручную по
-    docs/GUIDE.md: полный визард под все 8 площадок сразу и
-    программная правка config.py — избыточны для одного захода и
-    рискованны (Python-файл, не YAML). Возвращает False, если
-    пользователь отказался — тогда main() останавливается, не пытаясь
-    продолжить с неполным data_folder."""
+    data_folder или secrets.yaml ещё не существуют. Спрашивает только
+    критичный минимум (llm_api_key для OpenAI) — площадки/резюме/
+    переключение на другого LLM-провайдера (правка LLM_MODEL_TYPE в
+    config.py) пользователь заполняет вручную по docs/GUIDE.md:
+    полный визард под все 8 площадок сразу и программная правка
+    config.py — избыточны для одного захода и рискованны (Python-
+    файл, не YAML). Возвращает False, если пользователь отказался —
+    тогда main() останавливается, не пытаясь продолжить с неполным
+    data_folder."""
     print("\nПохоже, это первый запуск — data_folder ещё не настроен.\n")
     if not inquirer.confirm(
         message=(
@@ -373,25 +406,16 @@ def run_setup_wizard(data_folder: Path) -> bool:
         )
         return False
 
-    example = Path("data_folder_example")
-    if not data_folder.exists():
-        shutil.copytree(example, data_folder)
-        print(f"Создано: {data_folder}/ (копия {example}/)")
-    else:
-        for name in FileManager.REQUIRED_FILES:
-            target = data_folder / name
-            if not target.exists():
-                shutil.copy(example / name, target)
-                print(f"Создано: {target}")
-
     api_key = inquirer.text(
         message=(
             "API-ключ OpenAI (llm_api_key) — Enter, чтобы пропустить и "
             "вписать позже вручную"
         )
     )
-    if api_key:
-        set_top_level_field(data_folder / SECRETS_YAML, "llm_api_key", api_key)
+    result = bootstrap_data_folder(data_folder, api_key or None)
+    if result["created_folder"]:
+        print(f"Создано: {data_folder}/ (копия data_folder_example/)")
+    if result["api_key_written"]:
         print("llm_api_key записан в data_folder/secrets.yaml.")
     else:
         print(
@@ -434,6 +458,29 @@ def ensure_plain_text_resume(parameters: dict, llm_api_key: str) -> Path:
             extract_plain_text_resume(resume_pdf_path, llm_api_key),
             encoding="utf-8",
         )
+    return plain_text_resume_file
+
+
+def force_refresh_plain_text_resume(
+    parameters: dict, llm_api_key: str
+) -> Path:
+    """В отличие от ensure_plain_text_resume — перегенерирует
+    plain_text_resume.yaml из resume.pdf, даже если файл уже есть.
+    Нужна, когда пользователь заменил resume.pdf: без этого
+    закэшированный текст остаётся старым, пока кто-то вручную не
+    удалит plain_text_resume.yaml (дашборд: кнопка "Обновить из PDF"
+    на панели генерации резюме)."""
+    plain_text_resume_file: Path = parameters["plainTextResumeFile"]
+    resume_pdf_path: Path = parameters["dataFolder"] / RESUME_PDF
+    if not resume_pdf_path.exists():
+        raise FileNotFoundError(
+            f"Resume PDF not found: {resume_pdf_path}. Place your "
+            f"resume as '{RESUME_PDF}' in {parameters['dataFolder']}."
+        )
+    plain_text_resume_file.write_text(
+        extract_plain_text_resume(resume_pdf_path, llm_api_key),
+        encoding="utf-8",
+    )
     return plain_text_resume_file
 
 

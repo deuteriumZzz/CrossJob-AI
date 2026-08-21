@@ -10,11 +10,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from config import DAILY_APPLICATION_LIMIT, LOG_TO_FILE
-from main import ALL_SOURCES, ConfigValidator, FileManager
+from main import ALL_SOURCES, ConfigError, ConfigValidator, FileManager
 from main import append_to_company_blacklist as _append_to_blacklist
+from main import bootstrap_data_folder as _bootstrap_data_folder
 from main import create_cover_letter as _create_cover_letter
 from main import create_resume_pdf as _create_resume_pdf
 from main import create_resume_pdf_job_tailored as _create_resume_tailored
+from main import force_refresh_plain_text_resume as _refresh_plain_text
 from main import run_selected_sources
 from src.config_patch import set_source_field
 from src.job_sources.applied_log import AppliedLog
@@ -26,6 +28,7 @@ from src.job_sources.telegram_notify import send_notification
 from src.libs.resume_and_cover_builder import StyleManager
 from src.scheduler import Scheduler
 from src.scheduler_state import load_state
+from src.utils.constants import SECRETS_YAML
 
 STATIC_DIR = Path(__file__).parent / "static"
 LOG_FILE = Path("log/app.log")
@@ -53,6 +56,7 @@ class AppContext:
         self.config["outputFileDirectory"] = self.output_folder
         self.config["dataFolder"] = data_folder
         self.config["secretsFile"] = self.secrets_file
+        self.config["plainTextResumeFile"] = self.plain_text_resume_file
         set_llm_usage_output_folder(self.output_folder)
         self.applied_log = AppliedLog(self.output_folder / "applied_log.json")
         self.scheduler: Optional[Scheduler] = None
@@ -82,11 +86,55 @@ def set_data_folder(path: Path) -> None:
 def get_ctx() -> AppContext:
     global _ctx
     if _ctx is None:
-        _ctx = AppContext(_data_folder)
+        try:
+            _ctx = AppContext(_data_folder)
+        except (FileNotFoundError, ConfigError) as e:
+            raise HTTPException(
+                428,
+                f"data_folder ещё не настроен: {e}. Используйте "
+                "POST /api/setup/init или настройте data_folder "
+                "вручную (см. docs/GUIDE.md).",
+            )
     return _ctx
 
 
 app = FastAPI(title="CrossJob-AI")
+
+
+@app.get("/api/setup/status")
+def get_setup_status() -> dict:
+    """Не зависит от get_ctx()/AppContext — им ещё нечего строить,
+    пока data_folder не настроен. Фронтенд дергает это первым делом,
+    до любого другого /api/*, чтобы показать визард вместо падающего
+    дашборда."""
+    needs_setup = not (
+        _data_folder.exists() and (_data_folder / SECRETS_YAML).exists()
+    )
+    return {"needs_setup": needs_setup}
+
+
+class SetupInitRequest(BaseModel):
+    api_key: Optional[str] = None
+
+
+@app.post("/api/setup/init")
+def post_setup_init(body: SetupInitRequest) -> dict:
+    """Веб-эквивалент main.run_setup_wizard() — копирует data_folder
+    из шаблона и опционально пишет llm_api_key, затем сбрасывает
+    закэшированный AppContext, чтобы следующий запрос строил его
+    заново. Площадки/резюме/провайдер LLM — по-прежнему вручную (см.
+    docs/GUIDE.md), как и в CLI-визарде."""
+    global _ctx
+    result = _bootstrap_data_folder(_data_folder, body.api_key or None)
+    _ctx = None
+    try:
+        get_ctx()
+        result["ready"] = True
+        result["error"] = None
+    except HTTPException as e:
+        result["ready"] = False
+        result["error"] = e.detail
+    return result
 
 
 @app.get("/api/status")
@@ -314,6 +362,22 @@ def post_test_notification(ctx: AppContext = Depends(get_ctx)) -> dict:
     except Exception as e:
         raise HTTPException(502, f"Не удалось отправить: {e}")
     return {"sent": True}
+
+
+@app.post("/api/resume/refresh-plain-text")
+def post_refresh_plain_text_resume(
+    ctx: AppContext = Depends(get_ctx),
+) -> dict:
+    """plain_text_resume.yaml генерируется из resume.pdf один раз и
+    дальше переиспользуется (ensure_plain_text_resume) — если
+    пользователь заменил resume.pdf, кэш иначе остаётся старым.
+    Один LLM-вызов (не Selenium) — достаточно быстрый, чтобы не
+    заводить фоновый поток/поллинг, как у /api/generate/*."""
+    try:
+        path = _refresh_plain_text(ctx.config, ctx.llm_api_key)
+    except FileNotFoundError as e:
+        raise HTTPException(400, str(e))
+    return {"refreshed": True, "path": str(path)}
 
 
 @app.get("/api/generate/styles")

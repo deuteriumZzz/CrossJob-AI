@@ -397,7 +397,7 @@ async function startGenerate(kind) {
   pollGenerateStatus();
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+function initDashboard() {
   document.querySelectorAll("nav.tabs button").forEach((b) => {
     b.addEventListener("click", () => switchTab(b.dataset.tab));
   });
@@ -473,9 +473,57 @@ document.addEventListener("DOMContentLoaded", () => {
     .getElementById("gen-cover-letter")
     .addEventListener("click", () => startGenerate("cover-letter"));
 
+  document
+    .getElementById("refresh-plain-text")
+    .addEventListener("click", async () => {
+      const status = document.getElementById("refresh-plain-text-status");
+      status.textContent = "Обновление...";
+      try {
+        await api("/api/resume/refresh-plain-text", { method: "POST" });
+        status.textContent = "Готово.";
+      } catch (e) {
+        status.textContent = `Ошибка: ${e.message}`;
+      }
+    });
+
   switchTab("overview");
   setInterval(() => {
     const active = document.querySelector("nav.tabs button.active")?.dataset.tab;
     if (active === "overview") render.overview();
   }, 7000);
+}
+
+function initSetupScreen() {
+  document
+    .getElementById("setup-init")
+    .addEventListener("click", async () => {
+      const status = document.getElementById("setup-status");
+      const apiKey = document.getElementById("setup-api-key").value.trim();
+      status.textContent = "Создание...";
+      try {
+        const result = await api("/api/setup/init", {
+          method: "POST",
+          body: JSON.stringify({ api_key: apiKey || null }),
+        });
+        if (result.ready) {
+          status.textContent = "Готово, открываю дашборд...";
+          setTimeout(() => window.location.reload(), 600);
+        } else {
+          status.textContent = `Создано, но не готово: ${result.error}`;
+        }
+      } catch (e) {
+        status.textContent = `Ошибка: ${e.message}`;
+      }
+    });
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
+  const setupStatus = await api("/api/setup/status");
+  if (setupStatus.needs_setup) {
+    document.getElementById("setup-screen").style.display = "";
+    initSetupScreen();
+    return;
+  }
+  document.getElementById("app-shell").style.display = "";
+  initDashboard();
 });

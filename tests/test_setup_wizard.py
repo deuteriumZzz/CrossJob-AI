@@ -1,3 +1,4 @@
+import os
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -67,5 +68,63 @@ def test_accepting_wizard_fills_only_missing_required_files():
         assert (data_folder / "secrets.yaml").exists()
         # существующий файл не перезаписан копией из шаблона
         assert "custom already here" in (
+            data_folder / "work_preferences.yaml"
+        ).read_text(encoding="utf-8")
+
+
+def test_bootstrap_data_folder_works_regardless_of_process_cwd():
+    """Регрессия: раньше data_folder_example искался как путь
+    относительно CWD, что ломалось всегда, когда сервер (веб-
+    дашборд/десктоп-приложение) запущен не из корня проекта —
+    воспроизведено вживую при первой проверке веб-визарда в браузере
+    (500: FileNotFoundError: data_folder_example)."""
+    original_cwd = os.getcwd()
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            data_folder = Path(tmp) / "elsewhere" / "data_folder"
+
+            result = main.bootstrap_data_folder(data_folder, "sk-cwd-test")
+
+            assert result["created_folder"] is True
+            assert (data_folder / "secrets.yaml").exists()
+    finally:
+        os.chdir(original_cwd)
+
+
+def test_bootstrap_data_folder_reports_what_it_did():
+    with tempfile.TemporaryDirectory() as tmp:
+        data_folder = Path(tmp) / "data_folder"
+
+        result = main.bootstrap_data_folder(data_folder, "sk-direct")
+
+        assert result == {"created_folder": True, "api_key_written": True}
+        secrets_text = (data_folder / "secrets.yaml").read_text(
+            encoding="utf-8"
+        )
+        assert "llm_api_key: 'sk-direct'" in secrets_text
+
+
+def test_bootstrap_data_folder_without_api_key():
+    with tempfile.TemporaryDirectory() as tmp:
+        data_folder = Path(tmp) / "data_folder"
+
+        result = main.bootstrap_data_folder(data_folder)
+
+        assert result == {"created_folder": True, "api_key_written": False}
+
+
+def test_bootstrap_data_folder_on_existing_folder_does_not_recreate():
+    with tempfile.TemporaryDirectory() as tmp:
+        data_folder = Path(tmp) / "data_folder"
+        data_folder.mkdir()
+        (data_folder / "work_preferences.yaml").write_text(
+            "positions:\n  - already here\n", encoding="utf-8"
+        )
+
+        result = main.bootstrap_data_folder(data_folder)
+
+        assert result["created_folder"] is False
+        assert "already here" in (
             data_folder / "work_preferences.yaml"
         ).read_text(encoding="utf-8")

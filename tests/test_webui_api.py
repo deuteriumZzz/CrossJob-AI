@@ -291,3 +291,80 @@ def test_usage_endpoint_reports_zero_when_no_calls_made(client):
     response = client.get("/api/usage")
     assert response.status_code == 200
     assert response.json()["today_tokens"] == 0
+
+
+def test_refresh_plain_text_resume_endpoint(client):
+    with patch(
+        "src.webui.api._refresh_plain_text",
+        return_value=Path("/tmp/plain_text_resume.yaml"),
+    ):
+        response = client.post("/api/resume/refresh-plain-text")
+
+    assert response.status_code == 200
+    assert response.json()["refreshed"] is True
+
+
+def test_refresh_plain_text_resume_endpoint_missing_pdf(client):
+    with patch(
+        "src.webui.api._refresh_plain_text",
+        side_effect=FileNotFoundError("no resume.pdf"),
+    ):
+        response = client.post("/api/resume/refresh-plain-text")
+
+    assert response.status_code == 400
+
+
+def test_setup_status_not_needed_when_data_folder_valid(client):
+    response = client.get("/api/setup/status")
+    assert response.status_code == 200
+    assert response.json() == {"needs_setup": False}
+
+
+def test_setup_status_needed_when_data_folder_missing():
+    with tempfile.TemporaryDirectory() as tmp:
+        data_folder = Path(tmp) / "data_folder"
+        api.set_data_folder(data_folder)
+        try:
+            fresh_client = TestClient(api.app)
+            response = fresh_client.get("/api/setup/status")
+            assert response.json() == {"needs_setup": True}
+        finally:
+            api.set_data_folder(Path("data_folder"))
+
+
+def test_other_endpoints_return_428_when_data_folder_missing():
+    with tempfile.TemporaryDirectory() as tmp:
+        data_folder = Path(tmp) / "data_folder"
+        api.set_data_folder(data_folder)
+        try:
+            fresh_client = TestClient(api.app)
+            response = fresh_client.get("/api/status")
+            assert response.status_code == 428
+        finally:
+            api.set_data_folder(Path("data_folder"))
+
+
+def test_setup_init_creates_data_folder_and_becomes_ready():
+    with tempfile.TemporaryDirectory() as tmp:
+        data_folder = Path(tmp) / "data_folder"
+        api.set_data_folder(data_folder)
+        try:
+            fresh_client = TestClient(api.app)
+            response = fresh_client.post(
+                "/api/setup/init", json={"api_key": "sk-web-wizard"}
+            )
+            assert response.status_code == 200
+            body = response.json()
+            assert body["created_folder"] is True
+            assert body["api_key_written"] is True
+            assert body["ready"] is True
+
+            status = fresh_client.get("/api/setup/status")
+            assert status.json() == {"needs_setup": False}
+
+            secrets_text = (data_folder / "secrets.yaml").read_text(
+                encoding="utf-8"
+            )
+            assert "llm_api_key: 'sk-web-wizard'" in secrets_text
+        finally:
+            api.set_data_folder(Path("data_folder"))
