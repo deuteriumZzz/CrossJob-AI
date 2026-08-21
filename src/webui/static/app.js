@@ -327,6 +327,24 @@ const render = {
   async settings() {
     const status = await api("/api/status");
 
+    api("/api/settings/search").then((search) => {
+      document.getElementById("search-positions").value = (
+        search.positions || []
+      ).join("\n");
+      document.getElementById("search-locations").value = (
+        search.locations || []
+      ).join("\n");
+      document.getElementById("search-company-blacklist").value = (
+        search.company_blacklist || []
+      ).join("\n");
+      document.getElementById("search-title-blacklist").value = (
+        search.title_blacklist || []
+      ).join("\n");
+      document.getElementById("search-location-blacklist").value = (
+        search.location_blacklist || []
+      ).join("\n");
+    });
+
     api("/api/settings/llm").then((llm) => {
       llmCatalog = {
         models: llm.models || {},
@@ -618,6 +636,56 @@ function initDashboard() {
       applyLLMSelection(card.dataset.provider, null);
     });
   });
+
+  function linesOf(id) {
+    return document
+      .getElementById(id)
+      .value.split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
+  document
+    .getElementById("search-save")
+    .addEventListener("click", async () => {
+      const status = document.getElementById("search-status");
+      status.textContent = "Сохранение...";
+      try {
+        await api("/api/settings/search", {
+          method: "POST",
+          body: JSON.stringify({
+            positions: linesOf("search-positions"),
+            locations: linesOf("search-locations"),
+            company_blacklist: linesOf("search-company-blacklist"),
+            title_blacklist: linesOf("search-title-blacklist"),
+            location_blacklist: linesOf("search-location-blacklist"),
+          }),
+        });
+        status.textContent = "Сохранено.";
+        setTimeout(() => (status.textContent = ""), 2000);
+      } catch (e) {
+        status.textContent = `Ошибка: ${e.message}`;
+      }
+    });
+
+  document
+    .getElementById("search-generate-positions")
+    .addEventListener("click", async () => {
+      const status = document.getElementById("search-generate-status");
+      status.textContent = "Читаем резюме...";
+      try {
+        const result = await api("/api/settings/generate-positions", {
+          method: "POST",
+        });
+        document.getElementById("search-positions").value = (
+          result.positions || []
+        ).join("\n");
+        status.textContent = "Готово — проверьте список и Сохраните.";
+        setTimeout(() => (status.textContent = ""), 3500);
+      } catch (e) {
+        status.textContent = `Ошибка: ${e.message}`;
+      }
+    });
 
   document
     .getElementById("llm-provider-save")

@@ -30,8 +30,9 @@ from main import create_cover_letter as _create_cover_letter
 from main import create_resume_pdf as _create_resume_pdf
 from main import create_resume_pdf_job_tailored as _create_resume_tailored
 from main import force_refresh_plain_text_resume as _refresh_plain_text
+from main import generate_positions_from_resume as _generate_positions
 from main import run_selected_sources
-from src.config_patch import set_source_field
+from src.config_patch import set_list_field, set_source_field
 from src.job_sources.applied_log import AppliedLog
 from src.job_sources.llm_provider import PROVIDER_MODELS
 from src.job_sources.llm_provider import get_active_provider as _active_llm
@@ -392,6 +393,67 @@ def post_limits_settings(
         )
     ctx.reload_config()
     return _limits_snapshot(ctx)
+
+
+_SEARCH_LIST_FIELDS = (
+    "positions",
+    "locations",
+    "company_blacklist",
+    "title_blacklist",
+    "location_blacklist",
+)
+
+
+class SearchSettingsUpdate(BaseModel):
+    positions: Optional[list[str]] = None
+    locations: Optional[list[str]] = None
+    company_blacklist: Optional[list[str]] = None
+    title_blacklist: Optional[list[str]] = None
+    location_blacklist: Optional[list[str]] = None
+
+
+def _search_snapshot(ctx: AppContext) -> dict:
+    return {
+        field: ctx.config.get(field) or [] for field in _SEARCH_LIST_FIELDS
+    }
+
+
+@app.get("/api/settings/search")
+def get_search_settings(ctx: AppContext = Depends(get_ctx)) -> dict:
+    return _search_snapshot(ctx)
+
+
+@app.post("/api/settings/search")
+def post_search_settings(
+    body: SearchSettingsUpdate, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """positions/locations/*_blacklist — top-level списки в
+    work_preferences.yaml, раньше правились только руками; пишутся
+    той же текстовой техникой (set_list_field), что и остальные
+    настройки дашборда, — не yaml.safe_dump всего файла, чтобы не
+    терять комментарии пользователя."""
+    for field in _SEARCH_LIST_FIELDS:
+        value = getattr(body, field)
+        if value is not None:
+            set_list_field(ctx.config_file, field, value)
+    ctx.reload_config()
+    return _search_snapshot(ctx)
+
+
+@app.post("/api/settings/generate-positions")
+def post_generate_positions(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Кнопка "Сгенерировать из резюме" — один LLM-вызов (не Selenium),
+    как /api/resume/refresh-plain-text, поэтому тоже синхронно, без
+    фонового потока. Сразу сохраняет результат в positions: — та же
+    логика, что автовывод positions на старте CLI при пустом
+    work_preferences.yaml (main.generate_positions_from_resume)."""
+    try:
+        positions = _generate_positions(ctx.config, ctx.llm_api_key)
+    except FileNotFoundError as e:
+        raise HTTPException(400, str(e))
+    set_list_field(ctx.config_file, "positions", positions)
+    ctx.reload_config()
+    return {"positions": positions}
 
 
 _KNOWN_LLM_PROVIDERS = {"openai", "groq", "gemini", "deepseek", "ollama"}

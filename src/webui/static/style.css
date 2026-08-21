@@ -935,7 +935,8 @@ pre.logs {
 
 .limit-field input[type="text"],
 .limit-field input[type="password"],
-.limit-field select {
+.limit-field select,
+.limit-field textarea {
   width: 100%;
   background: var(--panel-2);
   color: var(--text);
@@ -944,6 +945,11 @@ pre.logs {
   padding: 9px 11px;
   font-size: 13px;
   font-family: inherit;
+}
+
+.limit-field textarea {
+  resize: vertical;
+  min-height: 64px;
 }
 
 /* ---------- LLM provider picker ---------- */

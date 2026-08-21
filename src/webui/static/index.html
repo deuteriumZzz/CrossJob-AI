@@ -199,6 +199,43 @@
       </div>
 
       <div class="panel">
+        <h3>Поиск</h3>
+        <p class="muted small">Должности (ключевые слова поиска, они же — ключевые слова для Telegram-каналов), локации и чёрные списки — без правки work_preferences.yaml вручную.</p>
+        <div class="limits-grid">
+          <label class="limit-field">
+            <span>Должности (одна на строку)</span>
+            <textarea id="search-positions" rows="3" placeholder="Python разработчик&#10;Backend developer"></textarea>
+          </label>
+          <label class="limit-field">
+            <span>Локации (одна на строку)</span>
+            <textarea id="search-locations" rows="3" placeholder="Москва"></textarea>
+          </label>
+        </div>
+        <div class="filters">
+          <button id="search-generate-positions" class="btn btn-secondary">Сгенерировать должности из резюме</button>
+          <span id="search-generate-status" class="muted small"></span>
+        </div>
+        <div class="limits-grid" style="margin-top:14px">
+          <label class="limit-field">
+            <span>Чёрный список компаний (одна на строку)</span>
+            <textarea id="search-company-blacklist" rows="3"></textarea>
+          </label>
+          <label class="limit-field">
+            <span>Чёрный список слов в названии (одно на строку)</span>
+            <textarea id="search-title-blacklist" rows="3"></textarea>
+          </label>
+          <label class="limit-field">
+            <span>Чёрный список локаций (одна на строку)</span>
+            <textarea id="search-location-blacklist" rows="3"></textarea>
+          </label>
+        </div>
+        <div class="filters">
+          <button id="search-save" class="btn btn-primary">Сохранить</button>
+          <span id="search-status" class="muted small"></span>
+        </div>
+      </div>
+
+      <div class="panel">
         <h3>Провайдер LLM</h3>
         <p class="muted small">Переключение применяется сразу, без перезапуска — для всех вызовов LLM (оценка вакансий, письма, резюме).</p>
         <div class="provider-grid" id="provider-grid">

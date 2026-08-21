@@ -520,6 +520,22 @@ def force_refresh_plain_text_resume(
     return plain_text_resume_file
 
 
+def generate_positions_from_resume(
+    parameters: dict, llm_api_key: str
+) -> list[str]:
+    """Кнопка "Сгенерировать из резюме" на дашборде — та же логика,
+    что автовывод positions при пустом work_preferences.yaml на
+    старте CLI (см. main()), но по явному запросу и с возвратом
+    результата вызывающему, а не немым присвоением в config."""
+    resume_pdf_path: Path = parameters["dataFolder"] / RESUME_PDF
+    if not resume_pdf_path.exists():
+        raise FileNotFoundError(
+            f"Resume PDF not found: {resume_pdf_path}. Place your "
+            f"resume as '{RESUME_PDF}' in {parameters['dataFolder']}."
+        )
+    return infer_positions_from_resume(resume_pdf_path, llm_api_key)
+
+
 def create_cover_letter(
     parameters: dict,
     llm_api_key: str,

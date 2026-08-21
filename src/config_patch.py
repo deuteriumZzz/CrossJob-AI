@@ -86,3 +86,44 @@ def set_source_field(
 
     lines[block_end:block_end] = [f"  {key}: {value_text}"]
     config_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def set_list_field(config_file: Path, key: str, values: list[str]) -> None:
+    """Заменяет ЦЕЛИКОМ top-level YAML-список (positions, locations,
+    company_blacklist/title_blacklist/location_blacklist в
+    work_preferences.yaml) — в отличие от set_source_field это не
+    правка одного поля, а замена всего блока `- item` строк под
+    ключом. Значения всегда в одинарных кавычках (та же техника, что
+    set_top_level_field) — свободный ввод из дашборда (названия
+    компаний/должностей) может содержать `:`/`#`, ломающие YAML без
+    кавычек. Пустой список пишется как `key: []`, а не пустой блок —
+    так уже принято в data_folder_example/work_preferences.yaml для
+    "оставить пустым, чтобы вывести из резюме"."""
+    text = config_file.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    new_lines = [f"  - '{v.replace(chr(39), chr(39) * 2)}'" for v in values]
+
+    block_start = None
+    for index, line in enumerate(lines):
+        if line.strip() == f"{key}:" or line.strip().startswith(f"{key}: "):
+            block_start = index
+            break
+
+    if block_start is None:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.append(f"{key}:" if new_lines else f"{key}: []")
+        lines.extend(new_lines)
+        config_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return
+
+    block_end = block_start + 1
+    for index in range(block_start + 1, len(lines)):
+        if lines[index].strip().startswith("- "):
+            block_end = index + 1
+        else:
+            break
+
+    replacement = [f"{key}:" if new_lines else f"{key}: []"] + new_lines
+    lines[block_start:block_end] = replacement
+    config_file.write_text("\n".join(lines) + "\n", encoding="utf-8")

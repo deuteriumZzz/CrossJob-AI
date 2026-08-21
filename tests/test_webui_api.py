@@ -345,6 +345,79 @@ def test_refresh_plain_text_resume_endpoint_missing_pdf(client):
     assert response.status_code == 400
 
 
+def test_get_search_settings_defaults_to_empty(client):
+    response = client.get("/api/settings/search")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["positions"] == []
+    assert body["locations"] == []
+    assert body["company_blacklist"] == []
+    assert body["title_blacklist"] == []
+    assert body["location_blacklist"] == []
+
+
+def test_post_search_settings_updates_lists(client):
+    response = client.post(
+        "/api/settings/search",
+        json={
+            "positions": ["Python разработчик", "Backend developer"],
+            "locations": ["Москва"],
+            "company_blacklist": ["ООО Ромашка"],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["positions"] == ["Python разработчик", "Backend developer"]
+    assert body["locations"] == ["Москва"]
+    assert body["company_blacklist"] == ["ООО Ромашка"]
+    # title/location_blacklist не переданы — остались пустыми, не тронуты
+    assert body["title_blacklist"] == []
+
+    follow_up = client.get("/api/settings/search")
+    assert follow_up.json()["positions"] == [
+        "Python разработчик",
+        "Backend developer",
+    ]
+
+
+def test_post_search_settings_partial_update_leaves_others(client):
+    client.post("/api/settings/search", json={"locations": ["Berlin"]})
+    response = client.post("/api/settings/search", json={"positions": ["QA"]})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["positions"] == ["QA"]
+    assert body["locations"] == ["Berlin"]
+
+
+def test_post_generate_positions_saves_inferred_list(client):
+    with patch(
+        "src.webui.api._generate_positions",
+        return_value=["Python разработчик", "Backend developer"],
+    ):
+        response = client.post("/api/settings/generate-positions")
+
+    assert response.status_code == 200
+    assert response.json()["positions"] == [
+        "Python разработчик",
+        "Backend developer",
+    ]
+    follow_up = client.get("/api/settings/search")
+    assert follow_up.json()["positions"] == [
+        "Python разработчик",
+        "Backend developer",
+    ]
+
+
+def test_post_generate_positions_missing_resume_returns_400(client):
+    with patch(
+        "src.webui.api._generate_positions",
+        side_effect=FileNotFoundError("no resume.pdf"),
+    ):
+        response = client.post("/api/settings/generate-positions")
+
+    assert response.status_code == 400
+
+
 def test_setup_status_not_needed_when_data_folder_valid(client):
     response = client.get("/api/setup/status")
     assert response.status_code == 200

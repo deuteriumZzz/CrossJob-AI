@@ -1,7 +1,11 @@
 import tempfile
 from pathlib import Path
 
-from src.config_patch import set_source_field, set_top_level_field
+from src.config_patch import (
+    set_list_field,
+    set_source_field,
+    set_top_level_field,
+)
 
 
 def test_set_source_field_updates_existing_value():
@@ -102,6 +106,63 @@ def test_set_top_level_field_escapes_single_quotes():
         assert "llm_api_key: 'sk-o''brien'" in text
 
 
+def test_set_list_field_replaces_existing_list():
+    with tempfile.TemporaryDirectory() as tmp:
+        config_file = Path(tmp) / "work_preferences.yaml"
+        config_file.write_text(
+            "positions:\n"
+            "  - Software engineer\n"
+            "\n"
+            "locations:\n"
+            "  - Germany\n",
+            encoding="utf-8",
+        )
+
+        set_list_field(config_file, "positions", ["Backend developer"])
+
+        text = config_file.read_text(encoding="utf-8")
+        assert "Software engineer" not in text
+        assert "  - 'Backend developer'" in text
+        # соседний блок не тронут
+        assert "locations:\n  - Germany" in text
+
+
+def test_set_list_field_empty_list_writes_inline_brackets():
+    with tempfile.TemporaryDirectory() as tmp:
+        config_file = Path(tmp) / "work_preferences.yaml"
+        config_file.write_text(
+            "company_blacklist:\n  - wayfair\n  - Crossover\n",
+            encoding="utf-8",
+        )
+
+        set_list_field(config_file, "company_blacklist", [])
+
+        text = config_file.read_text(encoding="utf-8")
+        assert text.strip() == "company_blacklist: []"
+
+
+def test_set_list_field_creates_block_if_missing():
+    with tempfile.TemporaryDirectory() as tmp:
+        config_file = Path(tmp) / "work_preferences.yaml"
+        config_file.write_text("positions:\n  - QA\n", encoding="utf-8")
+
+        set_list_field(config_file, "title_blacklist", ["intern"])
+
+        text = config_file.read_text(encoding="utf-8")
+        assert "title_blacklist:\n  - 'intern'" in text
+
+
+def test_set_list_field_escapes_single_quotes():
+    with tempfile.TemporaryDirectory() as tmp:
+        config_file = Path(tmp) / "work_preferences.yaml"
+        config_file.write_text("positions:\n  - QA\n", encoding="utf-8")
+
+        set_list_field(config_file, "positions", ["O'Brien Inc"])
+
+        text = config_file.read_text(encoding="utf-8")
+        assert "  - 'O''Brien Inc'" in text
+
+
 if __name__ == "__main__":
     test_set_source_field_updates_existing_value()
     test_set_source_field_adds_field_to_existing_block()
@@ -109,4 +170,8 @@ if __name__ == "__main__":
     test_set_top_level_field_updates_existing_value()
     test_set_top_level_field_inserts_when_missing()
     test_set_top_level_field_escapes_single_quotes()
+    test_set_list_field_replaces_existing_list()
+    test_set_list_field_empty_list_writes_inline_brackets()
+    test_set_list_field_creates_block_if_missing()
+    test_set_list_field_escapes_single_quotes()
     print("All tests passed.")
