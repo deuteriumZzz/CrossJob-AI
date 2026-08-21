@@ -573,7 +573,7 @@ def create_cover_letter(
             style_manager=style_manager,
             resume_generator=resume_generator,
             resume_object=resume_object,
-            output_path=Path("data_folder/output"),
+            output_path=Path(parameters["outputFileDirectory"]),
         )
         resume_facade.set_driver(driver)
         resume_facade.link_to_job(job_url)
@@ -686,7 +686,7 @@ def create_resume_pdf_job_tailored(
             style_manager=style_manager,
             resume_generator=resume_generator,
             resume_object=resume_object,
-            output_path=Path("data_folder/output"),
+            output_path=Path(parameters["outputFileDirectory"]),
         )
         resume_facade.set_driver(driver)
         resume_facade.link_to_job(job_url)
@@ -797,7 +797,7 @@ def create_resume_pdf(
             style_manager=style_manager,
             resume_generator=resume_generator,
             resume_object=resume_object,
-            output_path=Path("data_folder/output"),
+            output_path=Path(parameters["outputFileDirectory"]),
         )
         resume_facade.set_driver(driver)
         result_base64 = resume_facade.create_resume_pdf()
