@@ -47,4 +47,4 @@ jobs:
         run: mypy --ignore-missing-imports main.py src desktop_app.py
 
       - name: pytest
-        run: pytest tests/ -q
+        run: python -m pytest tests/ -q
