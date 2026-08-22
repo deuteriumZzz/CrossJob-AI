@@ -26,6 +26,11 @@ should not include a greeting or signature.
 
 ## Rules:
 - Do not include any introductions, explanations, or additional information.
+- Write the entire letter in the SAME language as the Job Description
+  below. Detect that language from the job description text itself —
+  ignore what language the resume happens to be written in. A
+  Russian-language job posting must get a Russian-language letter
+  even if the resume below is in English, and vice versa.
 
 ## Details :
 - **Job Description:**
