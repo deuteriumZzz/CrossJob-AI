@@ -43,14 +43,16 @@ def scrape_form_questions(driver) -> list[ScrapedQuestion]:
             options = [
                 r.get_attribute("aria-label")
                 for r in radios
-                if r.get_attribute("aria-label") != OTHER_OPTION_SENTINEL
+                if r.get_attribute("aria-label")
+                not in (None, "", OTHER_OPTION_SENTINEL)
             ]
             questions.append(ScrapedQuestion(i, text, "radio", options))
         elif checks:
             options = [
                 c.get_attribute("aria-label")
                 for c in checks
-                if c.get_attribute("aria-label") != OTHER_OPTION_SENTINEL
+                if c.get_attribute("aria-label")
+                not in (None, "", OTHER_OPTION_SENTINEL)
             ]
             questions.append(ScrapedQuestion(i, text, "checkbox", options))
         else:

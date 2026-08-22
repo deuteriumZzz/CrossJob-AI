@@ -2135,7 +2135,17 @@ def _prepare_external_form(
         time.sleep(3)
         questions = scrape_form_questions(driver)
         if not questions:
-            logger.warning(f"No questions found on {form_url} — skipping.")
+            logger.warning(
+                f"No recognizable questions on {form_url} (not a Google "
+                "Form, or a different layout) — falling back to a plain "
+                "link notification."
+            )
+            notify(
+                parameters,
+                "Работодатель просит заполнить анкету — не смог "
+                f"прочитать вопросы автоматически: {entry['company']} — "
+                f"{entry['title']}\n{form_url}",
+            )
             return
         resume_text = extract_pdf_text(str(resume_pdf_path))
         job = Job(
@@ -2144,6 +2154,12 @@ def _prepare_external_form(
         answers = draft_form_answers(questions, job, resume_text, llm_api_key)
     except Exception as e:
         logger.exception(f"Failed to prepare external form {form_url}: {e}")
+        notify(
+            parameters,
+            "Работодатель просит заполнить анкету — не смог обработать "
+            f"её автоматически: {entry['company']} — {entry['title']}\n"
+            f"{form_url}",
+        )
         return
     finally:
         driver.quit()
