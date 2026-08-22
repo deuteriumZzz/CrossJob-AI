@@ -41,16 +41,30 @@ def _load_telegram_credentials() -> tuple[int, str]:
     return int(api_id), str(api_hash)
 
 
+def _dump_button(b) -> str:
+    """Показывает РЕАЛЬНЫЙ тип кнопки и её payload — предыдущая версия
+    (getattr(b, 'data', b.url)) молчаливо возвращала None что для
+    callback-кнопок (b.data — bytes), что для reply-кнопок (у них нет
+    ни data, ни url вообще, только текст, отправляемый как обычное
+    сообщение при нажатии) — из такого дампа нельзя было понять, как
+    именно нажатие реально устроено на уровне протокола."""
+    raw = getattr(b, "button", None)
+    kind = type(raw).__name__ if raw is not None else type(b).__name__
+    data = getattr(raw, "data", None)
+    url = getattr(raw, "url", None)
+    if data is not None:
+        detail = f"callback_data={data!r}"
+    elif url is not None:
+        detail = f"url={url!r}"
+    else:
+        detail = "reply-keyboard (нажатие = отправка текста кнопки)"
+    return f"{b.text!r} [{kind}] {detail}"
+
+
 def _dump_buttons(buttons) -> str:
     if not buttons:
         return ""
-    rows = []
-    for row in buttons:
-        rows.append(
-            " | ".join(
-                f"[{b.text!r} -> {getattr(b, 'data', b.url)!r}]" for b in row
-            )
-        )
+    rows = [" | ".join(_dump_button(b) for b in row) for row in buttons]
     return "\nКнопки:\n  " + "\n  ".join(rows)
 
 

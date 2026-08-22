@@ -90,6 +90,13 @@ zarplata:
   schedule_enabled: false
   interval_hours: 3
 
+# Optional: only needed for the "Search & Apply on GetMatch" action.
+# Keep auto_apply: false until you've logged in once (first auto_apply
+# run opens a real browser window and waits for you to type the code
+# GetMatch sends to your Telegram) — see docs/GUIDE.md.
+getmatch:
+  auto_apply: false
+
 # Optional: only needed for the "Search Telegram channels" action.
 # `positions` above is reused as the search keywords.
 telegram:

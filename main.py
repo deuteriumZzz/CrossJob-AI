@@ -36,6 +36,7 @@ from src.job_sources.block_detection import (
 from src.job_sources.cover_letter import generate_cover_letter_for_job
 from src.job_sources.geekjob.client import GeekjobClient
 from src.job_sources.geekjob.source import GeekjobSource
+from src.job_sources.getmatch.auth import GetMatchSession
 from src.job_sources.getmatch.client import GetMatchClient
 from src.job_sources.getmatch.source import GetMatchSource
 from src.job_sources.github_context import fetch_github_summary
@@ -1632,12 +1633,14 @@ def search_telegram(parameters: dict, llm_api_key: str):
 
 def search_getmatch(parameters: dict, llm_api_key: str):
     """
-    Ищет на GetMatch вакансии по work_preferences.yaml и пишет
-    под каждую сопроводительное письмо на основе
-    data_folder/resume.pdf, готовое вставить вручную. Для GetMatch
-    нет автоматического отклика (почему — см. докстринг
-    src/job_sources/getmatch/source.py) — каждое совпадение
-    записывается как dry-run.
+    Ищет на GetMatch вакансии по work_preferences.yaml. Если
+    getmatch.auto_apply — true, откликается кликом на "Откликнуться"
+    на странице вакансии (проверено вручную на живом аккаунте с
+    заполненным профилем: это один клик, без формы под
+    сопроводительное письмо — GetMatch его нигде на сайте не
+    запрашивает, письмо от LLM всё равно пишется и попадает в
+    историю, просто не отправляется на площадку). Иначе — как раньше,
+    каждое совпадение просто пишется как dry-run.
     """
     data_folder: Path = parameters["dataFolder"]
     resume_pdf_path = data_folder / RESUME_PDF
@@ -1647,6 +1650,18 @@ def search_getmatch(parameters: dict, llm_api_key: str):
             f"resume as '{RESUME_PDF}' in {data_folder}."
         )
 
+    gm_preferences = parameters.get("getmatch") or {}
+    auto_apply = bool(gm_preferences.get("auto_apply", False))
+    email = None
+    if auto_apply:
+        secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
+        email = (secrets.get("getmatch") or {}).get("email")
+        if not email:
+            raise ConfigError(
+                "getmatch.email is required in secrets.yaml when "
+                "auto_apply is true"
+            )
+
     output_folder: Path = parameters["outputFileDirectory"]
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
@@ -1655,7 +1670,8 @@ def search_getmatch(parameters: dict, llm_api_key: str):
         return
 
     profile_dir = output_folder / ".chrome_profile_getmatch"
-    source: JobSource = GetMatchSource(GetMatchClient(profile_dir))
+    client = GetMatchClient(profile_dir)
+    source: JobSource = GetMatchSource(client)
     try:
         jobs = source.search(parameters)
     except PlatformBlockedError as e:
@@ -1668,6 +1684,10 @@ def search_getmatch(parameters: dict, llm_api_key: str):
         )
         return
     logger.info(f"Found {len(jobs)} matching GetMatch vacancies.")
+
+    if auto_apply:
+        assert email is not None  # enforced above when auto_apply is set
+        GetMatchSession(profile_dir).ensure_logged_in(email)
 
     sent_count = 0
     job_max_applications = _job_max_applications(parameters, "getmatch")
@@ -1708,15 +1728,32 @@ def search_getmatch(parameters: dict, llm_api_key: str):
                 f"{job.company}, skipping this vacancy: {e}"
             )
             continue
-        logger.info(
-            f"[manual apply needed] {job.role} at {job.company} ({job.link})"
-        )
+
+        if auto_apply:
+            applied = client.apply(job.link)
+            if applied:
+                status: Literal["applied", "dry_run"] = "applied"
+                logger.info(
+                    f"Applied to {job.role} at {job.company} ({job.link})"
+                )
+            else:
+                status = "dry_run"
+                logger.warning(
+                    "Кнопка 'Откликнуться' не найдена на "
+                    f"{job.link} — записано как dry-run."
+                )
+        else:
+            status = "dry_run"
+            logger.info(
+                f"[manual apply needed] {job.role} at {job.company} "
+                f"({job.link})"
+            )
 
         applied_log.record(
             job,
             cover_letter,
             resume_id="",
-            status="dry_run",
+            status=status,
             score=fit.score,
             gaps=fit.gaps,
         )
@@ -2359,7 +2396,7 @@ def handle_inquiries(
                 logger.info("Searching Telegram channels...")
                 search_telegram(parameters, llm_api_key)
 
-            if "Search on GetMatch (manual apply)" == selected_actions:
+            if "Search & Apply on GetMatch" == selected_actions:
                 logger.info("Searching GetMatch...")
                 search_getmatch(parameters, llm_api_key)
 
@@ -2417,7 +2454,7 @@ def prompt_user_action() -> str:
                     "Search on geekjob.ru (manual apply)",
                     "Search on rabota.ru (manual apply)",
                     "Search Telegram channels (manual reply)",
-                    "Search on GetMatch (manual apply)",
+                    "Search & Apply on GetMatch",
                     "Search & Apply on LinkedIn",
                     "Search selected sources",
                     "Check HeadHunter replies",
