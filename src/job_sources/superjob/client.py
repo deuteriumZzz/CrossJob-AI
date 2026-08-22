@@ -39,6 +39,14 @@ class SuperJobClient:
         response.raise_for_status()
         return response.json()
 
+    def list_resumes(self) -> list[dict]:
+        """GET /resumes/ — метод resumes() официального PHP-клиента.
+        Как и list_messages() — путь подтверждён по исходникам, но
+        не проверен боевым вызовом на живом аккаунте."""
+        response = self._client.get("/resumes/")
+        response.raise_for_status()
+        return response.json().get("objects", [])
+
     def list_messages(self) -> list[dict]:
         """GET /messages/ — путь эндпоинта подтверждён методом
         messages() официального PHP-клиента, но точные названия полей

@@ -935,6 +935,44 @@ def _job_max_applications(
     )
 
 
+def _resolve_resume_id(
+    client, configured_resume_id: Optional[str], platform_label: str
+) -> str:
+    """resume_id необязательно вписывать вручную — резюме уже лежит
+    на самой площадке (пользователь загрузил его туда сам через её
+    сайт), поэтому вместо немедленного отказа сначала смотрим список
+    резюме через API площадки (client.list_resumes()): одно найдено —
+    используем его, несколько — просим выбрать явно (со списком id,
+    чтобы не гадать по URL), ни одного — площадка правда пуста,
+    сначала нужно загрузить резюме на её сайте вручную. Локальный
+    resume.pdf тут не подставить — у официальных API HH/SuperJob/
+    Zarplata нет метода "откликнуться файлом", только по id уже
+    существующего на площадке резюме."""
+    if configured_resume_id:
+        return configured_resume_id
+    resumes = client.list_resumes()
+    if len(resumes) == 1:
+        resume_id = resumes[0]["id"]
+        logger.info(
+            f"{platform_label}.resume_id не указан — использую "
+            f"единственное найденное резюме на площадке: {resume_id}"
+        )
+        return resume_id
+    if not resumes:
+        raise ConfigError(
+            f"{platform_label}.resume_id не задан, и на площадке не "
+            "найдено ни одного резюме — сначала загрузите резюме на "
+            "сайте площадки, потом впишите его id в "
+            "work_preferences.yaml."
+        )
+    ids = ", ".join(r["id"] for r in resumes)
+    raise ConfigError(
+        f"{platform_label}.resume_id не задан, а на площадке "
+        f"несколько резюме — впишите нужный id в work_preferences.yaml "
+        f"(один из: {ids})"
+    )
+
+
 def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
     """
     Ищет на HeadHunter вакансии по work_preferences.yaml, пишет
@@ -963,15 +1001,12 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
     hh_preferences = parameters.get("headhunter") or {}
     auto_apply = bool(hh_preferences.get("auto_apply", False))
     resume_id = hh_preferences.get("resume_id")
-    if auto_apply and not resume_id:
-        raise ConfigError(
-            "headhunter.resume_id is required in "
-            "work_preferences.yaml when auto_apply is true"
-        )
 
     output_folder: Path = parameters["outputFileDirectory"]
     auth = HHAuth(client_id, client_secret, output_folder / ".hh_token.json")
     client = HeadHunterClient(auth.get_access_token())
+    if auto_apply:
+        resume_id = _resolve_resume_id(client, resume_id, "headhunter")
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
     source: JobSource = HeadHunterSource(client)
@@ -1091,17 +1126,14 @@ def search_and_apply_superjob(parameters: dict, llm_api_key: str):
     sj_preferences = parameters.get("superjob") or {}
     auto_apply = bool(sj_preferences.get("auto_apply", False))
     resume_id = sj_preferences.get("resume_id")
-    if auto_apply and not resume_id:
-        raise ConfigError(
-            "superjob.resume_id is required in "
-            "work_preferences.yaml when auto_apply is true"
-        )
 
     output_folder: Path = parameters["outputFileDirectory"]
     auth = SuperJobAuth(
         client_id, client_secret, output_folder / ".superjob_token.json"
     )
     client = SuperJobClient(auth.get_access_token(), client_secret)
+    if auto_apply:
+        resume_id = _resolve_resume_id(client, resume_id, "superjob")
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
     source: JobSource = SuperJobSource(client)
@@ -1219,17 +1251,14 @@ def search_and_apply_zarplata(parameters: dict, llm_api_key: str):
     zp_preferences = parameters.get("zarplata") or {}
     auto_apply = bool(zp_preferences.get("auto_apply", False))
     resume_id = zp_preferences.get("resume_id")
-    if auto_apply and not resume_id:
-        raise ConfigError(
-            "zarplata.resume_id is required in "
-            "work_preferences.yaml when auto_apply is true"
-        )
 
     output_folder: Path = parameters["outputFileDirectory"]
     auth = ZarplataAuth(
         client_id, client_secret, output_folder / ".zarplata_token.json"
     )
     client = ZarplataClient(auth.get_access_token())
+    if auto_apply:
+        resume_id = _resolve_resume_id(client, resume_id, "zarplata")
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
     source: JobSource = ZarplataSource(client)

@@ -38,6 +38,14 @@ class ZarplataClient:
         response.raise_for_status()
         return response.json()
 
+    def list_resumes(self) -> list[dict]:
+        """GET /resumes/mine — та же платформа HeadHunter-Group, что
+        и hh.ru (см. комментарий выше про ZP_API_BASE), не проверено
+        боевым вызовом."""
+        response = self._client.get("/resumes/mine")
+        response.raise_for_status()
+        return response.json()["items"]
+
     def list_negotiations(self) -> list[dict]:
         response = self._client.get("/negotiations")
         response.raise_for_status()
