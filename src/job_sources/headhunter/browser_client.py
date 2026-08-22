@@ -4,7 +4,7 @@ from typing import Callable
 
 from selenium.webdriver.common.by import By
 
-from src.job_sources.block_detection import raise_if_blocked
+from src.job_sources.block_detection import raise_if_blocked, visible_text
 from src.utils.chrome_utils import init_browser
 
 HH_BASE = "https://hh.ru"
@@ -13,17 +13,6 @@ HH_BASE = "https://hh.ru"
 # и город не должен ограничивать поиск.
 HH_AREA_RUSSIA = "113"
 PAGE_LOAD_WAIT_SECONDS = 4
-
-
-def _visible_text(driver) -> str:
-    """hh.ru — тяжёлое SPA: driver.page_source тянет за собой мегабайты
-    встроенных JS/JSON-бандлов (в т.ч. словарь переводов, где буквально
-    есть строка "error.signup.captcha.invalid":"Please, confirm that
-    you are not a robot" — подтверждено на живом аккаунте, это
-    вызывало ложное срабатывание raise_if_blocked на каждой странице).
-    Проверять на капчу/блокировку нужно то, что видит пользователь, а
-    не сырой HTML целиком — отсюда именно .text, а не page_source."""
-    return driver.execute_script("return document.body.innerText") or ""
 
 
 class HeadHunterBrowserClient:
@@ -44,7 +33,7 @@ class HeadHunterBrowserClient:
                 params += "&schedule=remote"
             driver.get(f"{HH_BASE}/search/vacancy?{params}")
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
-            raise_if_blocked(_visible_text(driver))
+            raise_if_blocked(visible_text(driver))
             return driver.page_source
         finally:
             driver.quit()
@@ -54,7 +43,7 @@ class HeadHunterBrowserClient:
         try:
             driver.get(f"{HH_BASE}/vacancy/{vacancy_id}")
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
-            raise_if_blocked(_visible_text(driver))
+            raise_if_blocked(visible_text(driver))
             return driver.page_source
         finally:
             driver.quit()
@@ -77,7 +66,7 @@ class HeadHunterBrowserClient:
         try:
             driver.get(vacancy_url)
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
-            raise_if_blocked(_visible_text(driver))
+            raise_if_blocked(visible_text(driver))
 
             buttons = driver.find_elements(
                 By.CSS_SELECTOR, '[data-qa="vacancy-response-link-top"]'

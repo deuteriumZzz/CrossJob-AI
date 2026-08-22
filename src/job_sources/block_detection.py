@@ -16,7 +16,9 @@ class PlatformBlockedError(Exception):
 
 def raise_if_blocked(response_or_html) -> None:
     """Принимает либо httpx.Response (проверяет status_code + text),
-    либо голую HTML/текстовую строку (например driver.page_source)."""
+    либо голую HTML/текстовую строку. Для Selenium-страниц сюда нужно
+    передавать visible_text(driver), а не driver.page_source — см. её
+    докстринг."""
     status_code = getattr(response_or_html, "status_code", None)
     text = getattr(response_or_html, "text", response_or_html) or ""
     if status_code == 429:
@@ -27,6 +29,21 @@ def raise_if_blocked(response_or_html) -> None:
             raise PlatformBlockedError(
                 f"Blocked (detected {keyword!r} in response body)"
             )
+
+
+def visible_text(driver) -> str:
+    """Тяжёлые SPA (Next.js и т.п.) тянут в driver.page_source
+    мегабайты встроенных JS/CSS-бандлов — подтверждено на живых
+    аккаунтах дважды: на hh.ru там буквально есть строка
+    "error.signup.captcha.invalid":"Please, confirm that you are not
+    a robot" (словарь переводов), на getmatch.ru — класс
+    ".SmartCaptcha-Overlay" (стили виджета капчи, подгружаются
+    заранее независимо от того, показана ли капча реально). Оба раза
+    это вызывало ложное срабатывание raise_if_blocked на самой
+    обычной странице. Проверять на капчу/блокировку нужно то, что
+    видит пользователь, а не сырой HTML целиком — отсюда именно
+    document.body.innerText, а не page_source."""
+    return driver.execute_script("return document.body.innerText") or ""
 
 
 def _blocked_until_path(output_folder: Path) -> Path:

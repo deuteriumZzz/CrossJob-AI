@@ -4,7 +4,7 @@ from typing import Optional
 
 from selenium.webdriver.common.by import By
 
-from src.job_sources.block_detection import raise_if_blocked
+from src.job_sources.block_detection import raise_if_blocked, visible_text
 from src.utils.chrome_utils import init_browser
 
 GM_BASE = "https://getmatch.ru"
@@ -32,9 +32,8 @@ class GetMatchClient:
         try:
             driver.get(f"{GM_BASE}/vacancies?q={query}")
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
-            page_source = driver.page_source
-            raise_if_blocked(page_source)
-            return page_source
+            raise_if_blocked(visible_text(driver))
+            return driver.page_source
         finally:
             driver.quit()
 
@@ -54,8 +53,7 @@ class GetMatchClient:
         try:
             driver.get(vacancy_url)
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
-            page_source = driver.page_source
-            raise_if_blocked(page_source)
+            raise_if_blocked(visible_text(driver))
             buttons = driver.find_elements(
                 By.XPATH, '//button[normalize-space()="Откликнуться"]'
             )

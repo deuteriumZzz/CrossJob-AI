@@ -5,7 +5,7 @@ from typing import Optional
 import httpx
 from selenium.webdriver.common.by import By
 
-from src.job_sources.block_detection import raise_if_blocked
+from src.job_sources.block_detection import raise_if_blocked, visible_text
 from src.job_sources.user_agents import random_user_agent
 from src.utils.chrome_utils import init_browser
 
@@ -58,8 +58,7 @@ class GeekjobClient:
         try:
             driver.get(vacancy_url)
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
-            page_source = driver.page_source
-            raise_if_blocked(page_source)
+            raise_if_blocked(visible_text(driver))
             buttons = driver.find_elements(
                 By.XPATH,
                 '//button[contains(normalize-space(), "Откликнуться")]',
