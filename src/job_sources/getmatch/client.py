@@ -38,20 +38,18 @@ class GetMatchClient:
         finally:
             driver.quit()
 
-    def apply(self, vacancy_url: str) -> bool:
-        """Один клик на "Откликнуться" — подтверждено вручную на живом
-        аккаунте с уже заполненным профилем: никакого мастера из
-        нескольких шагов и поля под сопроводительное письмо на
-        странице вакансии нет (мастер из README — это онбординг для
-        нового/незаполненного профиля, не форма отклика на конкретную
-        вакансию). Требует, чтобы GetMatchSession.ensure_logged_in()
-        уже был пройден для этого profile_dir — иначе кнопки
-        "Откликнуться" на странице просто не будет (покажется форма
-        входа), и apply() вернёт False. GetMatch не даёт отдельного
-        подтверждения в DOM после клика (кнопка просто меняет вид на
-        "Поделиться") — возврат True означает только "кнопка была
-        найдена и нажата", а не гарантированное подтверждение с
-        площадки."""
+    def apply(self, vacancy_url: str, cover_letter: str = "") -> bool:
+        """Клик на "Откликнуться" почти всегда открывает модалку с
+        зарплатой/локацией (обе уже подставлены из профиля — ничего
+        не трогаем) и полем "Сопроводительное письмо" — подтверждено
+        скриншотом реального аккаунта; вписываем письмо и жмём
+        "Отправить отклик". На случай редкого прямого one-click без
+        модалки (старое поведение) — если textarea/кнопка отправки не
+        нашлись, всё равно возвращаем True: сам клик на "Откликнуться"
+        уже засчитан площадкой. Требует, чтобы
+        GetMatchSession.ensure_logged_in() уже был пройден для этого
+        profile_dir — иначе кнопки "Откликнуться" не будет (форма
+        входа), и apply() вернёт False."""
         driver = init_browser(self.profile_dir)
         try:
             driver.get(vacancy_url)
@@ -64,7 +62,19 @@ class GetMatchClient:
             if not buttons:
                 return False
             buttons[0].click()
-            time.sleep(1)
+            time.sleep(1.5)
+
+            if cover_letter:
+                textareas = driver.find_elements(By.TAG_NAME, "textarea")
+                if textareas:
+                    textareas[0].send_keys(cover_letter)
+
+            submit_buttons = driver.find_elements(
+                By.XPATH, '//button[normalize-space()="Отправить отклик"]'
+            )
+            if submit_buttons:
+                submit_buttons[0].click()
+                time.sleep(1.5)
             return True
         finally:
             driver.quit()

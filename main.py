@@ -1850,7 +1850,7 @@ def search_getmatch(parameters: dict, llm_api_key: str):
             continue
 
         if auto_apply:
-            applied = client.apply(job.link)
+            applied = client.apply(job.link, cover_letter)
             if applied:
                 status: Literal["applied", "dry_run"] = "applied"
                 logger.info(
