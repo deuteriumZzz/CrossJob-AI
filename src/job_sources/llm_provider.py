@@ -1,6 +1,7 @@
 from typing import Optional
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.runnables import Runnable
 from langchain_core.runnables.fallbacks import RunnableWithFallbacks
 from pydantic import SecretStr
 
@@ -95,7 +96,7 @@ def set_fallback_keys(keys: Optional[dict]) -> None:
 
 
 def set_fallback_mode(mode: Optional[str]) -> None:
-    """"free" — в фолбэк идут только бесплатные модели настроенных
+    """ "free" — в фолбэк идут только бесплатные модели настроенных
     провайдеров (переключение никогда не начнёт неожиданно тратить
     деньги); "paid" — только платные; "auto" (по умолчанию) — все
     настроенные провайдеры, бесплатные впереди платных. Задаётся
@@ -110,6 +111,16 @@ def _recommended_model(provider: str) -> Optional[dict]:
     return next((m for m in models if m.get("recommended")), None) or (
         models[0] if models else None
     )
+
+
+def _default_model_id(provider: str) -> str:
+    """Всегда возвращает id модели — тонкая обёртка над
+    _recommended_model() для мест, которым нужна именно строка, а не
+    Optional[dict] (пустая строка недостижима на практике: 5
+    провайдеров ниже все со своим непустым списком в PROVIDER_MODELS,
+    но mypy этого не знает статически)."""
+    model = _recommended_model(provider)
+    return model["id"] if model else ""
 
 
 def _build_llm(
@@ -133,7 +144,7 @@ def _build_llm(
     if provider == "groq":
         from langchain_groq import ChatGroq
 
-        resolved_model = model or _recommended_model(provider)["id"]
+        resolved_model = model or _default_model_id(provider)
         return (
             ChatGroq(
                 model=resolved_model,
@@ -146,7 +157,7 @@ def _build_llm(
     if provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        resolved_model = model or _recommended_model(provider)["id"]
+        resolved_model = model or _default_model_id(provider)
         return (
             ChatGoogleGenerativeAI(
                 model=resolved_model,
@@ -159,7 +170,7 @@ def _build_llm(
     if provider == "deepseek":
         from langchain_openai import ChatOpenAI
 
-        resolved_model = model or _recommended_model(provider)["id"]
+        resolved_model = model or _default_model_id(provider)
         return (
             ChatOpenAI(
                 model=resolved_model,
@@ -173,16 +184,18 @@ def _build_llm(
     if provider == "ollama":
         from langchain_ollama import ChatOllama
 
-        resolved_model = model or _recommended_model(provider)["id"]
+        resolved_model = model or _default_model_id(provider)
         return (
             ChatOllama(
-                model=resolved_model, base_url=base_url, temperature=temperature
+                model=resolved_model,
+                base_url=base_url,
+                temperature=temperature,
             ),
             resolved_model,
         )
     from langchain_openai import ChatOpenAI
 
-    resolved_model = model or _recommended_model("openai")["id"]
+    resolved_model = model or _default_model_id("openai")
     return (
         ChatOpenAI(
             model=resolved_model,
@@ -270,7 +283,7 @@ def get_chat_llm(
     model: Optional[str] = None,
     temperature: float = 0,
     base_url: Optional[str] = None,
-) -> BaseChatModel:
+) -> Runnable:
     """Единая точка создания chat-LLM вместо ChatOpenAI(...),
     захардкоженного в 8 разных местах. Провайдер/модель/base_url:
     явный аргумент > set_provider_override() (дашборд) >
@@ -304,6 +317,7 @@ def get_chat_llm(
         ]
 
     fallbacks = _build_fallback_llms(provider, temperature)
+    result: Runnable = llm
     if fallbacks:
-        llm = _ChatModelWithFallbacks(runnable=llm, fallbacks=fallbacks)
-    return llm
+        result = _ChatModelWithFallbacks(runnable=llm, fallbacks=fallbacks)
+    return result

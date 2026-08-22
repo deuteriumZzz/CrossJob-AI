@@ -72,11 +72,19 @@ headhunter:
   schedule_enabled: false
   interval_hours: 3
   # Optional: auto-reply to employer questions in the hh.ru chat via
-  # LLM (salary questions, screening questions). Off by default like
-  # every other auto_* flag — read docs/GUIDE.md first, this is a
-  # best-effort browser flow, not yet verified against a live chat.
-  # If the employer's message contains a link (e.g. an external form),
-  # it's never auto-filled — you get a Telegram notification instead.
+  # LLM (salary questions, screening questions). Messages that don't
+  # actually need a reply (status updates, HH's own automated notices)
+  # are silently skipped, not answered. Off by default like every
+  # other auto_* flag — read docs/GUIDE.md first, this is a
+  # best-effort browser flow.
+  # If the employer's message contains a link to an external form
+  # (e.g. a Google Form), it's never filled in and submitted on its
+  # own: the bot reads the form's questions, drafts answers from your
+  # resume, and sends the draft to your Telegram (notifications: below)
+  # for a live decision — reply "да <id>" to submit as drafted,
+  # "заново <id>" to regenerate the draft, or
+  # "правка <id> <question number> <new answer>" to fix one answer.
+  # Nothing is entered on the third-party site until you approve.
   auto_reply: false
 
 # Optional: only needed for the "Search & Apply on SuperJob" action.

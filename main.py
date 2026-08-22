@@ -3,6 +3,7 @@ import binascii
 import re
 import shutil
 import sys
+import time
 import traceback
 from pathlib import Path
 from typing import Literal, Optional, Tuple
@@ -11,6 +12,7 @@ import click
 import inquirer
 import yaml
 from pdfminer.high_level import extract_text as extract_pdf_text
+from selenium.webdriver.common.by import By
 
 from config import (
     DAILY_APPLICATION_LIMIT,
@@ -21,6 +23,7 @@ from config import (
     LLM_MODEL_TYPE,
 )
 from src.config_patch import set_top_level_field
+from src.job import Job
 from src.job_sources.applied_log import AppliedLog
 from src.job_sources.apply_pacing import (
     randomized_daily_limit,
@@ -49,6 +52,24 @@ from src.job_sources.headhunter.browser_replies import (
 )
 from src.job_sources.headhunter.browser_session import HeadHunterSession
 from src.job_sources.headhunter.browser_source import HeadHunterBrowserSource
+from src.job_sources.headhunter.form_fill import (
+    answers_to_dicts,
+    dicts_to_answers,
+    dicts_to_questions,
+    draft_form_answers,
+    fill_form,
+    format_questions_and_answers,
+    questions_to_dicts,
+    scrape_form_questions,
+)
+from src.job_sources.headhunter.telegram_approval import (
+    get_pending_form,
+    notify_pending_form,
+    poll_form_commands,
+    remove_pending_form,
+    save_pending_form,
+    update_pending_form_answers,
+)
 from src.job_sources.job_fit import classify_fit, score_job_fit
 from src.job_sources.linkedin.answerer import EasyApplyAnswerer
 from src.job_sources.linkedin.auth import LinkedInSession
@@ -78,6 +99,7 @@ from src.job_sources.rabota_ru.source import RabotaRuSource
 from src.job_sources.reply_answerer import (
     build_preferences_summary,
     generate_reply,
+    message_needs_reply,
 )
 from src.job_sources.reply_check import (
     print_negotiation_replies,
@@ -1104,7 +1126,9 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
                 )
 
             try:
-                applied, cover_letter = client.apply(job.link, _cover_letter_fn)
+                applied, cover_letter = client.apply(
+                    job.link, _cover_letter_fn
+                )
             except Exception as e:
                 logger.exception(
                     f"Failed to apply/generate cover letter for {job.role} "
@@ -2087,6 +2111,238 @@ def notify(parameters: dict, text: str) -> None:
     notify_from_secrets(parameters, text)
 
 
+def _prepare_external_form(
+    parameters: dict,
+    entry: dict,
+    external_id: str,
+    form_url: str,
+    resume_pdf_path: Path,
+    llm_api_key: str,
+) -> None:
+    """Открывает ссылку на внешнюю форму (Google Forms, подтверждено
+    на живой форме — см. form_fill.py), читает вопросы, готовит
+    черновик ответов через LLM и присылает в Telegram на
+    подтверждение. Ничего не вводит и не отправляет сама — заполнение
+    и submit ждут ответа "да <id>" (см. check_headhunter_replies →
+    poll_approved_form_ids). Отдельный driver, а не тот, что держит
+    чат hh.ru открытым — иначе переход на сторонний домен посреди
+    цикла ответов на сообщения сломал бы остальные send_reply()."""
+    output_folder: Path = parameters["outputFileDirectory"]
+    profile_dir = output_folder / ".chrome_profile_headhunter_forms"
+    driver = init_browser(profile_dir)
+    try:
+        driver.get(form_url)
+        time.sleep(3)
+        questions = scrape_form_questions(driver)
+        if not questions:
+            logger.warning(f"No questions found on {form_url} — skipping.")
+            return
+        resume_text = extract_pdf_text(str(resume_pdf_path))
+        job = Job(
+            role=entry["title"], company=entry["company"], description=""
+        )
+        answers = draft_form_answers(questions, job, resume_text, llm_api_key)
+    except Exception as e:
+        logger.exception(f"Failed to prepare external form {form_url}: {e}")
+        return
+    finally:
+        driver.quit()
+
+    form_id = save_pending_form(
+        output_folder,
+        entry["company"],
+        entry["title"],
+        form_url,
+        external_id,
+        questions_to_dicts(questions),
+        answers_to_dicts(answers),
+    )
+    notify_pending_form(
+        parameters,
+        form_id,
+        entry["company"],
+        entry["title"],
+        form_url,
+        format_questions_and_answers(questions, answers),
+    )
+
+
+def _process_pending_form_approvals(
+    parameters: dict, llm_api_key: str
+) -> None:
+    """Раз за прогон проверяет Telegram на команды по анкетам (см.
+    telegram_approval.poll_form_commands: подтвердить/перегенерировать
+    /поправить пункт). Реальное заполнение и submit на стороннем
+    сайте происходит только для action=="approve" — единственное
+    место всего HH-конвейера, которое жмёт submit не на hh.ru, и
+    делает это только после явного ответа пользователя в Telegram."""
+    secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
+    notifications = secrets.get("notifications") or {}
+    bot_token = notifications.get("telegram_bot_token")
+    chat_id = notifications.get("telegram_chat_id")
+    if not bot_token or not chat_id:
+        return
+
+    output_folder: Path = parameters["outputFileDirectory"]
+    try:
+        commands = poll_form_commands(bot_token, chat_id, output_folder)
+    except Exception as e:
+        logger.warning(f"Failed to poll Telegram for form commands: {e}")
+        return
+
+    for cmd in commands:
+        form_id = cmd["form_id"]
+        record = get_pending_form(output_folder, form_id)
+        if record is None:
+            continue
+
+        if cmd["action"] == "approve":
+            _submit_approved_form(parameters, output_folder, form_id, record)
+        elif cmd["action"] == "regenerate":
+            _regenerate_form_draft(
+                parameters, output_folder, form_id, record, llm_api_key
+            )
+        elif cmd["action"] == "edit":
+            _edit_form_answer(
+                parameters,
+                output_folder,
+                form_id,
+                record,
+                cmd["question_index"],
+                cmd["new_text"],
+            )
+
+
+def _submit_approved_form(
+    parameters: dict, output_folder: Path, form_id: str, record: dict
+) -> None:
+    profile_dir = output_folder / ".chrome_profile_headhunter_forms"
+    driver = init_browser(profile_dir)
+    try:
+        driver.get(record["form_url"])
+        time.sleep(3)
+        fill_form(
+            driver,
+            dicts_to_questions(record["questions"]),
+            dicts_to_answers(record["answers"]),
+        )
+        submit_buttons = driver.find_elements(
+            By.XPATH, '//span[text()="Submit" or text()="Отправить"]'
+        )
+        if submit_buttons:
+            submit_buttons[0].click()
+            time.sleep(2)
+            logger.info(
+                f"Submitted external form for {record['company']} — "
+                f"{record['title']} after Telegram approval."
+            )
+            notify(
+                parameters,
+                f"Анкета отправлена: {record['company']} — "
+                f"{record['title']}",
+            )
+        else:
+            logger.warning(
+                f"Filled form for {record['company']} but no Submit "
+                "button found — form left open, not submitted."
+            )
+    except Exception as e:
+        logger.exception(f"Failed to fill/submit approved form {form_id}: {e}")
+    finally:
+        driver.quit()
+        remove_pending_form(output_folder, form_id)
+
+
+def _regenerate_form_draft(
+    parameters: dict,
+    output_folder: Path,
+    form_id: str,
+    record: dict,
+    llm_api_key: str,
+) -> None:
+    questions = dicts_to_questions(record["questions"])
+    job = Job(role=record["title"], company=record["company"], description="")
+    resume_pdf_path = parameters["dataFolder"] / RESUME_PDF
+    try:
+        resume_text = extract_pdf_text(str(resume_pdf_path))
+        answers = draft_form_answers(questions, job, resume_text, llm_api_key)
+    except Exception as e:
+        logger.exception(f"Failed to regenerate form draft {form_id}: {e}")
+        return
+    updated = update_pending_form_answers(
+        output_folder, form_id, answers_to_dicts(answers)
+    )
+    if updated is None:
+        return
+    notify_pending_form(
+        parameters,
+        form_id,
+        updated["company"],
+        updated["title"],
+        updated["form_url"],
+        format_questions_and_answers(questions, answers),
+        is_update=True,
+    )
+
+
+def _edit_form_answer(
+    parameters: dict,
+    output_folder: Path,
+    form_id: str,
+    record: dict,
+    question_index: int,
+    new_text: str,
+) -> None:
+    question = next(
+        (q for q in record["questions"] if q["index"] == question_index), None
+    )
+    if question is None:
+        logger.warning(
+            f"Form {form_id}: no question with index {question_index}."
+        )
+        return
+
+    if question["kind"] == "text":
+        new_answer = {
+            "index": question_index,
+            "text_answer": new_text,
+            "selected_options": None,
+        }
+    else:
+        matched = next(
+            (
+                o
+                for o in question["options"]
+                if new_text.lower() in o.lower()
+                or o.lower() in new_text.lower()
+            ),
+            None,
+        )
+        new_answer = {
+            "index": question_index,
+            "text_answer": None,
+            "selected_options": [matched or new_text],
+        }
+
+    answers = [a for a in record["answers"] if a["index"] != question_index]
+    answers.append(new_answer)
+    updated = update_pending_form_answers(output_folder, form_id, answers)
+    if updated is None:
+        return
+    notify_pending_form(
+        parameters,
+        form_id,
+        updated["company"],
+        updated["title"],
+        updated["form_url"],
+        format_questions_and_answers(
+            dicts_to_questions(updated["questions"]),
+            dicts_to_answers(updated["answers"]),
+        ),
+        is_update=True,
+    )
+
+
 def _answer_headhunter_messages(
     parameters: dict,
     driver,
@@ -2147,15 +2403,33 @@ def _answer_headhunter_messages(
             logger.info(
                 f"{entry['company']} — {entry['title']}: работодатель "
                 f"прислал ссылку на внешнюю форму ({external_link}) — "
-                "заполняется вручную, автоматически не трогаем."
+                "готовлю черновик и жду подтверждения в Telegram."
             )
-            notify(
+            _prepare_external_form(
                 parameters,
-                "Работодатель просит заполнить форму по ссылке: "
-                f"{entry['company']} — {entry['title']}\n{external_link}",
+                entry,
+                external_id,
+                external_link,
+                resume_pdf_path,
+                llm_api_key,
             )
             applied_log.mark_replied("headhunter", external_id, message_id)
             continue
+
+        try:
+            if not message_needs_reply(message["text"], llm_api_key):
+                logger.info(
+                    f"{entry['company']} — {entry['title']}: сообщение не "
+                    "требует ответа (статус/автоматика) — молча "
+                    "помечаем прочитанным, не отвечаем."
+                )
+                applied_log.mark_replied("headhunter", external_id, message_id)
+                continue
+        except Exception as e:
+            logger.warning(
+                f"Failed to classify message for {entry['company']}, "
+                f"replying anyway to be safe: {e}"
+            )
 
         try:
             reply_text = generate_reply(
@@ -2209,9 +2483,13 @@ def check_headhunter_replies(parameters: dict, llm_api_key: str):
 
     driver = init_browser(profile_dir)
     try:
-        _answer_headhunter_messages(parameters, driver, applied_log, llm_api_key)
+        _answer_headhunter_messages(
+            parameters, driver, applied_log, llm_api_key
+        )
     finally:
         driver.quit()
+
+    _process_pending_form_approvals(parameters, llm_api_key)
 
 
 def check_zarplata_replies(parameters: dict):

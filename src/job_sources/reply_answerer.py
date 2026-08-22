@@ -1,12 +1,37 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from pdfminer.high_level import extract_text
+from pydantic import BaseModel, Field
 
 from src.job_sources.llm_provider import get_chat_llm
+
+_NEEDS_REPLY_PROMPT = ChatPromptTemplate.from_template(
+    """
+    Ты решаешь, требует ли сообщение работодателя в чате по вакансии
+    ответа от кандидата. Ответа требуют: прямые вопросы, просьбы
+    что-то подтвердить/уточнить/предоставить, приглашение пройти
+    мини-интервью прямо в чате. Ответа НЕ требуют: статусные
+    уведомления ("отклик просмотрен", "вакансия закрыта"), автоматика
+    HH ("оцените вакансию"), благодарности без вопроса, сообщения,
+    которые уже закрывают тему (например отказ без вопроса).
+
+    Сообщение работодателя:
+    {message_text}
+    """
+)
+
+
+class _NeedsReply(BaseModel):
+    needs_reply: bool = Field(
+        description="True, если сообщение реально требует ответа кандидата"
+    )
+
 
 _REPLY_PROMPT = ChatPromptTemplate.from_template(
     """
@@ -110,3 +135,21 @@ def generate_reply(
         }
     )
     return output.strip()
+
+
+def message_needs_reply(message_text: str, llm_api_key: str) -> bool:
+    """Отсеивает статусные/автоматические сообщения (просмотрено,
+    вакансия закрыта, автоуведомления HH) от реальных вопросов —
+    чтобы бот не отвечал туда, где ответ не нужен, но и не оставлял
+    непрочитанным то, что реально требует реакции (см. запрос
+    пользователя: "непрочитанных не должно быть... где не требует
+    ответа — молча пропускать, где явно вопрос — отвечать")."""
+    llm = cast(BaseChatModel, get_chat_llm(llm_api_key, temperature=0))
+    structured = llm.with_structured_output(_NeedsReply)
+    result = cast(
+        _NeedsReply,
+        structured.invoke(
+            _NEEDS_REPLY_PROMPT.format(message_text=message_text)
+        ),
+    )
+    return result.needs_reply

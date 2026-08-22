@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Literal, cast
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
 from pdfminer.high_level import extract_text
 from pydantic import BaseModel, Field
@@ -58,9 +59,12 @@ def score_job_fit(
     fail open: считаем матч хорошим и без пробелов, чтобы кривой ответ
     модели не заблокировал молча все отклики."""
     resume_text = extract_text(str(resume_pdf_path))
-    llm = get_chat_llm(
-        llm_api_key,
-        temperature=0,
+    llm = cast(
+        BaseChatModel,
+        get_chat_llm(
+            llm_api_key,
+            temperature=0,
+        ),
     )
     chain = _SCORE_PROMPT | llm.with_structured_output(FitAssessment)
     try:
