@@ -195,6 +195,7 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
                     source_config.get("schedule_enabled")
                 ),
                 "auto_apply": bool(source_config.get("auto_apply")),
+                "resume_id": source_config.get("resume_id") or "",
                 "interval_hours": source_config.get("interval_hours"),
                 "last_run": entry.get("last_run"),
                 "next_run": entry.get("next_run"),
@@ -301,6 +302,7 @@ class SourceSettingsUpdate(BaseModel):
     auto_apply: Optional[bool] = None
     schedule_enabled: Optional[bool] = None
     interval_hours: Optional[int] = None
+    resume_id: Optional[str] = None
     job_max_applications: Optional[int] = None
     daily_application_limit: Optional[int] = None
 
@@ -330,6 +332,18 @@ def post_settings(
             ):
                 raise HTTPException(400, f"{field} must be >= 1")
             set_source_field(ctx.config_file, body.source, field, value)
+    if body.resume_id is not None:
+        # resume_id — ссылка на резюме, уже загруженное вручную на
+        # самой площадке (hh.ru/superjob.ru/zarplata.ru) — бот его не
+        # создаёт и не перезаписывает, только передаёт при отклике.
+        # quote=True: id может содержать произвольные символы.
+        set_source_field(
+            ctx.config_file,
+            body.source,
+            "resume_id",
+            body.resume_id,
+            quote=True,
+        )
     ctx.reload_config()
     return {"source": body.source, "updated": True}
 

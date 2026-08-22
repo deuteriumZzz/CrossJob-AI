@@ -94,6 +94,25 @@ def test_settings_update_persists_and_reflects_in_status(client):
     assert hh["interval_hours"] == 5
 
 
+def test_settings_update_persists_resume_id(client):
+    unset = client.get("/api/status").json()
+    hh = next(s for s in unset["sources"] if s["name"] == "headhunter")
+    assert hh["resume_id"] == ""
+
+    response = client.post(
+        "/api/settings",
+        json={"source": "headhunter", "resume_id": "abc123"},
+    )
+    assert response.status_code == 200
+
+    status = client.get("/api/status").json()
+    hh = next(s for s in status["sources"] if s["name"] == "headhunter")
+    sj = next(s for s in status["sources"] if s["name"] == "superjob")
+    assert hh["resume_id"] == "abc123"
+    # другая площадка не затронута
+    assert sj["resume_id"] == ""
+
+
 def test_settings_update_rejects_unknown_source(client):
     response = client.post(
         "/api/settings", json={"source": "not_a_real_source"}
