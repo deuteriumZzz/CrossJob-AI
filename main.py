@@ -53,7 +53,9 @@ from src.job_sources.llm_provider import (
 from src.job_sources.llm_provider import (
     set_provider_override as set_llm_provider_override,
 )
-from src.job_sources.llm_usage import check_and_mark_alert
+from src.job_sources.llm_usage import (
+    check_and_mark_alert,
+)
 from src.job_sources.llm_usage import (
     set_output_folder as set_llm_usage_output_folder,
 )

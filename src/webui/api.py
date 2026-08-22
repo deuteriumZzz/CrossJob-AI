@@ -39,7 +39,9 @@ from src.job_sources.llm_provider import get_active_provider as _active_llm
 from src.job_sources.llm_usage import (
     set_output_folder as set_llm_usage_output_folder,
 )
-from src.job_sources.llm_usage import summarize_usage
+from src.job_sources.llm_usage import (
+    summarize_usage,
+)
 from src.job_sources.telegram_notify import send_notification
 from src.libs.resume_and_cover_builder import StyleManager
 from src.scheduler import Scheduler
