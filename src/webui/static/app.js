@@ -343,6 +343,9 @@ const render = {
       document.getElementById("search-location-blacklist").value = (
         search.location_blacklist || []
       ).join("\n");
+      document.getElementById("search-telegram-channels").value = (
+        search.telegram_channels || []
+      ).join("\n");
     });
 
     api("/api/settings/llm").then((llm) => {
@@ -389,6 +392,7 @@ const render = {
         (s, i) => `
       <tr data-source="${s.name}" class="reveal" style="transition-delay:${staggerDelay(i, 25)}">
         <td>${sourceLabel(s.name)}</td>
+        <td title="${s.readiness && s.readiness.missing.length ? "Не хватает: " + s.readiness.missing.join(", ") : "Данных для подключения достаточно"}">${s.readiness && s.readiness.ready ? "✅" : "⚠️"}</td>
         <td><input type="checkbox" class="s-schedule" ${s.schedule_enabled ? "checked" : ""} /></td>
         <td><input type="number" class="s-interval" min="1" value="${s.interval_hours ?? 3}" /></td>
         <td><input type="checkbox" class="s-auto" ${s.auto_apply ? "checked" : ""} /></td>
@@ -661,6 +665,7 @@ function initDashboard() {
             company_blacklist: linesOf("search-company-blacklist"),
             title_blacklist: linesOf("search-title-blacklist"),
             location_blacklist: linesOf("search-location-blacklist"),
+            telegram_channels: linesOf("search-telegram-channels"),
           }),
         });
         status.textContent = "Сохранено.";

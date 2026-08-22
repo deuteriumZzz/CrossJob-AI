@@ -4,6 +4,7 @@ from pathlib import Path
 from src.config_patch import (
     set_list_field,
     set_source_field,
+    set_source_list_field,
     set_top_level_field,
 )
 
@@ -163,6 +164,58 @@ def test_set_list_field_escapes_single_quotes():
         assert "  - 'O''Brien Inc'" in text
 
 
+def test_set_source_list_field_replaces_existing_nested_list():
+    with tempfile.TemporaryDirectory() as tmp:
+        config_file = Path(tmp) / "work_preferences.yaml"
+        config_file.write_text(
+            "telegram:\n"
+            "  channels:\n"
+            "    - old_channel\n"
+            "  messages_per_channel: 100\n"
+            "\n"
+            "linkedin:\n"
+            "  auto_apply: false\n",
+            encoding="utf-8",
+        )
+
+        set_source_list_field(
+            config_file, "telegram", "channels", ["chan_one", "chan_two"]
+        )
+
+        text = config_file.read_text(encoding="utf-8")
+        assert "old_channel" not in text
+        assert "    - 'chan_one'" in text
+        assert "    - 'chan_two'" in text
+        # соседнее поле того же блока и другой блок не тронуты
+        assert "  messages_per_channel: 100" in text
+        assert "linkedin:\n  auto_apply: false" in text
+
+
+def test_set_source_list_field_creates_key_if_missing():
+    with tempfile.TemporaryDirectory() as tmp:
+        config_file = Path(tmp) / "work_preferences.yaml"
+        config_file.write_text(
+            "telegram:\n  messages_per_channel: 100\n", encoding="utf-8"
+        )
+
+        set_source_list_field(config_file, "telegram", "channels", ["c1"])
+
+        text = config_file.read_text(encoding="utf-8")
+        assert "channels:\n    - 'c1'" in text
+        assert "messages_per_channel: 100" in text
+
+
+def test_set_source_list_field_creates_block_if_missing():
+    with tempfile.TemporaryDirectory() as tmp:
+        config_file = Path(tmp) / "work_preferences.yaml"
+        config_file.write_text("positions:\n  - QA\n", encoding="utf-8")
+
+        set_source_list_field(config_file, "telegram", "channels", ["c1"])
+
+        text = config_file.read_text(encoding="utf-8")
+        assert "telegram:\n  channels:\n    - 'c1'" in text
+
+
 if __name__ == "__main__":
     test_set_source_field_updates_existing_value()
     test_set_source_field_adds_field_to_existing_block()
@@ -174,4 +227,7 @@ if __name__ == "__main__":
     test_set_list_field_empty_list_writes_inline_brackets()
     test_set_list_field_creates_block_if_missing()
     test_set_list_field_escapes_single_quotes()
+    test_set_source_list_field_replaces_existing_nested_list()
+    test_set_source_list_field_creates_key_if_missing()
+    test_set_source_list_field_creates_block_if_missing()
     print("All tests passed.")

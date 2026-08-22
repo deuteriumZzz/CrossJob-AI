@@ -72,6 +72,18 @@ def test_status_lists_all_sources_never_run(client):
     assert hh["schedule_enabled"] is False
 
 
+def test_status_reports_readiness_per_source(client):
+    response = client.get("/api/status")
+    sources = {s["name"]: s for s in response.json()["sources"]}
+    # фикстура secrets.yaml не задаёт ни одного client_id/api_id/email
+    hh = sources["headhunter"]
+    assert hh["readiness"]["ready"] is False
+    assert set(hh["readiness"]["missing"]) == {"client_id", "client_secret"}
+    # geekjob/rabota_ru не требуют секретов вообще — всегда готовы
+    assert sources["geekjob"]["readiness"] == {"ready": True, "missing": []}
+    assert sources["rabota_ru"]["readiness"] == {"ready": True, "missing": []}
+
+
 def test_stats_empty_log_returns_zeros(client):
     response = client.get("/api/stats")
     assert response.json() == {"day": 0, "week": 0, "month": 0}
@@ -406,6 +418,21 @@ def test_post_search_settings_partial_update_leaves_others(client):
     body = response.json()
     assert body["positions"] == ["QA"]
     assert body["locations"] == ["Berlin"]
+
+
+def test_post_search_settings_updates_telegram_channels(client):
+    unset = client.get("/api/settings/search").json()
+    assert unset["telegram_channels"] == []
+
+    response = client.post(
+        "/api/settings/search",
+        json={"telegram_channels": ["chan_one", "chan_two"]},
+    )
+    assert response.status_code == 200
+    assert response.json()["telegram_channels"] == ["chan_one", "chan_two"]
+
+    follow_up = client.get("/api/settings/search")
+    assert follow_up.json()["telegram_channels"] == ["chan_one", "chan_two"]
 
 
 def test_post_generate_positions_saves_inferred_list(client):

@@ -210,6 +210,10 @@
             <span>Локации (одна на строку)</span>
             <textarea id="search-locations" rows="3" placeholder="Москва"></textarea>
           </label>
+          <label class="limit-field">
+            <span>Telegram-каналы (username без @, один на строку)</span>
+            <textarea id="search-telegram-channels" rows="3" placeholder="some_public_job_channel"></textarea>
+          </label>
         </div>
         <div class="filters">
           <button id="search-generate-positions" class="btn btn-secondary">Сгенерировать должности из резюме</button>
@@ -358,7 +362,7 @@
       <div class="table-wrap">
         <table class="settings-table">
           <thead>
-            <tr><th>Площадка</th><th>В расписании</th><th>Интервал, ч</th><th>auto_apply</th><th>Resume ID</th><th>Откликов за прогон</th><th>Дневной лимит</th><th></th></tr>
+            <tr><th>Площадка</th><th>Готовность</th><th>В расписании</th><th>Интервал, ч</th><th>auto_apply</th><th>Resume ID</th><th>Откликов за прогон</th><th>Дневной лимит</th><th></th></tr>
           </thead>
           <tbody id="settings-rows"></tbody>
         </table>

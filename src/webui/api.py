@@ -32,7 +32,11 @@ from main import create_resume_pdf_job_tailored as _create_resume_tailored
 from main import force_refresh_plain_text_resume as _refresh_plain_text
 from main import generate_positions_from_resume as _generate_positions
 from main import run_selected_sources
-from src.config_patch import set_list_field, set_source_field
+from src.config_patch import (
+    set_list_field,
+    set_source_field,
+    set_source_list_field,
+)
 from src.job_sources.applied_log import AppliedLog
 from src.job_sources.llm_provider import PROVIDER_MODELS
 from src.job_sources.llm_provider import get_active_provider as _active_llm
@@ -183,9 +187,36 @@ def post_setup_init(body: SetupInitRequest) -> dict:
     return result
 
 
+# Те же поля, что main.py уже требует при старте каждого источника
+# (см. "Missing X.client_id/client_secret in secrets.yaml" и
+# аналогичные ConfigError) — источник правды тот же, просто здесь
+# это заранее показывается в дашборде, а не падает при запуске.
+# None — источнику вообще не нужны секреты (скрейпинг без аккаунта).
+_CREDENTIAL_REQUIREMENTS: dict = {
+    "headhunter": ("client_id", "client_secret"),
+    "superjob": ("client_id", "client_secret"),
+    "zarplata": ("client_id", "client_secret"),
+    "geekjob": None,
+    "rabota_ru": None,
+    "telegram": ("api_id", "api_hash"),
+    "getmatch": ("email",),
+    "linkedin": ("email", "password"),
+}
+
+
+def _readiness(secrets: dict, source: str) -> dict:
+    required = _CREDENTIAL_REQUIREMENTS.get(source)
+    if required is None:
+        return {"ready": True, "missing": []}
+    block = secrets.get(source) or {}
+    missing = [field for field in required if not block.get(field)]
+    return {"ready": not missing, "missing": missing}
+
+
 @app.get("/api/status")
 def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
     state = load_state(ctx.output_folder)
+    secrets = ConfigValidator.load_yaml(ctx.secrets_file)
     sources = []
     for name, _ in ALL_SOURCES:
         source_config = ctx.config.get(name) or {}
@@ -208,6 +239,7 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
                 "job_max_applications": _effective_job_max_applications(
                     ctx.config, name
                 ),
+                "readiness": _readiness(secrets, name),
             }
         )
     return {
@@ -426,12 +458,17 @@ class SearchSettingsUpdate(BaseModel):
     company_blacklist: Optional[list[str]] = None
     title_blacklist: Optional[list[str]] = None
     location_blacklist: Optional[list[str]] = None
+    telegram_channels: Optional[list[str]] = None
 
 
 def _search_snapshot(ctx: AppContext) -> dict:
-    return {
+    snapshot = {
         field: ctx.config.get(field) or [] for field in _SEARCH_LIST_FIELDS
     }
+    snapshot["telegram_channels"] = (ctx.config.get("telegram") or {}).get(
+        "channels"
+    ) or []
+    return snapshot
 
 
 @app.get("/api/settings/search")
@@ -452,6 +489,10 @@ def post_search_settings(
         value = getattr(body, field)
         if value is not None:
             set_list_field(ctx.config_file, field, value)
+    if body.telegram_channels is not None:
+        set_source_list_field(
+            ctx.config_file, "telegram", "channels", body.telegram_channels
+        )
     ctx.reload_config()
     return _search_snapshot(ctx)
 
