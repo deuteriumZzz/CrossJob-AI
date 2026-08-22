@@ -1,11 +1,16 @@
+import time
+from pathlib import Path
 from typing import Optional
 
 import httpx
+from selenium.webdriver.common.by import By
 
 from src.job_sources.block_detection import raise_if_blocked
 from src.job_sources.user_agents import random_user_agent
+from src.utils.chrome_utils import init_browser
 
 GJ_BASE = "https://geekjob.ru"
+PAGE_LOAD_WAIT_SECONDS = 4
 
 
 class GeekjobClient:
@@ -37,3 +42,32 @@ class GeekjobClient:
         response.raise_for_status()
         raise_if_blocked(response)
         return response.text
+
+    def apply(self, vacancy_url: str, profile_dir: Path) -> bool:
+        """Best-effort, НЕ проверено на живом аккаунте (в отличие от
+        HH/GetMatch): анонимно на странице вакансии подтверждено
+        только, что раздел "Откликнуться на вакансию" требует входа
+        через OAuth (Google/VK/GitHub и т.д.) — Google-пароль
+        пользователя вводить нельзя (см. GeekjobSession), поэтому
+        реальную кнопку отправки после входа увидеть было нечем.
+        Ищем кнопку с текстом "Откликнуться" внутри самой страницы
+        (не якорную ссылку в шапке — та просто прокручивает к разделу)
+        — если её там нет, возвращаем False и вызывающий код
+        записывает как dry-run, ничего не ломая."""
+        driver = init_browser(profile_dir)
+        try:
+            driver.get(vacancy_url)
+            time.sleep(PAGE_LOAD_WAIT_SECONDS)
+            page_source = driver.page_source
+            raise_if_blocked(page_source)
+            buttons = driver.find_elements(
+                By.XPATH,
+                '//button[contains(normalize-space(), "Откликнуться")]',
+            )
+            if not buttons:
+                return False
+            buttons[0].click()
+            time.sleep(1)
+            return True
+        finally:
+            driver.quit()

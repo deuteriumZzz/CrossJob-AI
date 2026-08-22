@@ -34,6 +34,7 @@ from src.job_sources.block_detection import (
     mark_blocked,
 )
 from src.job_sources.cover_letter import generate_cover_letter_for_job
+from src.job_sources.geekjob.auth import GeekjobSession
 from src.job_sources.geekjob.client import GeekjobClient
 from src.job_sources.geekjob.source import GeekjobSource
 from src.job_sources.getmatch.auth import GetMatchSession
@@ -60,6 +61,7 @@ from src.job_sources.llm_usage import (
 from src.job_sources.llm_usage import (
     set_output_folder as set_llm_usage_output_folder,
 )
+from src.job_sources.rabota_ru.auth import RabotaRuSession
 from src.job_sources.rabota_ru.client import RabotaRuClient
 from src.job_sources.rabota_ru.source import RabotaRuSource
 from src.job_sources.reply_answerer import (
@@ -1353,12 +1355,14 @@ def search_and_apply_zarplata(parameters: dict, llm_api_key: str):
 
 def search_geekjob(parameters: dict, llm_api_key: str):
     """
-    Ищет на geekjob.ru вакансии по work_preferences.yaml и пишет
-    под каждую сопроводительное письмо на основе
-    data_folder/resume.pdf, готовое вставить вручную. Для geekjob
-    нет автоматического отклика (почему — см. докстринг
-    src/job_sources/geekjob/source.py) — каждое совпадение
-    записывается как dry-run.
+    Ищет на geekjob.ru вакансии по work_preferences.yaml. Если
+    geekjob.auto_apply — true, откликается кликом на кнопку
+    "Откликнуться" на странице вакансии — best-effort, НЕ проверено
+    на живом залогиненном аккаунте (вход у geekjob.ru только через
+    OAuth соцсетей, пароль пользователя здесь никогда не вводится,
+    см. GeekjobSession), в отличие от HH/GetMatch. Если кнопка не
+    найдётся — тихо считается dry-run, ничего не падает. Иначе — как
+    раньше, каждое совпадение просто пишется как dry-run.
     """
     data_folder: Path = parameters["dataFolder"]
     resume_pdf_path = data_folder / RESUME_PDF
@@ -1368,6 +1372,9 @@ def search_geekjob(parameters: dict, llm_api_key: str):
             f"resume as '{RESUME_PDF}' in {data_folder}."
         )
 
+    gj_preferences = parameters.get("geekjob") or {}
+    auto_apply = bool(gj_preferences.get("auto_apply", False))
+
     output_folder: Path = parameters["outputFileDirectory"]
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
@@ -1375,7 +1382,9 @@ def search_geekjob(parameters: dict, llm_api_key: str):
         logger.warning("geekjob.ru is cooling down after a block — skipping.")
         return
 
-    source: JobSource = GeekjobSource(GeekjobClient())
+    profile_dir = output_folder / ".chrome_profile_geekjob"
+    client = GeekjobClient()
+    source: JobSource = GeekjobSource(client)
     try:
         jobs = source.search(parameters)
     except PlatformBlockedError as e:
@@ -1388,6 +1397,9 @@ def search_geekjob(parameters: dict, llm_api_key: str):
         )
         return
     logger.info(f"Found {len(jobs)} matching geekjob.ru vacancies.")
+
+    if auto_apply:
+        GeekjobSession(profile_dir).ensure_logged_in()
 
     sent_count = 0
     job_max_applications = _job_max_applications(parameters, "geekjob")
@@ -1428,15 +1440,32 @@ def search_geekjob(parameters: dict, llm_api_key: str):
                 f"{job.company}, skipping this vacancy: {e}"
             )
             continue
-        logger.info(
-            f"[manual apply needed] {job.role} at {job.company} ({job.link})"
-        )
+
+        if auto_apply:
+            applied = client.apply(job.link, profile_dir)
+            if applied:
+                status: Literal["applied", "dry_run"] = "applied"
+                logger.info(
+                    f"Applied to {job.role} at {job.company} ({job.link})"
+                )
+            else:
+                status = "dry_run"
+                logger.warning(
+                    "Кнопка 'Откликнуться' не найдена на "
+                    f"{job.link} — записано как dry-run."
+                )
+        else:
+            status = "dry_run"
+            logger.info(
+                f"[manual apply needed] {job.role} at {job.company} "
+                f"({job.link})"
+            )
 
         applied_log.record(
             job,
             cover_letter,
             resume_id="",
-            status="dry_run",
+            status=status,
             score=fit.score,
             gaps=fit.gaps,
         )
@@ -1445,12 +1474,14 @@ def search_geekjob(parameters: dict, llm_api_key: str):
 
 def search_rabota_ru(parameters: dict, llm_api_key: str):
     """
-    Ищет на rabota.ru вакансии по work_preferences.yaml и пишет
-    под каждую сопроводительное письмо на основе
-    data_folder/resume.pdf, готовое вставить вручную. Для rabota.ru
-    нет автоматического отклика (почему — см. докстринг
-    src/job_sources/rabota_ru/source.py) — каждое совпадение
-    записывается как dry-run.
+    Ищет на rabota.ru вакансии по work_preferences.yaml. Если
+    rabota_ru.auto_apply — true, откликается кликом на кнопку
+    "Откликнуться" на странице вакансии — best-effort, НЕ проверено
+    на живом залогиненном аккаунте (вход у rabota.ru только через
+    OAuth/код, пароль пользователя здесь никогда не вводится, см.
+    RabotaRuSession), в отличие от HH/GetMatch. Если кнопка не
+    найдётся — тихо считается dry-run, ничего не падает. Иначе — как
+    раньше, каждое совпадение просто пишется как dry-run.
     """
     data_folder: Path = parameters["dataFolder"]
     resume_pdf_path = data_folder / RESUME_PDF
@@ -1460,6 +1491,9 @@ def search_rabota_ru(parameters: dict, llm_api_key: str):
             f"resume as '{RESUME_PDF}' in {data_folder}."
         )
 
+    rr_preferences = parameters.get("rabota_ru") or {}
+    auto_apply = bool(rr_preferences.get("auto_apply", False))
+
     output_folder: Path = parameters["outputFileDirectory"]
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
@@ -1467,7 +1501,9 @@ def search_rabota_ru(parameters: dict, llm_api_key: str):
         logger.warning("rabota.ru is cooling down after a block — skipping.")
         return
 
-    source: JobSource = RabotaRuSource(RabotaRuClient())
+    profile_dir = output_folder / ".chrome_profile_rabota_ru"
+    client = RabotaRuClient()
+    source: JobSource = RabotaRuSource(client)
     try:
         jobs = source.search(parameters)
     except PlatformBlockedError as e:
@@ -1480,6 +1516,9 @@ def search_rabota_ru(parameters: dict, llm_api_key: str):
         )
         return
     logger.info(f"Found {len(jobs)} matching rabota.ru vacancies.")
+
+    if auto_apply:
+        RabotaRuSession(profile_dir).ensure_logged_in()
 
     sent_count = 0
     job_max_applications = _job_max_applications(parameters, "rabota_ru")
@@ -1520,15 +1559,32 @@ def search_rabota_ru(parameters: dict, llm_api_key: str):
                 f"{job.company}, skipping this vacancy: {e}"
             )
             continue
-        logger.info(
-            f"[manual apply needed] {job.role} at {job.company} ({job.link})"
-        )
+
+        if auto_apply:
+            applied = client.apply(job.link, profile_dir)
+            if applied:
+                status: Literal["applied", "dry_run"] = "applied"
+                logger.info(
+                    f"Applied to {job.role} at {job.company} ({job.link})"
+                )
+            else:
+                status = "dry_run"
+                logger.warning(
+                    "Кнопка 'Откликнуться' не найдена на "
+                    f"{job.link} — записано как dry-run."
+                )
+        else:
+            status = "dry_run"
+            logger.info(
+                f"[manual apply needed] {job.role} at {job.company} "
+                f"({job.link})"
+            )
 
         applied_log.record(
             job,
             cover_letter,
             resume_id="",
-            status="dry_run",
+            status=status,
             score=fit.score,
             gaps=fit.gaps,
         )
@@ -2384,11 +2440,11 @@ def handle_inquiries(
                 )
                 search_and_apply_zarplata(parameters, llm_api_key)
 
-            if "Search on geekjob.ru (manual apply)" == selected_actions:
+            if "Search & Apply on geekjob.ru" == selected_actions:
                 logger.info("Searching geekjob.ru...")
                 search_geekjob(parameters, llm_api_key)
 
-            if "Search on rabota.ru (manual apply)" == selected_actions:
+            if "Search & Apply on rabota.ru" == selected_actions:
                 logger.info("Searching rabota.ru...")
                 search_rabota_ru(parameters, llm_api_key)
 
@@ -2451,8 +2507,8 @@ def prompt_user_action() -> str:
                     "Search & Apply on HeadHunter",
                     "Search & Apply on SuperJob",
                     "Search & Apply on Zarplata.ru",
-                    "Search on geekjob.ru (manual apply)",
-                    "Search on rabota.ru (manual apply)",
+                    "Search & Apply on geekjob.ru",
+                    "Search & Apply on rabota.ru",
                     "Search Telegram channels (manual reply)",
                     "Search & Apply on GetMatch",
                     "Search & Apply on LinkedIn",
