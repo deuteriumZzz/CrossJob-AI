@@ -7,7 +7,16 @@
 import httpx
 import pytest
 
-import desktop_app
+pytest.importorskip(
+    "webview",
+    reason=(
+        "pywebview needs system GTK/WebKit libraries to import on "
+        "Linux (pip alone doesn't provide them) — not installed on "
+        "CI runners, same reason langchain-groq/etc. are importorskip'd."
+    ),
+)
+
+import desktop_app  # noqa: E402
 
 
 def test_wait_until_ready_succeeds_once_endpoint_responds_ok(monkeypatch):
