@@ -315,6 +315,31 @@
 
       <div class="panel">
         <h3>Telegram</h3>
+        <p class="muted small">
+          Нужен для уведомлений (новые ответы работодателей, дневной лимит откликов исчерпан,
+          расходы на LLM) на всех площадках, а для HeadHunter — ещё и для подтверждения
+          автозаполнения внешних анкет (Google Forms по ссылке из чата с работодателем):
+          бот присылает черновик ответов и ждёт вашего "да &lt;id&gt;" / "заново &lt;id&gt;" /
+          "правка &lt;id&gt; &lt;номер&gt; &lt;текст&gt;" в ответ, прежде чем что-то отправить.
+        </p>
+        <details class="muted small">
+          <summary>Как получить токен и chat_id (один раз)</summary>
+          <ol>
+            <li>В Telegram напишите <strong>@BotFather</strong>, отправьте <code>/newbot</code>,
+              задайте имя — в ответ придёт <em>telegram_bot_token</em>.</li>
+            <li>Напишите своему новому боту любое сообщение (например "привет") — иначе бот не
+              сможет писать вам первым.</li>
+            <li>Откройте в браузере
+              <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> и найдите
+              <code>"chat":{"id": ...}</code> — это <em>telegram_chat_id</em>.</li>
+            <li>Впишите оба значения в <code>data_folder/secrets.yaml</code>:
+              <pre>notifications:
+  telegram_bot_token: "..."
+  telegram_chat_id: "..."</pre>
+              (правится только руками в файле — то же самое, что и ключ LLM-провайдера выше).
+            </li>
+          </ol>
+        </details>
         <div class="filters">
           <button id="notif-test" class="btn btn-secondary">
             <svg viewBox="0 0 20 20" fill="none"><path d="M17.5 2.5 2 8.8l5 2 1.7 5.7 3-3.6 3.9 3.1 1.9-13.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
