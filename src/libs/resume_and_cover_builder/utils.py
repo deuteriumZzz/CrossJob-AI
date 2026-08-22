@@ -7,18 +7,13 @@ LLM-классов пакета: логирование каждого вызо�
 
 # app/libs/resume_and_cover_builder/utils.py
 import json
-import re
-import time
 from datetime import datetime
 from typing import Any, Dict, List, cast
 
-import openai
 from langchain_core.messages import BaseMessage
 from langchain_core.messages.ai import AIMessage
 from langchain_core.prompt_values import StringPromptValue
 from langchain_openai import ChatOpenAI
-from loguru import logger
-from requests.exceptions import HTTPError as HTTPStatusError
 
 from .config import global_config
 
@@ -95,70 +90,26 @@ class LoggerChatModel:
         self.llm = llm
 
     def __call__(self, messages: List[Dict[str, str]]) -> BaseMessage:
-        max_retries = 15
-        retry_delay = 10
-
-        for attempt in range(max_retries):
-            try:
-                # Объявленный тип возврата ChatOpenAI.invoke — общий
-                # BaseMessage, но chat-модель на практике всегда
-                # возвращает AIMessage; сужение типа здесь фиксирует
-                # это допущение, а не просто глушит проверку mypy.
-                reply = cast(AIMessage, self.llm.invoke(messages))
-                parsed_reply = self.parse_llmresult(reply)
-                LLMLogger.log_request(
-                    prompts=messages, parsed_reply=parsed_reply
-                )
-                return reply
-            except (openai.RateLimitError, HTTPStatusError) as err:
-                if (
-                    isinstance(err, HTTPStatusError)
-                    and err.response.status_code == 429
-                ):
-                    logger.warning(
-                        f"HTTP 429 Too Many Requests: Waiting for "
-                        f"{retry_delay} seconds before retrying "
-                        f"(Attempt {attempt + 1}/{max_retries})..."
-                    )
-                    time.sleep(retry_delay)
-                    retry_delay *= 2
-                else:
-                    wait_time = self.parse_wait_time_from_error_message(
-                        str(err)
-                    )
-                    logger.warning(
-                        f"Rate limit exceeded or API error. Waiting "
-                        f"for {wait_time} seconds before retrying "
-                        f"(Attempt {attempt + 1}/{max_retries})..."
-                    )
-                    time.sleep(wait_time)
-            except Exception as e:
-                logger.error(
-                    f"Unexpected error occurred: {str(e)}, retrying "
-                    f"in {retry_delay} seconds... "
-                    f"(Attempt {attempt + 1}/{max_retries})"
-                )
-                time.sleep(retry_delay)
-                retry_delay *= 2
-
-        logger.critical(
-            "Failed to get a response from the model after multiple attempts."
-        )
-        raise Exception(
-            "Failed to get a response from the model after multiple attempts."
-        )
-
-    @staticmethod
-    def parse_wait_time_from_error_message(error_message: str) -> int:
-        """Пытается вытащить подсказку «повторить через N сек» из
-        текста ошибки rate-limit (этого метода вообще не было
-        раньше — обращение к нему было готовым багом
-        AttributeError на этом запасном пути); если подсказки нет,
-        возвращает фиксированное значение по умолчанию."""
-        match = re.search(r"(\d+(?:\.\d+)?)\s*s(?:ec)?", error_message)
-        if match:
-            return max(1, int(float(match.group(1))))
-        return 30
+        """Раньше здесь был свой цикл до 15 повторов с растущей паузой
+        (10с, 20с, 40с...) на 429/любую ошибку — вслепую поверх
+        llm_provider.get_chat_llm(), который уже сам переключается на
+        другого провайдера при рейт-лимите (см. _ChatModelWithFallbacks
+        и max_retries=0 там же). Два независимых слоя ретраев на одну
+        и ту же ошибку складывались: получасовая генерация одного
+        письма на живом прогоне (подтверждено сегодня на HH и
+        GetMatch) — не рейт-лимит сам по себе, а именно этот старый
+        цикл, слепо повторяющий уже провалившийся с обеих сторон вызов
+        по 10-20 минут вместо того, чтобы просто отдать ошибку вызывающему
+        коду (там уже есть свой try/except — "Failed to generate cover
+        letter... skipping")."""
+        # Объявленный тип возврата ChatOpenAI.invoke — общий
+        # BaseMessage, но chat-модель на практике всегда возвращает
+        # AIMessage; сужение типа здесь фиксирует это допущение, а не
+        # просто глушит проверку mypy.
+        reply = cast(AIMessage, self.llm.invoke(messages))
+        parsed_reply = self.parse_llmresult(reply)
+        LLMLogger.log_request(prompts=messages, parsed_reply=parsed_reply)
+        return reply
 
     def parse_llmresult(self, llmresult: AIMessage) -> Dict[str, Any]:
         # Приводим результат LLM к структурированному виду

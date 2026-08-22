@@ -35,6 +35,17 @@ def generate_cover_letter_for_job(
     )
     global_config.STRINGS_MODULE_NAME = "strings"
     global_config.API_KEY = llm_api_key
+    # LOG_OUTPUT_FILE_PATH раньше выставлял только дашбордовый
+    # ResumeFacade (кнопка "Сгенерировать") — обычный автооткликер
+    # (main.py --auto ...) никогда через него не проходит, так что
+    # LLMLogger.log_request падал на None/"open_ai_calls.json" при
+    # КАЖДОМ письме. Раньше это тихо прятал старый 15-попыточный
+    # ретрай-цикл в LoggerChatModel (см. utils.py) — он слепо повторял
+    # эту детерминированную ошибку как будто это рейт-лимит, отсюда и
+    # были прогоны по 20+ минут на одно письмо. Выставляем сами, а не
+    # полагаемся на то, что кто-то сделал это раньше нас.
+    if global_config.LOG_OUTPUT_FILE_PATH is None:
+        global_config.LOG_OUTPUT_FILE_PATH = resume_pdf_path.parent
 
     resume_text = extract_text(str(resume_pdf_path))
 
