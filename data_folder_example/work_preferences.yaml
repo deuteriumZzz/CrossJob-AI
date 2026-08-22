@@ -61,17 +61,22 @@ location_blacklist:
 # пока его явно не включили.
 
 # Optional: only needed for the "Search & Apply on HeadHunter" action.
+# Login is a real browser window (phone number + SMS code, see
+# secrets.yaml), not an API — so there's no resume_id field here:
+# whichever resume hh.ru shows as default in the response popup is
+# what gets used. Search always covers all of Russia regardless of any
+# city filter saved on your account, since remote work has no region.
 headhunter:
   # Set to true to actually submit applications instead of a dry run.
   auto_apply: false
-  # An existing resume ID from your hh.ru profile (used as-is, not regenerated).
-  resume_id: "your-hh-ru-resume-id"
   schedule_enabled: false
   interval_hours: 3
-  # Optional: auto-reply to employer messages in the negotiation
-  # thread (salary questions, screening questions) via LLM. Off by
-  # default like every other auto_* flag — read docs/GUIDE.md first,
-  # this hits a not-yet-verified-live part of the HH API.
+  # Optional: auto-reply to employer questions in the hh.ru chat via
+  # LLM (salary questions, screening questions). Off by default like
+  # every other auto_* flag — read docs/GUIDE.md first, this is a
+  # best-effort browser flow, not yet verified against a live chat.
+  # If the employer's message contains a link (e.g. an external form),
+  # it's never auto-filled — you get a Telegram notification instead.
   auto_reply: false
 
 # Optional: only needed for the "Search & Apply on SuperJob" action.

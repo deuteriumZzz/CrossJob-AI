@@ -1,6 +1,7 @@
 from typing import Optional
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.runnables.fallbacks import RunnableWithFallbacks
 from pydantic import SecretStr
 
 from config import LLM_API_URL, LLM_MODEL, LLM_MODEL_TYPE
@@ -9,6 +10,8 @@ from src.job_sources.llm_usage import UsageCallback, get_output_folder
 _provider_override: Optional[str] = None
 _model_override: Optional[str] = None
 _base_url_override: Optional[str] = None
+_fallback_keys: dict = {}
+_fallback_mode: str = "auto"  # "auto" | "free" | "paid"
 
 # ponytail: free/paid + актуальность ID — сверено веб-поиском 2026-08-21
 # (свежие модели/цены/депрекейшены меняются быстрее, чем стоит
@@ -38,11 +41,14 @@ PROVIDER_MODELS: dict = {
         },
         {"id": "openai/gpt-oss-20b", "free": True, "recommended": False},
     ],
-    # Gemini 1.5 снят с прайс-листа (заменён 2.x/3.x); 2.5-flash
-    # уходит на пенсию 2026-10-16 — на замену уже есть 3.7-flash.
+    # gemini-2.5-flash отключён для новых аккаунтов (подтверждено
+    # живым вызовом 2026-08-22: 404 "no longer available to new
+    # users", Google предлагает 3.6-flash) — обновлено на актуальную
+    # линейку. 3.6-flash доступен на бесплатном тарифе (~15 RPM/1500
+    # RPD, проверено вручную живым ключом).
     "gemini": [
+        {"id": "gemini-3.6-flash", "free": True, "recommended": True},
         {"id": "gemini-3.7-flash", "free": False, "recommended": False},
-        {"id": "gemini-2.5-flash", "free": True, "recommended": True},
         {"id": "gemini-2.5-flash-lite", "free": True, "recommended": False},
     ],
     "deepseek": [
@@ -73,6 +79,180 @@ def set_provider_override(
     _provider_override = provider
     _model_override = model
     _base_url_override = base_url
+
+
+def set_fallback_keys(keys: Optional[dict]) -> None:
+    """Ключи остальных настроенных провайдеров (secrets.yaml:
+    llm_api_keys.<provider>), кроме активного — вызывается один раз
+    при старте вместе с set_provider_override(), тем же приёмом.
+    get_chat_llm() оборачивает основную модель в них через
+    .with_fallbacks(): 429/insufficient_quota от одного провайдера
+    не блокирует прогон на минуты ретраями, а сразу уходит на
+    следующий настроенный ключ. См. set_fallback_mode() — бесплатная
+    и платная цепочки не смешиваются, а выбираются отдельно."""
+    global _fallback_keys
+    _fallback_keys = dict(keys or {})
+
+
+def set_fallback_mode(mode: Optional[str]) -> None:
+    """"free" — в фолбэк идут только бесплатные модели настроенных
+    провайдеров (переключение никогда не начнёт неожиданно тратить
+    деньги); "paid" — только платные; "auto" (по умолчанию) — все
+    настроенные провайдеры, бесплатные впереди платных. Задаётся
+    через llm.mode в work_preferences.yaml (дашборд — рядом с
+    выбором провайдера), тем же приёмом, что set_provider_override()."""
+    global _fallback_mode
+    _fallback_mode = mode or "auto"
+
+
+def _recommended_model(provider: str) -> Optional[dict]:
+    models = PROVIDER_MODELS.get(provider) or []
+    return next((m for m in models if m.get("recommended")), None) or (
+        models[0] if models else None
+    )
+
+
+def _build_llm(
+    provider: str,
+    api_key: str,
+    model: Optional[str],
+    base_url: Optional[str],
+    temperature: float,
+) -> tuple[BaseChatModel, str]:
+    """Провайдер-специфичное создание chat-модели — вынесено из
+    get_chat_llm(), чтобы одна и та же логика строила и основную
+    модель, и каждый фолбэк в _build_fallback_llms(). Модель по
+    умолчанию берётся из PROVIDER_MODELS (_recommended_model), а не
+    захардкожена по месту — иначе дефолт и таблица PROVIDER_MODELS
+    расходятся при обновлении одного без другого (так уже было с
+    gemini-2.5-flash, снятым с публичного доступа — см. комментарий
+    там). max_retries=0 — подтверждено живым прогоном: SDK-клиенты
+    сами ретраят 429 с backoff по 10-30с ПЕРЕД тем, как исключение
+    дойдёт до .with_fallbacks(), из-за чего переключение на другого
+    провайдера ждало минуты вместо секунд."""
+    if provider == "groq":
+        from langchain_groq import ChatGroq
+
+        resolved_model = model or _recommended_model(provider)["id"]
+        return (
+            ChatGroq(
+                model=resolved_model,
+                api_key=SecretStr(api_key),
+                temperature=temperature,
+                max_retries=0,
+            ),
+            resolved_model,
+        )
+    if provider == "gemini":
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        resolved_model = model or _recommended_model(provider)["id"]
+        return (
+            ChatGoogleGenerativeAI(
+                model=resolved_model,
+                google_api_key=SecretStr(api_key),
+                temperature=temperature,
+                max_retries=0,
+            ),
+            resolved_model,
+        )
+    if provider == "deepseek":
+        from langchain_openai import ChatOpenAI
+
+        resolved_model = model or _recommended_model(provider)["id"]
+        return (
+            ChatOpenAI(
+                model=resolved_model,
+                api_key=SecretStr(api_key),
+                base_url=base_url or "https://api.deepseek.com",
+                temperature=temperature,
+                max_retries=0,
+            ),
+            resolved_model,
+        )
+    if provider == "ollama":
+        from langchain_ollama import ChatOllama
+
+        resolved_model = model or _recommended_model(provider)["id"]
+        return (
+            ChatOllama(
+                model=resolved_model, base_url=base_url, temperature=temperature
+            ),
+            resolved_model,
+        )
+    from langchain_openai import ChatOpenAI
+
+    resolved_model = model or _recommended_model("openai")["id"]
+    return (
+        ChatOpenAI(
+            model=resolved_model,
+            api_key=SecretStr(api_key),
+            temperature=temperature,
+            max_retries=0,
+        ),
+        resolved_model,
+    )
+
+
+def _build_fallback_llms(
+    exclude_provider: str, temperature: float
+) -> list[BaseChatModel]:
+    others = [p for p in _fallback_keys if p != exclude_provider]
+
+    if _fallback_mode == "free":
+        others = [
+            p for p in others if (_recommended_model(p) or {}).get("free")
+        ]
+    elif _fallback_mode == "paid":
+        others = [
+            p for p in others if not (_recommended_model(p) or {}).get("free")
+        ]
+    else:
+        others.sort(
+            key=lambda p: not (_recommended_model(p) or {}).get("free", False)
+        )
+
+    fallbacks = []
+    for provider in others:
+        api_key = _fallback_keys.get(provider)
+        if not api_key:
+            continue
+        try:
+            llm, resolved_model = _build_llm(
+                provider, api_key, None, None, temperature
+            )
+        except Exception:
+            continue
+        output_folder = get_output_folder()
+        if output_folder is not None:
+            llm.callbacks = [
+                UsageCallback(output_folder, provider, resolved_model)
+            ]
+        fallbacks.append(llm)
+    return fallbacks
+
+
+class _ChatModelWithFallbacks(RunnableWithFallbacks):
+    """RunnableWithFallbacks.__getattr__ (общий Runnable-прокси)
+    падает на Python 3.9 при вызове with_structured_output()
+    (job_fit.py:score_job_fit): typing.get_type_hints() внутри
+    _returns_runnable() не резолвит синтаксис "X | Y" в тайп-хинтах
+    свежего langchain-core на 3.9 — подтверждено живым падением
+    (TypeError: unsupported operand type(s) for |). with_structured_
+    output переопределён здесь вручную в обход этой генерик-проверки:
+    применяет её к основной модели и к каждому фолбэку, оборачивая
+    результат в новый экземпляр того же класса."""
+
+    def with_structured_output(self, *args, **kwargs):
+        return _ChatModelWithFallbacks(
+            runnable=self.runnable.with_structured_output(*args, **kwargs),
+            fallbacks=[
+                f.with_structured_output(*args, **kwargs)
+                for f in self.fallbacks
+            ],
+            exceptions_to_handle=self.exceptions_to_handle,
+            exception_key=self.exception_key,
+        )
 
 
 def get_active_provider() -> str:
@@ -110,59 +290,20 @@ def get_chat_llm(
         base_url = _base_url_override or (
             LLM_API_URL or None if is_config_default else None
         )
+    if resolved_provider not in PROVIDER_MODELS:
+        resolved_provider = "openai"
     provider = resolved_provider
-
-    if provider == "groq":
-        from langchain_groq import ChatGroq
-
-        resolved_model = model or "openai/gpt-oss-120b"
-        llm: BaseChatModel = ChatGroq(
-            model=resolved_model,
-            api_key=SecretStr(api_key),
-            temperature=temperature,
-        )
-    elif provider == "gemini":
-        from langchain_google_genai import ChatGoogleGenerativeAI
-
-        resolved_model = model or "gemini-2.5-flash"
-        llm = ChatGoogleGenerativeAI(
-            model=resolved_model,
-            google_api_key=SecretStr(api_key),
-            temperature=temperature,
-        )
-    elif provider == "deepseek":
-        from langchain_openai import ChatOpenAI
-
-        resolved_model = model or "deepseek-chat"
-        llm = ChatOpenAI(
-            model=resolved_model,
-            api_key=SecretStr(api_key),
-            base_url=base_url or "https://api.deepseek.com",
-            temperature=temperature,
-        )
-    elif provider == "ollama":
-        from langchain_ollama import ChatOllama
-
-        resolved_model = model or "llama3"
-        llm = ChatOllama(
-            model=resolved_model,
-            base_url=base_url,
-            temperature=temperature,
-        )
-    else:
-        from langchain_openai import ChatOpenAI
-
-        provider = "openai"
-        resolved_model = model or "gpt-4o-mini"
-        llm = ChatOpenAI(
-            model=resolved_model,
-            api_key=SecretStr(api_key),
-            temperature=temperature,
-        )
+    llm, resolved_model = _build_llm(
+        provider, api_key, model, base_url, temperature
+    )
 
     output_folder = get_output_folder()
     if output_folder is not None:
         llm.callbacks = [
             UsageCallback(output_folder, provider, resolved_model)
         ]
+
+    fallbacks = _build_fallback_llms(provider, temperature)
+    if fallbacks:
+        llm = _ChatModelWithFallbacks(runnable=llm, fallbacks=fallbacks)
     return llm

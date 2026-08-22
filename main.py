@@ -41,9 +41,14 @@ from src.job_sources.getmatch.auth import GetMatchSession
 from src.job_sources.getmatch.client import GetMatchClient
 from src.job_sources.getmatch.source import GetMatchSource
 from src.job_sources.github_context import fetch_github_summary
-from src.job_sources.headhunter.auth import HHAuth
-from src.job_sources.headhunter.client import HeadHunterClient
-from src.job_sources.headhunter.source import HeadHunterSource
+from src.job_sources.headhunter.browser_client import HeadHunterBrowserClient
+from src.job_sources.headhunter.browser_replies import (
+    fetch_new_employer_messages,
+    find_external_link,
+    send_reply,
+)
+from src.job_sources.headhunter.browser_session import HeadHunterSession
+from src.job_sources.headhunter.browser_source import HeadHunterBrowserSource
 from src.job_sources.job_fit import classify_fit, score_job_fit
 from src.job_sources.linkedin.answerer import EasyApplyAnswerer
 from src.job_sources.linkedin.auth import LinkedInSession
@@ -51,6 +56,12 @@ from src.job_sources.linkedin.easy_apply import run_easy_apply
 from src.job_sources.linkedin.source import LinkedInSource
 from src.job_sources.llm_provider import (
     get_active_provider as get_active_llm_provider,
+)
+from src.job_sources.llm_provider import (
+    set_fallback_keys as set_llm_fallback_keys,
+)
+from src.job_sources.llm_provider import (
+    set_fallback_mode as set_llm_fallback_mode,
 )
 from src.job_sources.llm_provider import (
     set_provider_override as set_llm_provider_override,
@@ -65,7 +76,6 @@ from src.job_sources.rabota_ru.auth import RabotaRuSession
 from src.job_sources.rabota_ru.client import RabotaRuClient
 from src.job_sources.rabota_ru.source import RabotaRuSource
 from src.job_sources.reply_answerer import (
-    build_hh_resume_summary,
     build_preferences_summary,
     generate_reply,
 )
@@ -880,13 +890,15 @@ def apply_llm_provider_override(parameters: dict) -> None:
     get_chat_llm(), забрали новый провайдер без перезапуска процесса.
     llm: отсутствует или пуст — override сбрасывается (провайдер по
     умолчанию — config.LLM_MODEL_TYPE), а не остаётся зависшим от
-    предыдущего вызова."""
+    предыдущего вызова. llm.mode — free/paid/auto, см.
+    llm_provider.set_fallback_mode()."""
     llm_config = parameters.get("llm") or {}
     set_llm_provider_override(
         llm_config.get("provider"),
         llm_config.get("model"),
         llm_config.get("base_url"),
     )
+    set_llm_fallback_mode(llm_config.get("mode"))
 
 
 def _daily_limit(parameters: dict, source: Optional[str] = None) -> int:
@@ -980,11 +992,16 @@ def _resolve_resume_id(
 
 def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
     """
-    Ищет на HeadHunter вакансии по work_preferences.yaml, пишет
-    под каждую персональное сопроводительное письмо на основе
-    data_folder/resume.pdf и либо откликается (при
-    headhunter.auto_apply: true), либо просто логирует и
-    записывает как dry-run.
+    Ищет на HeadHunter вакансии по work_preferences.yaml через
+    настоящую браузерную сессию hh.ru (вход по номеру телефона + SMS —
+    см. HeadHunterSession, официальный OAuth API требует регистрации
+    отдельного приложения, которое HH одобряет не сразу и не
+    гарантированно), пишет под каждую подходящую вакансию персональное
+    сопроводительное письмо на основе data_folder/resume.pdf и либо
+    откликается кликом (при headhunter.auto_apply: true), либо просто
+    логирует и записывает как dry-run. Поиск всегда идёт по всей
+    России без фильтра по городу (area=113 в HeadHunterBrowserClient) —
+    кандидат работает удалённо, конкретный регион не нужен.
     """
     data_folder: Path = parameters["dataFolder"]
     resume_pdf_path = data_folder / RESUME_PDF
@@ -994,28 +1011,32 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
             f"resume as '{RESUME_PDF}' in {data_folder}."
         )
 
-    secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
-    hh_secrets = secrets.get("headhunter") or {}
-    client_id = hh_secrets.get("client_id")
-    client_secret = hh_secrets.get("client_secret")
-    if not client_id or not client_secret:
-        raise ConfigError(
-            "Missing headhunter.client_id/client_secret in secrets.yaml"
-        )
-
     hh_preferences = parameters.get("headhunter") or {}
     auto_apply = bool(hh_preferences.get("auto_apply", False))
-    resume_id = hh_preferences.get("resume_id")
 
     output_folder: Path = parameters["outputFileDirectory"]
-    auth = HHAuth(client_id, client_secret, output_folder / ".hh_token.json")
-    client = HeadHunterClient(auth.get_access_token())
-    if auto_apply:
-        resume_id = _resolve_resume_id(client, resume_id, "headhunter")
+    profile_dir = output_folder / ".chrome_profile_headhunter"
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
-    source: JobSource = HeadHunterSource(client)
-    jobs = source.search(parameters)
+    if is_still_blocked(output_folder, "headhunter"):
+        logger.warning("hh.ru is cooling down after a block — skipping.")
+        return
+
+    HeadHunterSession(profile_dir).ensure_logged_in()
+
+    client = HeadHunterBrowserClient(profile_dir)
+    source: JobSource = HeadHunterBrowserSource(client)
+    try:
+        jobs = source.search(parameters)
+    except PlatformBlockedError as e:
+        logger.error(f"hh.ru appears to have blocked us: {e}")
+        mark_blocked(output_folder, "headhunter")
+        notify(
+            parameters,
+            f"hh.ru: похоже на блокировку ({e}). "
+            "Площадка поставлена на паузу на 24ч.",
+        )
+        return
     logger.info(f"Found {len(jobs)} matching HeadHunter vacancies.")
 
     daily_limit = randomized_daily_limit(
@@ -1074,32 +1095,51 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
                 f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
             )
 
-        try:
-            cover_letter = generate_cover_letter_for_job(
-                resume_pdf_path, job, llm_api_key
-            )
-        except Exception as e:
-            logger.exception(
-                f"Failed to generate cover letter for {job.role} at "
-                f"{job.company}, skipping this vacancy: {e}"
-            )
-            continue
-
         if auto_apply:
             wait_before_apply()
-            client.apply(job.external_id, resume_id or "", cover_letter)
-            status: Literal["applied", "dry_run"] = "applied"
-            logger.info(f"Applied to {job.role} at {job.company} ({job.link})")
+
+            def _cover_letter_fn() -> str:
+                return generate_cover_letter_for_job(
+                    resume_pdf_path, job, llm_api_key
+                )
+
+            try:
+                applied, cover_letter = client.apply(job.link, _cover_letter_fn)
+            except Exception as e:
+                logger.exception(
+                    f"Failed to apply/generate cover letter for {job.role} "
+                    f"at {job.company}, skipping this vacancy: {e}"
+                )
+                continue
+            if applied:
+                status: Literal["applied", "dry_run"] = "applied"
+                logger.info(
+                    f"Applied to {job.role} at {job.company} ({job.link})"
+                )
+            else:
+                status = "dry_run"
+                logger.warning(
+                    "Кнопка 'Откликнуться' не найдена на "
+                    f"{job.link} — записано как dry-run."
+                )
         else:
+            try:
+                cover_letter = generate_cover_letter_for_job(
+                    resume_pdf_path, job, llm_api_key
+                )
+            except Exception as e:
+                logger.exception(
+                    f"Failed to generate cover letter for {job.role} at "
+                    f"{job.company}, skipping this vacancy: {e}"
+                )
+                continue
             status = "dry_run"
             logger.info(
                 f"[dry run] Would apply to {job.role} at {job.company} "
                 f"({job.link})"
             )
 
-        applied_log.record(
-            job, cover_letter, resume_id or "", status, fit.score, fit.gaps
-        )
+        applied_log.record(job, cover_letter, "", status, fit.score, fit.gaps)
         sent_count += 1
 
 
@@ -2049,16 +2089,20 @@ def notify(parameters: dict, text: str) -> None:
 
 def _answer_headhunter_messages(
     parameters: dict,
-    client: HeadHunterClient,
+    driver,
     applied_log: AppliedLog,
     llm_api_key: str,
 ) -> None:
-    """Автоответ на сообщения работодателя в переписке HH — НЕ
-    проверено на живом аккаунте (см. докстринги
-    HeadHunterClient.list_negotiation_messages/
-    send_negotiation_message). Выключено по умолчанию: включается
-    через headhunter.auto_reply в work_preferences.yaml, как и
-    остальные auto_*-флаги в проекте."""
+    """Автоответ на сообщения работодателя в чате hh.ru — через ту же
+    браузерную сессию, что и поиск/отклик (см. HeadHunterSession и
+    browser_replies.py, НЕ проверено на живом аккаунте, как и
+    остальные best-effort браузерные места этого источника).
+    Выключено по умолчанию: включается через headhunter.auto_reply в
+    work_preferences.yaml, как и остальные auto_*-флаги в проекте.
+    Если работодатель прислал ссылку на внешнюю форму — сюда мы не
+    заходим и ничего не заполняем, только уведомляем пользователя
+    (см. find_external_link): вводить его личные данные на незнакомом
+    сайте без явного подтверждения нельзя."""
     hh_preferences = parameters.get("headhunter") or {}
     if not hh_preferences.get("auto_reply"):
         return
@@ -2067,16 +2111,6 @@ def _answer_headhunter_messages(
     resume_pdf_path = data_folder / RESUME_PDF
     if not resume_pdf_path.exists():
         return
-
-    resume_id = hh_preferences.get("resume_id")
-    hh_resume_summary = "Недоступно."
-    if resume_id:
-        try:
-            hh_resume_summary = build_hh_resume_summary(
-                client.get_resume(resume_id)
-            )
-        except Exception as e:
-            logger.warning(f"Failed to fetch HH resume for context: {e}")
 
     secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
     github_config = secrets.get("github") or {}
@@ -2090,55 +2124,55 @@ def _answer_headhunter_messages(
 
     preferences_summary = build_preferences_summary(parameters)
 
-    for negotiation in client.list_negotiations():
-        vacancy = negotiation.get("vacancy") or {}
-        external_id = str(vacancy.get("id") or "")
-        negotiation_id = str(negotiation.get("id") or "")
-        if not external_id or not negotiation_id:
-            continue
+    try:
+        messages = fetch_new_employer_messages(driver)
+    except Exception as e:
+        logger.warning(f"Failed to fetch hh.ru chat messages: {e}")
+        return
+
+    for message in messages:
+        external_id = message["external_id"]
+        message_id = message["message_id"]
 
         entry = applied_log.find_by_source_and_external_id(
             "headhunter", external_id
         )
         if entry is None or entry["status"] != "applied":
             continue
+        if message_id == entry.get("last_replied_message_id"):
+            continue
 
-        try:
-            messages = client.list_negotiation_messages(negotiation_id)
-        except Exception as e:
-            logger.warning(
-                f"Failed to fetch messages for {entry['company']}: {e}"
+        external_link = find_external_link(message["text"])
+        if external_link:
+            logger.info(
+                f"{entry['company']} — {entry['title']}: работодатель "
+                f"прислал ссылку на внешнюю форму ({external_link}) — "
+                "заполняется вручную, автоматически не трогаем."
             )
-            continue
-        if not messages:
-            continue
-
-        last_message = messages[-1]
-        message_id = str(last_message.get("id") or "")
-        author_type = (last_message.get("author") or {}).get(
-            "participant_type"
-        )
-        message_text = last_message.get("text") or ""
-        if (
-            not message_id
-            or not message_text
-            or author_type == "applicant"
-            or message_id == entry.get("last_replied_message_id")
-        ):
+            notify(
+                parameters,
+                "Работодатель просит заполнить форму по ссылке: "
+                f"{entry['company']} — {entry['title']}\n{external_link}",
+            )
+            applied_log.mark_replied("headhunter", external_id, message_id)
             continue
 
         try:
             reply_text = generate_reply(
                 resume_pdf_path,
-                message_text,
+                message["text"],
                 entry["title"],
                 entry["company"],
                 preferences_summary,
                 llm_api_key,
-                hh_resume_summary=hh_resume_summary,
                 github_summary=github_summary,
             )
-            client.send_negotiation_message(negotiation_id, reply_text)
+            if not send_reply(driver, reply_text):
+                logger.warning(
+                    "Не нашли поле ввода чата на hh.ru для ответа "
+                    f"{entry['company']} — разметка могла измениться."
+                )
+                continue
         except Exception as e:
             logger.exception(
                 f"Failed to auto-reply to {entry['company']}: {e}"
@@ -2155,38 +2189,29 @@ def _answer_headhunter_messages(
 
 def check_headhunter_replies(parameters: dict, llm_api_key: str):
     """
-    Сверяет ваши реальные отклики на HeadHunter с текущим статусом
-    переговоров в HH — чтобы видеть ответ работодателя, не заходя
-    на hh.ru. Плюс — если headhunter.auto_reply: true — автоматически
-    отвечает на новые сообщения работодателя (см.
-    _answer_headhunter_messages). Внешние формы ATS, куда может вести
-    ответ работодателя, эта функция не трогает; там всё вручную.
+    Если headhunter.auto_reply: true — автоматически отвечает на новые
+    сообщения работодателя в чате hh.ru через браузерную сессию (см.
+    _answer_headhunter_messages/HeadHunterSession). В отличие от
+    остальных check_*_replies в проекте, здесь нет отдельной сверки
+    статусов переговоров (viewed/invited/...) — это требует парсинга
+    ещё и списка /applicant/negotiations поверх чатов, не запрошено
+    явно и не проверено на живом аккаунте; добавить при необходимости.
+    Ничего не делает, если headhunter.auto_reply выключен (по
+    умолчанию) — не открывает браузер зря.
     """
-    secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
-    hh_secrets = secrets.get("headhunter") or {}
-    client_id = hh_secrets.get("client_id")
-    client_secret = hh_secrets.get("client_secret")
-    if not client_id or not client_secret:
-        raise ConfigError(
-            "Missing headhunter.client_id/client_secret in secrets.yaml"
-        )
+    hh_preferences = parameters.get("headhunter") or {}
+    if not hh_preferences.get("auto_reply"):
+        return
 
     output_folder: Path = parameters["outputFileDirectory"]
-    auth = HHAuth(client_id, client_secret, output_folder / ".hh_token.json")
-    client = HeadHunterClient(auth.get_access_token())
+    profile_dir = output_folder / ".chrome_profile_headhunter"
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
-    print_negotiation_replies(
-        "headhunter",
-        client.list_negotiations(),
-        applied_log,
-        on_new_reply=lambda entry, state: notify(
-            parameters,
-            f"Новый ответ: {entry['company']} — {entry['title']}: {state}",
-        ),
-    )
-
-    _answer_headhunter_messages(parameters, client, applied_log, llm_api_key)
+    driver = init_browser(profile_dir)
+    try:
+        _answer_headhunter_messages(parameters, driver, applied_log, llm_api_key)
+    finally:
+        driver.quit()
 
 
 def check_zarplata_replies(parameters: dict):
@@ -2641,6 +2666,9 @@ def main(auto: Optional[str], daemon: bool):
         # находится, и всегда берётся общий llm_api_key.
         llm_api_key = ConfigValidator.validate_secrets(
             secrets_file, get_active_llm_provider()
+        )
+        set_llm_fallback_keys(
+            (ConfigValidator.load_yaml(secrets_file).get("llm_api_keys")) or {}
         )
 
         # Позиции не заданы — один раз выводим их из resume.pdf,

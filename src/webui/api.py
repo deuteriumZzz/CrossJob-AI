@@ -40,6 +40,7 @@ from src.config_patch import (
 from src.job_sources.applied_log import AppliedLog
 from src.job_sources.llm_provider import PROVIDER_MODELS
 from src.job_sources.llm_provider import get_active_provider as _active_llm
+from src.job_sources.llm_provider import set_fallback_keys as _set_llm_fallback_keys
 from src.job_sources.llm_usage import (
     set_output_folder as set_llm_usage_output_folder,
 )
@@ -91,6 +92,9 @@ class AppContext:
         self.config["plainTextResumeFile"] = self.plain_text_resume_file
         set_llm_usage_output_folder(self.output_folder)
         apply_llm_provider_override(self.config)
+        _set_llm_fallback_keys(
+            ConfigValidator.load_yaml(self.secrets_file).get("llm_api_keys")
+        )
         self.llm_api_key = self._resolve_llm_api_key()
         self.applied_log = AppliedLog(self.output_folder / "applied_log.json")
         self.scheduler: Optional[Scheduler] = None
@@ -104,6 +108,9 @@ class AppContext:
         fresh = ConfigValidator.validate_config(self.config_file)
         self.config.update(fresh)
         apply_llm_provider_override(self.config)
+        _set_llm_fallback_keys(
+            ConfigValidator.load_yaml(self.secrets_file).get("llm_api_keys")
+        )
         self.llm_api_key = self._resolve_llm_api_key()
 
     def _resolve_llm_api_key(self) -> str:
@@ -191,9 +198,11 @@ def post_setup_init(body: SetupInitRequest) -> dict:
 # (см. "Missing X.client_id/client_secret in secrets.yaml" и
 # аналогичные ConfigError) — источник правды тот же, просто здесь
 # это заранее показывается в дашборде, а не падает при запуске.
-# None — источнику вообще не нужны секреты (скрейпинг без аккаунта).
+# None — источнику вообще не нужны секреты (скрейпинг без аккаунта,
+# либо вход целиком вручную в открывшемся браузере — как headhunter,
+# см. HeadHunterSession).
 _CREDENTIAL_REQUIREMENTS: dict = {
-    "headhunter": ("client_id", "client_secret"),
+    "headhunter": None,
     "superjob": ("client_id", "client_secret"),
     "zarplata": ("client_id", "client_secret"),
     "geekjob": None,

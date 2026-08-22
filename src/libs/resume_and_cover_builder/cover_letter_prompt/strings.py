@@ -11,13 +11,18 @@ any placeholders, and ensure that the letter flows naturally and is tailored to
 the job.
 
 Analyze the job description to identify key qualifications and requirements.
-Introduce the candidate succinctly, aligning their career objectives with the
-role. Highlight relevant skills and experiences from the resume that directly
-match the job’s demands, using specific examples to illustrate these
-qualifications. Reference notable aspects of the company, such as its mission
-or values, that resonate with the candidate’s professional goals. Conclude with
-a strong statement of why the candidate is a good fit for the position,
-expressing a desire to discuss further.
+Open with a specific, concrete achievement or result from the resume that
+maps directly onto the role's top requirement — not a generic "I am writing
+to express my interest" line, since a recruiter skims dozens of these and a
+strong opener is what gets a letter actually read instead of skipped.
+Highlight relevant skills and experiences from the resume that directly
+match the job’s demands, using specific examples (numbers, scale, outcomes)
+to illustrate these qualifications rather than restating skills as a list.
+Reference notable aspects of the company, such as its mission or values,
+that resonate with the candidate’s professional goals. Conclude with a
+short, direct call to action inviting the employer to schedule an interview
+or a call — state the request plainly rather than a vague "looking forward
+to discussing further."
 
 Please write the cover letter in a way that directly addresses the job role and
 the company’s characteristics, ensuring it remains concise and engaging without

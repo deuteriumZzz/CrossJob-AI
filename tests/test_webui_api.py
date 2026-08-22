@@ -76,10 +76,15 @@ def test_status_reports_readiness_per_source(client):
     response = client.get("/api/status")
     sources = {s["name"]: s for s in response.json()["sources"]}
     # фикстура secrets.yaml не задаёт ни одного client_id/api_id/email
-    hh = sources["headhunter"]
-    assert hh["readiness"]["ready"] is False
-    assert set(hh["readiness"]["missing"]) == {"client_id", "client_secret"}
-    # geekjob/rabota_ru не требуют секретов вообще — всегда готовы
+    zarplata = sources["zarplata"]
+    assert zarplata["readiness"]["ready"] is False
+    assert set(zarplata["readiness"]["missing"]) == {
+        "client_id",
+        "client_secret",
+    }
+    # headhunter/geekjob/rabota_ru не требуют секретов в файле вообще —
+    # вход целиком вручную в открывшемся браузере, всегда готовы.
+    assert sources["headhunter"]["readiness"] == {"ready": True, "missing": []}
     assert sources["geekjob"]["readiness"] == {"ready": True, "missing": []}
     assert sources["rabota_ru"]["readiness"] == {"ready": True, "missing": []}
 
