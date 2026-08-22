@@ -30,7 +30,15 @@ class GetMatchClient:
     def search_vacancies_html(self, query: str) -> str:
         driver = init_browser(self.profile_dir)
         try:
-            driver.get(f"{GM_BASE}/vacancies?q={query}")
+            # l=remote, se=junior/middle — подтверждено кликом по
+            # реальным чекбоксам фильтра "Регион и формат работы" /
+            # "Уровень вакансии" на живой странице и чтением итогового
+            # URL, а не угадано; кандидат ищет только удалённую работу
+            # уровня junior/middle.
+            driver.get(
+                f"{GM_BASE}/vacancies?q={query}"
+                "&l=remote&se=junior&se=middle"
+            )
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
             raise_if_blocked(visible_text(driver))
             return driver.page_source
