@@ -5,23 +5,33 @@ from selenium.webdriver.support.ui import Select
 
 from src.logging import logger
 
-# ponytail: селекторы взяты из хорошо задокументированных публичных
-# паттернов разметки LinkedIn Easy Apply — НЕ проверены на живой
-# залогиненной сессии, в отличие от остальных
-# площадок проекта. Если LinkedIn с тех пор поменял разметку, селекторы
-# нужно обновить; поэтому нераспознанное поле анкеты прерывает именно
-# эту вакансию, а не пытается угадать дальше.
+# ponytail: сверено на живой залогиненной сессии (2026-08-23, реальная
+# 5-шаговая форма Easy Apply: Contact info → Resume → Additional
+# Questions → Work authorization → Review). LinkedIn использует
+# CSS-in-JS с хэшированными классами, которые меняются от сборки к
+# сборке — по ним ничего не селектится стабильно, поэтому везде ниже
+# либо атрибуты (role=, aria-label=, componentkey=), либо видимый
+# текст кнопки. EASY_APPLY_BUTTON_XPATH/DISMISS_XPATH/DISCARD_XPATH
+# подтверждены как есть, без изменений — остальное ниже было неверным
+# и переписано по факту.
 EASY_APPLY_BUTTON_XPATH = (
     "//button[contains(@class,'jobs-apply-button') or "
     ".//span[contains(text(),'Easy Apply')]]"
 )
+# Кнопки "Next"/"Review"/"Submit application" не имеют aria-label
+# вообще (подтверждено — было null на живой форме), только видимый
+# текст — раньше матчилось по несуществующему aria-label и НИКОГДА не
+# срабатывало.
 NEXT_OR_REVIEW_XPATH = (
-    "//button[contains(@aria-label,'next step') or "
-    "contains(@aria-label,'Review')]"
+    "//button[normalize-space(.)='Next' or normalize-space(.)='Review']"
 )
-SUBMIT_XPATH = "//button[contains(@aria-label,'Submit application')]"
+SUBMIT_XPATH = "//button[normalize-space(.)='Submit application']"
 DISMISS_XPATH = "//button[@aria-label='Dismiss']"
 DISCARD_XPATH = "//button[contains(.,'Discard')]"
+# Нативный <dialog>, не div.jobs-easy-apply-modal/div[role='dialog']
+# (подтверждено — старый селектор не находит ничего на текущей
+# разметке).
+MODAL_SELECTOR = "dialog[data-testid='dialog']"
 MAX_STEPS = 12
 
 
@@ -41,7 +51,15 @@ def run_easy_apply(
     time.sleep(2)
 
     for _ in range(MAX_STEPS):
+        # ponytail: подтверждено вживую — те же функции на той же
+        # зависавшей вакансии прошли все шаги чисто, когда между ними
+        # естественно появлялась пара сотен мс на чтение/парсинг DOM
+        # для диагностики; без этой паузы (голый цикл) та же вакансия
+        # зависала. Небольшой sleep здесь воспроизводит это "время на
+        # осмотреться" перед тем, как цикл снова начнёт что-то кликать.
+        time.sleep(0.8)
         _upload_resume_if_present(driver, resume_pdf_path)
+        _set_phone_country_code_if_present(driver)
 
         if not _answer_visible_questions(driver, answerer):
             logger.warning(
@@ -68,7 +86,12 @@ def run_easy_apply(
             )
             _dismiss(driver)
             return False
-        time.sleep(1.5)
+        # ponytail: 1.5с изначально — недостаточно, живой прогон
+        # несколько раз подряд зависал на шаге "Resume" сразу после
+        # перехода; похоже на гонку между переходом шага и следующей
+        # попыткой взаимодействия. Не гарантия, а снижение
+        # вероятности; если снова начнёт зависать — увеличивать ещё.
+        time.sleep(4)
 
     logger.warning(
         f"Easy Apply exceeded {MAX_STEPS} steps on {job.link} — skipping."
@@ -94,7 +117,49 @@ def _dismiss(driver) -> None:
         _click(driver, DISCARD_XPATH)
 
 
+def _set_phone_country_code_if_present(driver) -> None:
+    """Подтверждено на живой сессии: телефон на шаге "Contact info"
+    уже верно предзаполнен из профиля (реальный российский номер),
+    но соседний <select> с кодом страны дефолтится не по номеру, а
+    по локации из резюме (Bali, Indonesia в resume_linkedin.pdf) —
+    без явной правки остаётся Indonesia (+62) при российском номере,
+    что делает контакт нерабочим целиком. Кандидат всегда российский,
+    код страны жёстко "ru" — это гражданство/номер, а не страна
+    поиска вакансий (см. RESUME_PDF_LINKEDIN/f_WT/geoId в
+    search.py — те про локацию вакансии, это поле про телефон).
+    Отличаем от email-select'а (у него всего 1 option) по количеству
+    опций — у списка стран их 250+."""
+    for select_el in driver.find_elements(By.TAG_NAME, "select"):
+        options = select_el.find_elements(By.TAG_NAME, "option")
+        if len(options) < 50:
+            continue
+        try:
+            Select(select_el).select_by_value("ru")
+        except Exception:
+            pass
+        break
+
+
 def _upload_resume_if_present(driver, resume_pdf_path) -> None:
+    """Подтверждено на живой сессии: на шаге "Resume" нет готового
+    <input type=file> в разметке — он появляется в DOM только после
+    клика на кнопку "Upload resume". execute_script — синтетический
+    (untrusted) клик, а не driver-native btn.click(): trusted-клик
+    иногда открывает НАСТОЯЩИЙ системный диалог выбора файла
+    (подтверждено пользователем вживую), который Selenium закрыть не
+    может — untrusted-клик такого не делает ни разу за все живые
+    проверки. Кликаем на "Upload resume" каждый раз, когда кнопка
+    видна, не проверяя заранее наличие input — пробовали пропускать
+    повторный клик, если input уже в DOM, но именно это давало
+    зависания (input мог "протухнуть" между перерендерами шага, и
+    send_keys в него не долетал до React)."""
+    for btn in driver.find_elements(
+        By.XPATH, "//button[normalize-space(.)='Upload resume']"
+    ):
+        if btn.is_displayed():
+            driver.execute_script("arguments[0].click();", btn)
+            time.sleep(1)
+            break
     for file_input in driver.find_elements(
         By.CSS_SELECTOR, "input[type='file']"
     ):
@@ -105,21 +170,27 @@ def _upload_resume_if_present(driver, resume_pdf_path) -> None:
 
 
 def _answer_visible_questions(driver, answerer) -> bool:
+    """Группа вопроса — [componentkey^="ea_focus_"] (подтверждено
+    живьём на шаге "Additional Questions"): текст вопроса — первый
+    <p> внутри группы (не <label> — labels пустые, текст радио-опций
+    лежит в aria-label самого элемента role=radio, а не в label рядом
+    с input, как раньше предполагалось). select/checkbox — не
+    встречены живьём ни на одной реальной вакансии, оставлены как
+    best-effort фолбэк на случай других форм."""
     try:
-        form = driver.find_element(
-            By.CSS_SELECTOR, "div.jobs-easy-apply-modal, div[role='dialog']"
-        )
+        form = driver.find_element(By.CSS_SELECTOR, MODAL_SELECTOR)
     except Exception:
         return True
 
-    groups = form.find_elements(
-        By.CSS_SELECTOR, ".fb-dash-form-element, .jobs-easy-apply-form-element"
-    )
+    groups = form.find_elements(By.CSS_SELECTOR, "[componentkey^='ea_focus_']")
     for group in groups:
-        labels = group.find_elements(By.TAG_NAME, "label")
-        question = labels[0].text.strip() if labels else ""
+        try:
+            question = group.find_element(By.TAG_NAME, "p").text.strip()
+        except Exception:
+            question = ""
         if not question:
             continue
+        question = question.rstrip("*").strip()
 
         selects = group.find_elements(By.TAG_NAME, "select")
         if selects:
@@ -135,11 +206,12 @@ def _answer_visible_questions(driver, answerer) -> bool:
                 )
             continue
 
-        radios = group.find_elements(By.CSS_SELECTOR, "input[type='radio']")
+        radios = group.find_elements(By.CSS_SELECTOR, "[role='radio']")
         if radios:
-            radio_labels = [label.text.strip() for label in labels[1:]] or [
-                r.get_attribute("value") for r in radios
+            radio_labels = [
+                r.get_attribute("aria-label") or "" for r in radios
             ]
+            radio_labels = [label for label in radio_labels if label]
             if not radio_labels:
                 return False
             chosen = _closest_option(
