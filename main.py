@@ -134,6 +134,7 @@ from src.utils.chrome_utils import HTML_to_PDF, init_browser
 from src.utils.constants import (
     PLAIN_TEXT_RESUME_YAML,
     RESUME_PDF,
+    RESUME_PDF_LINKEDIN,
     SECRETS_YAML,
     WORK_PREFERENCES_YAML,
 )
@@ -1946,22 +1947,40 @@ def search_and_apply_linkedin(parameters: dict, llm_api_key: str):
     выставлен в true, откликается через многошаговую модалку —
     отвечая на отборочные вопросы через LLM на основе
     job_application_profile.yaml + resume.pdf, прикладывая
-    resume.pdf как есть. Best-effort: в момент написания не было
-    живого аккаунта LinkedIn, чтобы сверить разметку модалки
-    Easy Apply (см. докстринг
-    src/job_sources/linkedin/easy_apply.py) — нераспознанное поле
-    просто пропускает эту вакансию, а не гадает. auto_apply: false
-    по умолчанию независимо от того, что в итоге стоит в
-    work_preferences.yaml — первый запуск всегда dry-run, чтобы
-    проверить сгенерированные ответы до того, как что-то реально
-    уйдёт — включайте true только после просмотра dry-run.
+    резюме как есть (см. RESUME_PDF_LINKEDIN — отдельный файл под
+    международные вакансии). Вход в аккаунт — вручную в открывшемся
+    браузере (LinkedInSession), как и у остальных площадок проекта.
+    Селекторы модалки Easy Apply (см. докстринг
+    src/job_sources/linkedin/easy_apply.py) сверены на живой
+    залогиненной сессии 2026-08-23 — нераспознанное поле анкеты
+    по-прежнему просто пропускает эту вакансию, а не гадает, но это
+    уже подстраховка от будущих изменений разметки LinkedIn, а не
+    заведомо неподтверждённый код. Отдельного поля под PDF
+    сопроводительного письма в форме Easy Apply нет вообще
+    (подтверждено на реальной 5-шаговой форме) — cover_letter ниже
+    только пишется в историю (applied_log), никуда не прикладывается.
+    auto_apply: false по умолчанию независимо от того, что в итоге
+    стоит в work_preferences.yaml — первый запуск всегда dry-run,
+    чтобы проверить сгенерированные ответы до того, как что-то
+    реально уйдёт — включайте true только после просмотра dry-run.
     """
     data_folder: Path = parameters["dataFolder"]
-    resume_pdf_path = data_folder / RESUME_PDF
+    resume_pdf_path = data_folder / RESUME_PDF_LINKEDIN
+    if resume_pdf_path.exists():
+        logger.info(f"Using {RESUME_PDF_LINKEDIN} for LinkedIn.")
+    else:
+        resume_pdf_path = data_folder / RESUME_PDF
+        logger.info(
+            f"{RESUME_PDF_LINKEDIN} not found — falling back to "
+            f"{RESUME_PDF} for LinkedIn (likely the wrong language "
+            "for an international audience; add "
+            f"{RESUME_PDF_LINKEDIN} to use a separate resume here)."
+        )
     if not resume_pdf_path.exists():
         raise FileNotFoundError(
             f"Resume PDF not found: {resume_pdf_path}. Place your "
-            f"resume as '{RESUME_PDF}' in {data_folder}."
+            f"resume as '{RESUME_PDF}' (or '{RESUME_PDF_LINKEDIN}' "
+            f"for a LinkedIn-specific one) in {data_folder}."
         )
 
     profile_path = data_folder / "job_application_profile.yaml"
@@ -1973,13 +1992,6 @@ def search_and_apply_linkedin(parameters: dict, llm_api_key: str):
         )
     profile = JobApplicationProfile(profile_path.read_text(encoding="utf-8"))
 
-    secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
-    li_secrets = secrets.get("linkedin") or {}
-    email = li_secrets.get("email")
-    password = li_secrets.get("password")
-    if not email or not password:
-        raise ConfigError("Missing linkedin.email/password in secrets.yaml")
-
     li_preferences = parameters.get("linkedin") or {}
     auto_apply = bool(li_preferences.get("auto_apply", False))
 
@@ -1988,7 +2000,7 @@ def search_and_apply_linkedin(parameters: dict, llm_api_key: str):
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
     try:
-        session.ensure_logged_in(email, password)
+        session.ensure_logged_in()
         source: JobSource = LinkedInSource(session.driver)
         jobs = source.search(parameters)
         logger.info(f"Found {len(jobs)} matching LinkedIn Easy Apply jobs.")

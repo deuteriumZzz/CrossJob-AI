@@ -137,5 +137,12 @@ telegram:
 # LinkedIn account, see docs/GUIDE.md.
 linkedin:
   auto_apply: false
-  location: "Germany"
+  # Пусто/не задано — поиск по всему миру (LinkedIn geoId=Worldwide),
+  # только среди remote-вакансий. Если нужно ограничиться конкретными
+  # странами (например под собственные Job preferences в самом
+  # LinkedIn-аккаунте) — перечислите их списком:
+  # locations:
+  #   - "Germany"
+  #   - "Netherlands"
+  locations: []
 

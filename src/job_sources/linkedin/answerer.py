@@ -9,22 +9,27 @@ from src.resume_schemas.job_application_profile import JobApplicationProfile
 
 _ANSWER_PROMPT = ChatPromptTemplate.from_template(
     """
-    Ты заполняешь анкету Easy Apply от имени кандидата. Ответь на вопрос
-    коротко и по делу, используя только факты из резюме и профиля ниже.
-    Не выдумывай факты, которых там нет.
+    You are filling out an Easy Apply screening form on behalf of the
+    candidate. Answer the question briefly and to the point, using only
+    facts from the resume and profile below. Do not invent facts that
+    aren't there.
 
-    Резюме кандидата:
+    Always answer in English, regardless of what language the resume,
+    profile, or job title/company happen to be in — LinkedIn and this
+    form are English-language.
+
+    Candidate's resume:
     {resume_text}
 
-    Профиль кандидата:
+    Candidate's profile:
     {profile_text}
 
-    Вакансия: {job_title} в {job_company}
+    Job: {job_title} at {job_company}
 
-    Вопрос анкеты: {question}
+    Form question: {question}
     {options_hint}
 
-    Ответь только текстом ответа, без пояснений и кавычек.
+    Reply with only the answer text, no explanations or quotation marks.
     """
 )
 
@@ -48,7 +53,8 @@ class EasyApplyAnswerer:
 
     def answer(self, question: str, options: Optional[list] = None) -> str:
         options_hint = (
-            f"Выбери один вариант ровно как он написан: {', '.join(options)}"
+            f"Pick exactly one option, written exactly as shown: "
+            f"{', '.join(options)}"
             if options
             else ""
         )
