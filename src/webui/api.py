@@ -210,7 +210,7 @@ _CREDENTIAL_REQUIREMENTS: dict = {
     "rabota_ru": None,
     "telegram": ("api_id", "api_hash"),
     "getmatch": ("email",),
-    "linkedin": ("email", "password"),
+    "linkedin": None,
 }
 
 
