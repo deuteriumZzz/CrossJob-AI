@@ -1,6 +1,9 @@
 ![CrossJob-AI](assets/banner.svg)
 
-**[📘 README](README.md)** · **[📖 Полный гайд по настройке](docs/GUIDE.md)**
+[![Guide](https://img.shields.io/badge/📖_Guide-docs%2FGUIDE.md-2ea44f)](docs/GUIDE.md)
+[![RU](https://img.shields.io/badge/🇷🇺-RU-red.svg)](README.md)
+[![EN](https://img.shields.io/badge/🇬🇧-EN-blue.svg)](README.en.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Бот для поиска и автоотклика на вакансии на российских job-площадках, плюс поиск по Telegram-каналам.
 
