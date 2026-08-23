@@ -973,6 +973,7 @@ pre.logs {
 }
 
 .provider-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1005,4 +1006,15 @@ pre.logs {
   border-color: var(--accent);
   background: rgba(122, 184, 255, 0.1);
   color: var(--accent);
+}
+
+.provider-card.has-key::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
 }

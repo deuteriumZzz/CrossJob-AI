@@ -13,6 +13,7 @@ _model_override: Optional[str] = None
 _base_url_override: Optional[str] = None
 _fallback_keys: dict = {}
 _fallback_mode: str = "auto"  # "auto" | "free" | "paid"
+_fallback_enabled: bool = True
 
 # ponytail: free/paid + актуальность ID — сверено веб-поиском 2026-08-21
 # (свежие модели/цены/депрекейшены меняются быстрее, чем стоит
@@ -104,6 +105,19 @@ def set_fallback_mode(mode: Optional[str]) -> None:
     выбором провайдера), тем же приёмом, что set_provider_override()."""
     global _fallback_mode
     _fallback_mode = mode or "auto"
+
+
+def set_fallback_enabled(enabled: Optional[bool]) -> None:
+    """False — использовать строго один выбранный провайдер, без
+    переключения на другие ключи из secrets.yaml при ошибке/лимите
+    (то, что ключа у другого провайдера вовсе нет, и так само по
+    себе исключает его из цепочки — этот флаг про другой случай:
+    пользователь явно не хочет уходить с выбранного провайдера, даже
+    если ключ другого настроен). По умолчанию True — прежнее
+    поведение. Задаётся через llm.fallback_enabled в
+    work_preferences.yaml (дашборд — рядом с выбором провайдера)."""
+    global _fallback_enabled
+    _fallback_enabled = True if enabled is None else bool(enabled)
 
 
 def _recommended_model(provider: str) -> Optional[dict]:
@@ -210,6 +224,8 @@ def _build_llm(
 def _build_fallback_llms(
     exclude_provider: str, temperature: float
 ) -> list[BaseChatModel]:
+    if not _fallback_enabled:
+        return []
     others = [p for p in _fallback_keys if p != exclude_provider]
 
     if _fallback_mode == "free":
