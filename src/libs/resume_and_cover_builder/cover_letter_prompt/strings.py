@@ -66,6 +66,11 @@ Rules:
 Remove boilerplate text
 Include only relevant information to match the job description against the
 resume
+Write your entire analysis in the SAME language as the job description
+below — do not translate it into English or any other language.
+Start your analysis with a line "Company: <exact company name>" and a line
+"Role: <exact job title>", copied verbatim from the job description as
+written — never invent, translate, or normalize either.
 
 # Analysis Requirements
 Your analysis should include the following sections:
