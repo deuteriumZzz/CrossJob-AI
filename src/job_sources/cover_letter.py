@@ -55,5 +55,13 @@ def generate_cover_letter_for_job(
     )
     answerer = _llm_clj.LLMCoverLetterJobDescription(llm_api_key, strings)
     answerer.set_resume(resume_text)
-    answerer.set_job_description_from_text(job.description)
+    # Промпт письма определяет язык письма по тексту описания
+    # вакансии — если оно пустое или совсем короткое (у GetMatch
+    # search-карточка отдаёт только обрезанный сниппет, иногда пустой
+    # — подтверждено на реальном отклике: письмо ушло по-английски на
+    # русскую вакансию), угадывать язык не из чего, и LLM по
+    # умолчанию пишет на английском. Название и компания почти всегда
+    # на языке площадки — добавляем их как минимальный сигнал.
+    job_description_text = f"{job.role} — {job.company}\n\n{job.description}"
+    answerer.set_job_description_from_text(job_description_text)
     return answerer.generate_cover_letter()

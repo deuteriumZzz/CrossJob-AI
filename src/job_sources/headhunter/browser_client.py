@@ -5,6 +5,7 @@ from typing import Callable
 from selenium.webdriver.common.by import By
 
 from src.job_sources.block_detection import raise_if_blocked, visible_text
+from src.job_sources.html_text import html_letter_to_plain_text
 from src.utils.chrome_utils import init_browser
 
 HH_BASE = "https://hh.ru"
@@ -113,6 +114,6 @@ class HeadHunterBrowserClient:
         )
         if not textareas or not textareas[0].is_displayed():
             return ""
-        cover_letter = cover_letter_fn()
+        cover_letter = html_letter_to_plain_text(cover_letter_fn())
         textareas[0].send_keys(cover_letter)
         return cover_letter

@@ -5,6 +5,7 @@ from typing import Optional
 from selenium.webdriver.common.by import By
 
 from src.job_sources.block_detection import raise_if_blocked, visible_text
+from src.job_sources.html_text import html_letter_to_plain_text
 from src.utils.chrome_utils import init_browser
 
 GM_BASE = "https://getmatch.ru"
@@ -73,7 +74,9 @@ class GetMatchClient:
             if cover_letter:
                 textareas = driver.find_elements(By.TAG_NAME, "textarea")
                 if textareas:
-                    textareas[0].send_keys(cover_letter)
+                    textareas[0].send_keys(
+                        html_letter_to_plain_text(cover_letter)
+                    )
 
             submit_buttons = driver.find_elements(
                 By.XPATH, '//button[normalize-space()="Отправить отклик"]'
