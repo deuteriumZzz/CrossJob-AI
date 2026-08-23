@@ -533,7 +533,14 @@ def post_generate_positions(ctx: AppContext = Depends(get_ctx)) -> dict:
     return {"positions": positions}
 
 
-_KNOWN_LLM_PROVIDERS = {"openai", "groq", "gemini", "deepseek", "ollama"}
+_KNOWN_LLM_PROVIDERS = {
+    "openai",
+    "groq",
+    "gemini",
+    "deepseek",
+    "nvidia",
+    "ollama",
+}
 
 
 def _mask_api_key(key: str) -> str:

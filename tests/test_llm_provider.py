@@ -53,6 +53,12 @@ def test_deepseek_provider_uses_deepseek_base_url():
     assert llm.openai_api_base == "https://api.deepseek.com"
 
 
+def test_nvidia_provider_uses_nvidia_base_url():
+    llm = get_chat_llm("nvapi-test", provider="nvidia")
+    assert llm.model_name == "meta/llama-3.3-70b-instruct"
+    assert llm.openai_api_base == "https://integrate.api.nvidia.com/v1"
+
+
 def test_groq_provider_requires_langchain_groq():
     pytest.importorskip("langchain_groq")
     llm = get_chat_llm("gsk-test", provider="groq")
@@ -122,7 +128,14 @@ def test_get_active_provider_reflects_override():
 
 
 def test_provider_models_catalog_covers_known_providers():
-    for provider in ("openai", "groq", "gemini", "deepseek", "ollama"):
+    for provider in (
+        "openai",
+        "groq",
+        "gemini",
+        "deepseek",
+        "nvidia",
+        "ollama",
+    ):
         models = PROVIDER_MODELS[provider]
         assert models
         assert all(
@@ -137,4 +150,5 @@ if __name__ == "__main__":
     test_default_provider_is_openai()
     test_openai_provider_uses_given_model()
     test_deepseek_provider_uses_deepseek_base_url()
+    test_nvidia_provider_uses_nvidia_base_url()
     print("All tests passed.")

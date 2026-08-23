@@ -93,13 +93,13 @@ LLM suggests 2-4 matching positions from your PDF resume, no manual
 `work_preferences.yaml` editing needed), rebuild `plain_text_resume.yaml`
 from the PDF, export `applied_log.json` as a backup, get a Telegram
 notification when daily LLM spend crosses a set threshold, and switch
-the LLM provider/model (OpenAI/Groq/Gemini/DeepSeek/Ollama) with your own
+the LLM provider/model (OpenAI/Groq/Gemini/DeepSeek/NVIDIA NIM/Ollama) with your own
 API key for each — no `config.py` editing needed. Details in
 [docs/GUIDE.md](docs/GUIDE.md) (RU).
 
 ## Configuration
 
-- `data_folder/secrets.yaml` — your LLM key (`llm_api_key`, defaults to OpenAI) and, for each platform, its own keys (HeadHunter needs no secrets — login is browser-based, by phone number and SMS, see GUIDE.md; SuperJob — https://api.superjob.ru/register/, Zarplata.ru — the same idea HH used to use, Telegram — https://my.telegram.org/apps, see GUIDE.md). The LLM provider doesn't have to be OpenAI — Groq/Gemini/DeepSeek/Ollama are all supported, each with its own key under the `llm_api_keys:` block (switching provider, picking a model, and entering keys — all in the dashboard's Settings tab, no `config.py` editing). **Default recommendation — Groq, model `openai/gpt-oss-120b`** (marked with a crown 👑 in the model picker): free, and good enough for scoring vacancies/writing letters — at this call volume a paid provider would add up to a noticeable daily bill.
+- `data_folder/secrets.yaml` — your LLM key (`llm_api_key`, defaults to OpenAI) and, for each platform, its own keys (HeadHunter needs no secrets — login is browser-based, by phone number and SMS, see GUIDE.md; SuperJob — https://api.superjob.ru/register/, Zarplata.ru — the same idea HH used to use, Telegram — https://my.telegram.org/apps, see GUIDE.md). The LLM provider doesn't have to be OpenAI — Groq/Gemini/DeepSeek/NVIDIA NIM/Ollama are all supported, each with its own key under the `llm_api_keys:` block (switching provider, picking a model, and entering keys — all in the dashboard's Settings tab, no `config.py` editing). **Default recommendation — Groq, model `openai/gpt-oss-120b`** (marked with a crown 👑 in the model picker): free, and good enough for scoring vacancies/writing letters — at this call volume a paid provider would add up to a noticeable daily bill.
 - `data_folder/work_preferences.yaml` — positions (also used as Telegram search keywords), locations, company/title/location blacklists, filters by experience/employment type/date, and optional `headhunter:`/`superjob:`/`zarplata:` blocks (`auto_apply`, `resume_id`) and a `telegram:` block (`channels`).
 - `data_folder/resume.pdf` — your resume as-is; used only to generate cover letters.
 

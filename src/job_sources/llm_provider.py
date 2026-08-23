@@ -57,6 +57,27 @@ PROVIDER_MODELS: dict = {
         {"id": "deepseek-reasoner", "free": False, "recommended": False},
         {"id": "deepseek-chat", "free": False, "recommended": True},
     ],
+    # NVIDIA NIM (build.nvidia.com) — OpenAI-совместимый API, свой
+    # отдельный бесплатный тариф от Groq/Gemini (другой провайдер —
+    # другой лимит, при исчерпании двух остальных фолбэк дотягивается
+    # и досюда).
+    "nvidia": [
+        {
+            "id": "meta/llama-3.3-70b-instruct",
+            "free": True,
+            "recommended": True,
+        },
+        {
+            "id": "meta/llama-3.1-8b-instruct",
+            "free": True,
+            "recommended": False,
+        },
+        {
+            "id": "mistralai/mixtral-8x22b-instruct-v0.1",
+            "free": True,
+            "recommended": False,
+        },
+    ],
     "ollama": [
         {"id": "llama3.1", "free": True, "recommended": True},
         {"id": "qwen2.5", "free": True, "recommended": False},
@@ -190,6 +211,20 @@ def _build_llm(
                 model=resolved_model,
                 api_key=SecretStr(api_key),
                 base_url=base_url or "https://api.deepseek.com",
+                temperature=temperature,
+                max_retries=0,
+            ),
+            resolved_model,
+        )
+    if provider == "nvidia":
+        from langchain_openai import ChatOpenAI
+
+        resolved_model = model or _default_model_id(provider)
+        return (
+            ChatOpenAI(
+                model=resolved_model,
+                api_key=SecretStr(api_key),
+                base_url=base_url or "https://integrate.api.nvidia.com/v1",
                 temperature=temperature,
                 max_retries=0,
             ),
