@@ -78,6 +78,30 @@ PROVIDER_MODELS: dict = {
             "recommended": False,
         },
     ],
+    # OpenRouter — тоже свой отдельный бесплатный пул, модели с
+    # суффиксом ":free" в id. ponytail: id моделей ниже (как и у
+    # nvidia выше) — по общим знаниям, НЕ подтверждено живым ключом
+    # (в отличие от Groq/Gemini, проверенных реальными вызовами
+    # сегодня) — у OpenRouter/NVIDIA бесплатные модели меняются, при
+    # первой живой ошибке "model not found" проверить актуальный
+    # список на openrouter.ai/models?max_price=0.
+    "openrouter": [
+        {
+            "id": "meta-llama/llama-3.3-70b-instruct:free",
+            "free": True,
+            "recommended": True,
+        },
+        {
+            "id": "deepseek/deepseek-chat:free",
+            "free": True,
+            "recommended": False,
+        },
+        {
+            "id": "qwen/qwen-2.5-72b-instruct:free",
+            "free": True,
+            "recommended": False,
+        },
+    ],
     "ollama": [
         {"id": "llama3.1", "free": True, "recommended": True},
         {"id": "qwen2.5", "free": True, "recommended": False},
@@ -225,6 +249,20 @@ def _build_llm(
                 model=resolved_model,
                 api_key=SecretStr(api_key),
                 base_url=base_url or "https://integrate.api.nvidia.com/v1",
+                temperature=temperature,
+                max_retries=0,
+            ),
+            resolved_model,
+        )
+    if provider == "openrouter":
+        from langchain_openai import ChatOpenAI
+
+        resolved_model = model or _default_model_id(provider)
+        return (
+            ChatOpenAI(
+                model=resolved_model,
+                api_key=SecretStr(api_key),
+                base_url=base_url or "https://openrouter.ai/api/v1",
                 temperature=temperature,
                 max_retries=0,
             ),

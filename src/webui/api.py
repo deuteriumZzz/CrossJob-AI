@@ -539,6 +539,7 @@ _KNOWN_LLM_PROVIDERS = {
     "gemini",
     "deepseek",
     "nvidia",
+    "openrouter",
     "ollama",
 }
 

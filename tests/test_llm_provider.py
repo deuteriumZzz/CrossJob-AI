@@ -59,6 +59,12 @@ def test_nvidia_provider_uses_nvidia_base_url():
     assert llm.openai_api_base == "https://integrate.api.nvidia.com/v1"
 
 
+def test_openrouter_provider_uses_openrouter_base_url():
+    llm = get_chat_llm("sk-or-test", provider="openrouter")
+    assert llm.model_name == "meta-llama/llama-3.3-70b-instruct:free"
+    assert llm.openai_api_base == "https://openrouter.ai/api/v1"
+
+
 def test_groq_provider_requires_langchain_groq():
     pytest.importorskip("langchain_groq")
     llm = get_chat_llm("gsk-test", provider="groq")
@@ -134,6 +140,7 @@ def test_provider_models_catalog_covers_known_providers():
         "gemini",
         "deepseek",
         "nvidia",
+        "openrouter",
         "ollama",
     ):
         models = PROVIDER_MODELS[provider]
@@ -151,4 +158,5 @@ if __name__ == "__main__":
     test_openai_provider_uses_given_model()
     test_deepseek_provider_uses_deepseek_base_url()
     test_nvidia_provider_uses_nvidia_base_url()
+    test_openrouter_provider_uses_openrouter_base_url()
     print("All tests passed.")
