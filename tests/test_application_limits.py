@@ -1,4 +1,9 @@
+import tempfile
+from pathlib import Path
+
 import main
+from src.job import Job
+from src.job_sources.applied_log import AppliedLog
 
 
 def test_daily_limit_falls_back_to_config_default():
@@ -106,3 +111,56 @@ def test_linkedin_daily_limit_wrapper_matches_daily_limit_with_source():
     assert main._linkedin_daily_limit(parameters) == main._daily_limit(
         parameters, "linkedin"
     )
+
+
+def test_total_daily_limit_unset_by_default():
+    assert main._total_daily_limit({}) is None
+    assert main._total_daily_limit({"limits": {}}) is None
+
+
+def test_total_daily_limit_reads_override():
+    parameters = {"limits": {"total_daily_application_limit": 20}}
+    assert main._total_daily_limit(parameters) == 20
+
+
+def _record_applied(applied_log: AppliedLog, source: str, external_id: str):
+    applied_log.record(
+        Job(
+            role="R",
+            company="C",
+            link=f"https://example.com/{source}/{external_id}",
+            source=source,
+            external_id=external_id,
+        ),
+        cover_letter="x",
+        resume_id="r1",
+        status="applied",
+        score=8,
+        gaps=[],
+    )
+
+
+def test_total_daily_limit_reached_stays_false_when_unset():
+    with tempfile.TemporaryDirectory() as tmp:
+        applied_log = AppliedLog(Path(tmp) / "applied_log.json")
+        for i in range(50):
+            _record_applied(applied_log, "headhunter", str(i))
+        assert main._total_daily_limit_reached({}, applied_log) is False
+
+
+def test_total_daily_limit_reached_counts_across_all_sources():
+    with tempfile.TemporaryDirectory() as tmp:
+        applied_log = AppliedLog(Path(tmp) / "applied_log.json")
+        parameters = {"limits": {"total_daily_application_limit": 3}}
+        assert main._total_daily_limit_reached(parameters, applied_log) is (
+            False
+        )
+
+        _record_applied(applied_log, "headhunter", "1")
+        _record_applied(applied_log, "getmatch", "1")
+        assert main._total_daily_limit_reached(parameters, applied_log) is (
+            False
+        )
+
+        _record_applied(applied_log, "linkedin", "1")
+        assert main._total_daily_limit_reached(parameters, applied_log) is True

@@ -79,6 +79,9 @@ from src.job_sources.llm_provider import (
     get_active_provider as get_active_llm_provider,
 )
 from src.job_sources.llm_provider import (
+    set_fallback_enabled as set_llm_fallback_enabled,
+)
+from src.job_sources.llm_provider import (
     set_fallback_keys as set_llm_fallback_keys,
 )
 from src.job_sources.llm_provider import (
@@ -913,7 +916,10 @@ def apply_llm_provider_override(parameters: dict) -> None:
     llm: отсутствует или пуст — override сбрасывается (провайдер по
     умолчанию — config.LLM_MODEL_TYPE), а не остаётся зависшим от
     предыдущего вызова. llm.mode — free/paid/auto, см.
-    llm_provider.set_fallback_mode()."""
+    llm_provider.set_fallback_mode(). llm.fallback_enabled — False
+    запрещает переключение на других настроенных провайдеров при
+    ошибке/лимите (строго один выбранный провайдер), см.
+    llm_provider.set_fallback_enabled()."""
     llm_config = parameters.get("llm") or {}
     set_llm_provider_override(
         llm_config.get("provider"),
@@ -921,6 +927,7 @@ def apply_llm_provider_override(parameters: dict) -> None:
         llm_config.get("base_url"),
     )
     set_llm_fallback_mode(llm_config.get("mode"))
+    set_llm_fallback_enabled(llm_config.get("fallback_enabled"))
 
 
 def _daily_limit(parameters: dict, source: Optional[str] = None) -> int:
@@ -953,6 +960,45 @@ def _linkedin_daily_limit(parameters: dict) -> int:
     """Тонкая обёртка над _daily_limit(parameters, "linkedin") — для
     мест, которые явно про LinkedIn (дашборд: /api/status)."""
     return _daily_limit(parameters, "linkedin")
+
+
+def _total_daily_limit(parameters: dict) -> Optional[int]:
+    """Общий лимит откликов в сутки — единый бюджет на ВСЕ площадки
+    вместе, а не независимый лимит на каждую (см. _daily_limit() —
+    тот применяется per-площадка). limits.total_daily_application_
+    limit не задан или 0 — функция выключена (обратная
+    совместимость: без этого поля в work_preferences.yaml поведение
+    не меняется, площадки по-прежнему считают свой лимит
+    независимо)."""
+    value = (parameters.get("limits") or {}).get(
+        "total_daily_application_limit"
+    )
+    return int(value) if value else None
+
+
+def _total_daily_limit_reached(
+    parameters: dict, applied_log: AppliedLog
+) -> bool:
+    """True — общий (across all площадок) дневной бюджет откликов
+    исчерпан, вызывающий цикл должен остановиться немедленно, даже
+    если у своей площадки лимит ещё не исчерпан. Вызывается в каждом
+    search_and_apply_*/search_* так же, как уже существующая
+    проверка per-площадочного daily_limit — тем же местом в цикле."""
+    total_limit = _total_daily_limit(parameters)
+    if total_limit is None:
+        return False
+    if applied_log.applied_today_count_all() >= total_limit:
+        logger.info(
+            f"Reached total daily application limit ({total_limit}) "
+            "across all platforms combined."
+        )
+        notify(
+            parameters,
+            f"Общий дневной лимит откликов ({total_limit}) на все "
+            "площадки вместе достигнут.",
+        )
+        return True
+    return False
 
 
 def _job_max_applications(
@@ -1072,6 +1118,8 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
                 f"Reached JOB_MAX_APPLICATIONS "
                 f"({job_max_applications}) for this run."
             )
+            break
+        if _total_daily_limit_reached(parameters, applied_log):
             break
         if applied_log.already_applied(job):
             continue
@@ -1219,6 +1267,8 @@ def search_and_apply_superjob(parameters: dict, llm_api_key: str):
                 f"({job_max_applications}) for this run."
             )
             break
+        if _total_daily_limit_reached(parameters, applied_log):
+            break
         if applied_log.already_applied(job):
             continue
         if (
@@ -1343,6 +1393,8 @@ def search_and_apply_zarplata(parameters: dict, llm_api_key: str):
                 f"Reached JOB_MAX_APPLICATIONS "
                 f"({job_max_applications}) for this run."
             )
+            break
+        if _total_daily_limit_reached(parameters, applied_log):
             break
         if applied_log.already_applied(job):
             continue
@@ -1474,6 +1526,8 @@ def search_geekjob(parameters: dict, llm_api_key: str):
                 f"({job_max_applications}) for this run."
             )
             break
+        if _total_daily_limit_reached(parameters, applied_log):
+            break
         if applied_log.already_applied(job):
             continue
 
@@ -1593,6 +1647,8 @@ def search_rabota_ru(parameters: dict, llm_api_key: str):
                 f"({job_max_applications}) for this run."
             )
             break
+        if _total_daily_limit_reached(parameters, applied_log):
+            break
         if applied_log.already_applied(job):
             continue
 
@@ -1708,6 +1764,8 @@ def search_telegram(parameters: dict, llm_api_key: str):
                 f"({job_max_applications}) for this run."
             )
             break
+        if _total_daily_limit_reached(parameters, applied_log):
+            break
         if applied_log.already_applied(job):
             continue
 
@@ -1817,6 +1875,8 @@ def search_getmatch(parameters: dict, llm_api_key: str):
                 f"Reached JOB_MAX_APPLICATIONS "
                 f"({job_max_applications}) for this run."
             )
+            break
+        if _total_daily_limit_reached(parameters, applied_log):
             break
         if applied_log.already_applied(job):
             continue
@@ -1945,6 +2005,8 @@ def search_and_apply_linkedin(parameters: dict, llm_api_key: str):
                     f"({job_max_applications}) for this run."
                 )
                 break
+            if _total_daily_limit_reached(parameters, applied_log):
+                break
             if applied_log.already_applied(job):
                 continue
             if (
@@ -2008,8 +2070,17 @@ def search_and_apply_linkedin(parameters: dict, llm_api_key: str):
                 continue
 
             try:
+                # force_russian=False: LinkedIn ждёт оформленный PDF
+                # (см. docstring этой функции) и обычно
+                # публикует вакансии на английском — язык здесь
+                # по-прежнему определяется по тексту вакансии, а не
+                # закреплён за русским, в отличие от остальных
+                # площадок.
                 cover_letter = generate_cover_letter_for_job(
-                    resume_pdf_path, job, llm_api_key
+                    resume_pdf_path,
+                    job,
+                    llm_api_key,
+                    force_russian=False,
                 )
             except Exception as e:
                 logger.exception(

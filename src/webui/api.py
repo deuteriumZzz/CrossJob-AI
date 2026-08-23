@@ -23,6 +23,7 @@ from config import (
 from main import ALL_SOURCES, ConfigError, ConfigValidator, FileManager
 from main import _daily_limit as _effective_daily_limit
 from main import _job_max_applications as _effective_job_max_applications
+from main import _total_daily_limit as _effective_total_daily_limit
 from main import append_to_company_blacklist as _append_to_blacklist
 from main import apply_llm_provider_override
 from main import bootstrap_data_folder as _bootstrap_data_folder
@@ -255,6 +256,8 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
         "daemon_running": ctx.scheduler_thread is not None
         and ctx.scheduler_thread.is_alive(),
         "sources": sources,
+        "total_applied_today": ctx.applied_log.applied_today_count_all(),
+        "total_daily_limit": _effective_total_daily_limit(ctx.config),
     }
 
 
@@ -394,6 +397,7 @@ def post_settings(
 class LimitsSettingsUpdate(BaseModel):
     daily_application_limit: Optional[int] = None
     linkedin_daily_application_limit: Optional[int] = None
+    total_daily_application_limit: Optional[int] = None
     job_max_applications: Optional[int] = None
     llm_daily_cost_alert_usd: Optional[float] = None
 
@@ -407,6 +411,12 @@ def _limits_snapshot(ctx: AppContext) -> dict:
         "linkedin_daily_application_limit": limits.get(
             "linkedin_daily_application_limit",
             LINKEDIN_DAILY_APPLICATION_LIMIT,
+        ),
+        # None — общий лимит выключен (обратная совместимость, см.
+        # main._total_daily_limit()): площадки по-прежнему считают
+        # свой дневной лимит независимо, без единого бюджета на всех.
+        "total_daily_application_limit": limits.get(
+            "total_daily_application_limit"
         ),
         "job_max_applications": limits.get(
             "job_max_applications", JOB_MAX_APPLICATIONS
@@ -431,6 +441,7 @@ def post_limits_settings(
     for field in (
         "daily_application_limit",
         "linkedin_daily_application_limit",
+        "total_daily_application_limit",
         "job_max_applications",
     ):
         value = getattr(body, field)
@@ -561,6 +572,8 @@ def _llm_snapshot(ctx: AppContext) -> dict:
         or (LLM_API_URL or None if is_config_default else None),
         "models": PROVIDER_MODELS,
         "api_key_previews": key_previews,
+        "mode": llm_config.get("mode") or "auto",
+        "fallback_enabled": llm_config.get("fallback_enabled", True),
     }
 
 
@@ -569,10 +582,15 @@ def get_llm_settings(ctx: AppContext = Depends(get_ctx)) -> dict:
     return _llm_snapshot(ctx)
 
 
+_KNOWN_LLM_MODES = {"free", "paid", "auto"}
+
+
 class LLMProviderUpdate(BaseModel):
     provider: Optional[str] = None
     model: Optional[str] = None
     base_url: Optional[str] = None
+    mode: Optional[str] = None
+    fallback_enabled: Optional[bool] = None
 
 
 @app.post("/api/settings/llm")
@@ -589,6 +607,14 @@ def post_llm_settings(
         set_source_field(ctx.config_file, "llm", "provider", body.provider)
     if body.model is not None:
         set_source_field(ctx.config_file, "llm", "model", body.model)
+    if body.mode is not None:
+        if body.mode not in _KNOWN_LLM_MODES:
+            raise HTTPException(400, f"Unknown mode: {body.mode}")
+        set_source_field(ctx.config_file, "llm", "mode", body.mode)
+    if body.fallback_enabled is not None:
+        set_source_field(
+            ctx.config_file, "llm", "fallback_enabled", body.fallback_enabled
+        )
     if body.base_url is not None:
         set_source_field(ctx.config_file, "llm", "base_url", body.base_url)
     ctx.reload_config()

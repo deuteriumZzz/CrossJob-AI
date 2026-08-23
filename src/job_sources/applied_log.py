@@ -79,6 +79,18 @@ class AppliedLog:
             and datetime.fromisoformat(e["applied_at"]).date() == today
         )
 
+    def applied_today_count_all(self) -> int:
+        """Как applied_today_count(), но сумма по ВСЕМ площадкам —
+        для общего дневного лимита на все площадки вместе (main.
+        _total_daily_limit_reached()), а не по каждой независимо."""
+        today = datetime.now().astimezone().date()
+        return sum(
+            1
+            for e in self._data["applications"]
+            if e["status"] == "applied"
+            and datetime.fromisoformat(e["applied_at"]).date() == today
+        )
+
     def entries_by_source_and_status(
         self, source: str, status: Status
     ) -> list[dict]:

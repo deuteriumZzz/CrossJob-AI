@@ -274,6 +274,20 @@
             <input id="llm-base-url" type="text" placeholder="http://localhost:11434" />
           </label>
         </div>
+        <div class="limits-grid">
+          <label class="limit-field">
+            <span>Режим переключения на другие провайдеры</span>
+            <select id="llm-mode">
+              <option value="auto">Авто — сначала бесплатные, потом платные</option>
+              <option value="free">Только бесплатные модели</option>
+              <option value="paid">Только платные модели</option>
+            </select>
+          </label>
+          <label class="limit-field" style="justify-content:flex-end">
+            <span><input id="llm-fallback-enabled" type="checkbox" checked style="margin-right:6px" />Переключаться на другой провайдер при ошибке/лимите</span>
+          </label>
+        </div>
+        <p class="muted small">Если выключить переключение — используется строго выбранный выше провайдер, без ухода на другие ключи из настроек ниже, даже если они настроены. Режим (авто/бесплатно/платно) определяет, какие из настроенных ключей участвуют в цепочке переключения и в каком порядке.</p>
         <div class="filters">
           <button id="llm-provider-save" class="btn btn-primary">Сохранить провайдера</button>
           <span id="llm-provider-status" class="muted small"></span>
@@ -295,11 +309,15 @@
         </div>
         <div class="limits-grid">
           <label class="limit-field">
-            <span>Дневной лимит — HH / SuperJob / Zarplata</span>
+            <span>Общий дневной лимит — все площадки вместе (пусто — выключено)</span>
+            <input id="limit-total" type="number" min="1" placeholder="напр. 20" />
+          </label>
+          <label class="limit-field">
+            <span>Дневной лимит — HH / SuperJob / Zarplata (дефолт, если у площадки нет своего в таблице ниже)</span>
             <input id="limit-daily" type="number" min="1" />
           </label>
           <label class="limit-field">
-            <span>Дневной лимит — LinkedIn</span>
+            <span>Дневной лимит — LinkedIn (дефолт)</span>
             <input id="limit-linkedin" type="number" min="1" />
           </label>
           <label class="limit-field">
@@ -307,6 +325,8 @@
             <input id="limit-per-run" type="number" min="1" />
           </label>
         </div>
+        <p class="muted small">Общий лимит — это жёсткий потолок: как только сегодня суммарно по ВСЕМ площадкам отправлено столько откликов, автооткликер останавливается везде, даже если у отдельной площадки в таблице ниже свой лимит ещё не исчерпан. Лимиты по площадкам — то, как этот общий бюджет распределяется между ними (например 10 на HH + 2 на GetMatch + 8 на LinkedIn = 20).</p>
+        <div id="total-budget-info" class="limit-bar-info"></div>
         <div class="filters">
           <button id="limits-save" class="btn btn-primary">Сохранить</button>
           <span id="limits-status" class="muted small"></span>

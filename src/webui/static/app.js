@@ -106,6 +106,10 @@ function applyLLMSelection(provider, currentModel) {
     .querySelectorAll("#provider-grid .provider-card")
     .forEach((card) => {
       card.classList.toggle("active", card.dataset.provider === provider);
+      card.classList.toggle(
+        "has-key",
+        Boolean(llmCatalog.api_key_previews[card.dataset.provider])
+      );
     });
 
   const modelSelect = document.getElementById("llm-model");
@@ -131,6 +135,32 @@ function applyLLMSelection(provider, currentModel) {
     providerLabel(provider);
   document.getElementById("llm-key-preview").textContent =
     llmCatalog.api_key_previews[provider] || "—";
+}
+
+function renderTotalBudget(status, totalLimit) {
+  const el = document.getElementById("total-budget-info");
+  if (!totalLimit) {
+    el.innerHTML =
+      '<p class="muted small">Общий лимит не задан — каждая площадка считает свой дневной лимит независимо.</p>';
+    return;
+  }
+  const appliedToday = status.total_applied_today || 0;
+  const sumPerPlatform = (status.sources || []).reduce(
+    (sum, s) => sum + (s.daily_limit || 0),
+    0
+  );
+  const usedRatio = Math.min(1, appliedToday / totalLimit);
+  const usedClass =
+    usedRatio >= 1 ? "full" : usedRatio >= 0.7 ? "warn" : "";
+  const overBudget = sumPerPlatform > totalLimit;
+  el.innerHTML = `
+    <p class="muted small">Сегодня отправлено: ${appliedToday} / ${totalLimit} (общий лимит)</p>
+    <div class="limit-bar"><div class="limit-bar-fill ${usedClass}" style="width:${Math.round(usedRatio * 100)}%"></div></div>
+    <p class="muted small" style="margin-top:8px${overBudget ? ";color:var(--err)" : ""}">
+      ${overBudget ? "⚠️ " : ""}Распределено по площадкам (сумма лимитов в таблице ниже): ${sumPerPlatform} / ${totalLimit}
+      ${overBudget ? " — превышает общий лимит, снизьте лимиты отдельных площадок." : ""}
+    </p>
+  `;
 }
 
 function skeletonStats() {
@@ -355,15 +385,21 @@ const render = {
       };
       applyLLMSelection(llm.provider, llm.model);
       document.getElementById("llm-base-url").value = llm.base_url || "";
+      document.getElementById("llm-mode").value = llm.mode || "auto";
+      document.getElementById("llm-fallback-enabled").checked =
+        llm.fallback_enabled !== false;
     });
 
     api("/api/settings/limits").then((limits) => {
+      document.getElementById("limit-total").value =
+        limits.total_daily_application_limit || "";
       document.getElementById("limit-daily").value =
         limits.daily_application_limit;
       document.getElementById("limit-linkedin").value =
         limits.linkedin_daily_application_limit;
       document.getElementById("limit-per-run").value =
         limits.job_max_applications;
+      renderTotalBudget(status, limits.total_daily_application_limit);
       if (limits.llm_daily_cost_alert_usd != null) {
         document.getElementById("llm-alert-usd").value =
           limits.llm_daily_cost_alert_usd;
@@ -593,6 +629,11 @@ function initDashboard() {
       document.getElementById("limit-per-run").value,
       10
     );
+    // Пустое поле — не трогаем сохранённое значение на сервере
+    // (POST игнорирует null), а не пытаемся его "снять": у
+    // set_source_field() нет удаления поля из YAML, только запись.
+    const totalRaw = document.getElementById("limit-total").value.trim();
+    const total = totalRaw ? parseInt(totalRaw, 10) : null;
     status.textContent = "Сохранение...";
     try {
       await api("/api/settings/limits", {
@@ -600,6 +641,7 @@ function initDashboard() {
         body: JSON.stringify({
           daily_application_limit: daily,
           linkedin_daily_application_limit: linkedin,
+          total_daily_application_limit: total,
           job_max_applications: perRun,
         }),
       });
@@ -707,6 +749,10 @@ function initDashboard() {
       }
       const model = document.getElementById("llm-model").value.trim();
       const baseUrl = document.getElementById("llm-base-url").value.trim();
+      const mode = document.getElementById("llm-mode").value;
+      const fallbackEnabled = document.getElementById(
+        "llm-fallback-enabled"
+      ).checked;
       status.textContent = "Сохранение...";
       try {
         await api("/api/settings/llm", {
@@ -715,6 +761,8 @@ function initDashboard() {
             provider: active.dataset.provider,
             model: model || null,
             base_url: baseUrl || null,
+            mode,
+            fallback_enabled: fallbackEnabled,
           }),
         });
         status.textContent = "Сохранено — применено сразу.";
@@ -754,6 +802,7 @@ function initDashboard() {
           result.api_key_preview;
         document.getElementById("llm-key-preview").textContent =
           result.api_key_preview;
+        active.classList.add("has-key");
         input.value = "";
         status.textContent = "Ключ сохранён.";
         setTimeout(() => (status.textContent = ""), 2500);
