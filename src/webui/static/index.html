@@ -100,11 +100,7 @@
           <p class="muted">Статус площадок и статистика откликов</p>
         </div>
         <div class="toolbar">
-          <button id="run-now" class="btn btn-accent">
-            <svg viewBox="0 0 20 20" fill="none"><path d="M11 2 4 11.5h5.2L9 18l7-9.5H10.8L11 2Z" fill="currentColor"/></svg>
-            Запустить выбранные
-          </button>
-          <span id="run-now-status" class="muted small"></span>
+          <span class="muted small">Галочка на карточке площадки = она в расписании демона (кнопка «Запустить» слева)</span>
         </div>
       </div>
       <div id="stats-row" class="stats-row"></div>
@@ -135,9 +131,9 @@
         </select>
         <select id="filter-status">
           <option value="">Любой статус</option>
-          <option value="applied">applied</option>
-          <option value="dry_run">dry_run</option>
-          <option value="skipped_low_fit">skipped_low_fit</option>
+          <option value="applied">Отправлено</option>
+          <option value="dry_run">Тестовый прогон</option>
+          <option value="skipped_low_fit">Пропущено (слабое совпадение)</option>
         </select>
         <input id="filter-query" type="text" placeholder="Поиск по компании/названию" />
         <button id="history-apply-filters" class="btn btn-secondary">Применить</button>
@@ -415,10 +411,25 @@
       <div class="table-wrap">
         <table class="settings-table">
           <thead>
-            <tr><th>Площадка</th><th>Готовность</th><th>В расписании</th><th>Интервал, ч</th><th>auto_apply</th><th>Resume ID</th><th>Откликов за прогон</th><th>Дневной лимит</th><th></th></tr>
+            <tr><th>Площадка</th><th>Готовность</th><th>В расписании</th><th>Интервал, ч</th><th>auto_apply</th><th title="Только HeadHunter — автоответ в чате">auto_reply</th><th title="Только HeadHunter — бамп резюме">auto_bump_resume</th><th>Resume ID</th><th>Откликов за прогон</th><th>Дневной лимит</th><th></th></tr>
           </thead>
           <tbody id="settings-rows"></tbody>
         </table>
+      </div>
+
+      <div class="panel">
+        <h3>Резюме на hh.ru</h3>
+        <p class="muted small">
+          Ручные действия (открывают реальный браузер) — не часть
+          автоматического цикла. Клонирование и создание — best-effort
+          клики, разметка не подтверждена на живом аккаунте.
+        </p>
+        <div class="row">
+          <input type="text" id="hh-resume-clone-id" placeholder="id резюме для клонирования" />
+          <button id="hh-resume-clone" class="btn btn-secondary">Клонировать</button>
+          <button id="hh-resume-create-draft" class="btn btn-secondary">Начать новое резюме (черновик)</button>
+        </div>
+        <span id="hh-resume-status" class="muted small"></span>
       </div>
     </section>
 

@@ -82,11 +82,56 @@ def test_status_reports_readiness_per_source(client):
         "client_id",
         "client_secret",
     }
-    # headhunter/geekjob/rabota_ru не требуют секретов в файле вообще —
-    # вход целиком вручную в открывшемся браузере, всегда готовы.
-    assert sources["headhunter"]["readiness"] == {"ready": True, "missing": []}
-    assert sources["geekjob"]["readiness"] == {"ready": True, "missing": []}
-    assert sources["rabota_ru"]["readiness"] == {"ready": True, "missing": []}
+    # geekjob/rabota_ru не требуют ни секретов, ни локального резюме —
+    # площадка сама показывает то, что уже загружено в профиль.
+    assert sources["geekjob"]["readiness"] == {
+        "ready": True,
+        "missing": [],
+        "resume": None,
+    }
+    assert sources["rabota_ru"]["readiness"] == {
+        "ready": True,
+        "missing": [],
+        "resume": None,
+    }
+    # headhunter не требует секретов (вход вручную в браузере), но
+    # ЧИТАЕТ resume.pdf из data_folder перед откликом — фикстура его не
+    # создаёт, поэтому "не готов" здесь корректно указывает на файл, а
+    # не на несуществующий секрет.
+    hh_readiness = sources["headhunter"]["readiness"]
+    assert hh_readiness["ready"] is False
+    assert hh_readiness["missing"] == ["resume.pdf в data_folder"]
+
+
+def test_readiness_resume_check_headhunter_and_linkedin(client):
+    """headhunter/linkedin читают локальный PDF резюме перед откликом
+    (см. main.RESUME_PDF/RESUME_PDF_LINKEDIN) — readiness должна и
+    подтверждать наличие файла, и различать resume.pdf от
+    resume_linkedin.pdf, включая молчаливый fallback LinkedIn на
+    resume.pdf, когда своего файла нет."""
+    data_folder = api._data_folder
+    (data_folder / "resume.pdf").write_bytes(b"%PDF-1.4 fake")
+
+    response = client.get("/api/status")
+    sources = {s["name"]: s for s in response.json()["sources"]}
+
+    hh = sources["headhunter"]["readiness"]
+    assert hh["ready"] is True
+    assert hh["resume"] == {"filename": "resume.pdf", "ready": True}
+
+    # LinkedIn: пока нет своего resume_linkedin.pdf, но общий resume.pdf
+    # уже есть — площадка готова, но с предупреждением про язык/локацию.
+    li = sources["linkedin"]["readiness"]
+    assert li["ready"] is True
+    assert li["resume"]["filename"] == "resume.pdf"
+    assert "resume_linkedin.pdf" in li["resume"]["warning"]
+
+    (data_folder / "resume_linkedin.pdf").write_bytes(b"%PDF-1.4 fake")
+    response = client.get("/api/status")
+    li = {s["name"]: s for s in response.json()["sources"]}["linkedin"][
+        "readiness"
+    ]
+    assert li["resume"] == {"filename": "resume_linkedin.pdf", "ready": True}
 
 
 def test_stats_empty_log_returns_zeros(client):
@@ -128,6 +173,106 @@ def test_settings_update_persists_resume_id(client):
     assert hh["resume_id"] == "abc123"
     # другая площадка не затронута
     assert sj["resume_id"] == ""
+
+
+def test_block_employer_starts_background_run(client):
+    release = threading.Event()
+    calls = []
+
+    def fake_block(parameters, company):
+        calls.append(company)
+        release.wait(timeout=5)
+        return True
+
+    with patch(
+        "src.webui.api.block_headhunter_employer", side_effect=fake_block
+    ):
+        response = client.post(
+            "/api/headhunter/block-employer",
+            json={"company": "Рога и Копыта"},
+        )
+        assert response.status_code == 200
+        assert response.json() == {
+            "started": True,
+            "company": "Рога и Копыта",
+        }
+        release.set()
+
+    for _ in range(50):
+        if calls:
+            break
+        time.sleep(0.05)
+    assert calls == ["Рога и Копыта"]
+
+
+def test_clone_resume_starts_background_run(client):
+    calls = []
+
+    def fake_clone(parameters, resume_id):
+        calls.append(resume_id)
+        return "https://hh.ru/resume/new"
+
+    with patch(
+        "src.webui.api.clone_headhunter_resume", side_effect=fake_clone
+    ):
+        response = client.post(
+            "/api/headhunter/clone-resume", json={"resume_id": "abc123"}
+        )
+        assert response.status_code == 200
+        assert response.json() == {"started": True, "resume_id": "abc123"}
+
+    for _ in range(50):
+        if calls:
+            break
+        time.sleep(0.05)
+    assert calls == ["abc123"]
+
+
+def test_create_resume_draft_starts_background_run(client):
+    calls = []
+
+    def fake_create(parameters):
+        calls.append(parameters is not None)
+        return "https://hh.ru/applicant/resumes/constructor/draft1"
+
+    with patch(
+        "src.webui.api.create_headhunter_resume_draft",
+        side_effect=fake_create,
+    ):
+        response = client.post("/api/headhunter/create-resume-draft")
+        assert response.status_code == 200
+        assert response.json() == {"started": True}
+
+    for _ in range(50):
+        if calls:
+            break
+        time.sleep(0.05)
+    assert calls == [True]
+
+
+def test_settings_update_persists_auto_reply_and_bump_resume(client):
+    response = client.post(
+        "/api/settings",
+        json={
+            "source": "headhunter",
+            "auto_reply": True,
+            "auto_bump_resume": True,
+        },
+    )
+    assert response.status_code == 200
+
+    status = client.get("/api/status").json()
+    hh = next(s for s in status["sources"] if s["name"] == "headhunter")
+    assert hh["auto_reply"] is True
+    assert hh["auto_bump_resume"] is True
+
+    # Backend не ограничивает эти поля площадкой headhunter (тот же
+    # generic паттерн, что и у resume_id) — фронтенд просто не рисует
+    # эти столбцы для остальных источников. Другая площадка не должна
+    # быть затронута тем, что мы включили флаги для HH.
+    sj = next(s for s in status["sources"] if s["name"] == "superjob")
+    assert sj["auto_reply"] is False
+    assert sj["auto_bump_resume"] is False
 
 
 def test_settings_update_rejects_unknown_source(client):

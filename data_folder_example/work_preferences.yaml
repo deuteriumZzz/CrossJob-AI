@@ -86,6 +86,49 @@ headhunter:
   # "правка <id> <question number> <new answer>" to fix one answer.
   # Nothing is entered on the third-party site until you approve.
   auto_reply: false
+  # Optional: click the "Обновить" (bump/refresh) button on your resume
+  # before each run — a free alternative to HH's paid "raise resume in
+  # search" service. Needs resume_id (below) set. Off by default: the
+  # selector for this button has NOT been confirmed against a live
+  # logged-in account yet — verify it works before relying on it. HH
+  # itself enforces the cooldown (usually ~4h per resume) and just
+  # shows the button disabled if you're too early — that's not an error.
+  auto_bump_resume: false
+  # Опциональное обслуживание: отменяет зависшие отклики (в статусе
+  # "отказ", или без изменений дольше cleanup_older_than_days) кликом
+  # "Отменить отклик" на hh.ru. Деструктивно (реальные отклики на
+  # аккаунте) — НЕ входит в основной цикл поиска/отклика, запускается
+  # только вручную (пункт меню "Clean up stale HeadHunter negotiations"
+  # или `--auto cleanup_hh_negotiations`). При false — вообще ничего не
+  # делает, даже если запущено вручную.
+  auto_cleanup_negotiations: false
+  cleanup_older_than_days: 30
+
+# check_hh_replies — отдельное расписание для проверки чата hh.ru
+# (headhunter.auto_reply выше должен быть true, иначе это расписание
+# ничего не делает). Toplevel-блок, не внутри headhunter: — планировщик
+# ищет источники по имени ключа верхнего уровня, а проверка чата — не
+# "поиск+отклик", а отдельная задача со своим интервалом (обычно чаще,
+# чем headhunter.interval_hours у поиска).
+check_hh_replies:
+  schedule_enabled: false
+  interval_hours: 1
+
+# check_sj_replies/check_zp_replies — то же самое, что check_hh_replies,
+# но для SuperJob/Zarplata.ru: проверяют новые ответы работодателя и
+# шлют уведомление в Telegram (без AI-автоответа, в отличие от HH —
+# поэтому нет отдельного auto_reply-флага, единственный gate —
+# schedule_enabled здесь). Требуют superjob.client_id/client_secret
+# или zarplata.client_id/client_secret в secrets.yaml — без них
+# упадут с ConfigError (демон это переживёт, залогирует ошибку и
+# пойдёт дальше, но проверка просто не будет работать).
+check_sj_replies:
+  schedule_enabled: false
+  interval_hours: 1
+
+check_zp_replies:
+  schedule_enabled: false
+  interval_hours: 1
 
 # Optional: only needed for the "Search & Apply on SuperJob" action.
 superjob:

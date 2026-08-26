@@ -9,6 +9,16 @@ A bot that searches and auto-applies to job postings on Russian job boards, plus
 
 > The setup guide ([docs/GUIDE.md](docs/GUIDE.md)) is Russian-only for now — this README covers the same ground in English, but for full setup detail you may need to translate that page.
 
+## What's new (2026-08-26)
+
+- HeadHunter: a single Chrome process for the whole run (search + vacancy pages + applying) instead of opening/closing a browser at every step — faster and fewer hangs. Same for GetMatch.
+- HeadHunter: auto-answers a vacancy's test/questionnaire before applying (heuristic, no AI by default).
+- HeadHunter: optional free resume "bump" before each run (`auto_bump_resume`) — a free alternative to HH's paid "raise resume in search".
+- HeadHunter: manual dashboard actions — block an employer, clone a resume, start a resume draft, cancel stale/declined negotiations (`auto_cleanup_negotiations`).
+- SuperJob and zarplata.ru: their own schedule for checking chat replies (`check_sj_replies`/`check_zp_replies`), the same idea HH already had — previously not part of the daemon cycle at all.
+- A shared page-load timeout (45s) and script timeout (30s) for every browser-based platform — a hung Selenium call used to stall the whole run with no error in the log.
+- Dashboard: each platform card's checkbox now toggles the daemon schedule directly (instead of a separate "Run selected" button); the platform/history lists no longer flicker on every status poll; resume readiness (PDF present in `data_folder`) is shown for HH/LinkedIn.
+
 ## What it does
 
 - Searches for jobs matching your criteria (`work_preferences.yaml`) across connected platforms.

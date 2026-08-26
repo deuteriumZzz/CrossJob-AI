@@ -21,6 +21,9 @@ from config import (
     LOG_TO_FILE,
 )
 from main import ALL_SOURCES, ConfigError, ConfigValidator, FileManager
+from main import SCHEDULER_SOURCES
+from main import block_headhunter_employer
+from main import clone_headhunter_resume, create_headhunter_resume_draft
 from main import _daily_limit as _effective_daily_limit
 from main import _job_max_applications as _effective_job_max_applications
 from main import _total_daily_limit as _effective_total_daily_limit
@@ -52,7 +55,7 @@ from src.job_sources.telegram_notify import send_notification
 from src.libs.resume_and_cover_builder import StyleManager
 from src.scheduler import Scheduler
 from src.scheduler_state import load_state
-from src.utils.constants import SECRETS_YAML
+from src.utils.constants import RESUME_PDF, RESUME_PDF_LINKEDIN, SECRETS_YAML
 
 # В PyInstaller-сборке (desktop_app.spec) __file__ не указывает на
 # реальную папку с забандленным src/webui/static — она распакована в
@@ -214,13 +217,51 @@ _CREDENTIAL_REQUIREMENTS: dict = {
 }
 
 
-def _readiness(secrets: dict, source: str) -> dict:
+# Площадки, где резюме уже есть прямо в личном кабинете (getmatch,
+# rabota_ru и т.д.) не требуют локального PDF для отклика — только
+# HeadHunter и LinkedIn реально читают файл из data_folder перед
+# откликом (см. RESUME_PDF/RESUME_PDF_LINKEDIN в main.py). Заявлять
+# "резюме не найдено" для остальных площадок было бы ложной тревогой.
+_RESUME_FILENAME_BY_SOURCE = {
+    "headhunter": RESUME_PDF,
+    "linkedin": RESUME_PDF_LINKEDIN,
+}
+
+
+def _resume_readiness(data_folder: Path, source: str) -> Optional[dict]:
+    filename = _RESUME_FILENAME_BY_SOURCE.get(source)
+    if filename is None:
+        return None
+    if (data_folder / filename).exists():
+        return {"ready": True, "filename": filename}
+    # LinkedIn молча падает назад на resume.pdf (см.
+    # search_and_apply_linkedin в main.py) — не ложная тревога, если
+    # общий файл всё же есть, просто предупреждаем про язык/локацию.
+    if source == "linkedin" and (data_folder / RESUME_PDF).exists():
+        return {
+            "ready": True,
+            "filename": RESUME_PDF,
+            "warning": (
+                f"{RESUME_PDF_LINKEDIN} не найден — используется общий "
+                f"{RESUME_PDF} (проверьте язык/локацию для международных "
+                "вакансий)."
+            ),
+        }
+    return {"ready": False, "filename": filename}
+
+
+def _readiness(secrets: dict, data_folder: Path, source: str) -> dict:
     required = _CREDENTIAL_REQUIREMENTS.get(source)
-    if required is None:
-        return {"ready": True, "missing": []}
-    block = secrets.get(source) or {}
-    missing = [field for field in required if not block.get(field)]
-    return {"ready": not missing, "missing": missing}
+    missing: list[str] = []
+    if required is not None:
+        block = secrets.get(source) or {}
+        missing = [field for field in required if not block.get(field)]
+
+    resume = _resume_readiness(data_folder, source)
+    ready = not missing and (resume is None or resume["ready"])
+    if resume is not None and not resume["ready"]:
+        missing = [*missing, f"{resume['filename']} в data_folder"]
+    return {"ready": ready, "missing": missing, "resume": resume}
 
 
 @app.get("/api/status")
@@ -238,6 +279,14 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
                     source_config.get("schedule_enabled")
                 ),
                 "auto_apply": bool(source_config.get("auto_apply")),
+                # auto_reply/auto_bump_resume — HH-специфичные флаги
+                # (чат-автоответ/бамп резюме), но приходят для каждого
+                # источника: для остальных площадок просто останутся
+                # false, фронтенд их там и не показывает (см. app.js).
+                "auto_reply": bool(source_config.get("auto_reply")),
+                "auto_bump_resume": bool(
+                    source_config.get("auto_bump_resume")
+                ),
                 "resume_id": source_config.get("resume_id") or "",
                 "interval_hours": source_config.get("interval_hours"),
                 "last_run": entry.get("last_run"),
@@ -249,7 +298,7 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
                 "job_max_applications": _effective_job_max_applications(
                     ctx.config, name
                 ),
-                "readiness": _readiness(secrets, name),
+                "readiness": _readiness(secrets, ctx.config["dataFolder"], name),
             }
         )
     return {
@@ -329,6 +378,59 @@ def get_blacklist_candidates(
     return ctx.applied_log.suggest_blacklist_candidates()
 
 
+class BlockEmployerRequest(BaseModel):
+    company: str
+
+
+@app.post("/api/headhunter/block-employer")
+def post_block_employer(
+    body: BlockEmployerRequest, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Блокирует работодателя на стороне hh.ru (серверный бан) — явное
+    ручное действие пользователя из списка кандидатов в блэклист
+    (get_blacklist_candidates), никогда не срабатывает автоматически.
+    Открывает реальный браузер (~5-10с), поэтому фоновым потоком, тем
+    же паттерном, что и /api/run-now."""
+
+    def _run() -> None:
+        block_headhunter_employer(ctx.config, body.company)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"started": True, "company": body.company}
+
+
+class CloneResumeRequest(BaseModel):
+    resume_id: str
+
+
+@app.post("/api/headhunter/clone-resume")
+def post_clone_resume(
+    body: CloneResumeRequest, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Клонирует резюме на hh.ru кликом (браузерный аналог
+    hh-applicant-tool clone_resume.py). Открывает реальный браузер —
+    фоновым потоком, тот же паттерн, что /api/run-now."""
+
+    def _run() -> None:
+        clone_headhunter_resume(ctx.config, body.resume_id)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"started": True, "resume_id": body.resume_id}
+
+
+@app.post("/api/headhunter/create-resume-draft")
+def post_create_resume_draft(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Запускает мастер создания резюме на hh.ru с предзаполненной
+    должностью (см. create_headhunter_resume_draft) — черновик,
+    остальное пользователь дозаполняет вручную."""
+
+    def _run() -> None:
+        create_headhunter_resume_draft(ctx.config)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"started": True}
+
+
 class BlacklistRequest(BaseModel):
     companies: list[str]
 
@@ -346,6 +448,12 @@ def post_blacklist(
 class SourceSettingsUpdate(BaseModel):
     source: str
     auto_apply: Optional[bool] = None
+    # HH-специфичные флаги (чат-автоответ/бамп резюме на HH) — для
+    # остальных площадок set_source_field их просто запишет в
+    # неиспользуемый блок конфига, безвредно, тот же паттерн, что уже
+    # у resume_id для нерелевантных источников.
+    auto_reply: Optional[bool] = None
+    auto_bump_resume: Optional[bool] = None
     schedule_enabled: Optional[bool] = None
     interval_hours: Optional[int] = None
     resume_id: Optional[str] = None
@@ -361,6 +469,8 @@ def post_settings(
         raise HTTPException(400, f"Unknown source: {body.source}")
     for field in (
         "auto_apply",
+        "auto_reply",
+        "auto_bump_resume",
         "schedule_enabled",
         "interval_hours",
         "job_max_applications",
@@ -676,7 +786,7 @@ def start_daemon(ctx: AppContext = Depends(get_ctx)) -> dict:
         return {"running": True}
     stop_event = threading.Event()
     ctx.scheduler = Scheduler(
-        dict(ALL_SOURCES),
+        SCHEDULER_SOURCES,
         ctx.config,
         ctx.llm_api_key,
         ctx.output_folder,

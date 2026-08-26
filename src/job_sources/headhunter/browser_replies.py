@@ -5,10 +5,16 @@ import time
 
 from selenium.webdriver.common.by import By
 
+from src.logging import logger
+
 HH_BASE = "https://hh.ru"
 NEGOTIATIONS_URL = f"{HH_BASE}/applicant/negotiations"
 PAGE_LOAD_WAIT_SECONDS = 4
 _URL_RE = re.compile(r"https?://\S+")
+_BLOCK_EMPLOYER_BUTTON_SELECTOR = (
+    '[data-qa*="employer-block"], button[data-qa*="block-employer"]'
+)
+_CONFIRM_BUTTON_SELECTOR = 'button[data-qa*="confirm"]'
 
 
 def find_external_link(message_text: str) -> str | None:
@@ -103,3 +109,32 @@ def send_reply(driver, text: str) -> bool:
     send_buttons[0].click()
     time.sleep(1)
     return True
+
+
+def block_employer(driver, employer_link: str) -> bool:
+    """Кликает "Заблокировать работодателя" на странице чата/вакансии
+    работодателя. ponytail: селектор НЕ подтверждён живым просмотром —
+    это серверная блокировка на стороне HH, жёстче и труднее
+    отменяется, чем локальный текстовый company_blacklist в
+    blacklist_filter.py. Вызывается ТОЛЬКО вручную (webui-эндпоинт), не
+    из автоматического цикла поиска/чата — см. main.py."""
+    driver.get(employer_link)
+    time.sleep(PAGE_LOAD_WAIT_SECONDS)
+    buttons = driver.find_elements(
+        By.CSS_SELECTOR, _BLOCK_EMPLOYER_BUTTON_SELECTOR
+    )
+    if not buttons or not buttons[0].is_displayed():
+        return False
+    try:
+        buttons[0].click()
+        time.sleep(1)
+        confirm = driver.find_elements(
+            By.CSS_SELECTOR, _CONFIRM_BUTTON_SELECTOR
+        )
+        if confirm and confirm[0].is_displayed():
+            confirm[0].click()
+            time.sleep(1)
+        return True
+    except Exception as e:
+        logger.warning(f"Не удалось заблокировать работодателя: {e}")
+        return False

@@ -23,13 +23,35 @@ class GetMatchClient:
     используется настоящий браузер Selenium вместо httpx, в отличие
     от остальных скрейперов. profile_dir (если передан) даёт Chrome
     постоянный профиль вместо чистого запуска каждый раз — см.
-    src/utils/chrome_utils.py."""
+    src/utils/chrome_utils.py.
+
+    ponytail: используйте как контекстный менеджер (`with
+    GetMatchClient(profile_dir) as client:`), чтобы один Chrome-процесс
+    переиспользовался на весь прогон (поиск + отклики) вместо
+    открытия/закрытия браузера на каждый вызов — см. тот же приём и
+    обоснование в HeadHunterBrowserClient. Без `with` — старое
+    поведение (свой driver на вызов), для обратной совместимости."""
 
     def __init__(self, profile_dir: Optional[Path] = None):
         self.profile_dir = profile_dir
+        self._driver = None
+
+    def __enter__(self) -> "GetMatchClient":
+        self._driver = init_browser(self.profile_dir)
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if self._driver is not None:
+            self._driver.quit()
+            self._driver = None
+
+    def _acquire_driver(self):
+        if self._driver is not None:
+            return self._driver, False
+        return init_browser(self.profile_dir), True
 
     def search_vacancies_html(self, query: str) -> str:
-        driver = init_browser(self.profile_dir)
+        driver, owns_it = self._acquire_driver()
         try:
             # l=remote, se=junior/middle — подтверждено кликом по
             # реальным чекбоксам фильтра "Регион и формат работы" /
@@ -44,7 +66,8 @@ class GetMatchClient:
             raise_if_blocked(visible_text(driver))
             return driver.page_source
         finally:
-            driver.quit()
+            if owns_it:
+                driver.quit()
 
     def apply(self, vacancy_url: str, cover_letter: str = "") -> bool:
         """Клик на "Откликнуться" почти всегда открывает модалку с
@@ -58,7 +81,7 @@ class GetMatchClient:
         GetMatchSession.ensure_logged_in() уже был пройден для этого
         profile_dir — иначе кнопки "Откликнуться" не будет (форма
         входа), и apply() вернёт False."""
-        driver = init_browser(self.profile_dir)
+        driver, owns_it = self._acquire_driver()
         try:
             driver.get(vacancy_url)
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
@@ -86,4 +109,5 @@ class GetMatchClient:
                 time.sleep(1.5)
             return True
         finally:
-            driver.quit()
+            if owns_it:
+                driver.quit()

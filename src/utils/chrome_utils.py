@@ -54,6 +54,16 @@ def chrome_browser_options(profile_dir: Optional[Path] = None):
     return options
 
 
+# ponytail: без явного лимита Selenium может ждать driver.get() и
+# скрипты страницы практически бесконечно (зависший запрос, модалка,
+# перекрывающая рендер, и т.п.) — весь прогон площадки тогда "зависает"
+# без единой ошибки в логе, что и наблюдалось на HH/GetMatch. Таймаут
+# здесь общий для всех браузерных источников (HH/GetMatch/LinkedIn/
+# rabota.ru/geekjob), т.к. все они идут через init_browser().
+PAGE_LOAD_TIMEOUT_SECONDS = 45
+SCRIPT_TIMEOUT_SECONDS = 30
+
+
 def init_browser(profile_dir: Optional[Path] = None) -> webdriver.Chrome:
     try:
         options = chrome_browser_options(profile_dir)
@@ -63,6 +73,8 @@ def init_browser(profile_dir: Optional[Path] = None) -> webdriver.Chrome:
             service=ChromeService(ChromeDriverManager().install()),
             options=options,
         )
+        driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT_SECONDS)
+        driver.set_script_timeout(SCRIPT_TIMEOUT_SECONDS)
         logger.debug("Chrome browser initialized successfully.")
         return driver
     except Exception as e:

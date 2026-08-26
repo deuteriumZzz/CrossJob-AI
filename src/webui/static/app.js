@@ -20,6 +20,16 @@ function sourceLabel(name) {
   return SOURCE_LABELS[name] || name;
 }
 
+const STATUS_LABELS = {
+  applied: "отправлено",
+  dry_run: "тестовый прогон",
+  skipped_low_fit: "пропущено (слабое совпадение)",
+};
+
+function statusLabel(status) {
+  return STATUS_LABELS[status] || status;
+}
+
 function fmtTime(iso) {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -92,6 +102,13 @@ function switchTab(name) {
 }
 
 let overviewLoaded = false;
+let lastOverviewSnapshot = null;
+let historyLoaded = false;
+let lastHistorySnapshot = null;
+let repliesLoaded = false;
+let lastRepliesSnapshot = null;
+let logsLoaded = false;
+let lastLogsSnapshot = null;
 let llmCatalog = { models: {}, api_key_previews: {} };
 
 function providerLabel(provider) {
@@ -201,6 +218,14 @@ const render = {
       api("/api/stats"),
     ]);
 
+    // ponytail: без этой проверки весь блок ниже (счётчики со
+    // start-anew анимацией, карточки площадок, чекбоксы) пересобирался
+    // на каждый опрос раз в 7с даже когда ничего не изменилось — визуально
+    // это и есть "мерцание", о котором сообщил пользователь.
+    const snapshot = JSON.stringify({ status, stats });
+    const unchanged = overviewLoaded && snapshot === lastOverviewSnapshot;
+    lastOverviewSnapshot = snapshot;
+
     const badge = document.getElementById("daemon-badge");
     badge.innerHTML = `<span class="badge-dot"></span>${
       status.daemon_running ? "демон работает" : "демон остановлен"
@@ -210,58 +235,66 @@ const render = {
     document.getElementById("daemon-start").disabled = status.daemon_running;
     document.getElementById("daemon-stop").disabled = !status.daemon_running;
 
-    const statsRow = document.getElementById("stats-row");
-    statsRow.innerHTML = `
-      <div class="stat-card"><div class="value" data-target="${stats.day}">0</div><div class="label">Сегодня</div></div>
-      <div class="stat-card"><div class="value" data-target="${stats.week}">0</div><div class="label">За неделю</div></div>
-      <div class="stat-card"><div class="value" data-target="${stats.month}">0</div><div class="label">За месяц</div></div>
-    `;
-    statsRow.querySelectorAll(".value").forEach((el) => {
-      countUp(el, parseInt(el.dataset.target, 10));
-    });
+    if (!unchanged) {
+      const statsRow = document.getElementById("stats-row");
+      statsRow.innerHTML = `
+        <div class="stat-card"><div class="value" data-target="${stats.day}">0</div><div class="label">Сегодня</div></div>
+        <div class="stat-card"><div class="value" data-target="${stats.week}">0</div><div class="label">За неделю</div></div>
+        <div class="stat-card"><div class="value" data-target="${stats.month}">0</div><div class="label">За месяц</div></div>
+      `;
+      statsRow.querySelectorAll(".value").forEach((el) => {
+        countUp(el, parseInt(el.dataset.target, 10));
+      });
 
-    document.getElementById("source-grid").innerHTML = status.sources
-      .map((s, i) => {
-        const dot = STATUS_DOT[s.status] || "never_run";
-        const ratio = s.daily_limit
-          ? Math.min(1, s.applied_today / s.daily_limit)
-          : 0;
-        const barClass =
-          ratio >= 1 ? "full" : ratio >= 0.7 ? "warn" : "";
-        return `
-        <div class="source-card stagger-item" style="animation-delay:${staggerDelay(i)}">
-          <h3>
-            <input type="checkbox" class="run-now-check" value="${s.name}" title="Выбрать для запуска сейчас" />
-            <span class="dot ${dot}"></span> ${sourceLabel(s.name)}
-          </h3>
-          <div class="row"><span>Расписание</span><span>${s.schedule_enabled ? `каждые ${s.interval_hours}ч` : "выключено"}</span></div>
-          <div class="row"><span>Последний запуск</span><span>${fmtTime(s.last_run)}</span></div>
-          <div class="row"><span>Следующий запуск</span><span>${fmtTime(s.next_run)}</span></div>
-          <div class="row"><span>Откликов сегодня</span><span>${s.applied_today}/${s.daily_limit}</span></div>
-          <div class="limit-bar"><div class="limit-bar-fill ${barClass}" style="width:${Math.round(ratio * 100)}%"></div></div>
-          ${s.last_error ? `<div class="error-row">${s.last_error}</div>` : ""}
-        </div>`;
-      })
-      .join("");
+      // ponytail: чекбокс теперь ЕСТЬ schedule_enabled этой площадки —
+      // единственный переключатель "площадка участвует в демоне", вместо
+      // отдельной кнопки "Запустить выбранные" поверх отдельного тумблера
+      // в "Настройках". checked всегда берётся из свежих данных сервера
+      // (s.schedule_enabled), а не сохраняется вручную между опросами —
+      // рендер и так пропускается, пока status не изменится (см. unchanged
+      // выше), так что раньше поставленная галочка не мигает.
+      document.getElementById("source-grid").innerHTML = status.sources
+        .map((s, i) => {
+          const dot = STATUS_DOT[s.status] || "never_run";
+          const ratio = s.daily_limit
+            ? Math.min(1, s.applied_today / s.daily_limit)
+            : 0;
+          const barClass =
+            ratio >= 1 ? "full" : ratio >= 0.7 ? "warn" : "";
+          return `
+          <div class="source-card stagger-item" style="animation-delay:${staggerDelay(i)}">
+            <h3>
+              <input type="checkbox" class="schedule-toggle" data-source="${s.name}" title="В расписании демона" ${s.schedule_enabled ? "checked" : ""} />
+              <span class="dot ${dot}"></span> ${sourceLabel(s.name)}
+            </h3>
+            <div class="row"><span>Расписание</span><span>${s.schedule_enabled ? `каждые ${s.interval_hours}ч` : "выключено"}</span></div>
+            <div class="row"><span>Последний запуск</span><span>${fmtTime(s.last_run)}</span></div>
+            <div class="row"><span>Следующий запуск</span><span>${fmtTime(s.next_run)}</span></div>
+            <div class="row"><span>Откликов сегодня</span><span>${s.applied_today}/${s.daily_limit}</span></div>
+            <div class="limit-bar"><div class="limit-bar-fill ${barClass}" style="width:${Math.round(ratio * 100)}%"></div></div>
+            ${s.last_error ? `<div class="error-row">${s.last_error}</div>` : ""}
+          </div>`;
+        })
+        .join("");
+      document.querySelectorAll(".schedule-toggle").forEach((box) => {
+        box.addEventListener("change", async () => {
+          box.disabled = true;
+          try {
+            await api("/api/settings", {
+              method: "POST",
+              body: JSON.stringify({
+                source: box.dataset.source,
+                schedule_enabled: box.checked,
+              }),
+            });
+          } finally {
+            box.disabled = false;
+          }
+        });
+      });
+    }
 
     overviewLoaded = true;
-    await render.runNowStatus();
-  },
-
-  async runNowStatus() {
-    const status = await api("/api/run-now/status");
-    const el = document.getElementById("run-now-status");
-    const btn = document.getElementById("run-now");
-    if (status.running) {
-      el.textContent = `Выполняется сейчас: ${status.sources
-        .map(sourceLabel)
-        .join(", ")}`;
-      btn.disabled = true;
-    } else {
-      el.textContent = "";
-      btn.disabled = false;
-    }
-    return status.running;
   },
 
   async history() {
@@ -274,9 +307,19 @@ const render = {
     if (q) params.set("q", q);
 
     const tbody = document.getElementById("history-rows");
-    tbody.innerHTML = skeletonRows(6, 6);
+    if (!historyLoaded) tbody.innerHTML = skeletonRows(6, 6);
 
     const entries = await api(`/api/applications?${params}`);
+    historyLoaded = true;
+
+    // ponytail: тот же фикс мерцания, что и на "Обзоре" — без этого
+    // таблица (и её fade-in анимация строк через observeReveal)
+    // пересобиралась с нуля на каждом опросе раз в 7с, даже если ни
+    // одной новой строки не появилось.
+    const historySnapshot = JSON.stringify({ params: params.toString(), entries });
+    if (historySnapshot === lastHistorySnapshot) return;
+    lastHistorySnapshot = historySnapshot;
+
     if (!entries.length) {
       tbody.innerHTML = `<tr><td colspan="6" class="muted">Ничего не найдено.</td></tr>`;
       return;
@@ -291,7 +334,7 @@ const render = {
         <td>${sourceLabel(e.source)}</td>
         <td>${e.company}</td>
         <td><a href="${e.link}" target="_blank" rel="noopener">${e.title}</a></td>
-        <td>${e.status}</td>
+        <td>${statusLabel(e.status)}</td>
         <td>${e.score ?? ""}</td>
       </tr>`
       )
@@ -301,9 +344,15 @@ const render = {
 
   async replies() {
     const tbody = document.getElementById("replies-rows");
-    tbody.innerHTML = skeletonRows(3, 4);
+    if (!repliesLoaded) tbody.innerHTML = skeletonRows(3, 4);
 
     const entries = await api("/api/replies");
+    repliesLoaded = true;
+
+    const repliesSnapshot = JSON.stringify(entries);
+    if (repliesSnapshot === lastRepliesSnapshot) return;
+    lastRepliesSnapshot = repliesSnapshot;
+
     if (!entries.length) {
       tbody.innerHTML = `<tr><td colspan="4" class="muted">Пока нет ответов.</td></tr>`;
       return;
@@ -349,6 +398,7 @@ const render = {
       <div class="candidate-row stagger-item" style="animation-delay:${staggerDelay(i)}">
         <input type="checkbox" value="${c}" class="blacklist-check" />
         <span>${c}</span>
+        <button class="btn btn-secondary btn-small block-hh-employer" data-company="${c}" title="Заблокировать работодателя на hh.ru (серверный бан, только для HeadHunter)">🔒 hh.ru</button>
       </div>`
       )
       .join("");
@@ -428,10 +478,26 @@ const render = {
         (s, i) => `
       <tr data-source="${s.name}" class="reveal" style="transition-delay:${staggerDelay(i, 25)}">
         <td>${sourceLabel(s.name)}</td>
-        <td title="${s.readiness && s.readiness.missing.length ? "Не хватает: " + s.readiness.missing.join(", ") : "Данных для подключения достаточно"}">${s.readiness && s.readiness.ready ? "✅" : "⚠️"}</td>
+        <td title="${
+          s.readiness && s.readiness.missing.length
+            ? "Не хватает: " + s.readiness.missing.join(", ")
+            : s.readiness && s.readiness.resume && s.readiness.resume.warning
+              ? s.readiness.resume.warning
+              : "Данных для подключения достаточно"
+        }">${s.readiness && s.readiness.ready ? "✅" : "⚠️"}</td>
         <td><input type="checkbox" class="s-schedule" ${s.schedule_enabled ? "checked" : ""} /></td>
         <td><input type="number" class="s-interval" min="1" value="${s.interval_hours ?? 3}" /></td>
         <td><input type="checkbox" class="s-auto" ${s.auto_apply ? "checked" : ""} /></td>
+        <td>${
+          s.name === "headhunter"
+            ? `<input type="checkbox" class="s-auto-reply" ${s.auto_reply ? "checked" : ""} />`
+            : "—"
+        }</td>
+        <td>${
+          s.name === "headhunter"
+            ? `<input type="checkbox" class="s-auto-bump" ${s.auto_bump_resume ? "checked" : ""} />`
+            : "—"
+        }</td>
         <td><input type="text" class="s-resume-id" value="${s.resume_id || ""}" placeholder="id резюме на площадке" /></td>
         <td><input type="number" class="s-max-applications" min="1" value="${s.job_max_applications}" /></td>
         <td><input type="number" class="s-daily-limit" min="1" value="${s.daily_limit}" /></td>
@@ -445,11 +511,15 @@ const render = {
       btn.addEventListener("click", async (ev) => {
         const row = ev.target.closest("tr");
         const source = row.dataset.source;
+        const autoReplyEl = row.querySelector(".s-auto-reply");
+        const autoBumpEl = row.querySelector(".s-auto-bump");
         const body = {
           source,
           schedule_enabled: row.querySelector(".s-schedule").checked,
           interval_hours: parseInt(row.querySelector(".s-interval").value, 10),
           auto_apply: row.querySelector(".s-auto").checked,
+          ...(autoReplyEl ? { auto_reply: autoReplyEl.checked } : {}),
+          ...(autoBumpEl ? { auto_bump_resume: autoBumpEl.checked } : {}),
           resume_id: row.querySelector(".s-resume-id").value.trim(),
           job_max_applications: parseInt(
             row.querySelector(".s-max-applications").value,
@@ -475,9 +545,20 @@ const render = {
     const params = new URLSearchParams({ lines: "300" });
     if (source) params.set("source", source);
     const pre = document.getElementById("log-output");
-    pre.innerHTML = `<div class="skeleton" style="height:14px;width:90%;margin-bottom:8px"></div><div class="skeleton" style="height:14px;width:75%;margin-bottom:8px"></div><div class="skeleton" style="height:14px;width:85%"></div>`;
+    if (!logsLoaded) {
+      pre.innerHTML = `<div class="skeleton" style="height:14px;width:90%;margin-bottom:8px"></div><div class="skeleton" style="height:14px;width:75%;margin-bottom:8px"></div><div class="skeleton" style="height:14px;width:85%"></div>`;
+    }
 
     const data = await api(`/api/logs?${params}`);
+    logsLoaded = true;
+
+    // ponytail: тот же фикс — иначе pre.textContent сбрасывал
+    // прокрутку и мигал на каждом опросе, даже если новых строк лога
+    // не появилось.
+    const logsSnapshot = JSON.stringify(data);
+    if (logsSnapshot === lastLogsSnapshot) return;
+    lastLogsSnapshot = logsSnapshot;
+
     if (data.note) {
       pre.textContent = data.note;
       return;
@@ -545,21 +626,6 @@ function initDashboard() {
     }
   });
 
-  document.getElementById("run-now").addEventListener("click", async () => {
-    const sources = Array.from(
-      document.querySelectorAll(".run-now-check:checked")
-    ).map((c) => c.value);
-    if (!sources.length) {
-      alert("Выберите хотя бы одну площадку.");
-      return;
-    }
-    await api("/api/run-now", {
-      method: "POST",
-      body: JSON.stringify({ sources }),
-    });
-    render.overview();
-  });
-
   document.getElementById("daemon-start").addEventListener("click", async () => {
     await api("/api/daemon/start", { method: "POST" });
     render.overview();
@@ -588,6 +654,52 @@ function initDashboard() {
         body: JSON.stringify({ companies }),
       });
       render.analytics();
+    });
+
+  // Делегирование клика: список кандидатов перерисовывается на каждый
+  // render.analytics(), поэтому слушатель вешаем на постоянный
+  // родительский элемент, а не на кнопки напрямую.
+  document
+    .getElementById("blacklist-candidates")
+    .addEventListener("click", async (ev) => {
+      const btn = ev.target.closest(".block-hh-employer");
+      if (!btn) return;
+      const company = btn.dataset.company;
+      if (!confirm(`Заблокировать "${company}" на hh.ru? Это серверная блокировка, отменить её сложнее, чем локальный чёрный список.`)) {
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = "…";
+      await api("/api/headhunter/block-employer", {
+        method: "POST",
+        body: JSON.stringify({ company }),
+      });
+      btn.textContent = "Запрошено";
+    });
+
+  document
+    .getElementById("hh-resume-clone")
+    .addEventListener("click", async () => {
+      const resumeId = document
+        .getElementById("hh-resume-clone-id")
+        .value.trim();
+      if (!resumeId) return;
+      const statusEl = document.getElementById("hh-resume-status");
+      statusEl.textContent = "Запущено — откроется браузер…";
+      await api("/api/headhunter/clone-resume", {
+        method: "POST",
+        body: JSON.stringify({ resume_id: resumeId }),
+      });
+      statusEl.textContent = "Запрошено, результат — в логах/уведомлениях.";
+    });
+
+  document
+    .getElementById("hh-resume-create-draft")
+    .addEventListener("click", async () => {
+      const statusEl = document.getElementById("hh-resume-status");
+      statusEl.textContent = "Запущено — откроется браузер…";
+      await api("/api/headhunter/create-resume-draft", { method: "POST" });
+      statusEl.textContent = "Запрошено, ссылка на черновик — в логах/уведомлениях.";
     });
 
   api("/api/generate/styles").then((styles) => {
@@ -812,9 +924,16 @@ function initDashboard() {
     });
 
   switchTab("overview");
+  // ponytail: раньше опрос гонял только вкладку "Обзор" — история
+  // откликов/ответы/логи обновлялись только вручную (кнопка "Применить"
+  // или смена вкладки), из-за чего прогресс запущенного отклика был не
+  // виден без перезапуска программы. Настройки сюда намеренно не
+  // включены — иначе несохранённый ввод в полях будет затираться, как
+  // чекбоксы на "Обзоре" до фикса выше.
+  const LIVE_TABS = new Set(["overview", "history", "replies", "logs"]);
   setInterval(() => {
     const active = document.querySelector("nav.tabs button.active")?.dataset.tab;
-    if (active === "overview") render.overview();
+    if (active && LIVE_TABS.has(active)) render[active]();
   }, 7000);
 }
 
