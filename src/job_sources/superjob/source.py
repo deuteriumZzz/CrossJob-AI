@@ -4,6 +4,7 @@ import httpx
 
 from src.job import Job
 from src.job_sources.blacklist_filter import passes_blacklists
+from src.job_sources.preferences import effective_list
 from src.job_sources.html_text import strip_html
 from src.job_sources.superjob.client import SuperJobClient
 from src.job_sources.superjob.mapping import sj_vacancy_to_job
@@ -53,7 +54,7 @@ class SuperJobSource:
         seen_ids: set[str] = set()
         jobs: list[Job] = []
 
-        for position in preferences.get("positions", []):
+        for position in effective_list(preferences, "superjob", "positions"):
             results = self.client.search_vacancies(
                 {"keyword": position, "count": RESULTS_PER_POSITION}
             )

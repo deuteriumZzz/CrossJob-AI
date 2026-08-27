@@ -1,4 +1,5 @@
 from src.job import Job
+from src.job_sources.preferences import effective_list
 
 
 def passes_blacklists(job: Job, preferences: dict) -> bool:
@@ -25,7 +26,7 @@ def passes_blacklists(job: Job, preferences: dict) -> bool:
     # реальном прогоне, при том что напрямую тот же поиск находил
     # вакансии).
     if job.source != "linkedin":
-        locations = preferences.get("locations", [])
+        locations = effective_list(preferences, job.source, "locations")
         if locations and not matches_any(job.location, locations):
             return False
 

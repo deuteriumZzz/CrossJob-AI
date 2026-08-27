@@ -167,6 +167,71 @@ def check_and_mark_alert(output_folder: Path, threshold_usd: float) -> bool:
     return True
 
 
+def _health_path(output_folder: Path) -> Path:
+    return output_folder / ".llm_health.json"
+
+
+def record_llm_result(output_folder: Path, ok: bool) -> None:
+    """Считает успехи/ошибки LLM-звонков за день — грубый сигнал "все
+    провайдеры сегодня недоступны" (обычно значит: исчерпаны
+    бесплатные лимиты у всех сразу). Без привязки к конкретному
+    провайдеру — with_fallbacks() уже перебирает их все внутри одного
+    chain.invoke(), здесь важен только итог всей цепочки."""
+    path = _health_path(output_folder)
+    with state_file_lock(path):
+        data = (
+            json.loads(path.read_text(encoding="utf-8"))
+            if path.exists()
+            else {}
+        )
+        day = datetime.now(timezone.utc).date().isoformat()
+        entry = data.setdefault(day, {"ok": 0, "error": 0})
+        entry["ok" if ok else "error"] += 1
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def llm_health_today(output_folder: Path) -> dict:
+    path = _health_path(output_folder)
+    if not path.exists():
+        return {"ok": 0, "error": 0}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    today = datetime.now(timezone.utc).date().isoformat()
+    return data.get(today) or {"ok": 0, "error": 0}
+
+
+def llm_exhausted_today(output_folder: Path) -> bool:
+    """Не меньше 3 ошибок за сегодня и ни одного успеха — порог,
+    чтобы одна случайная сетевая ошибка в начале дня не поднимала
+    тревогу раньше, чем fallback-цепочка вообще успела себя
+    показать."""
+    health = llm_health_today(output_folder)
+    return health["error"] >= 3 and health["ok"] == 0
+
+
+def check_and_mark_llm_exhausted_alert(output_folder: Path) -> bool:
+    """True — впервые за сегодня видно llm_exhausted_today() —
+    вызывающий код должен уведомить ровно один раз. Тот же
+    debounce-паттерн, что и check_and_mark_alert для расходов (общий
+    файл состояния, отдельный ключ)."""
+    if not llm_exhausted_today(output_folder):
+        return False
+    path = _alert_state_path(output_folder)
+    today = datetime.now(timezone.utc).date().isoformat()
+    with state_file_lock(path):
+        data = (
+            json.loads(path.read_text(encoding="utf-8"))
+            if path.exists()
+            else {}
+        )
+        if data.get("last_llm_exhausted_alert_date") == today:
+            return False
+        data["last_llm_exhausted_alert_date"] = today
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data), encoding="utf-8")
+    return True
+
+
 class UsageCallback(BaseCallbackHandler):
     """Подвешивается на LLM в get_chat_llm() — считает токены с
     каждого .invoke()/.generate() автоматически, без правки call
@@ -185,6 +250,7 @@ class UsageCallback(BaseCallbackHandler):
         parent_run_id: Optional[UUID] = None,
         **kwargs,
     ) -> None:
+        record_llm_result(self.output_folder, ok=True)
         usage = (response.llm_output or {}).get("token_usage") or {}
         prompt = usage.get("prompt_tokens", 0)
         completion = usage.get("completion_tokens", 0)
@@ -196,3 +262,13 @@ class UsageCallback(BaseCallbackHandler):
                 prompt,
                 completion,
             )
+
+    def on_llm_error(
+        self,
+        error: BaseException,
+        *,
+        run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
+        **kwargs,
+    ) -> None:
+        record_llm_result(self.output_folder, ok=False)

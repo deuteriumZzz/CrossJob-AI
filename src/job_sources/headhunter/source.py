@@ -6,6 +6,7 @@ import httpx
 
 from src.job import Job
 from src.job_sources.blacklist_filter import passes_blacklists
+from src.job_sources.preferences import effective_list
 from src.job_sources.headhunter.client import HeadHunterClient
 from src.job_sources.headhunter.mapping import hh_vacancy_to_job
 from src.job_sources.html_text import strip_html
@@ -134,7 +135,7 @@ class HeadHunterSource:
         seen_ids: set[str] = set()
         jobs: list[Job] = []
 
-        for position in preferences.get("positions", []):
+        for position in effective_list(preferences, "headhunter", "positions"):
             params = _build_search_params(preferences, text=position)
             results = self.client.search_vacancies(params)
             for item in results.get("items", []):

@@ -1,5 +1,6 @@
 from src.job import Job
 from src.job_sources.blacklist_filter import passes_blacklists
+from src.job_sources.preferences import effective_list
 from src.job_sources.rabota_ru.client import RabotaRuClient
 from src.job_sources.rabota_ru.mapping import (
     parse_search_results,
@@ -27,7 +28,7 @@ class RabotaRuSource:
         seen_ids: set = set()
         jobs: list[Job] = []
 
-        for position in preferences.get("positions", []):
+        for position in effective_list(preferences, "rabota_ru", "positions"):
             for page in range(1, PAGES_PER_POSITION + 1):
                 html = self.client.search_vacancies_html(position, page=page)
                 items = parse_search_results(html)

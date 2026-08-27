@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Callable
 
 from selenium.webdriver.common.by import By
@@ -16,6 +17,16 @@ _QUESTION_BLOCK_SELECTOR = (
 )
 _OPTION_SELECTOR = 'input[type="radio"], input[type="checkbox"], label'
 _FREE_TEXT_SELECTOR = 'textarea, input[type="text"]'
+
+# Подтверждено на живом скриншоте пользователя: некоторые вакансии
+# уводят с "Откликнуться" не в модалку на той же странице, а на
+# отдельную "Vacancy response" / "Answer the questions" по этому URL —
+# в отличие от _QUESTION_BLOCK_SELECTOR, разметку полей внутри самой
+# страницы никто не подтверждал, поэтому answer_full_page_questionnaire
+# ниже опирается на URL и HTML-семантику (name у radio, label[for]),
+# а не на догаданные data-qa/классы hh.
+VACANCY_RESPONSE_URL_MARKER = "/applicant/vacancy_response"
+_SUBMIT_BUTTON_TEXT_MARKERS = ("respond", "откликнуться", "отправить", "send")
 
 
 def answer_vacancy_test_if_present(
@@ -108,3 +119,133 @@ def _answer_free_text(
         field.send_keys(answer)
     except Exception as e:
         logger.warning(f"Не удалось ввести ответ на вопрос теста: {e}")
+
+
+def answer_full_page_questionnaire(
+    driver, ai_answer_fn: Callable[[str], str] | None = None
+) -> bool:
+    """Отвечает на анкету на отдельной странице .../applicant/
+    vacancy_response (см. VACANCY_RESPONSE_URL_MARKER) — детект по
+    URL, а не по разметке, потому что сам переход туда подтверждён
+    живым скриншотом пользователя, а вёрстка полей внутри — нет.
+    Группирует radio-инпуты по стандартному HTML-атрибуту name (одна
+    группа = один вопрос) и находит текст вопроса для textarea/
+    input[text] через <label for=...> — то есть переиспользует ту же
+    эвристику ответов (_answer_multiple_choice/_answer_free_text), что
+    и модалка теста, только определяет вопросы иначе.
+
+    Возвращает True, только если реально нашли и нажали кнопку
+    отправки по видимому тексту — иначе False, чтобы вызывающий код
+    (apply()) не считал отклик отправленным, пока форма не отправлена
+    на самом деле."""
+    if VACANCY_RESPONSE_URL_MARKER not in driver.current_url:
+        return False
+
+    logger.info(
+        "HH перевёл на отдельную страницу анкеты отклика "
+        f"({driver.current_url}) — отвечаем на вопросы эвристикой/AI."
+    )
+
+    for options in _group_radio_options_by_name(driver):
+        _answer_multiple_choice(options)
+
+    for field in driver.find_elements(By.CSS_SELECTOR, _FREE_TEXT_SELECTOR):
+        if not field.is_displayed():
+            continue
+        question_text = _label_text_for(driver, field)
+        _answer_free_text(field, question_text, ai_answer_fn)
+
+    submit = _find_button_by_visible_text(driver, _SUBMIT_BUTTON_TEXT_MARKERS)
+    if submit is None:
+        logger.warning(
+            "Анкета отклика на "
+            f"{driver.current_url} заполнена, но кнопка отправки не "
+            "найдена по тексту — отклик мог не уйти, проверьте вручную."
+        )
+        return False
+
+    driver.execute_script(
+        "arguments[0].scrollIntoView({block: 'center'});", submit
+    )
+    driver.execute_script("arguments[0].click();", submit)
+    time.sleep(1.5)
+    return True
+
+
+class _RadioOption:
+    """<input type=radio> сам по себе не имеет .text (это не текстовый
+    контент) — _answer_multiple_choice ищет "да" именно по .text,
+    поэтому без обёртки эвристика "предпочесть да" никогда бы не
+    сработала на настоящих radio-инпутах. click() бьёт по самому
+    радио, а не по label — оба варианта валидны в HTML, но так
+    исключается двойной toggle, если label визуально не оборачивает
+    инпут."""
+
+    def __init__(self, driver, radio):
+        self._radio = radio
+        self.text = _label_text_for(driver, radio)
+
+    def click(self) -> None:
+        self._radio.click()
+
+
+def _group_radio_options_by_name(driver) -> list[list]:
+    groups: dict[str, list] = {}
+    for radio in driver.find_elements(
+        By.CSS_SELECTOR, 'input[type="radio"]'
+    ):
+        if not radio.is_displayed():
+            continue
+        name = radio.get_attribute("name") or ""
+        groups.setdefault(name, []).append(_RadioOption(driver, radio))
+    return list(groups.values())
+
+
+def _label_text_for(driver, field) -> str:
+    """Текст вопроса/варианта ответа для произвольного поля (radio,
+    textarea, input[text]) — пробует по нарастающей: явную связку
+    label[for=id], затем ближайший <label>-предок (частый паттерн для
+    radio: <label><input type=radio> Да</label>), и только в конце —
+    ближайший предшествующий текстовый узел через JS (для полей без
+    явной связки, например текстового вопроса перед textarea)."""
+    field_id = field.get_attribute("id")
+    if field_id:
+        labels = driver.find_elements(
+            By.CSS_SELECTOR, f'label[for="{field_id}"]'
+        )
+        if labels:
+            return labels[0].text.strip()
+    try:
+        ancestor_labels = field.find_elements(
+            By.XPATH, "./ancestor::label[1]"
+        )
+        if ancestor_labels:
+            return ancestor_labels[0].text.strip()
+    except Exception:
+        pass
+    try:
+        return (
+            driver.execute_script(
+                "let n = arguments[0];"
+                "while (n && !n.previousElementSibling && n.parentElement)"
+                " { n = n.parentElement; }"
+                "return n && n.previousElementSibling"
+                " ? n.previousElementSibling.innerText : '';",
+                field,
+            )
+            or ""
+        ).strip()
+    except Exception:
+        return ""
+
+
+def _find_button_by_visible_text(driver, needles: tuple[str, ...]):
+    for el in driver.find_elements(
+        By.CSS_SELECTOR, 'button, a[role="button"]'
+    ):
+        if not el.is_displayed():
+            continue
+        text = (el.text or "").strip().lower()
+        if any(needle in text for needle in needles):
+            return el
+    return None

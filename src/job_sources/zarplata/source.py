@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from src.job import Job
 from src.job_sources.blacklist_filter import passes_blacklists
+from src.job_sources.preferences import effective_list
 from src.job_sources.headhunter.mapping import hh_vacancy_to_job
 from src.job_sources.headhunter.source import (
     _build_search_params,
@@ -22,7 +23,7 @@ class ZarplataSource:
         seen_ids: set[str] = set()
         jobs: list[Job] = []
 
-        for position in preferences.get("positions", []):
+        for position in effective_list(preferences, "zarplata", "positions"):
             params = _build_search_params(preferences, text=position)
             results = self.client.search_vacancies(params)
             for item in results.get("items", []):

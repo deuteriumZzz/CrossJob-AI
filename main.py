@@ -102,6 +102,7 @@ from src.job_sources.llm_provider import (
 )
 from src.job_sources.llm_usage import (
     check_and_mark_alert,
+    check_and_mark_llm_exhausted_alert,
 )
 from src.job_sources.llm_usage import (
     set_output_folder as set_llm_usage_output_folder,
@@ -2239,6 +2240,15 @@ def run_selected_sources(
                 f"CrossJob-AI: расходы на LLM сегодня превысили "
                 f"${threshold}.",
             )
+
+    if output_folder and check_and_mark_llm_exhausted_alert(output_folder):
+        notify(
+            parameters,
+            "CrossJob-AI: похоже, все настроенные LLM-провайдеры сегодня "
+            "недоступны (несколько ошибок подряд, ни одного успешного "
+            "вызова) — вероятно, исчерпаны бесплатные лимиты. Вакансии "
+            "пока оцениваются с fallback (без реальной LLM-проверки).",
+        )
 
 
 def run_all_sources(parameters: dict, llm_api_key: str) -> None:

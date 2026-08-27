@@ -405,7 +405,10 @@ const render = {
   },
 
   async settings() {
-    const status = await api("/api/status");
+    const [status, salary] = await Promise.all([
+      api("/api/status"),
+      api("/api/settings/salary"),
+    ]);
 
     api("/api/settings/search").then((search) => {
       document.getElementById("search-positions").value = (
@@ -470,6 +473,10 @@ const render = {
         : usage.total_cost_usd === null && usage.total_tokens > 0
           ? "$-оценка недоступна для используемой модели/провайдера — показаны только токены."
           : "";
+      document.getElementById("llm-exhausted-banner").style.display = usage
+        .llm_exhausted_today
+        ? ""
+        : "none";
     });
 
     const tbody = document.getElementById("settings-rows");
@@ -502,6 +509,46 @@ const render = {
         <td><input type="number" class="s-max-applications" min="1" value="${s.job_max_applications}" /></td>
         <td><input type="number" class="s-daily-limit" min="1" value="${s.daily_limit}" /></td>
         <td><button class="btn btn-secondary s-save">Сохранить</button></td>
+        <td><button class="btn btn-ghost btn-small s-filters-toggle" title="Свои должности/локации/зарплата для этой площадки">⚙ Фильтры</button></td>
+      </tr>
+      <tr class="filters-detail" data-source="${s.name}" style="display:none">
+        <td colspan="12">
+          <div class="limits-grid" style="margin:10px 0">
+            <label class="limit-field">
+              <span>Свои должности для ${sourceLabel(s.name)} (пусто — общие из "Поиск")</span>
+              <textarea class="f-positions" rows="2" placeholder="оставить пустым — использовать общие">${(s.positions_override || []).join("\n")}</textarea>
+            </label>
+            <label class="limit-field">
+              <span>Свои локации для ${sourceLabel(s.name)} (пусто — общие из "Поиск")</span>
+              <textarea class="f-locations" rows="2" placeholder="оставить пустым — использовать общие">${(s.locations_override || []).join("\n")}</textarea>
+            </label>
+            ${
+              s.name === "headhunter"
+                ? `<label class="limit-field">
+                <span>Зарплата для автоответа в чате HH</span>
+                <input type="text" class="f-hh-salary" value="${salary.hh_salary_expectations || ""}" placeholder="250000-300000 RUR" />
+              </label>`
+                : ""
+            }
+            ${
+              s.name === "linkedin"
+                ? `<label class="limit-field">
+                <span>Зарплата для скрининга LinkedIn (USD/год)</span>
+                <input type="text" class="f-linkedin-salary" value="${salary.linkedin_salary_range_usd || ""}" placeholder="60000-80000" />
+              </label>`
+                : ""
+            }
+          </div>
+          <p class="muted small">Сейчас реально ищет по: «${(s.effective_positions || []).join("», «") || "—"}»${
+          s.name === "linkedin"
+            ? " · локации LinkedIn настраиваются отдельно (linkedin.locations)"
+            : `, локации: «${(s.effective_locations || []).join("», «") || "любые"}»`
+        }.</p>
+          <div class="filters">
+            <button class="btn btn-secondary f-save">Сохранить фильтры</button>
+            <span class="f-status muted small"></span>
+          </div>
+        </td>
       </tr>`
       )
       .join("");
@@ -536,6 +583,55 @@ const render = {
         });
         btn.textContent = "Сохранено";
         setTimeout(() => (btn.textContent = "Сохранить"), 1500);
+      });
+    });
+
+    tbody.querySelectorAll(".s-filters-toggle").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        const detail = ev.target.closest("tr").nextElementSibling;
+        if (detail && detail.classList.contains("filters-detail")) {
+          detail.style.display =
+            detail.style.display === "none" ? "" : "none";
+        }
+      });
+    });
+
+    const linesOfEl = (el) =>
+      el.value
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+    tbody.querySelectorAll(".f-save").forEach((btn) => {
+      btn.addEventListener("click", async (ev) => {
+        const row = ev.target.closest("tr.filters-detail");
+        const source = row.dataset.source;
+        const statusEl = row.querySelector(".f-status");
+        await api("/api/settings", {
+          method: "POST",
+          body: JSON.stringify({
+            source,
+            positions: linesOfEl(row.querySelector(".f-positions")),
+            locations: linesOfEl(row.querySelector(".f-locations")),
+          }),
+        });
+        const hhSalaryEl = row.querySelector(".f-hh-salary");
+        const liSalaryEl = row.querySelector(".f-linkedin-salary");
+        if (hhSalaryEl || liSalaryEl) {
+          await api("/api/settings/salary", {
+            method: "POST",
+            body: JSON.stringify({
+              ...(hhSalaryEl
+                ? { hh_salary_expectations: hhSalaryEl.value.trim() }
+                : {}),
+              ...(liSalaryEl
+                ? { linkedin_salary_range_usd: liSalaryEl.value.trim() }
+                : {}),
+            }),
+          });
+        }
+        statusEl.textContent = "Сохранено";
+        await render.settings();
       });
     });
   },
@@ -763,6 +859,41 @@ function initDashboard() {
       status.textContent = `Ошибка: ${e.message}`;
     }
   });
+
+  document
+    .getElementById("limits-distribute")
+    .addEventListener("click", async () => {
+      const status = document.getElementById("limits-status");
+      status.textContent = "Распределение...";
+      try {
+        await api("/api/settings/limits/distribute", { method: "POST" });
+        status.textContent = "Готово.";
+        await render.settings();
+      } catch (e) {
+        status.textContent = `Ошибка: ${e.message}`;
+      }
+    });
+
+  document
+    .getElementById("limits-reset-recommended")
+    .addEventListener("click", async () => {
+      const status = document.getElementById("limits-status");
+      status.textContent = "Сохранение...";
+      try {
+        await api("/api/settings/limits", {
+          method: "POST",
+          body: JSON.stringify({
+            daily_application_limit: 15,
+            linkedin_daily_application_limit: 8,
+            job_max_applications: 5,
+          }),
+        });
+        status.textContent = "Готово.";
+        await render.settings();
+      } catch (e) {
+        status.textContent = `Ошибка: ${e.message}`;
+      }
+    });
 
   document
     .getElementById("llm-alert-save")

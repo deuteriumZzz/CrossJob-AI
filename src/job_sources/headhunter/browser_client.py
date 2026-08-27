@@ -8,6 +8,7 @@ from selenium.webdriver.common.by import By
 
 from src.job_sources.block_detection import raise_if_blocked, visible_text
 from src.job_sources.headhunter.browser_test_answer import (
+    answer_full_page_questionnaire,
     answer_vacancy_test_if_present,
 )
 from src.job_sources.html_text import html_letter_to_plain_text
@@ -160,6 +161,9 @@ class HeadHunterBrowserClient:
                 ],
             )
 
+            if answer_full_page_questionnaire(driver, ai_answer_fn):
+                return True, ""
+
             test_answered = answer_vacancy_test_if_present(
                 driver, ai_answer_fn
             )
@@ -237,7 +241,12 @@ class HeadHunterBrowserClient:
             By.CSS_SELECTOR, '[data-qa*="letter-toggle"]'
         )
         if toggles and toggles[0].is_displayed():
-            toggles[0].click()
+            # ponytail: обычный .click() падает с "element click
+            # intercepted" — центр bounding box карточки перекрыт её
+            # же дочерним текстовым div (magritte-card), подтверждено
+            # дважды на живых прогонах. JS-клик бьёт прямо в DOM-узел,
+            # минуя проверку перекрытия в точке клика.
+            driver.execute_script("arguments[0].click();", toggles[0])
             time.sleep(0.5)
         textareas = driver.find_elements(
             By.CSS_SELECTOR, 'textarea[data-qa*="letter"]'

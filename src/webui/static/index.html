@@ -212,7 +212,7 @@
           </label>
         </div>
         <div class="filters">
-          <button id="search-generate-positions" class="btn btn-secondary">Сгенерировать должности из резюме</button>
+          <button id="search-generate-positions" class="btn btn-primary">🪄 Сгенерировать должности из резюме</button>
           <span id="search-generate-status" class="muted small"></span>
         </div>
         <div class="limits-grid" style="margin-top:14px">
@@ -310,6 +310,8 @@
         <h3>Лимиты откликов</h3>
         <div class="risk-banner">
           ⚠️ Официальных цифр лимитов не публикует ни одна площадка — заданные здесь значения только уменьшают риск, но не гарантируют, что бота не заметят. Чем выше лимиты и чем ближе они к количеству найденных вакансий, тем больше активность похожа на бота. Повышайте постепенно, начните с малого. LinkedIn блокирует автоматизацию агрессивнее остальных — держите его лимит ниже.
+          <br /><br />
+          <strong>Ориентир для старта</strong> (это дефолты самого бота, не гарантия от бана): HH / SuperJob / Zarplata — 15/день, LinkedIn — 8/день, не больше 5 откликов за один прогон, интервал между прогонами — от 3ч. Поднимайте эти числа только если несколько дней подряд не видите капчи/блокировок.
         </div>
         <div class="limits-grid">
           <label class="limit-field">
@@ -333,6 +335,8 @@
         <div id="total-budget-info" class="limit-bar-info"></div>
         <div class="filters">
           <button id="limits-save" class="btn btn-primary">Сохранить</button>
+          <button id="limits-distribute" class="btn btn-secondary" title="Раскидывает общий дневной лимит по площадкам в расписании случайными долями (LinkedIn — меньше остальных)">🎲 Распределить по площадкам</button>
+          <button id="limits-reset-recommended" class="btn btn-ghost" title="HH/SuperJob/Zarplata — 15/день, LinkedIn — 8/день, 5 откликов за прогон">Сбросить к рекомендованным</button>
           <span id="limits-status" class="muted small"></span>
         </div>
       </div>
@@ -396,6 +400,9 @@
       </div>
       <div class="panel">
         <h3>Расходы на LLM</h3>
+        <div id="llm-exhausted-banner" class="risk-banner" style="display:none">
+          ⚠️ Похоже, все настроенные LLM-провайдеры сегодня недоступны (несколько ошибок подряд, ни одного успешного вызова) — вероятно, исчерпаны бесплатные лимиты. Вакансии пока оцениваются с fallback, без реальной LLM-проверки. Добавьте платный ключ или подождите до завтра (лимиты бесплатных провайдеров обычно сбрасываются раз в сутки).
+        </div>
         <p id="usage-summary" class="muted small">Загрузка...</p>
         <p id="usage-note" class="muted small"></p>
         <div class="filters">
@@ -411,7 +418,7 @@
       <div class="table-wrap">
         <table class="settings-table">
           <thead>
-            <tr><th>Площадка</th><th>Готовность</th><th>В расписании</th><th>Интервал, ч</th><th>auto_apply</th><th title="Только HeadHunter — автоответ в чате">auto_reply</th><th title="Только HeadHunter — бамп резюме">auto_bump_resume</th><th>Resume ID</th><th>Откликов за прогон</th><th>Дневной лимит</th><th></th></tr>
+            <tr><th>Площадка</th><th>Готовность</th><th>В расписании</th><th>Интервал, ч</th><th>auto_apply</th><th title="Только HeadHunter — автоответ в чате">auto_reply</th><th title="Только HeadHunter — бамп резюме">auto_bump_resume</th><th>Resume ID</th><th>Откликов за прогон</th><th>Дневной лимит</th><th></th><th title="Свои должности/локации/зарплата для этой площадки">Фильтры</th></tr>
           </thead>
           <tbody id="settings-rows"></tbody>
         </table>

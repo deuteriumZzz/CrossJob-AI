@@ -1,5 +1,6 @@
 from src.job import Job
 from src.job_sources.blacklist_filter import passes_blacklists
+from src.job_sources.preferences import effective_list
 from src.job_sources.getmatch.client import GetMatchClient
 from src.job_sources.getmatch.mapping import parse_search_results
 
@@ -18,7 +19,7 @@ class GetMatchSource:
         seen_ids: set = set()
         jobs: list[Job] = []
 
-        for position in preferences.get("positions", []):
+        for position in effective_list(preferences, "getmatch", "positions"):
             html = self.client.search_vacancies_html(position)
             for job in parse_search_results(html):
                 if job.external_id in seen_ids:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import sys
 import threading
 from datetime import datetime
@@ -40,7 +41,9 @@ from src.config_patch import (
     set_list_field,
     set_source_field,
     set_source_list_field,
+    set_top_level_field,
 )
+from src.job_sources.preferences import effective_list
 from src.job_sources.applied_log import AppliedLog
 from src.job_sources.llm_provider import PROVIDER_MODELS
 from src.job_sources.llm_provider import get_active_provider as _active_llm
@@ -49,6 +52,7 @@ from src.job_sources.llm_usage import (
     set_output_folder as set_llm_usage_output_folder,
 )
 from src.job_sources.llm_usage import (
+    llm_exhausted_today,
     summarize_usage,
 )
 from src.job_sources.telegram_notify import send_notification
@@ -289,6 +293,18 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
                 ),
                 "resume_id": source_config.get("resume_id") or "",
                 "interval_hours": source_config.get("interval_hours"),
+                # Свои positions/locations площадки (пусто — используется
+                # общий список из панели "Поиск") + что реально ищется
+                # прямо сейчас с учётом фолбэка — для панели "Фильтры"
+                # в дашборде (см. effective_list).
+                "positions_override": source_config.get("positions") or [],
+                "locations_override": source_config.get("locations") or [],
+                "effective_positions": effective_list(
+                    ctx.config, name, "positions"
+                ),
+                "effective_locations": effective_list(
+                    ctx.config, name, "locations"
+                ),
                 "last_run": entry.get("last_run"),
                 "next_run": entry.get("next_run"),
                 "status": entry.get("status", "never_run"),
@@ -363,7 +379,10 @@ def get_replies(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
 
 @app.get("/api/usage")
 def get_usage(ctx: AppContext = Depends(get_ctx)) -> dict:
-    return summarize_usage(ctx.output_folder)
+    return {
+        **summarize_usage(ctx.output_folder),
+        "llm_exhausted_today": llm_exhausted_today(ctx.output_folder),
+    }
 
 
 @app.get("/api/analytics/gaps")
@@ -459,6 +478,10 @@ class SourceSettingsUpdate(BaseModel):
     resume_id: Optional[str] = None
     job_max_applications: Optional[int] = None
     daily_application_limit: Optional[int] = None
+    # Свои positions/locations для этой площадки — пусто/не задано
+    # означает "используй общие из панели Поиск" (см. effective_list).
+    positions: Optional[list[str]] = None
+    locations: Optional[list[str]] = None
 
 
 @app.post("/api/settings")
@@ -499,6 +522,14 @@ def post_settings(
             "resume_id",
             body.resume_id,
             quote=True,
+        )
+    if body.positions is not None:
+        set_source_list_field(
+            ctx.config_file, body.source, "positions", body.positions
+        )
+    if body.locations is not None:
+        set_source_list_field(
+            ctx.config_file, body.source, "locations", body.locations
         )
     ctx.reload_config()
     return {"source": body.source, "updated": True}
@@ -573,6 +604,57 @@ def post_limits_settings(
     return _limits_snapshot(ctx)
 
 
+def _distribute_total_limit(total: int, sources: list[str]) -> dict[str, int]:
+    """Раскидывает total между sources случайными долями (LinkedIn —
+    вдвое меньший вес по умолчанию, см. risk-banner в дашборде: банит
+    автоматизацию агрессивнее остальных площадок). Сумма долей после
+    округления вниз почти всегда меньше total — остаток раздаётся по
+    одной штуке в случайном порядке, чтобы сумма сошлась ровно."""
+    weights = {
+        s: (0.5 if s == "linkedin" else 1.0) * random.uniform(0.6, 1.4)
+        for s in sources
+    }
+    weight_sum = sum(weights.values())
+    shares = {s: int(total * w / weight_sum) for s, w in weights.items()}
+    remainder = total - sum(shares.values())
+    order = list(sources)
+    random.shuffle(order)
+    i = 0
+    while remainder > 0:
+        shares[order[i % len(order)]] += 1
+        remainder -= 1
+        i += 1
+    return shares
+
+
+@app.post("/api/settings/limits/distribute")
+def post_distribute_limits(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Кнопка "Распределить" — то же самое, что раньше приходилось
+    делать руками (вписать число в каждую строку таблицы площадок),
+    одним кликом: берёт уже заданный общий дневной лимит и раскидывает
+    его по площадкам в расписании (schedule_enabled), с уклоном против
+    LinkedIn."""
+    total = _limits_snapshot(ctx)["total_daily_application_limit"]
+    if not total:
+        raise HTTPException(
+            400, "Сначала задайте общий дневной лимит (поле выше)."
+        )
+    sources = [
+        name
+        for name, _ in ALL_SOURCES
+        if (ctx.config.get(name) or {}).get("schedule_enabled")
+    ]
+    if not sources:
+        sources = [name for name, _ in ALL_SOURCES]
+    shares = _distribute_total_limit(total, sources)
+    for source, value in shares.items():
+        set_source_field(
+            ctx.config_file, source, "daily_application_limit", value
+        )
+    ctx.reload_config()
+    return {"shares": shares}
+
+
 _SEARCH_LIST_FIELDS = (
     "positions",
     "locations",
@@ -641,6 +723,69 @@ def post_generate_positions(ctx: AppContext = Depends(get_ctx)) -> dict:
     set_list_field(ctx.config_file, "positions", positions)
     ctx.reload_config()
     return {"positions": positions}
+
+
+_JOB_APPLICATION_PROFILE_YAML = "job_application_profile.yaml"
+
+
+class SalarySettingsUpdate(BaseModel):
+    hh_salary_expectations: Optional[str] = None
+    linkedin_salary_range_usd: Optional[str] = None
+
+
+def _profile_file(ctx: AppContext) -> Path:
+    return ctx.config["dataFolder"] / _JOB_APPLICATION_PROFILE_YAML
+
+
+def _salary_snapshot(ctx: AppContext) -> dict:
+    profile_file = _profile_file(ctx)
+    profile = (
+        (ConfigValidator.load_yaml(profile_file) or {})
+        if profile_file.exists()
+        else {}
+    )
+    return {
+        # HH: подсказка для LLM в автоответе чата (reply_answerer.py),
+        # рубли/месяц — российский рынок.
+        "hh_salary_expectations": ctx.config.get("salary_expectations") or "",
+        # LinkedIn: ответ на скрининговые вопросы Easy Apply,
+        # доллары/год — международный рынок, намеренно отдельное поле
+        # (см. комментарий в job_application_profile.yaml).
+        "linkedin_salary_range_usd": (
+            profile.get("salary_expectations") or {}
+        ).get("salary_range_usd")
+        or "",
+    }
+
+
+@app.get("/api/settings/salary")
+def get_salary_settings(ctx: AppContext = Depends(get_ctx)) -> dict:
+    return _salary_snapshot(ctx)
+
+
+@app.post("/api/settings/salary")
+def post_salary_settings(
+    body: SalarySettingsUpdate, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    if body.hh_salary_expectations is not None:
+        set_top_level_field(
+            ctx.config_file, "salary_expectations", body.hh_salary_expectations
+        )
+        ctx.reload_config()
+    if body.linkedin_salary_range_usd is not None:
+        profile_file = _profile_file(ctx)
+        if not profile_file.exists():
+            raise HTTPException(
+                400, f"{_JOB_APPLICATION_PROFILE_YAML} not found: {profile_file}"
+            )
+        set_source_field(
+            profile_file,
+            "salary_expectations",
+            "salary_range_usd",
+            body.linkedin_salary_range_usd,
+            quote=True,
+        )
+    return _salary_snapshot(ctx)
 
 
 _KNOWN_LLM_PROVIDERS = {

@@ -1,5 +1,6 @@
 from src.job import Job
 from src.job_sources.blacklist_filter import passes_blacklists
+from src.job_sources.preferences import effective_list
 from src.job_sources.headhunter.browser_client import HeadHunterBrowserClient
 from src.job_sources.headhunter.browser_mapping import (
     hh_html_vacancy_to_job,
@@ -26,7 +27,7 @@ class HeadHunterBrowserSource:
         seen_ids: set = set()
         jobs: list[Job] = []
 
-        for position in preferences.get("positions", []):
+        for position in effective_list(preferences, "headhunter", "positions"):
             for page in range(PAGES_PER_POSITION):
                 html = self.client.search_vacancies_html(
                     position, remote_only, page=page
@@ -46,6 +47,15 @@ class HeadHunterBrowserSource:
                     job = hh_html_vacancy_to_job(detail_html, item.external_id)
                     if not job.role:
                         job = item
+                    else:
+                        # hh_html_vacancy_to_job не размечает location
+                        # (нет проверенного селектора на странице
+                        # вакансии) — берём адрес, который уже пришёл
+                        # с карточки поиска (vacancy-serp__vacancy-
+                        # address, подтверждено живьём), иначе
+                        # passes_blacklists всегда режет по пустой
+                        # строке против locations-allowlist.
+                        job.location = item.location
                     if passes_blacklists(job, preferences):
                         jobs.append(job)
 

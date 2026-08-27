@@ -1,5 +1,6 @@
 from src.job import Job
 from src.job_sources.blacklist_filter import passes_blacklists
+from src.job_sources.preferences import effective_list
 from src.job_sources.linkedin.search import (
     load_job_description,
     search_easy_apply_jobs,
@@ -21,7 +22,7 @@ class LinkedInSource:
 
         seen_ids: set = set()
         jobs: list[Job] = []
-        for position in preferences.get("positions", []):
+        for position in effective_list(preferences, "linkedin", "positions"):
             for location in locations:
                 for job in search_easy_apply_jobs(
                     self.driver, position, location
