@@ -1,5 +1,6 @@
 import random
 import time
+from datetime import datetime
 
 from src.logging import logger
 
@@ -11,6 +12,31 @@ MAX_DELAY_SECONDS = 90
 
 MIN_SOURCE_DELAY_SECONDS = 10
 MAX_SOURCE_DELAY_SECONDS = 30
+
+# Холодное сообщение незнакомцу в Telegram — на порядок чувствительнее
+# отклика на вакансию: несколько личных сообщений подряд за секунды с
+# личного аккаунта — самый быстрый способ словить ограничения от
+# Telegram. Пауза в минутах, а не секундах, как у откликов на площадках.
+MIN_TELEGRAM_MESSAGE_DELAY_SECONDS = 120
+MAX_TELEGRAM_MESSAGE_DELAY_SECONDS = 600
+
+
+def wait_before_telegram_message() -> None:
+    """Случайная пауза (2-10 минут) перед каждым холодным сообщением
+    контакту из поста в Telegram-канале."""
+    delay = random.uniform(
+        MIN_TELEGRAM_MESSAGE_DELAY_SECONDS, MAX_TELEGRAM_MESSAGE_DELAY_SECONDS
+    )
+    logger.debug(f"Waiting {delay:.0f}s before next Telegram message...")
+    time.sleep(delay)
+
+
+def within_active_hours(start_hour: int, end_hour: int) -> bool:
+    """Живой человек не пишет рекрутёрам в 4 утра — если задан диапазон
+    активных часов (локальное время машины), холодные сообщения вне
+    него просто откладываются до следующего прогона, а не копятся в
+    очередь на отправку разом, как только начнутся активные часы."""
+    return start_hour <= datetime.now().hour < end_hour
 
 
 def wait_before_apply() -> None:

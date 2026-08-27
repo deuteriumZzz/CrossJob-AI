@@ -110,6 +110,20 @@ let lastRepliesSnapshot = null;
 let logsLoaded = false;
 let lastLogsSnapshot = null;
 let llmCatalog = { models: {}, api_key_previews: {} };
+let activeTelegramContact = null;
+
+function formatChatTime(iso) {
+  try {
+    return new Date(iso).toLocaleString("ru-RU", {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
 
 function providerLabel(provider) {
   const card = document.querySelector(
@@ -426,9 +440,6 @@ const render = {
       document.getElementById("search-location-blacklist").value = (
         search.location_blacklist || []
       ).join("\n");
-      document.getElementById("search-telegram-channels").value = (
-        search.telegram_channels || []
-      ).join("\n");
     });
 
     api("/api/settings/llm").then((llm) => {
@@ -636,6 +647,80 @@ const render = {
     });
   },
 
+  async telegram() {
+    const [status, settings, conversations] = await Promise.all([
+      api("/api/telegram/status"),
+      api("/api/settings/telegram"),
+      api("/api/telegram/conversations"),
+    ]);
+
+    const badge = document.getElementById("telegram-status-badge");
+    const note = document.getElementById("telegram-status-note");
+    if (!status.configured) {
+      badge.className = "badge off";
+      badge.innerHTML = '<span class="badge-dot"></span>не настроено';
+      note.textContent =
+        "Впишите telegram.api_id/api_hash в secrets.yaml (см. подсказку выше).";
+    } else if (status.connected) {
+      badge.className = "badge on";
+      badge.innerHTML = '<span class="badge-dot"></span>подключено';
+      note.textContent = "";
+    } else {
+      badge.className = "badge off";
+      badge.innerHTML = '<span class="badge-dot"></span>не авторизовано';
+      note.textContent =
+        "Запустите поиск по Telegram один раз вручную (--auto telegram) и введите код входа в консоли.";
+    }
+
+    document.getElementById("tg-channels").value = (
+      settings.channels || []
+    ).join("\n");
+    document.getElementById("tg-max-age").value =
+      settings.max_post_age_days ?? "";
+    document.getElementById("tg-daily-limit").value =
+      settings.daily_message_limit ?? "";
+    document.getElementById("tg-auto-message").checked = !!settings.auto_message;
+    document.getElementById("tg-hours-start").value =
+      settings.active_hours_start ?? "";
+    document.getElementById("tg-hours-end").value =
+      settings.active_hours_end ?? "";
+    document.getElementById("tg-intro-template").value =
+      settings.intro_message_template || "";
+
+    const unreadCount = conversations.filter((c) => c.unread).length;
+    const navBadge = document.getElementById("telegram-unread-badge");
+    if (unreadCount > 0) {
+      navBadge.textContent = String(unreadCount);
+      navBadge.style.display = "";
+    } else {
+      navBadge.style.display = "none";
+    }
+
+    const list = document.getElementById("tg-conv-list");
+    if (!conversations.length) {
+      list.innerHTML = '<p class="muted small">Пока нет диалогов.</p>';
+    } else {
+      list.innerHTML = conversations
+        .map(
+          (c) => `
+        <div class="conv-item${c.contact === activeTelegramContact ? " active" : ""}" data-contact="${c.contact}">
+          <span class="conv-contact">${c.unread ? '<span class="conv-unread-dot"></span>' : ""}@${c.contact}</span>
+          <span class="conv-preview">${c.last_message ? c.last_message.text : ""}</span>
+        </div>`
+        )
+        .join("");
+      list.querySelectorAll(".conv-item").forEach((el) => {
+        el.addEventListener("click", () =>
+          openTelegramConversation(el.dataset.contact)
+        );
+      });
+    }
+
+    if (activeTelegramContact) {
+      await openTelegramConversation(activeTelegramContact);
+    }
+  },
+
   async logs() {
     const source = document.getElementById("log-source").value;
     const params = new URLSearchParams({ lines: "300" });
@@ -662,6 +747,52 @@ const render = {
     pre.textContent = data.lines.join("\n") || "(пусто)";
   },
 };
+
+async function openTelegramConversation(contact) {
+  activeTelegramContact = contact;
+  document
+    .querySelectorAll("#tg-conv-list .conv-item")
+    .forEach((el) =>
+      el.classList.toggle("active", el.dataset.contact === contact)
+    );
+
+  const conv = await api(`/api/telegram/conversations/${contact}`);
+  document.getElementById("tg-chat-empty").style.display = "none";
+  document.getElementById("tg-chat-panel").style.display = "";
+  document.getElementById("tg-chat-contact").textContent = `@${contact}`;
+
+  const messages = document.getElementById("tg-chat-messages");
+  messages.innerHTML = conv.messages
+    .map(
+      (m) => `
+    <div class="chat-bubble ${m.direction}">
+      ${m.text.replace(/</g, "&lt;")}
+      <span class="chat-bubble-time">${formatChatTime(m.at)}</span>
+    </div>`
+    )
+    .join("");
+  messages.scrollTop = messages.scrollHeight;
+
+  // Открытие треда гасит бейдж "непрочитано" на бэкенде (см.
+  // get_telegram_conversation) — обновляем счётчик в шапке вкладки,
+  // не дожидаясь следующего полного render.telegram().
+  const navBadge = document.getElementById("telegram-unread-badge");
+  const remaining = document.querySelectorAll(
+    "#tg-conv-list .conv-unread-dot"
+  ).length;
+  const dot = document.querySelector(
+    `#tg-conv-list .conv-item[data-contact="${contact}"] .conv-unread-dot`
+  );
+  if (dot) {
+    dot.remove();
+    const left = remaining - 1;
+    if (left > 0) {
+      navBadge.textContent = String(left);
+    } else {
+      navBadge.style.display = "none";
+    }
+  }
+}
 
 async function pollGenerateStatus() {
   const statusEl = document.getElementById("gen-status");
@@ -950,7 +1081,6 @@ function initDashboard() {
             company_blacklist: linesOf("search-company-blacklist"),
             title_blacklist: linesOf("search-title-blacklist"),
             location_blacklist: linesOf("search-location-blacklist"),
-            telegram_channels: linesOf("search-telegram-channels"),
           }),
         });
         status.textContent = "Сохранено.";
@@ -978,6 +1108,68 @@ function initDashboard() {
         status.textContent = `Ошибка: ${e.message}`;
       }
     });
+
+  document
+    .getElementById("telegram-status-refresh")
+    .addEventListener("click", () => render.telegram());
+
+  document
+    .getElementById("tg-settings-save")
+    .addEventListener("click", async () => {
+      const status = document.getElementById("tg-settings-status");
+      status.textContent = "Сохранение...";
+      const numOrNull = (id) => {
+        const v = document.getElementById(id).value.trim();
+        return v === "" ? null : Number(v);
+      };
+      try {
+        await api("/api/settings/telegram", {
+          method: "POST",
+          body: JSON.stringify({
+            channels: linesOf("tg-channels"),
+            max_post_age_days: numOrNull("tg-max-age"),
+            daily_message_limit: numOrNull("tg-daily-limit"),
+            auto_message: document.getElementById("tg-auto-message").checked,
+            active_hours_start: numOrNull("tg-hours-start"),
+            active_hours_end: numOrNull("tg-hours-end"),
+            intro_message_template: document
+              .getElementById("tg-intro-template")
+              .value.trim(),
+          }),
+        });
+        status.textContent = "Сохранено.";
+        setTimeout(() => (status.textContent = ""), 2000);
+      } catch (e) {
+        status.textContent = `Ошибка: ${e.message}`;
+      }
+    });
+
+  async function sendTelegramMessage() {
+    if (!activeTelegramContact) return;
+    const input = document.getElementById("tg-chat-input");
+    const text = input.value.trim();
+    if (!text) return;
+    const status = document.getElementById("tg-chat-status");
+    status.textContent = "Отправка...";
+    try {
+      await api(
+        `/api/telegram/conversations/${activeTelegramContact}/send`,
+        { method: "POST", body: JSON.stringify({ text }) }
+      );
+      input.value = "";
+      status.textContent = "";
+      await openTelegramConversation(activeTelegramContact);
+    } catch (e) {
+      status.textContent = `Ошибка: ${e.message}`;
+    }
+  }
+
+  document
+    .getElementById("tg-chat-send")
+    .addEventListener("click", sendTelegramMessage);
+  document.getElementById("tg-chat-input").addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") sendTelegramMessage();
+  });
 
   document
     .getElementById("llm-provider-save")
@@ -1061,7 +1253,13 @@ function initDashboard() {
   // виден без перезапуска программы. Настройки сюда намеренно не
   // включены — иначе несохранённый ввод в полях будет затираться, как
   // чекбоксы на "Обзоре" до фикса выше.
-  const LIVE_TABS = new Set(["overview", "history", "replies", "logs"]);
+  const LIVE_TABS = new Set([
+    "overview",
+    "history",
+    "replies",
+    "logs",
+    "telegram",
+  ]);
   setInterval(() => {
     const active = document.querySelector("nav.tabs button.active")?.dataset.tab;
     if (active && LIVE_TABS.has(active)) render[active]();

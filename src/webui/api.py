@@ -23,6 +23,7 @@ from config import (
 )
 from main import ALL_SOURCES, ConfigError, ConfigValidator, FileManager
 from main import SCHEDULER_SOURCES
+from main import TELEGRAM_INTRO_TEMPLATE_DEFAULT
 from main import block_headhunter_employer
 from main import clone_headhunter_resume, create_headhunter_resume_draft
 from main import _daily_limit as _effective_daily_limit
@@ -55,8 +56,14 @@ from src.job_sources.llm_usage import (
     llm_exhausted_today,
     summarize_usage,
 )
+from src.job_sources.telegram.client import (
+    TelegramSourceClient,
+    TelegramStatusClient,
+)
+from src.job_sources.telegram_conversations import TelegramConversations
 from src.job_sources.telegram_notify import send_notification
 from src.libs.resume_and_cover_builder import StyleManager
+from src.logging import logger
 from src.scheduler import Scheduler
 from src.scheduler_state import load_state
 from src.utils.constants import RESUME_PDF, RESUME_PDF_LINKEDIN, SECRETS_YAML
@@ -670,17 +677,12 @@ class SearchSettingsUpdate(BaseModel):
     company_blacklist: Optional[list[str]] = None
     title_blacklist: Optional[list[str]] = None
     location_blacklist: Optional[list[str]] = None
-    telegram_channels: Optional[list[str]] = None
 
 
 def _search_snapshot(ctx: AppContext) -> dict:
-    snapshot = {
+    return {
         field: ctx.config.get(field) or [] for field in _SEARCH_LIST_FIELDS
     }
-    snapshot["telegram_channels"] = (ctx.config.get("telegram") or {}).get(
-        "channels"
-    ) or []
-    return snapshot
 
 
 @app.get("/api/settings/search")
@@ -701,12 +703,180 @@ def post_search_settings(
         value = getattr(body, field)
         if value is not None:
             set_list_field(ctx.config_file, field, value)
-    if body.telegram_channels is not None:
-        set_source_list_field(
-            ctx.config_file, "telegram", "channels", body.telegram_channels
-        )
     ctx.reload_config()
     return _search_snapshot(ctx)
+
+
+class TelegramSettingsUpdate(BaseModel):
+    # Каналы живут отдельно от общих positions/locations (см.
+    # _search_snapshot выше) — это не площадка поиска, а свой раздел в
+    # UI, см. обсуждение "площадки это одно, а телеграм канал уже
+    # другое". channels принимает как @username/username, так и полные
+    # ссылки https://t.me/username — нормализуется в
+    # telegram.client.normalize_channel при поиске.
+    channels: Optional[list[str]] = None
+    max_post_age_days: Optional[int] = None
+    auto_message: Optional[bool] = None
+    daily_message_limit: Optional[int] = None
+    active_hours_start: Optional[int] = None
+    active_hours_end: Optional[int] = None
+    intro_message_template: Optional[str] = None
+
+
+def _telegram_settings_snapshot(ctx: AppContext) -> dict:
+    tg = ctx.config.get("telegram") or {}
+    return {
+        "channels": tg.get("channels") or [],
+        "max_post_age_days": tg.get("max_post_age_days", 7),
+        "auto_message": tg.get("auto_message", False),
+        "daily_message_limit": tg.get("daily_message_limit", 15),
+        "active_hours_start": tg.get("active_hours_start"),
+        "active_hours_end": tg.get("active_hours_end"),
+        "intro_message_template": tg.get(
+            "intro_message_template", TELEGRAM_INTRO_TEMPLATE_DEFAULT
+        ),
+    }
+
+
+@app.get("/api/settings/telegram")
+def get_telegram_settings(ctx: AppContext = Depends(get_ctx)) -> dict:
+    return _telegram_settings_snapshot(ctx)
+
+
+@app.post("/api/settings/telegram")
+def post_telegram_settings(
+    body: TelegramSettingsUpdate, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    if body.channels is not None:
+        set_source_list_field(
+            ctx.config_file, "telegram", "channels", body.channels
+        )
+    for field in (
+        "max_post_age_days",
+        "auto_message",
+        "daily_message_limit",
+        "active_hours_start",
+        "active_hours_end",
+    ):
+        value = getattr(body, field)
+        if value is not None:
+            set_source_field(ctx.config_file, "telegram", field, value)
+    if body.intro_message_template is not None:
+        set_source_field(
+            ctx.config_file,
+            "telegram",
+            "intro_message_template",
+            body.intro_message_template,
+            quote=True,
+        )
+    ctx.reload_config()
+    return _telegram_settings_snapshot(ctx)
+
+
+def _telegram_session_path(ctx: AppContext) -> Path:
+    return ctx.output_folder / ".telegram_session"
+
+
+def _telegram_secrets(ctx: AppContext) -> tuple[str, str] | None:
+    tg_secrets = (
+        ConfigValidator.load_yaml(ctx.secrets_file).get("telegram") or {}
+    )
+    api_id, api_hash = tg_secrets.get("api_id"), tg_secrets.get("api_hash")
+    return (api_id, api_hash) if api_id and api_hash else None
+
+
+@app.get("/api/telegram/status")
+def get_telegram_status(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Бейдж подключения в UI: настроен ли api_id/api_hash и
+    авторизована ли сессия (человек уже один раз ввёл код входа) — без
+    попытки залогиниться самой (см. TelegramStatusClient: connect(), а
+    не start(), иначе запрос из вебui завис бы в ожидании
+    интерактивного ввода, которому неоткуда прийти)."""
+    creds = _telegram_secrets(ctx)
+    if creds is None:
+        return {"configured": False, "connected": False}
+    try:
+        with TelegramStatusClient(
+            int(creds[0]), creds[1], _telegram_session_path(ctx)
+        ) as client:
+            connected = client.is_authorized()
+    except Exception as e:
+        logger.warning(f"Failed to check Telegram session status: {e}")
+        return {"configured": True, "connected": False}
+    return {"configured": True, "connected": connected}
+
+
+@app.get("/api/telegram/conversations")
+def get_telegram_conversations(ctx: AppContext = Depends(get_ctx)) -> list:
+    conversations = TelegramConversations(
+        ctx.output_folder / "telegram_conversations.json"
+    )
+    return [
+        {
+            "contact": conv["contact"],
+            "last_activity_at": conv["last_activity_at"],
+            "last_message": (
+                conv["messages"][-1] if conv["messages"] else None
+            ),
+            "message_count": len(conv["messages"]),
+            "unread": conv.get("unread", False),
+        }
+        for conv in conversations.all()
+    ]
+
+
+@app.get("/api/telegram/conversations/{contact}")
+def get_telegram_conversation(
+    contact: str, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Открытие треда в UI автоматически гасит его "непрочитано" —
+    как в любом мессенджере, отдельной кнопки "прочитано" не нужно."""
+    conversations = TelegramConversations(
+        ctx.output_folder / "telegram_conversations.json"
+    )
+    conv = conversations.get(contact)
+    if conv is None:
+        raise HTTPException(404, f"No conversation with @{contact}")
+    if conv.get("unread"):
+        conversations.mark_read(contact)
+        conv = conversations.get(contact)
+    return conv
+
+
+class TelegramMessageSend(BaseModel):
+    text: str
+
+
+@app.post("/api/telegram/conversations/{contact}/send")
+def post_telegram_message(
+    contact: str,
+    body: TelegramMessageSend,
+    ctx: AppContext = Depends(get_ctx),
+) -> dict:
+    """Ручная отправка из чата в дашборде — в отличие от холодного
+    первого сообщения (search_telegram), это осознанное действие
+    пользователя прямо сейчас, поэтому без pacing/лимитов: он и так не
+    будет печатать сотню сообщений в секунду руками."""
+    creds = _telegram_secrets(ctx)
+    if creds is None:
+        raise HTTPException(
+            400, "Missing telegram.api_id/api_hash in secrets.yaml"
+        )
+    if not body.text.strip():
+        raise HTTPException(400, "Message text is empty")
+    try:
+        with TelegramSourceClient(
+            int(creds[0]), creds[1], _telegram_session_path(ctx)
+        ) as client:
+            client.send_message(contact, body.text)
+    except Exception as e:
+        raise HTTPException(502, f"Failed to send Telegram message: {e}")
+
+    conversations = TelegramConversations(
+        ctx.output_folder / "telegram_conversations.json"
+    )
+    conversations.record_outbound(contact, body.text)
+    return conversations.get(contact)
 
 
 @app.post("/api/settings/generate-positions")

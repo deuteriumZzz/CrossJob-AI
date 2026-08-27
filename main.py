@@ -29,7 +29,9 @@ from src.job_sources.applied_log import AppliedLog
 from src.job_sources.apply_pacing import (
     randomized_daily_limit,
     wait_before_apply,
+    wait_before_telegram_message,
     wait_between_sources,
+    within_active_hours,
 )
 from src.job_sources.base import JobSource
 from src.job_sources.block_detection import (
@@ -127,7 +129,9 @@ from src.job_sources.superjob.auth import SuperJobAuth
 from src.job_sources.superjob.client import SuperJobClient
 from src.job_sources.superjob.source import SuperJobSource
 from src.job_sources.telegram.client import TelegramSourceClient
+from src.job_sources.telegram.contact import extract_contact
 from src.job_sources.telegram.source import TelegramSource
+from src.job_sources.telegram_conversations import TelegramConversations
 from src.job_sources.telegram_notify import notify_from_secrets
 from src.job_sources.zarplata.auth import ZarplataAuth
 from src.job_sources.zarplata.client import ZarplataClient
@@ -1757,15 +1761,28 @@ def search_rabota_ru(parameters: dict, llm_api_key: str):
         sent_count += 1
 
 
+# {role}/{link} подставляются per-вакансия. Короткое и человеческое —
+# см. комментарий в search_telegram про то, почему не всё письмо целиком.
+TELEGRAM_INTRO_TEMPLATE_DEFAULT = (
+    "Здравствуйте! Заинтересовала вакансия «{role}» ({link}). "
+    "Расскажу подробнее о себе, если ещё актуально."
+)
+
+
 def search_telegram(parameters: dict, llm_api_key: str):
     """
     Ищет в настроенных Telegram-каналах свежие посты по
     ключевым словам из positions в work_preferences.yaml и пишет
     под каждый сопроводительное письмо на основе
-    data_folder/resume.pdf. Автоматического отклика для Telegram
-    нет — там почти всегда "напиши автору в личку", а не вызов
-    API — поэтому каждое совпадение записывается как dry-run,
-    готовое вставить в ответ.
+    data_folder/resume.pdf.
+
+    Если в посте нашёлся ровно один @username-контакт (extract_contact)
+    и telegram.auto_message включён — то же сопроводительное письмо
+    отправляется ему первым сообщением (с человекоподобной паузой,
+    дневным лимитом и окном активных часов, см. apply_pacing), а диалог
+    заводится в telegram_conversations.json для UI ("Диалоги").
+    Иначе (нет контакта, или auto_message выключен) — как раньше,
+    просто dry-run запись, годная только для ручного ответа.
     """
     data_folder: Path = parameters["dataFolder"]
     resume_pdf_path = data_folder / RESUME_PDF
@@ -1789,9 +1806,28 @@ def search_telegram(parameters: dict, llm_api_key: str):
             "telegram.channels is required in "
             "work_preferences.yaml (list of channel usernames)"
         )
+    # Первое сообщение — короткое приветствие с интересом к вакансии,
+    # а не всё сопроводительное письмо целиком: сразу вываливать длинный
+    # текст (и тем более резюме) в первом же сообщении незнакомцу похоже
+    # на рассылку ботом. cover_letter при этом всё равно генерируется и
+    # попадает в applied_log/отчёт как обычно — пригодится, когда
+    # разговор продолжится в чате и попросят прислать резюме/подробнее
+    # рассказать о себе.
+    auto_message = tg_preferences.get("auto_message", False)
+    intro_template = tg_preferences.get(
+        "intro_message_template", TELEGRAM_INTRO_TEMPLATE_DEFAULT
+    )
+    active_hours_start = tg_preferences.get("active_hours_start")
+    active_hours_end = tg_preferences.get("active_hours_end")
 
     output_folder: Path = parameters["outputFileDirectory"]
     applied_log = AppliedLog(output_folder / "applied_log.json")
+    conversations = TelegramConversations(
+        output_folder / "telegram_conversations.json"
+    )
+    daily_message_limit = randomized_daily_limit(
+        tg_preferences.get("daily_message_limit", 15)
+    )
 
     with TelegramSourceClient(
         int(api_id), api_hash, output_folder / ".telegram_session"
@@ -1799,60 +1835,99 @@ def search_telegram(parameters: dict, llm_api_key: str):
         source: JobSource = TelegramSource(client)
         jobs = source.search(parameters)
 
-    logger.info(f"Found {len(jobs)} matching Telegram posts.")
+        logger.info(f"Found {len(jobs)} matching Telegram posts.")
 
-    sent_count = 0
-    job_max_applications = _job_max_applications(parameters, "telegram")
-    for job in jobs:
-        if sent_count >= job_max_applications:
-            logger.info(
-                f"Reached JOB_MAX_APPLICATIONS "
-                f"({job_max_applications}) for this run."
-            )
-            break
-        if _total_daily_limit_reached(parameters, applied_log):
-            break
-        if applied_log.already_applied(job):
-            continue
+        sent_count = 0
+        job_max_applications = _job_max_applications(parameters, "telegram")
+        for job in jobs:
+            if sent_count >= job_max_applications:
+                logger.info(
+                    f"Reached JOB_MAX_APPLICATIONS "
+                    f"({job_max_applications}) for this run."
+                )
+                break
+            if _total_daily_limit_reached(parameters, applied_log):
+                break
+            if applied_log.already_applied(job):
+                continue
 
-        fit = score_job_fit(resume_pdf_path, job, llm_api_key)
-        tier = classify_fit(fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE)
-        if tier == "skip":
-            logger.info(
-                f"Skipping {job.role} at {job.company}: fit score "
-                f"{fit.score}/10 below minimum."
+            fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+            tier = classify_fit(
+                fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE
             )
+            if tier == "skip":
+                logger.info(
+                    f"Skipping {job.role} at {job.company}: fit score "
+                    f"{fit.score}/10 below minimum."
+                )
+                applied_log.record(
+                    job, "", "", "skipped_low_fit", fit.score, fit.gaps
+                )
+                continue
+            if tier == "weak":
+                logger.info(
+                    f"{job.role} at {job.company}: weak fit "
+                    f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
+                )
+
+            try:
+                cover_letter = generate_cover_letter_for_job(
+                    resume_pdf_path, job, llm_api_key
+                )
+            except Exception as e:
+                logger.exception(
+                    f"Failed to generate cover letter for {job.role} at "
+                    f"{job.company}, skipping this vacancy: {e}"
+                )
+                continue
+
+            # https://t.me/{channel}/{message_id} — см. mapping.py.
+            channel = job.link.rsplit("/", 2)[-2]
+            contact = extract_contact(job.description, channel)
+            status = "dry_run"
+            if (
+                contact
+                and auto_message
+                and not conversations.already_contacted(contact)
+                and conversations.sent_today_count() < daily_message_limit
+                and (
+                    active_hours_start is None
+                    or active_hours_end is None
+                    or within_active_hours(
+                        active_hours_start, active_hours_end
+                    )
+                )
+            ):
+                wait_before_telegram_message()
+                intro_message = intro_template.format(
+                    role=job.role, link=job.link
+                )
+                try:
+                    client.send_message(contact, intro_message)
+                except Exception as e:
+                    logger.exception(
+                        f"Failed to message @{contact} about {job.role}: {e}"
+                    )
+                else:
+                    conversations.record_outbound(
+                        contact, intro_message, job_link=job.link
+                    )
+                    status = "applied"
+                    logger.info(
+                        f"Messaged @{contact} about {job.role} ({job.link})"
+                    )
+            else:
+                logger.info(f"[manual reply needed] {job.role} ({job.link})")
+
             applied_log.record(
-                job, "", "", "skipped_low_fit", fit.score, fit.gaps
+                job,
+                cover_letter,
+                resume_id="",
+                status=status,
+                score=fit.score,
+                gaps=fit.gaps,
             )
-            continue
-        if tier == "weak":
-            logger.info(
-                f"{job.role} at {job.company}: weak fit "
-                f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
-            )
-
-        try:
-            cover_letter = generate_cover_letter_for_job(
-                resume_pdf_path, job, llm_api_key
-            )
-        except Exception as e:
-            logger.exception(
-                f"Failed to generate cover letter for {job.role} at "
-                f"{job.company}, skipping this vacancy: {e}"
-            )
-            continue
-        logger.info(f"[manual reply needed] {job.role} ({job.link})")
-
-        applied_log.record(
-            job,
-            cover_letter,
-            resume_id="",
-            status="dry_run",
-            score=fit.score,
-            gaps=fit.gaps,
-        )
-        sent_count += 1
+            sent_count += 1
 
 
 def search_getmatch(parameters: dict, llm_api_key: str):
@@ -2876,19 +2951,68 @@ def _check_zp_replies_scheduled(parameters: dict, llm_api_key: str) -> None:
     check_zarplata_replies(parameters)
 
 
+def check_telegram_replies(parameters: dict, llm_api_key: str) -> None:
+    """Проверяет личные диалоги, заведённые search_telegram
+    (telegram.auto_message), на новые ответы контактов — то же самое,
+    что check_superjob_replies/check_zarplata_replies: только
+    уведомление в Telegram-бот, без AI-автоответа (в отличие от HH,
+    где есть чат с явной кнопкой "ответить" на площадке — здесь это
+    личный диалог самого пользователя, автоматически отвечать в него
+    от его имени не тот случай)."""
+    secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
+    tg_secrets = secrets.get("telegram") or {}
+    api_id = tg_secrets.get("api_id")
+    api_hash = tg_secrets.get("api_hash")
+    if not api_id or not api_hash:
+        return
+
+    output_folder: Path = parameters["outputFileDirectory"]
+    conversations = TelegramConversations(
+        output_folder / "telegram_conversations.json"
+    )
+    active_conversations = conversations.all()
+    if not active_conversations:
+        return
+
+    with TelegramSourceClient(
+        int(api_id), api_hash, output_folder / ".telegram_session"
+    ) as client:
+        for conv in active_conversations:
+            contact = conv["contact"]
+            try:
+                new_messages = client.new_incoming_messages(
+                    contact, conv.get("last_incoming_id", 0)
+                )
+            except Exception as e:
+                logger.warning(f"Failed to poll @{contact} on Telegram: {e}")
+                continue
+            for message in reversed(new_messages):
+                text = (message.text or "").strip()
+                if not text:
+                    continue
+                conversations.record_inbound(
+                    contact, text, message.id, message.date
+                )
+                notify(
+                    parameters,
+                    f"Новый ответ в Telegram от @{contact}: {text}",
+                )
+
+
 # ponytail: check_*_replies не входят в ALL_SOURCES (это не
 # "поиск+отклик", а отдельные проверки чата/переговоров) — но
 # демону/веб-планировщику нужно их видеть, иначе headhunter.auto_reply
-# (и сама возможность увидеть новые ответы SJ/ZP) никогда не
+# (и сама возможность увидеть новые ответы SJ/ZP/Telegram) никогда не
 # срабатывает сам по себе, только вручную через --auto check_*_replies.
 # У каждого свой schedule_enabled/interval_hours блок в
 # work_preferences.yaml (toplevel, не внутри headhunter:/superjob:/
-# zarplata:), т.к. Scheduler матчит по имени ключа словаря.
+# zarplata:/telegram:), т.к. Scheduler матчит по имени ключа словаря.
 SCHEDULER_SOURCES = {
     **dict(ALL_SOURCES),
     "check_hh_replies": check_headhunter_replies,
     "check_sj_replies": _check_sj_replies_scheduled,
     "check_zp_replies": _check_zp_replies_scheduled,
+    "check_telegram_replies": check_telegram_replies,
 }
 
 
@@ -3214,7 +3338,8 @@ def prompt_selected_sources() -> list[str]:
         "Run non-interactively (for cron) instead of showing the menu: "
         "one of headhunter/superjob/zarplata/geekjob/rabota_ru/telegram/"
         "getmatch/linkedin/all/check_hh_replies/check_sj_replies/"
-        "check_zp_replies/cleanup_hh_negotiations, or "
+        "check_zp_replies/check_telegram_replies/"
+        "cleanup_hh_negotiations, or "
         "'selected:hh,superjob' for a comma-separated subset of sources."
     ),
 )
@@ -3237,6 +3362,7 @@ def main(auto: Optional[str], daemon: bool):
         "check_hh_replies",
         "check_sj_replies",
         "check_zp_replies",
+        "check_telegram_replies",
         "cleanup_hh_negotiations",
     }
     if auto is not None and not (
@@ -3365,6 +3491,10 @@ def main(auto: Optional[str], daemon: bool):
 
         if auto == "check_zp_replies":
             check_zarplata_replies(config)
+            return
+
+        if auto == "check_telegram_replies":
+            check_telegram_replies(config, llm_api_key)
             return
 
         if daemon:

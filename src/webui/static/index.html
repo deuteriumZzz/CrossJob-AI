@@ -63,6 +63,11 @@
         <svg viewBox="0 0 20 20" fill="none"><path d="M3 5.5A2 2 0 0 1 5 3.5h10a2 2 0 0 1 2 2V12a2 2 0 0 1-2 2H8l-3.5 3V14H5a2 2 0 0 1-2-2V5.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
         <span>Ответы</span>
       </button>
+      <button data-tab="telegram" title="Telegram">
+        <svg viewBox="0 0 20 20" fill="none"><path d="m2.5 10.3 14.6-6c.7-.3 1.4.3 1.1 1l-2.5 12.4c-.2.9-1.2 1.2-1.9.6l-3.4-2.7-2 1.9c-.3.3-.7.2-.8-.2l-.6-3.3 8.1-7.6c.3-.3-.1-.5-.4-.3L6 11.4l-3.3-1c-.7-.2-.7-1 -.2-1.1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        <span>Telegram</span>
+        <span id="telegram-unread-badge" class="tab-badge" style="display:none"></span>
+      </button>
       <button data-tab="analytics" title="Аналитика">
         <svg viewBox="0 0 20 20" fill="none"><path d="M3.5 16.5v-5M9 16.5V5.5M14.5 16.5v-8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
         <span>Аналитика</span>
@@ -165,6 +170,100 @@
       </div>
     </section>
 
+    <section id="view-telegram" class="view">
+      <div class="view-header">
+        <div>
+          <h2>Telegram</h2>
+          <p class="muted">Каналы вакансий, автосообщения контактам из постов и переписка</p>
+        </div>
+        <div class="toolbar">
+          <span id="telegram-status-badge" class="badge off"><span class="badge-dot"></span>проверка...</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Подключение</h3>
+        <p class="muted small">
+          Читает каналы и пишет контактам через твой личный аккаунт (не бота) — вход по
+          <code>api_id</code>/<code>api_hash</code> с <a href="https://my.telegram.org/apps" target="_blank" rel="noopener">my.telegram.org</a>
+          в <code>data_folder/secrets.yaml</code> (блок <code>telegram:</code>). При первом запуске поиска по Telegram
+          в консоли попросит номер телефона и код из самого Telegram — дальше сессия сохраняется, повторно вводить не нужно.
+        </p>
+        <div class="filters">
+          <button id="telegram-status-refresh" class="btn btn-secondary">Проверить подключение</button>
+          <span id="telegram-status-note" class="muted small"></span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Каналы и правила поиска</h3>
+        <div class="limits-grid">
+          <label class="limit-field">
+            <span>Каналы (username или ссылка t.me/..., один на строку)</span>
+            <textarea id="tg-channels" rows="3" placeholder="some_public_job_channel&#10;https://t.me/another_channel"></textarea>
+          </label>
+          <label class="limit-field">
+            <span>Не старше скольких дней (иначе можно написать по давно закрытой вакансии)</span>
+            <input id="tg-max-age" type="number" min="1" placeholder="7" />
+          </label>
+          <label class="limit-field">
+            <span>Дневной лимит холодных сообщений</span>
+            <input id="tg-daily-limit" type="number" min="1" placeholder="15" />
+          </label>
+        </div>
+        <div class="limits-grid">
+          <label class="limit-field" style="justify-content:flex-end">
+            <span><input id="tg-auto-message" type="checkbox" style="margin-right:6px" />Автоматически писать найденному в посте контакту первым</span>
+          </label>
+          <label class="limit-field">
+            <span>Активные часы — с</span>
+            <input id="tg-hours-start" type="number" min="0" max="23" placeholder="9" />
+          </label>
+          <label class="limit-field">
+            <span>Активные часы — до</span>
+            <input id="tg-hours-end" type="number" min="0" max="23" placeholder="21" />
+          </label>
+        </div>
+        <label class="limit-field">
+          <span>Текст первого сообщения ({role} — вакансия, {link} — ссылка на пост)</span>
+          <textarea id="tg-intro-template" rows="2"></textarea>
+        </label>
+        <div class="risk-banner">
+          ⚠️ Даже с паузами и лимитом это холодные сообщения незнакомым людям с твоего личного
+          аккаунта — Telegram может ограничить аккаунт при слишком активной рассылке. Первое
+          сообщение — только короткое приветствие с интересом к вакансии, без резюме и без
+          автоответа на входящие: продолжать разговор (в т.ч. присылать резюме, если попросят) —
+          вручную, из диалогов ниже.
+        </div>
+        <div class="filters">
+          <button id="tg-settings-save" class="btn btn-primary">Сохранить</button>
+          <span id="tg-settings-status" class="muted small"></span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Диалоги</h3>
+        <p class="muted small">Автоответа на входящие нет — только уведомление в Telegram-бот и здесь. Отвечать нужно самому.</p>
+        <div class="telegram-layout">
+          <div id="tg-conv-list" class="conv-list">
+            <p class="muted small">Загрузка...</p>
+          </div>
+          <div class="chat-thread">
+            <div id="tg-chat-empty" class="muted small">Выберите диалог слева.</div>
+            <div id="tg-chat-panel" style="display:none">
+              <h3 id="tg-chat-contact" style="margin:0 0 8px"></h3>
+              <div id="tg-chat-messages" class="chat-messages"></div>
+              <div class="chat-composer">
+                <input id="tg-chat-input" type="text" placeholder="Написать сообщение..." />
+                <button id="tg-chat-send" class="btn btn-primary">Отправить</button>
+              </div>
+              <span id="tg-chat-status" class="muted small"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section id="view-analytics" class="view">
       <div class="view-header">
         <div>
@@ -196,7 +295,7 @@
 
       <div class="panel">
         <h3>Поиск</h3>
-        <p class="muted small">Должности (ключевые слова поиска, они же — ключевые слова для Telegram-каналов), локации и чёрные списки — без правки work_preferences.yaml вручную.</p>
+        <p class="muted small">Должности (ключевые слова поиска, они же — ключевые слова для Telegram-каналов) и локации — без правки work_preferences.yaml вручную. Настройки самого Telegram (каналы, автосообщения, диалоги) — на вкладке «Telegram» слева.</p>
         <div class="limits-grid">
           <label class="limit-field">
             <span>Должности (одна на строку)</span>
@@ -205,10 +304,6 @@
           <label class="limit-field">
             <span>Локации (одна на строку)</span>
             <textarea id="search-locations" rows="3" placeholder="Москва"></textarea>
-          </label>
-          <label class="limit-field">
-            <span>Telegram-каналы (username без @, один на строку)</span>
-            <textarea id="search-telegram-channels" rows="3" placeholder="some_public_job_channel"></textarea>
           </label>
         </div>
         <div class="filters">

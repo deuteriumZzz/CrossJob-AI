@@ -570,19 +570,19 @@ def test_post_search_settings_partial_update_leaves_others(client):
     assert body["locations"] == ["Berlin"]
 
 
-def test_post_search_settings_updates_telegram_channels(client):
-    unset = client.get("/api/settings/search").json()
-    assert unset["telegram_channels"] == []
+def test_post_telegram_settings_updates_channels(client):
+    unset = client.get("/api/settings/telegram").json()
+    assert unset["channels"] == []
 
     response = client.post(
-        "/api/settings/search",
-        json={"telegram_channels": ["chan_one", "chan_two"]},
+        "/api/settings/telegram",
+        json={"channels": ["chan_one", "chan_two"]},
     )
     assert response.status_code == 200
-    assert response.json()["telegram_channels"] == ["chan_one", "chan_two"]
+    assert response.json()["channels"] == ["chan_one", "chan_two"]
 
-    follow_up = client.get("/api/settings/search")
-    assert follow_up.json()["telegram_channels"] == ["chan_one", "chan_two"]
+    follow_up = client.get("/api/settings/telegram")
+    assert follow_up.json()["channels"] == ["chan_one", "chan_two"]
 
 
 def test_post_generate_positions_saves_inferred_list(client):

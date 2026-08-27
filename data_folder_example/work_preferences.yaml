@@ -168,11 +168,45 @@ rabota_ru:
   auto_apply: false
 
 # Optional: only needed for the "Search Telegram channels" action.
-# `positions` above is reused as the search keywords.
+# `positions` above is reused as the search keywords. Also editable from
+# the dashboard's own "Telegram" tab — see docs/GUIDE.md.
 telegram:
+  # username или полная ссылка (https://t.me/username) — оба формата
+  # принимаются, см. telegram.client.normalize_channel.
   channels:
     - some_public_job_channel
   messages_per_channel: 100
+  # Посты старше стольки дней не рассматриваются вообще — иначе
+  # messages_per_channel листает вглубь редко постящего канала и легко
+  # находит вакансию месячной давности, по которой писать уже поздно.
+  max_post_age_days: 7
+  # Если в посте нашёлся ровно один @username-контакт — писать ему
+  # первым коротким приветствием (см. intro_message_template ниже) с
+  # человекоподобными паузами (2-10 минут) и дневным лимитом. По
+  # умолчанию выключено — без этого посты просто попадают в отчёт для
+  # ручного ответа, как раньше.
+  auto_message: false
+  daily_message_limit: 15
+  # Слать сообщения только в эти часы (по времени машины) — иначе
+  # холодное сообщение в 4 утра выглядит совсем не по-человечески.
+  # Не заданы — шлёт в любое время.
+  active_hours_start: 9
+  active_hours_end: 21
+  # {role}/{link} подставляются на конкретную вакансию. Специально
+  # короткое — сразу вываливать резюме/длинное письмо незнакомцу похоже
+  # на рассылку ботом; продолжать разговор (в т.ч. присылать резюме) —
+  # вручную, из вкладки "Telegram" → "Диалоги" в дашборде.
+  intro_message_template: >-
+    Здравствуйте! Заинтересовала вакансия «{role}» ({link}).
+    Расскажу подробнее о себе, если ещё актуально.
+
+# check_telegram_replies — отдельное расписание, проверяет диалоги,
+# заведённые telegram.auto_message, на новые ответы (только уведомление,
+# без автоответа — см. check_hh_replies выше про общий смысл отдельного
+# расписания под проверку чата).
+check_telegram_replies:
+  schedule_enabled: false
+  interval_hours: 1
 
 # Optional: only needed for the "Search & Apply on LinkedIn" action.
 # Keep auto_apply: false until you've reviewed a dry run's generated
