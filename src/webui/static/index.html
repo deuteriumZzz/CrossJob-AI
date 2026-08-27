@@ -28,7 +28,7 @@
       <a href="https://github.com/deuteriumZzz/CrossJob-AI/blob/main/docs/GUIDE.md" target="_blank" rel="noopener">docs/GUIDE.md</a>).
     </p>
     <label class="setup-label" for="setup-api-key">API-ключ OpenAI (llm_api_key)</label>
-    <input id="setup-api-key" type="text" placeholder="sk-... (необязательно, можно вписать позже)" />
+    <input id="setup-api-key" type="text" placeholder="sk-… (необязательно, можно вписать позже)" autocomplete="off" />
     <div class="filters">
       <button id="setup-init" class="btn btn-primary">Создать data_folder и продолжить</button>
       <span id="setup-status" class="muted small"></span>
@@ -144,7 +144,7 @@
           <option value="dry_run">Тестовый прогон</option>
           <option value="skipped_low_fit">Пропущено (слабое совпадение)</option>
         </select>
-        <input id="filter-query" type="text" placeholder="Поиск по компании/названию" />
+        <input id="filter-query" type="text" placeholder="Поиск по компании/названию" aria-label="Поиск по компании/названию" />
         <button id="history-apply-filters" class="btn btn-secondary">Применить</button>
       </div>
       <div class="table-wrap">
@@ -181,7 +181,7 @@
           <p class="muted">Каналы вакансий, автосообщения контактам из постов и переписка</p>
         </div>
         <div class="toolbar">
-          <span id="telegram-status-badge" class="badge off"><span class="badge-dot"></span>проверка...</span>
+          <span id="telegram-status-badge" class="badge off"><span class="badge-dot"></span>проверка…</span>
         </div>
       </div>
 
@@ -250,7 +250,7 @@
         <p class="muted small">Автоответа на входящие нет — только уведомление в Telegram-бот и здесь. Отвечать нужно самому.</p>
         <div class="telegram-layout">
           <div id="tg-conv-list" class="conv-list">
-            <p class="muted small">Загрузка...</p>
+            <p class="muted small">Загрузка…</p>
           </div>
           <div class="chat-thread">
             <div id="tg-chat-empty" class="muted small">Выберите диалог слева.</div>
@@ -261,7 +261,7 @@
               </div>
               <div id="tg-chat-messages" class="chat-messages"></div>
               <div class="chat-composer">
-                <input id="tg-chat-input" type="text" placeholder="Написать сообщение..." />
+                <input id="tg-chat-input" type="text" placeholder="Написать сообщение…" aria-label="Текст сообщения" />
                 <button id="tg-chat-attach-resume" class="btn btn-secondary" title="Отправить resume.pdf файлом">📎 Резюме</button>
                 <button id="tg-chat-send" class="btn btn-primary">Отправить</button>
               </div>
@@ -402,7 +402,7 @@
         <div class="filters" style="margin-top:14px">
           <label class="limit-field" style="flex:1 1 260px">
             <span>Ключ для <span id="llm-key-provider-label">OpenAI</span> (сейчас: <span id="llm-key-preview">—</span>)</span>
-            <input id="llm-key-input" type="password" placeholder="вставьте ключ этого провайдера" />
+            <input id="llm-key-input" type="password" placeholder="вставьте ключ этого провайдера" autocomplete="off" />
           </label>
           <button id="llm-key-save" class="btn btn-secondary">Сохранить ключ</button>
           <span id="llm-key-status" class="muted small"></span>
@@ -445,9 +445,11 @@
       </div>
 
       <div class="panel">
-        <h3>Telegram</h3>
+        <h3>Уведомления (Telegram-бот)</h3>
         <p class="muted small">
-          Нужен для уведомлений (новые ответы работодателей, дневной лимит откликов исчерпан,
+          Отдельный бот только для уведомлений вам — не путать с вкладкой "Telegram" слева
+          (там про поиск по каналам и переписку с контактами). Нужен для уведомлений (новые
+          ответы работодателей, дневной лимит откликов исчерпан,
           расходы на LLM) на всех площадках, а для HeadHunter — ещё и для подтверждения
           автозаполнения внешних анкет (Google Forms по ссылке из чата с работодателем):
           бот присылает черновик ответов и ждёт вашего "да &lt;id&gt;" / "заново &lt;id&gt;" /
@@ -485,7 +487,7 @@
         <p class="muted small">Рендерится через Selenium (то же, что в консольном меню) — может занять до минуты.</p>
         <div class="filters">
           <select id="gen-style"></select>
-          <input id="gen-job-url" type="text" placeholder="Ссылка на вакансию (для резюме/письма под вакансию)" />
+          <input id="gen-job-url" type="text" placeholder="Ссылка на вакансию (для резюме/письма под вакансию)" aria-label="Ссылка на вакансию" />
         </div>
         <div class="filters">
           <button id="gen-resume" class="btn btn-secondary">Резюме (общее)</button>
@@ -506,7 +508,7 @@
         <div id="llm-exhausted-banner" class="risk-banner" style="display:none">
           ⚠️ Похоже, все настроенные LLM-провайдеры сегодня недоступны (несколько ошибок подряд, ни одного успешного вызова) — вероятно, исчерпаны бесплатные лимиты. Вакансии пока оцениваются с fallback, без реальной LLM-проверки. Добавьте платный ключ или подождите до завтра (лимиты бесплатных провайдеров обычно сбрасываются раз в сутки).
         </div>
-        <p id="usage-summary" class="muted small">Загрузка...</p>
+        <p id="usage-summary" class="muted small">Загрузка…</p>
         <p id="usage-note" class="muted small"></p>
         <div class="filters">
           <label class="limit-field" style="flex:0 0 260px">
@@ -535,7 +537,7 @@
           клики, разметка не подтверждена на живом аккаунте.
         </p>
         <div class="row">
-          <input type="text" id="hh-resume-clone-id" placeholder="id резюме для клонирования" />
+          <input type="text" id="hh-resume-clone-id" placeholder="id резюме для клонирования" aria-label="ID резюме для клонирования" />
           <button id="hh-resume-clone" class="btn btn-secondary">Клонировать</button>
           <button id="hh-resume-create-draft" class="btn btn-secondary">Начать новое резюме (черновик)</button>
         </div>

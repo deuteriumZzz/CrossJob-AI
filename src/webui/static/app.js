@@ -98,6 +98,11 @@ function switchTab(name) {
   document
     .querySelectorAll("main .view")
     .forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
+  // URL отражает текущую вкладку — иначе обновление страницы (F5) всегда
+  // сбрасывает на "Обзор", даже если человек читал длинный тред в Telegram
+  // или таблицу в Истории. replaceState, а не location.hash — не плодит
+  // отдельную запись в истории браузера на каждый клик по вкладке.
+  history.replaceState(null, "", `#${name}`);
   render[name]?.();
 }
 
@@ -827,7 +832,7 @@ async function pollGenerateStatus() {
       }
       return;
     }
-    statusEl.textContent = "Генерация (может занять до минуты)...";
+    statusEl.textContent = "Генерация (может занять до минуты)…";
     await new Promise((r) => setTimeout(r, 2000));
   }
 }
@@ -842,7 +847,7 @@ async function startGenerate(kind) {
     return;
   }
   downloadEl.style.display = "none";
-  statusEl.textContent = "Запуск...";
+  statusEl.textContent = "Запуск…";
   try {
     await api(`/api/generate/${kind}`, {
       method: "POST",
@@ -862,7 +867,7 @@ function initDashboard() {
 
   document.getElementById("notif-test").addEventListener("click", async () => {
     const status = document.getElementById("notif-test-status");
-    status.textContent = "Отправка...";
+    status.textContent = "Отправка…";
     try {
       await api("/api/notifications/test", { method: "POST" });
       status.textContent = "Отправлено, проверьте Telegram.";
@@ -966,7 +971,7 @@ function initDashboard() {
     .getElementById("refresh-plain-text")
     .addEventListener("click", async () => {
       const status = document.getElementById("refresh-plain-text-status");
-      status.textContent = "Обновление...";
+      status.textContent = "Обновление…";
       try {
         await api("/api/resume/refresh-plain-text", { method: "POST" });
         status.textContent = "Готово.";
@@ -991,7 +996,7 @@ function initDashboard() {
     // set_source_field() нет удаления поля из YAML, только запись.
     const totalRaw = document.getElementById("limit-total").value.trim();
     const total = totalRaw ? parseInt(totalRaw, 10) : null;
-    status.textContent = "Сохранение...";
+    status.textContent = "Сохранение…";
     try {
       await api("/api/settings/limits", {
         method: "POST",
@@ -1013,7 +1018,7 @@ function initDashboard() {
     .getElementById("limits-distribute")
     .addEventListener("click", async () => {
       const status = document.getElementById("limits-status");
-      status.textContent = "Распределение...";
+      status.textContent = "Распределение…";
       try {
         await api("/api/settings/limits/distribute", { method: "POST" });
         status.textContent = "Готово.";
@@ -1027,7 +1032,7 @@ function initDashboard() {
     .getElementById("limits-reset-recommended")
     .addEventListener("click", async () => {
       const status = document.getElementById("limits-status");
-      status.textContent = "Сохранение...";
+      status.textContent = "Сохранение…";
       try {
         await api("/api/settings/limits", {
           method: "POST",
@@ -1054,7 +1059,7 @@ function initDashboard() {
         status.textContent = "Введите значение.";
         return;
       }
-      status.textContent = "Сохранение...";
+      status.textContent = "Сохранение…";
       try {
         await api("/api/settings/limits", {
           method: "POST",
@@ -1089,7 +1094,7 @@ function initDashboard() {
     .getElementById("search-save")
     .addEventListener("click", async () => {
       const status = document.getElementById("search-status");
-      status.textContent = "Сохранение...";
+      status.textContent = "Сохранение…";
       try {
         await api("/api/settings/search", {
           method: "POST",
@@ -1112,7 +1117,7 @@ function initDashboard() {
     .getElementById("search-generate-positions")
     .addEventListener("click", async () => {
       const status = document.getElementById("search-generate-status");
-      status.textContent = "Читаем резюме...";
+      status.textContent = "Читаем резюме…";
       try {
         const result = await api("/api/settings/generate-positions", {
           method: "POST",
@@ -1135,7 +1140,7 @@ function initDashboard() {
     .getElementById("tg-settings-save")
     .addEventListener("click", async () => {
       const status = document.getElementById("tg-settings-status");
-      status.textContent = "Сохранение...";
+      status.textContent = "Сохранение…";
       const numOrNull = (id) => {
         const v = document.getElementById(id).value.trim();
         return v === "" ? null : Number(v);
@@ -1168,7 +1173,7 @@ function initDashboard() {
     const text = input.value.trim();
     if (!text) return;
     const status = document.getElementById("tg-chat-status");
-    status.textContent = "Отправка...";
+    status.textContent = "Отправка…";
     try {
       await api(
         `/api/telegram/conversations/${activeTelegramContact}/send`,
@@ -1194,7 +1199,7 @@ function initDashboard() {
     .addEventListener("click", async () => {
       if (!activeTelegramContact) return;
       const status = document.getElementById("tg-chat-status");
-      status.textContent = "Отправка резюме...";
+      status.textContent = "Отправка резюме…";
       try {
         await api(
           `/api/telegram/conversations/${activeTelegramContact}/send-resume`,
@@ -1247,7 +1252,7 @@ function initDashboard() {
       const fallbackEnabled = document.getElementById(
         "llm-fallback-enabled"
       ).checked;
-      status.textContent = "Сохранение...";
+      status.textContent = "Сохранение…";
       try {
         await api("/api/settings/llm", {
           method: "POST",
@@ -1283,7 +1288,7 @@ function initDashboard() {
         status.textContent = "Вставьте ключ.";
         return;
       }
-      status.textContent = "Сохранение...";
+      status.textContent = "Сохранение…";
       try {
         const result = await api("/api/settings/llm-key", {
           method: "POST",
@@ -1305,7 +1310,13 @@ function initDashboard() {
       }
     });
 
-  switchTab("overview");
+  const knownTabs = new Set(
+    Array.from(document.querySelectorAll("nav.tabs button")).map(
+      (b) => b.dataset.tab
+    )
+  );
+  const initialTab = location.hash.replace("#", "");
+  switchTab(knownTabs.has(initialTab) ? initialTab : "overview");
   // ponytail: раньше опрос гонял только вкладку "Обзор" — история
   // откликов/ответы/логи обновлялись только вручную (кнопка "Применить"
   // или смена вкладки), из-за чего прогресс запущенного отклика был не
@@ -1331,14 +1342,14 @@ function initSetupScreen() {
     .addEventListener("click", async () => {
       const status = document.getElementById("setup-status");
       const apiKey = document.getElementById("setup-api-key").value.trim();
-      status.textContent = "Создание...";
+      status.textContent = "Создание…";
       try {
         const result = await api("/api/setup/init", {
           method: "POST",
           body: JSON.stringify({ api_key: apiKey || null }),
         });
         if (result.ready) {
-          status.textContent = "Готово, открываю дашборд...";
+          status.textContent = "Готово, открываю дашборд…";
           setTimeout(() => window.location.reload(), 600);
         } else {
           status.textContent = `Создано, но не готово: ${result.error}`;
