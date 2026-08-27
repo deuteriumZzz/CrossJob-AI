@@ -110,6 +110,10 @@
       </div>
       <div id="stats-row" class="stats-row"></div>
       <div id="source-grid" class="source-grid"></div>
+
+      <h3 class="section-subheading">Проверки ответов</h3>
+      <p class="muted small">Отдельное от поиска/отклика расписание — заходит и проверяет чат/ответы, ничего не ищет. Без своей галочки здесь эти проверки не запускаются сами по себе, даже если площадка выше уже в расписании.</p>
+      <div id="chat-checks-grid" class="source-grid"></div>
     </section>
 
     <section id="view-history" class="view">
@@ -251,10 +255,14 @@
           <div class="chat-thread">
             <div id="tg-chat-empty" class="muted small">Выберите диалог слева.</div>
             <div id="tg-chat-panel" style="display:none">
-              <h3 id="tg-chat-contact" style="margin:0 0 8px"></h3>
+              <div class="filters" style="justify-content:space-between;margin-bottom:8px">
+                <h3 id="tg-chat-contact" style="margin:0"></h3>
+                <button id="tg-chat-delete" class="btn btn-ghost btn-small" title="Удалить диалог из истории">🗑 Удалить диалог</button>
+              </div>
               <div id="tg-chat-messages" class="chat-messages"></div>
               <div class="chat-composer">
                 <input id="tg-chat-input" type="text" placeholder="Написать сообщение..." />
+                <button id="tg-chat-attach-resume" class="btn btn-secondary" title="Отправить resume.pdf файлом">📎 Резюме</button>
                 <button id="tg-chat-send" class="btn btn-primary">Отправить</button>
               </div>
               <span id="tg-chat-status" class="muted small"></span>

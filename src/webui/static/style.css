@@ -201,6 +201,12 @@ nav.tabs button.active {
   color: var(--muted);
 }
 
+.section-subheading {
+  margin: 22px 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
 .tab-badge {
   margin-left: auto;
   background: var(--danger, #e5636b);

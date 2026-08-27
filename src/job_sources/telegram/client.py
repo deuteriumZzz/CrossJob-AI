@@ -53,6 +53,9 @@ class TelegramSourceClient:
     def send_message(self, contact: str, text: str) -> Message:
         return self._client.send_message(contact, text)
 
+    def send_file(self, contact: str, file_path: Path, caption: str = "") -> Message:
+        return self._client.send_file(contact, str(file_path), caption=caption)
+
     def new_incoming_messages(
         self, contact: str, min_id: int
     ) -> list[Message]:

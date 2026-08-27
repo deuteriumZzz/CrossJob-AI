@@ -64,7 +64,7 @@ from src.job_sources.telegram_conversations import TelegramConversations
 from src.job_sources.telegram_notify import send_notification
 from src.libs.resume_and_cover_builder import StyleManager
 from src.logging import logger
-from src.scheduler import Scheduler
+from src.scheduler import DEFAULT_INTERVAL_HOURS, Scheduler
 from src.scheduler_state import load_state
 from src.utils.constants import RESUME_PDF, RESUME_PDF_LINKEDIN, SECRETS_YAML
 
@@ -324,10 +324,50 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
                 "readiness": _readiness(secrets, ctx.config["dataFolder"], name),
             }
         )
+    # Проверки чата/ответов — НЕ "площадка" (нет поиска/отклика), а
+    # отдельное расписание поверх уже отправленных откликов/сообщений
+    # (см. SCHEDULER_SOURCES в main.py). Раньше не было видно в
+    # дашборде вообще — только правкой YAML — из-за чего непонятно,
+    # включена ли реально проверка чата HH или нет.
+    chat_checks = [
+        {
+            "name": "check_hh_replies",
+            "label": "HeadHunter — ответы в чате",
+            "note": "Работает только если включён headhunter.auto_reply.",
+        },
+        {
+            "name": "check_sj_replies",
+            "label": "SuperJob — статус откликов",
+            "note": "Только уведомление, без автоответа.",
+        },
+        {
+            "name": "check_zp_replies",
+            "label": "Zarplata.ru — статус откликов",
+            "note": "Только уведомление, без автоответа.",
+        },
+        {
+            "name": "check_telegram_replies",
+            "label": "Telegram — новые сообщения в диалогах",
+            "note": "Только уведомление — отвечать нужно вручную во вкладке Telegram.",
+        },
+    ]
+    for check in chat_checks:
+        source_config = ctx.config.get(check["name"]) or {}
+        entry = state.get(check["name"]) or {}
+        check["schedule_enabled"] = bool(source_config.get("schedule_enabled"))
+        check["interval_hours"] = source_config.get(
+            "interval_hours", DEFAULT_INTERVAL_HOURS
+        )
+        check["last_run"] = entry.get("last_run")
+        check["next_run"] = entry.get("next_run")
+        check["status"] = entry.get("status", "never_run")
+        check["last_error"] = entry.get("last_error")
+
     return {
         "daemon_running": ctx.scheduler_thread is not None
         and ctx.scheduler_thread.is_alive(),
         "sources": sources,
+        "chat_checks": chat_checks,
         "total_applied_today": ctx.applied_log.applied_today_count_all(),
         "total_daily_limit": _effective_total_daily_limit(ctx.config),
     }
@@ -495,7 +535,12 @@ class SourceSettingsUpdate(BaseModel):
 def post_settings(
     body: SourceSettingsUpdate, ctx: AppContext = Depends(get_ctx)
 ) -> dict:
-    if body.source not in dict(ALL_SOURCES):
+    # SCHEDULER_SOURCES ⊃ ALL_SOURCES — включает ещё check_hh_replies/
+    # check_sj_replies/check_zp_replies/check_telegram_replies, у
+    # которых нет своей карточки в ALL_SOURCES (это не "поиск+отклик"),
+    # но schedule_enabled/interval_hours переключаются тем же способом
+    # (см. панель "Проверки ответов" в дашборде).
+    if body.source not in dict(SCHEDULER_SOURCES):
         raise HTTPException(400, f"Unknown source: {body.source}")
     for field in (
         "auto_apply",
@@ -877,6 +922,50 @@ def post_telegram_message(
     )
     conversations.record_outbound(contact, body.text)
     return conversations.get(contact)
+
+
+@app.post("/api/telegram/conversations/{contact}/send-resume")
+def post_telegram_send_resume(
+    contact: str, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Кнопка "📎 Резюме" в чате — отправляет уже существующий
+    data_folder/resume.pdf файлом, только по явному нажатию (не
+    автоматически с первым сообщением, см. риск-баннер на вкладке
+    Telegram про то, почему)."""
+    creds = _telegram_secrets(ctx)
+    if creds is None:
+        raise HTTPException(
+            400, "Missing telegram.api_id/api_hash in secrets.yaml"
+        )
+    resume_path = ctx.config["dataFolder"] / RESUME_PDF
+    if not resume_path.exists():
+        raise HTTPException(400, f"{RESUME_PDF} not found in data_folder")
+    try:
+        with TelegramSourceClient(
+            int(creds[0]), creds[1], _telegram_session_path(ctx)
+        ) as client:
+            client.send_file(contact, resume_path)
+    except Exception as e:
+        raise HTTPException(502, f"Failed to send resume: {e}")
+
+    conversations = TelegramConversations(
+        ctx.output_folder / "telegram_conversations.json"
+    )
+    conversations.record_outbound(contact, f"📎 Отправлено резюме ({RESUME_PDF})")
+    return conversations.get(contact)
+
+
+@app.delete("/api/telegram/conversations/{contact}")
+def delete_telegram_conversation(
+    contact: str, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    conversations = TelegramConversations(
+        ctx.output_folder / "telegram_conversations.json"
+    )
+    existed = conversations.delete(contact)
+    if not existed:
+        raise HTTPException(404, f"No conversation with @{contact}")
+    return {"deleted": contact}
 
 
 @app.post("/api/settings/generate-positions")

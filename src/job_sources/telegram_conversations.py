@@ -119,6 +119,22 @@ class TelegramConversations:
     def already_contacted(self, contact: str) -> bool:
         return self.get(contact) is not None
 
+    def delete(self, contact: str) -> bool:
+        """Удаляет диалог целиком из истории (не архив — если контакт
+        снова напишет или ему снова спишутся, диалог просто заведётся
+        заново пустым). Возвращает False, если такого контакта и не
+        было — чтобы вызывающий код мог отличить "удалили" от "нечего
+        было удалять"."""
+        existed = self.get(contact) is not None
+
+        def _mutate(data: dict) -> None:
+            data["conversations"] = [
+                c for c in data["conversations"] if c["contact"].lower() != contact.lower()
+            ]
+
+        self._write_locked(_mutate)
+        return existed
+
     def sent_today_count(self) -> int:
         """Сколько исходящих сообщений реально отправлено сегодня —
         основа для дневного лимита холодных обращений (см.

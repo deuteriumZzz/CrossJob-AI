@@ -290,6 +290,24 @@ const render = {
           </div>`;
         })
         .join("");
+      document.getElementById("chat-checks-grid").innerHTML = status.chat_checks
+        .map((c, i) => {
+          const dot = STATUS_DOT[c.status] || "never_run";
+          return `
+          <div class="source-card stagger-item" style="animation-delay:${staggerDelay(i)}">
+            <h3>
+              <input type="checkbox" class="schedule-toggle" data-source="${c.name}" title="В расписании демона" ${c.schedule_enabled ? "checked" : ""} />
+              <span class="dot ${dot}"></span> ${c.label}
+            </h3>
+            <div class="row"><span>Расписание</span><span>${c.schedule_enabled ? `каждые ${c.interval_hours}ч` : "выключено"}</span></div>
+            <div class="row"><span>Последняя проверка</span><span>${fmtTime(c.last_run)}</span></div>
+            <div class="row"><span>Следующая проверка</span><span>${fmtTime(c.next_run)}</span></div>
+            <p class="muted small" style="margin:6px 0 0">${c.note}</p>
+            ${c.last_error ? `<div class="error-row">${c.last_error}</div>` : ""}
+          </div>`;
+        })
+        .join("");
+
       document.querySelectorAll(".schedule-toggle").forEach((box) => {
         box.addEventListener("change", async () => {
           box.disabled = true;
@@ -1170,6 +1188,47 @@ function initDashboard() {
   document.getElementById("tg-chat-input").addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") sendTelegramMessage();
   });
+
+  document
+    .getElementById("tg-chat-attach-resume")
+    .addEventListener("click", async () => {
+      if (!activeTelegramContact) return;
+      const status = document.getElementById("tg-chat-status");
+      status.textContent = "Отправка резюме...";
+      try {
+        await api(
+          `/api/telegram/conversations/${activeTelegramContact}/send-resume`,
+          { method: "POST" }
+        );
+        status.textContent = "";
+        await openTelegramConversation(activeTelegramContact);
+      } catch (e) {
+        status.textContent = `Ошибка: ${e.message}`;
+      }
+    });
+
+  document
+    .getElementById("tg-chat-delete")
+    .addEventListener("click", async () => {
+      if (!activeTelegramContact) return;
+      if (
+        !confirm(
+          `Удалить всю переписку с @${activeTelegramContact}? Это не архив — история удаляется без возможности восстановить, а контакт перестаёт считаться "уже написанным" (бот может написать ему заново при следующем совпадении).`
+        )
+      )
+        return;
+      try {
+        await api(`/api/telegram/conversations/${activeTelegramContact}`, {
+          method: "DELETE",
+        });
+        activeTelegramContact = null;
+        document.getElementById("tg-chat-panel").style.display = "none";
+        document.getElementById("tg-chat-empty").style.display = "";
+        await render.telegram();
+      } catch (e) {
+        document.getElementById("tg-chat-status").textContent = `Ошибка: ${e.message}`;
+      }
+    });
 
   document
     .getElementById("llm-provider-save")
