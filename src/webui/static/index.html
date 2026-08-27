@@ -300,8 +300,18 @@
           <p class="muted">Расписание, автоотклик и уведомления</p>
         </div>
       </div>
+      <nav class="settings-jump">
+        <a href="#settings-search">Поиск</a>
+        <a href="#settings-llm">Провайдер LLM</a>
+        <a href="#settings-limits">Лимиты откликов</a>
+        <a href="#settings-notifications">Уведомления</a>
+        <a href="#settings-resume">Резюме и письмо</a>
+        <a href="#settings-usage">Расходы на LLM</a>
+        <a href="#settings-table">Площадки</a>
+        <a href="#settings-hh-resume">Резюме на hh.ru</a>
+      </nav>
 
-      <div class="panel">
+      <div class="panel" id="settings-search">
         <h3>Поиск</h3>
         <p class="muted small">Должности (ключевые слова поиска, они же — ключевые слова для Telegram-каналов) и локации — без правки work_preferences.yaml вручную. Настройки самого Telegram (каналы, автосообщения, диалоги) — на вкладке «Telegram» слева.</p>
         <div class="limits-grid">
@@ -338,7 +348,7 @@
         </div>
       </div>
 
-      <div class="panel">
+      <div class="panel" id="settings-llm">
         <h3>Провайдер LLM</h3>
         <p class="muted small">Переключение применяется сразу, без перезапуска — для всех вызовов LLM (оценка вакансий, письма, резюме).</p>
         <div class="provider-grid" id="provider-grid">
@@ -409,7 +419,7 @@
         </div>
       </div>
 
-      <div class="panel">
+      <div class="panel" id="settings-limits">
         <h3>Лимиты откликов</h3>
         <div class="risk-banner">
           ⚠️ Официальных цифр лимитов не публикует ни одна площадка — заданные здесь значения только уменьшают риск, но не гарантируют, что бота не заметят. Чем выше лимиты и чем ближе они к количеству найденных вакансий, тем больше активность похожа на бота. Повышайте постепенно, начните с малого. LinkedIn блокирует автоматизацию агрессивнее остальных — держите его лимит ниже.
@@ -444,7 +454,7 @@
         </div>
       </div>
 
-      <div class="panel">
+      <div class="panel" id="settings-notifications">
         <h3>Уведомления (Telegram-бот)</h3>
         <p class="muted small">
           Отдельный бот только для уведомлений вам — не путать с вкладкой "Telegram" слева
@@ -482,7 +492,7 @@
         </div>
       </div>
 
-      <div class="panel">
+      <div class="panel" id="settings-resume">
         <h3>Резюме и сопроводительное письмо</h3>
         <p class="muted small">Рендерится через Selenium (то же, что в консольном меню) — может занять до минуты.</p>
         <div class="filters">
@@ -503,7 +513,7 @@
           <span id="refresh-plain-text-status" class="muted small"></span>
         </div>
       </div>
-      <div class="panel">
+      <div class="panel" id="settings-usage">
         <h3>Расходы на LLM</h3>
         <div id="llm-exhausted-banner" class="risk-banner" style="display:none">
           ⚠️ Похоже, все настроенные LLM-провайдеры сегодня недоступны (несколько ошибок подряд, ни одного успешного вызова) — вероятно, исчерпаны бесплатные лимиты. Вакансии пока оцениваются с fallback, без реальной LLM-проверки. Добавьте платный ключ или подождите до завтра (лимиты бесплатных провайдеров обычно сбрасываются раз в сутки).
@@ -520,16 +530,16 @@
         </div>
       </div>
 
-      <div class="table-wrap">
+      <div class="table-wrap" id="settings-table">
         <table class="settings-table">
           <thead>
-            <tr><th>Площадка</th><th>Готовность</th><th>В расписании</th><th>Интервал, ч</th><th>auto_apply</th><th title="Только HeadHunter — автоответ в чате">auto_reply</th><th title="Только HeadHunter — бамп резюме">auto_bump_resume</th><th>Resume ID</th><th>Откликов за прогон</th><th>Дневной лимит</th><th></th><th title="Свои должности/локации/зарплата для этой площадки">Фильтры</th></tr>
+            <tr><th>Площадка</th><th>Готовность</th><th>В расписании</th><th>Интервал, ч</th><th title="auto_apply — реально откликаться, не только показывать">Автоотклик</th><th title="auto_reply — только HeadHunter, автоответ в чате">Автоответ в чате</th><th title="auto_bump_resume — только HeadHunter, бамп резюме">Бамп резюме</th><th>Resume ID</th><th>Откликов за прогон</th><th>Дневной лимит</th><th></th><th title="Свои должности/локации/зарплата для этой площадки">Фильтры</th></tr>
           </thead>
           <tbody id="settings-rows"></tbody>
         </table>
       </div>
 
-      <div class="panel">
+      <div class="panel" id="settings-hh-resume">
         <h3>Резюме на hh.ru</h3>
         <p class="muted small">
           Ручные действия (открывают реальный браузер) — не часть
