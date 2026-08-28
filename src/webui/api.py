@@ -48,6 +48,9 @@ from src.job_sources.preferences import effective_list
 from src.job_sources.applied_log import AppliedLog
 from src.job_sources.llm_provider import PROVIDER_MODELS
 from src.job_sources.llm_provider import get_active_provider as _active_llm
+from src.job_sources.llm_provider import (
+    set_fallback_base_urls as _set_llm_fallback_base_urls,
+)
 from src.job_sources.llm_provider import set_fallback_keys as _set_llm_fallback_keys
 from src.job_sources.llm_usage import (
     set_output_folder as set_llm_usage_output_folder,
@@ -111,6 +114,11 @@ class AppContext:
         _set_llm_fallback_keys(
             ConfigValidator.load_yaml(self.secrets_file).get("llm_api_keys")
         )
+        _set_llm_fallback_base_urls(
+            ConfigValidator.load_yaml(self.secrets_file).get(
+                "llm_provider_base_urls"
+            )
+        )
         self.llm_api_key = self._resolve_llm_api_key()
         self.applied_log = AppliedLog(self.output_folder / "applied_log.json")
         self.scheduler: Optional[Scheduler] = None
@@ -126,6 +134,11 @@ class AppContext:
         apply_llm_provider_override(self.config)
         _set_llm_fallback_keys(
             ConfigValidator.load_yaml(self.secrets_file).get("llm_api_keys")
+        )
+        _set_llm_fallback_base_urls(
+            ConfigValidator.load_yaml(self.secrets_file).get(
+                "llm_provider_base_urls"
+            )
         )
         self.llm_api_key = self._resolve_llm_api_key()
 
@@ -1106,6 +1119,8 @@ _KNOWN_LLM_PROVIDERS = {
     "huggingface",
     "ollama_cloud",
     "llm7",
+    "cloudflare",
+    "vercel",
     "ollama",
 }
 
@@ -1138,6 +1153,9 @@ def _llm_snapshot(ctx: AppContext) -> dict:
     legacy_key = secrets.get("llm_api_key")
     if legacy_key and LLM_MODEL_TYPE not in key_previews:
         key_previews[LLM_MODEL_TYPE] = _mask_api_key(legacy_key)
+    # Не секрет как ключ (это адрес, не пароль) — показывается в
+    # дашборде как есть, без маскировки.
+    provider_base_urls = secrets.get("llm_provider_base_urls") or {}
     return {
         "provider": provider,
         "model": llm_config.get("model")
@@ -1146,6 +1164,7 @@ def _llm_snapshot(ctx: AppContext) -> dict:
         or (LLM_API_URL or None if is_config_default else None),
         "models": PROVIDER_MODELS,
         "api_key_previews": key_previews,
+        "provider_base_urls": provider_base_urls,
         "mode": llm_config.get("mode") or "auto",
         "fallback_enabled": llm_config.get("fallback_enabled", True),
     }
@@ -1218,6 +1237,31 @@ def post_llm_key(
     if _active_llm() == body.provider:
         ctx.llm_api_key = key
     return {"provider": body.provider, "api_key_preview": _mask_api_key(key)}
+
+
+class LLMProviderBaseUrlUpdate(BaseModel):
+    provider: str
+    base_url: str
+
+
+@app.post("/api/settings/llm-provider-base-url")
+def post_llm_provider_base_url(
+    body: LLMProviderBaseUrlUpdate, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Пишет llm_provider_base_urls.<provider> — только для
+    провайдеров без единого статического эндпоинта (сейчас — только
+    Cloudflare Workers AI, у которого account_id зашит в URL). Тот же
+    приём, что post_llm_key(), но для второго секрета вместо ключа."""
+    if body.provider not in _KNOWN_LLM_PROVIDERS:
+        raise HTTPException(400, f"Unknown provider: {body.provider}")
+    url = body.base_url.strip()
+    if not url:
+        raise HTTPException(400, "base_url must not be empty")
+    set_source_field(
+        ctx.secrets_file, "llm_provider_base_urls", body.provider, url, quote=True
+    )
+    ctx.reload_config()
+    return {"provider": body.provider, "base_url": url}
 
 
 @app.get("/api/logs")

@@ -396,6 +396,14 @@
             <svg viewBox="0 0 24 24" fill="none"><path d="M5 5h14L11 13v6l2 1v.2H9V20l2-1v-6L5 5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
             <span>LLM7.io</span>
           </button>
+          <button class="provider-card" data-provider="cloudflare" title="Cloudflare Workers AI">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M4 15c0-3 2.5-5 5.5-5 1 0 2 .3 2.8.9C13 9.2 14.7 8 16.7 8c3 0 5.3 2.3 5.3 5.2 0 .3 0 .5-.1.8H4.5c-.3-.6-.5-1.3-.5-2Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+            <span>Cloudflare</span>
+          </button>
+          <button class="provider-card" data-provider="vercel" title="Vercel AI Gateway">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M12 4 21 19H3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+            <span>Vercel</span>
+          </button>
           <button class="provider-card" data-provider="ollama" title="Ollama">
             <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="6" width="16" height="13" rx="4" stroke="currentColor" stroke-width="1.6"/><circle cx="9" cy="12.5" r="1.3" fill="currentColor"/><circle cx="15" cy="12.5" r="1.3" fill="currentColor"/><path d="M9 4.5v2M15 4.5v2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
             <span>Ollama</span>
@@ -431,11 +439,27 @@
         </div>
         <div class="filters" style="margin-top:14px">
           <label class="limit-field" style="flex:1 1 260px">
-            <span>Ключ для <span id="llm-key-provider-label">OpenAI</span> (сейчас: <span id="llm-key-preview">—</span>)</span>
+            <span>
+              Ключ для <span id="llm-key-provider-label">OpenAI</span>
+              (сейчас: <span id="llm-key-preview">—</span>)
+              — <a id="llm-key-get-link" href="#" target="_blank" rel="noopener">получить ключ →</a>
+            </span>
             <input id="llm-key-input" type="password" placeholder="вставьте ключ этого провайдера" autocomplete="off" />
           </label>
           <button id="llm-key-save" class="btn btn-secondary">Сохранить ключ</button>
           <span id="llm-key-status" class="muted small"></span>
+        </div>
+        <div class="filters" id="llm-provider-base-url-row" style="margin-top:14px; display:none">
+          <label class="limit-field" style="flex:1 1 260px">
+            <span>
+              Base URL для <span id="llm-provider-base-url-label">этого провайдера</span>
+              (сейчас: <span id="llm-provider-base-url-preview">—</span>)
+              — у Cloudflare свой account_id зашит в адрес, найти его можно в личном кабинете справа на странице учётной записи
+            </span>
+            <input id="llm-provider-base-url-input" type="text" placeholder="https://api.cloudflare.com/client/v4/accounts/ВАШ_ACCOUNT_ID/ai/v1" autocomplete="off" />
+          </label>
+          <button id="llm-provider-base-url-save" class="btn btn-secondary">Сохранить Base URL</button>
+          <span id="llm-provider-base-url-status" class="muted small"></span>
         </div>
       </div>
 

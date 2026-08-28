@@ -93,6 +93,8 @@ notifications:
 | Hugging Face | https://huggingface.co/settings/tokens | Кредитный бесплатный тир |
 | Ollama Cloud | https://ollama.com/settings/keys | Отдельно от локального Ollama ниже |
 | LLM7.io | https://token.llm7.io | Ввести email — токен придёт сразу, без пароля |
+| Cloudflare Workers AI | https://dash.cloudflare.com/profile/api-tokens | Кроме ключа нужен ещё и свой `account_id` (виден в личном кабинете справа) — его вставляете отдельным полем "Base URL" в дашборде (карточка Cloudflare), в виде `https://api.cloudflare.com/client/v4/accounts/ВАШ_ACCOUNT_ID/ai/v1` |
+| Vercel AI Gateway | https://vercel.com/docs/ai-gateway/authentication-and-byok/api-keys | Не классический бесплатный тир, а $5 кредитов, реально обновляющихся каждые 30 дней — пока не привяжете платную карту |
 | Ollama (локально) | — | Ключ не нужен, см. ниже |
 
 **Рекомендация по умолчанию — Groq, `openai/gpt-oss-120b`.**

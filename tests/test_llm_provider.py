@@ -8,6 +8,7 @@ from src.job_sources.llm_provider import (
     _build_fallback_llms,
     get_active_provider,
     get_chat_llm,
+    set_fallback_base_urls,
     set_fallback_enabled,
     set_fallback_keys,
     set_fallback_mode,
@@ -19,6 +20,7 @@ from src.job_sources.llm_provider import (
 def _reset_fallback_state():
     yield
     set_fallback_keys(None)
+    set_fallback_base_urls(None)
     set_fallback_mode(None)
     set_fallback_enabled(None)
 
@@ -73,7 +75,7 @@ def test_nvidia_provider_uses_nvidia_base_url():
 
 def test_openrouter_provider_uses_openrouter_base_url():
     llm = get_chat_llm("sk-or-test", provider="openrouter")
-    assert llm.model_name == "meta-llama/llama-3.3-70b-instruct:free"
+    assert llm.model_name == "minimax/minimax-m3:free"
     assert llm.openai_api_base == "https://openrouter.ai/api/v1"
 
 
@@ -158,6 +160,8 @@ def test_provider_models_catalog_covers_known_providers():
         "huggingface",
         "ollama_cloud",
         "llm7",
+        "cloudflare",
+        "vercel",
         "ollama",
     ):
         models = PROVIDER_MODELS[provider]
@@ -173,13 +177,52 @@ def test_provider_models_catalog_covers_known_providers():
 def test_new_openai_compatible_providers_use_own_base_url():
     for provider, expected_base_url in (
         ("mistral", "https://api.mistral.ai/v1"),
-        ("cohere", "https://api.cohere.com/v2"),
+        ("cohere", "https://api.cohere.ai/compatibility/v1"),
         ("huggingface", "https://router.huggingface.co/v1"),
         ("ollama_cloud", "https://ollama.com/v1"),
         ("llm7", "https://api.llm7.io/v1"),
+        ("vercel", "https://ai-gateway.vercel.sh/v1"),
     ):
         llm = get_chat_llm("test-key", provider=provider)
         assert llm.openai_api_base == expected_base_url
+
+
+def test_cloudflare_requires_base_url():
+    """account_id живёт в URL, не в ключе — без явного base_url
+    нечего подставить по умолчанию (в отличие от остальных
+    провайдеров), поэтому это должно падать, а не тихо уйти на
+    api.openai.com с чужим ключом."""
+    with pytest.raises(ValueError):
+        get_chat_llm("test-key", provider="cloudflare")
+
+
+def test_cloudflare_uses_given_base_url():
+    llm = get_chat_llm(
+        "test-key",
+        provider="cloudflare",
+        base_url="https://api.cloudflare.com/client/v4/accounts/acct123/ai/v1",
+    )
+    assert (
+        llm.openai_api_base
+        == "https://api.cloudflare.com/client/v4/accounts/acct123/ai/v1"
+    )
+
+
+def test_fallback_uses_configured_provider_base_url():
+    """set_fallback_base_urls() должен долетать до каждой модели
+    Cloudflare в цепочке фолбэка, не только до основной модели."""
+    set_fallback_mode("free")
+    set_fallback_keys({"cloudflare": "cf-test-key"})
+    set_fallback_base_urls(
+        {"cloudflare": "https://api.cloudflare.com/client/v4/accounts/acct123/ai/v1"}
+    )
+    fallbacks = _build_fallback_llms("openai", temperature=0)
+    assert fallbacks
+    for llm in fallbacks:
+        assert (
+            llm.openai_api_base
+            == "https://api.cloudflare.com/client/v4/accounts/acct123/ai/v1"
+        )
 
 
 def test_fallback_depth_tries_every_free_model_of_a_provider():

@@ -98,6 +98,9 @@ from src.job_sources.llm_provider import (
     set_fallback_enabled as set_llm_fallback_enabled,
 )
 from src.job_sources.llm_provider import (
+    set_fallback_base_urls as set_llm_fallback_base_urls,
+)
+from src.job_sources.llm_provider import (
     set_fallback_keys as set_llm_fallback_keys,
 )
 from src.job_sources.llm_provider import (
@@ -3412,6 +3415,10 @@ def main(auto: Optional[str], daemon: bool):
         )
         set_llm_fallback_keys(
             (ConfigValidator.load_yaml(secrets_file).get("llm_api_keys")) or {}
+        )
+        set_llm_fallback_base_urls(
+            (ConfigValidator.load_yaml(secrets_file).get("llm_provider_base_urls"))
+            or {}
         )
 
         # Позиции не заданы — один раз выводим их из resume.pdf,

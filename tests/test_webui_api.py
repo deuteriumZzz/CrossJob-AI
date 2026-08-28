@@ -842,3 +842,44 @@ def test_post_llm_key_rejects_unknown_provider(client):
         json={"provider": "not-a-real-provider", "api_key": "sk-x"},
     )
     assert response.status_code == 400
+
+
+def test_post_llm_provider_base_url_updates_secrets(client):
+    response = client.post(
+        "/api/settings/llm-provider-base-url",
+        json={
+            "provider": "cloudflare",
+            "base_url": "https://api.cloudflare.com/client/v4/accounts/acct123/ai/v1",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == "cloudflare"
+    assert body["base_url"] == (
+        "https://api.cloudflare.com/client/v4/accounts/acct123/ai/v1"
+    )
+
+    secrets_text = api.get_ctx().secrets_file.read_text(encoding="utf-8")
+    assert "acct123" in secrets_text
+    assert "llm_provider_base_urls" in secrets_text
+
+    follow_up = client.get("/api/settings/llm")
+    assert follow_up.json()["provider_base_urls"]["cloudflare"] == (
+        "https://api.cloudflare.com/client/v4/accounts/acct123/ai/v1"
+    )
+
+
+def test_post_llm_provider_base_url_rejects_empty(client):
+    response = client.post(
+        "/api/settings/llm-provider-base-url",
+        json={"provider": "cloudflare", "base_url": "   "},
+    )
+    assert response.status_code == 400
+
+
+def test_post_llm_provider_base_url_rejects_unknown_provider(client):
+    response = client.post(
+        "/api/settings/llm-provider-base-url",
+        json={"provider": "not-a-real-provider", "base_url": "https://x"},
+    )
+    assert response.status_code == 400

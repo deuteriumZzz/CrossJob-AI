@@ -123,17 +123,23 @@ for HH and LinkedIn, rebuild `plain_text_resume.yaml` from the PDF,
 export `applied_log.json` as a backup, get a Telegram notification when
 daily LLM spend crosses a set threshold (or when every LLM provider is
 unavailable), and switch the LLM provider/model
-(OpenAI/Groq/Gemini/DeepSeek/NVIDIA NIM/OpenRouter/Mistral/Cohere/Hugging Face/Ollama Cloud/LLM7.io/Ollama) with your own
+(OpenAI/Groq/Gemini/DeepSeek/NVIDIA NIM/OpenRouter/Mistral/Cohere/Hugging Face/Ollama Cloud/LLM7.io/Cloudflare/Vercel/Ollama) with your own
 API key for each — no `config.py` editing needed. Details in
 [docs/GUIDE.md](docs/GUIDE.md) (RU).
 
 ## Configuration
 
-- `data_folder/secrets.yaml` — your LLM key (`llm_api_key`, defaults to OpenAI) and, for each platform, its own keys (HeadHunter needs no secrets — login is browser-based, by phone number and SMS, see GUIDE.md; SuperJob — https://api.superjob.ru/register/, Telegram — https://my.telegram.org/apps, see GUIDE.md). The LLM provider doesn't have to be OpenAI — Groq/Gemini/DeepSeek/NVIDIA NIM/OpenRouter/Mistral/Cohere/Hugging Face/Ollama Cloud/LLM7.io/Ollama are all supported, each with its own key under the `llm_api_keys:` block (switching provider, picking a model, and entering keys — all in the dashboard's Settings tab, no `config.py` editing; links to each provider's key page are in GUIDE.md). **Default recommendation — Groq, model `openai/gpt-oss-120b`** (marked with a crown 👑 in the model picker): free, and good enough for scoring vacancies/writing letters — at this call volume a paid provider would add up to a noticeable daily bill.
+- `data_folder/secrets.yaml` — your LLM key (`llm_api_key`, defaults to OpenAI) and, for each platform, its own keys (HeadHunter needs no secrets — login is browser-based, by phone number and SMS, see GUIDE.md; SuperJob — https://api.superjob.ru/register/, Telegram — https://my.telegram.org/apps, see GUIDE.md). The LLM provider doesn't have to be OpenAI — Groq/Gemini/DeepSeek/NVIDIA NIM/OpenRouter/Mistral/Cohere/Hugging Face/Ollama Cloud/LLM7.io/Cloudflare/Vercel/Ollama are all supported, each with its own key under the `llm_api_keys:` block (switching provider, picking a model, and entering keys — all in the dashboard's Settings tab, no `config.py` editing; links to each provider's key page are in GUIDE.md). **Default recommendation — Groq, model `openai/gpt-oss-120b`** (marked with a crown 👑 in the model picker): free, and good enough for scoring vacancies/writing letters — at this call volume a paid provider would add up to a noticeable daily bill.
 - `data_folder/work_preferences.yaml` — positions, locations, company/title/location blacklists, filters by experience/employment type/date, and optional `headhunter:`/`superjob:` blocks (`auto_apply`, `resume_id`) and a `telegram:` block (`channels`, `auto_message`, `daily_message_limit`, `max_post_age_days`, `intro_message_template`). Any platform, Telegram included, can override `positions`/`locations` just for itself inside its own block — empty there means "use the shared list above".
 - `data_folder/resume.pdf` — your resume as-is; used only to generate cover letters.
 
 The first run of each platform's action opens a browser for a one-time login (OAuth); the token refreshes automatically after that. For Telegram, instead of a browser, it's a phone number and login code typed into the console on the first search run.
+
+## How smart are the models
+
+Every provider in the project has a default model (👑 in the dashboard's model picker) — here's how they compare on an independent benchmark, [Artificial Analysis Intelligence Index](https://artificialanalysis.ai/leaderboards/models), checked live on 2026-08-29. This is a snapshot — providers update models and weights without notice (the same thing already happened to Groq's lineup and to gemini-2.5-flash, see the comments in `src/job_sources/llm_provider.py`), so the exact numbers will drift, but the relative spread — which model is clearly smarter vs. simpler — still holds as a guide. Only each provider's recommended model is shown, not every alternative it offers (see the dashboard or `PROVIDER_MODELS` in `src/job_sources/llm_provider.py` for the full list).
+
+![How smart are the models we use](assets/llm-intelligence.en.svg)
 
 ## License
 

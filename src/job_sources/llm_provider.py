@@ -12,6 +12,12 @@ _provider_override: Optional[str] = None
 _model_override: Optional[str] = None
 _base_url_override: Optional[str] = None
 _fallback_keys: dict = {}
+# Per-provider base_url для фолбэк-цепочки — нужен только провайдерам
+# без единого статического эндпоинта (Cloudflare Workers AI зашивает
+# account_id прямо в URL: .../accounts/{account_id}/ai/v1). Остальные
+# провайдеры используют свой дефолтный base_url в _build_llm() и эту
+# карту не трогают.
+_fallback_base_urls: dict = {}
 _fallback_mode: str = "auto"  # "auto" | "free" | "paid"
 _fallback_enabled: bool = True
 
@@ -79,41 +85,46 @@ PROVIDER_MODELS: dict = {
         },
     ],
     # OpenRouter — тоже свой отдельный бесплатный пул, модели с
-    # суффиксом ":free" в id. ponytail: id моделей ниже (как и у
-    # nvidia выше) — по общим знаниям, НЕ подтверждено живым ключом
-    # (в отличие от Groq/Gemini, проверенных реальными вызовами
-    # сегодня) — у OpenRouter/NVIDIA бесплатные модели меняются, при
-    # первой живой ошибке "model not found" проверить актуальный
-    # список на openrouter.ai/models?max_price=0.
+    # суффиксом ":free" в id. ponytail: список сверен живым запросом
+    # к openrouter.ai/api/v1/models 2026-08-29 — прошлый список
+    # (llama-3.3-70b/deepseek-chat/qwen-2.5-72b) на тот момент уже
+    # был снят с бесплатного тира (404 "unavailable for free" живым
+    # ключом). Бесплатные модели у OpenRouter меняются часто — при
+    # "model not found" сверить актуальный список на
+    # openrouter.ai/models?max_price=0 или тем же запросом к API.
     "openrouter": [
         {
-            "id": "meta-llama/llama-3.3-70b-instruct:free",
+            "id": "minimax/minimax-m3:free",
             "free": True,
             "recommended": True,
         },
         {
-            "id": "deepseek/deepseek-chat:free",
+            "id": "google/gemma-4-31b-it:free",
             "free": True,
             "recommended": False,
         },
         {
-            "id": "qwen/qwen-2.5-72b-instruct:free",
+            "id": "nvidia/nemotron-3-super-120b-a12b:free",
             "free": True,
             "recommended": False,
         },
     ],
     # Mistral La Plateforme — свой отдельный бесплатный пул (~1 RPS/
-    # 500K TPM на "Experiment"-тарифе). ponytail: границу free/paid
-    # между их моделями — по общим знаниям, не подтверждено живым
-    # ключом — при "model not found"/403 проверить console.mistral.ai.
+    # 500K TPM на "Experiment"-тарифе). ponytail: id моделей сверены
+    # живым запросом к api.mistral.ai/v1/models 2026-08-29 (прошлые
+    # "ministral-3-8b-latest"/"ministral-3-3b-latest" были выдуманы —
+    # реальный формат без второго "3-": ministral-8b-latest/
+    # ministral-3b-latest); граница free/paid — по общим знаниям, не
+    # подтверждена API (models-эндпоинт её не отдаёт).
     "mistral": [
-        {"id": "ministral-3-8b-latest", "free": True, "recommended": True},
-        {"id": "ministral-3-3b-latest", "free": True, "recommended": False},
+        {"id": "ministral-8b-latest", "free": True, "recommended": True},
+        {"id": "ministral-3b-latest", "free": True, "recommended": False},
         {"id": "mistral-small-latest", "free": False, "recommended": False},
     ],
-    # Cohere — OpenAI-совместимый v2 эндпоинт, отдельный лимит trial-
+    # Cohere — OpenAI-совместимый эндпоинт, отдельный лимит trial-
     # ключа (20 RPM, 1000 вызовов/месяц — маленький, но ещё один
-    # независимый пул). ponytail: не подтверждено живым ключом.
+    # независимый пул). ponytail: model id и base_url (см. _build_llm)
+    # подтверждены живым вызовом 2026-08-29.
     "cohere": [
         {"id": "command-r7b-12-2024", "free": True, "recommended": True},
         {"id": "command-r-plus", "free": False, "recommended": False},
@@ -140,12 +151,75 @@ PROVIDER_MODELS: dict = {
         {"id": "deepseek-v4-flash", "free": True, "recommended": False},
     ],
     # LLM7.io — анонимный бесплатный шлюз без обязательной
-    # регистрации (10 RPM/60 запросов в час без ключа). ponytail: не
-    # подтверждено живым ключом.
+    # регистрации (10 RPM/60 запросов в час без ключа, больше — с
+    # бесплатным токеном с token.llm7.io). ponytail: id сверены
+    # живым запросом к api.llm7.io/v1/models 2026-08-29 — прежний
+    # "gpt-oss:20b" отдавал 400 "currently unavailable", а
+    # "mistral-nemo-instruct-2407" был неверного регистра (у них
+    # camelCase: mistral-Nemo-Instruct-2407, id регистрозависимые).
+    # deepseek-v4-flash в их каталоге тоже есть, но отдал 402
+    # "insufficient balance" на бесплатном токене — не free вопреки
+    # листингу, поэтому не включён.
     "llm7": [
-        {"id": "gpt-oss:20b", "free": True, "recommended": True},
+        {"id": "gpt-oss", "free": True, "recommended": True},
         {
-            "id": "mistral-nemo-instruct-2407",
+            "id": "mistral-Nemo-Instruct-2407",
+            "free": True,
+            "recommended": False,
+        },
+    ],
+    # Cloudflare Workers AI — свой отдельный бесплатный пул (~10 000
+    # "neurons"/день, возобновляется каждый день), но в отличие от
+    # остальных провайдеров у него нет одного статического эндпоинта:
+    # base_url обязательно содержит account_id пользователя
+    # (.../accounts/{account_id}/ai/v1) — задаётся отдельно через
+    # llm_provider_base_urls.cloudflare в secrets.yaml (см.
+    # set_fallback_base_urls), не через PROVIDER_MODELS. ponytail: все
+    # 3 id подтверждены живым вызовом 2026-08-29 (реальный аккаунт) —
+    # "@cf/meta/llama-3.1-8b-instruct" (без -fp8) на тот момент уже
+    # был снят (410 "deprecated on 2026-05-30"), заменён на рабочий
+    # -fp8 вариант; список моделей у Cloudflare меняется, при "model
+    # not found"/410 сверить /ai/models/search или
+    # developers.cloudflare.com/workers-ai/models/.
+    "cloudflare": [
+        {
+            "id": "@cf/openai/gpt-oss-120b",
+            "free": True,
+            "recommended": True,
+        },
+        {
+            "id": "@cf/meta/llama-3.1-8b-instruct-fp8",
+            "free": True,
+            "recommended": False,
+        },
+        {
+            "id": "@cf/google/gemma-4-26b-a4b-it",
+            "free": True,
+            "recommended": False,
+        },
+    ],
+    # Vercel AI Gateway — не классический "бесплатный тир", а $5
+    # кредитов, которые реально обновляются каждые 30 дней бессрочно
+    # (подтверждено документацией/статьями 2026-08-29), пока не
+    # привязана платная карта — в отличие от разовых trial-кредитов у
+    # других шлюзов, это честно продлевающийся пул. OpenAI-
+    # совместимый, base_url подтверждён по офф. документации
+    # vercel.com/docs/ai-gateway. ponytail: id моделей ниже — по
+    # общим знаниям (дешёвые/открытые, чтобы дольше хватало $5), не
+    # подтверждено живым ключом.
+    "vercel": [
+        {
+            "id": "meta/llama-3.3-70b-instruct",
+            "free": True,
+            "recommended": True,
+        },
+        {
+            "id": "google/gemini-3.6-flash",
+            "free": True,
+            "recommended": False,
+        },
+        {
+            "id": "deepseek/deepseek-chat",
             "free": True,
             "recommended": False,
         },
@@ -187,6 +261,17 @@ def set_fallback_keys(keys: Optional[dict]) -> None:
     и платная цепочки не смешиваются, а выбираются отдельно."""
     global _fallback_keys
     _fallback_keys = dict(keys or {})
+
+
+def set_fallback_base_urls(base_urls: Optional[dict]) -> None:
+    """secrets.yaml: llm_provider_base_urls.<provider> — только для
+    провайдеров без единого статического эндпоинта (сейчас — только
+    Cloudflare Workers AI, чей URL несёт account_id пользователя).
+    Вызывается тем же приёмом и в тех же местах, что
+    set_fallback_keys(). Провайдеры не из этой карты используют свой
+    дефолтный base_url из _build_llm()."""
+    global _fallback_base_urls
+    _fallback_base_urls = dict(base_urls or {})
 
 
 def set_fallback_mode(mode: Optional[str]) -> None:
@@ -338,7 +423,7 @@ def _build_llm(
             ChatOpenAI(
                 model=resolved_model,
                 api_key=SecretStr(api_key),
-                base_url=base_url or "https://api.cohere.com/v2",
+                base_url=base_url or "https://api.cohere.ai/compatibility/v1",
                 temperature=temperature,
                 max_retries=0,
             ),
@@ -381,6 +466,42 @@ def _build_llm(
                 model=resolved_model,
                 api_key=SecretStr(api_key),
                 base_url=base_url or "https://api.llm7.io/v1",
+                temperature=temperature,
+                max_retries=0,
+            ),
+            resolved_model,
+        )
+    if provider == "cloudflare":
+        from langchain_openai import ChatOpenAI
+
+        if not base_url:
+            # Нет статического дефолта — account_id обязателен в
+            # URL, угадать/захардкодить нечего. Явная ошибка вместо
+            # тихого похода на api.openai.com с чужим ключом.
+            raise ValueError(
+                "cloudflare requires base_url "
+                "(llm_provider_base_urls.cloudflare in secrets.yaml)"
+            )
+        resolved_model = model or _default_model_id(provider)
+        return (
+            ChatOpenAI(
+                model=resolved_model,
+                api_key=SecretStr(api_key),
+                base_url=base_url,
+                temperature=temperature,
+                max_retries=0,
+            ),
+            resolved_model,
+        )
+    if provider == "vercel":
+        from langchain_openai import ChatOpenAI
+
+        resolved_model = model or _default_model_id(provider)
+        return (
+            ChatOpenAI(
+                model=resolved_model,
+                api_key=SecretStr(api_key),
+                base_url=base_url or "https://ai-gateway.vercel.sh/v1",
                 temperature=temperature,
                 max_retries=0,
             ),
@@ -446,10 +567,11 @@ def _build_fallback_llms(
         api_key = _fallback_keys.get(provider)
         if not api_key:
             continue
+        base_url = _fallback_base_urls.get(provider)
         for model_entry in _fallback_models(provider):
             try:
                 llm, resolved_model = _build_llm(
-                    provider, api_key, model_entry["id"], None, temperature
+                    provider, api_key, model_entry["id"], base_url, temperature
                 )
             except Exception:
                 continue

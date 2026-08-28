@@ -133,7 +133,12 @@ let repliesLoaded = false;
 let lastRepliesSnapshot = null;
 let logsLoaded = false;
 let lastLogsSnapshot = null;
-let llmCatalog = { models: {}, api_key_previews: {} };
+let llmCatalog = { models: {}, api_key_previews: {}, provider_base_urls: {} };
+// Провайдеры без единого статического эндпоинта — нужен свой
+// base_url на аккаунт (сейчас только Cloudflare Workers AI, у
+// которого account_id зашит в URL). См. llm_provider.py:
+// set_fallback_base_urls().
+const PROVIDERS_NEEDING_BASE_URL = new Set(["cloudflare"]);
 let activeTelegramContact = null;
 
 function formatChatTime(iso) {
@@ -155,6 +160,25 @@ function providerLabel(provider) {
   );
   return card ? card.querySelector("span").textContent : provider;
 }
+
+// Те же страницы, что в таблице docs/GUIDE.md — держать в одном
+// месте смысла нет (бэкенд не знает про этот URL), поэтому
+// дублируется здесь; при добавлении провайдера обновлять оба места.
+const LLM_KEY_PAGE_URLS = {
+  openai: "https://platform.openai.com/api-keys",
+  groq: "https://console.groq.com/keys",
+  gemini: "https://aistudio.google.com/apikey",
+  deepseek: "https://platform.deepseek.com/api_keys",
+  nvidia: "https://build.nvidia.com",
+  openrouter: "https://openrouter.ai/keys",
+  mistral: "https://console.mistral.ai/api-keys",
+  cohere: "https://dashboard.cohere.com/api-keys",
+  huggingface: "https://huggingface.co/settings/tokens",
+  ollama_cloud: "https://ollama.com/settings/keys",
+  llm7: "https://token.llm7.io",
+  cloudflare: "https://dash.cloudflare.com/profile/api-tokens",
+  vercel: "https://vercel.com/docs/ai-gateway/authentication-and-byok/api-keys",
+};
 
 function applyLLMSelection(provider, currentModel) {
   document
@@ -190,6 +214,21 @@ function applyLLMSelection(provider, currentModel) {
     providerLabel(provider);
   document.getElementById("llm-key-preview").textContent =
     llmCatalog.api_key_previews[provider] || "—";
+
+  const keyLink = document.getElementById("llm-key-get-link");
+  const keyPageUrl = LLM_KEY_PAGE_URLS[provider];
+  keyLink.style.display = keyPageUrl ? "" : "none";
+  if (keyPageUrl) keyLink.href = keyPageUrl;
+
+  const baseUrlRow = document.getElementById("llm-provider-base-url-row");
+  const needsBaseUrl = PROVIDERS_NEEDING_BASE_URL.has(provider);
+  baseUrlRow.style.display = needsBaseUrl ? "" : "none";
+  if (needsBaseUrl) {
+    document.getElementById("llm-provider-base-url-label").textContent =
+      providerLabel(provider);
+    document.getElementById("llm-provider-base-url-preview").textContent =
+      llmCatalog.provider_base_urls[provider] || "—";
+  }
 }
 
 function relativeTimeRu(iso) {
@@ -550,6 +589,7 @@ const render = {
       llmCatalog = {
         models: llm.models || {},
         api_key_previews: llm.api_key_previews || {},
+        provider_base_urls: llm.provider_base_urls || {},
       };
       applyLLMSelection(llm.provider, llm.model);
       document.getElementById("llm-base-url").value = llm.base_url || "";
@@ -1387,6 +1427,43 @@ function initDashboard() {
         active.classList.add("has-key");
         input.value = "";
         status.textContent = "Ключ сохранён.";
+        setTimeout(() => (status.textContent = ""), 2500);
+      } catch (e) {
+        status.textContent = `Ошибка: ${e.message}`;
+      }
+    });
+
+  document
+    .getElementById("llm-provider-base-url-save")
+    .addEventListener("click", async () => {
+      const status = document.getElementById("llm-provider-base-url-status");
+      const input = document.getElementById("llm-provider-base-url-input");
+      const active = document.querySelector(
+        "#provider-grid .provider-card.active"
+      );
+      const url = input.value.trim();
+      if (!active) {
+        status.textContent = "Выберите провайдера.";
+        return;
+      }
+      if (!url) {
+        status.textContent = "Вставьте base URL.";
+        return;
+      }
+      status.textContent = "Сохранение…";
+      try {
+        const result = await api("/api/settings/llm-provider-base-url", {
+          method: "POST",
+          body: JSON.stringify({
+            provider: active.dataset.provider,
+            base_url: url,
+          }),
+        });
+        llmCatalog.provider_base_urls[result.provider] = result.base_url;
+        document.getElementById("llm-provider-base-url-preview").textContent =
+          result.base_url;
+        input.value = "";
+        status.textContent = "Base URL сохранён.";
         setTimeout(() => (status.textContent = ""), 2500);
       } catch (e) {
         status.textContent = `Ошибка: ${e.message}`;

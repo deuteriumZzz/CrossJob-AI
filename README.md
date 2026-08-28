@@ -121,17 +121,23 @@ Telegram отдельно (вкладка "Telegram" — каналы, авто�
 `applied_log.json` как бэкап, получить уведомление в Telegram, когда
 дневные траты на LLM превысят заданный порог (или когда все
 провайдеры LLM недоступны), и переключить провайдера/модель LLM
-(OpenAI/Groq/Gemini/DeepSeek/NVIDIA NIM/OpenRouter/Mistral/Cohere/Hugging Face/Ollama Cloud/LLM7.io/Ollama) со своим
+(OpenAI/Groq/Gemini/DeepSeek/NVIDIA NIM/OpenRouter/Mistral/Cohere/Hugging Face/Ollama Cloud/LLM7.io/Cloudflare/Vercel/Ollama) со своим
 API-ключом на каждого — без правки `config.py`. Подробности — в
 [docs/GUIDE.md](docs/GUIDE.md).
 
 ## Конфигурация
 
-- `data_folder/secrets.yaml` — ключ LLM (`llm_api_key`, по умолчанию для OpenAI) и, для каждой площадки, свои ключи (HeadHunter секретов не требует — вход браузерный, по номеру телефона и SMS, см. GUIDE.md; SuperJob — https://api.superjob.ru/register/, Telegram — https://my.telegram.org/apps, см. GUIDE.md). Провайдер LLM не обязан быть OpenAI — поддерживаются Groq/Gemini/DeepSeek/NVIDIA NIM/OpenRouter/Mistral/Cohere/Hugging Face/Ollama Cloud/LLM7.io/Ollama, каждый со своим ключом в блоке `llm_api_keys:` (переключение, выбор модели и ввод ключей — в дашборде, вкладка Настройки, без правки `config.py`; ссылки на страницу получения ключа для каждого провайдера — в GUIDE.md). **Рекомендация по умолчанию — Groq, модель `openai/gpt-oss-120b`** (помечена короной 👑 в выборе модели): бесплатно и достаточно для оценки вакансий/писем, при таком объёме вызовов LLM платный провайдер за день накапает заметный счёт.
+- `data_folder/secrets.yaml` — ключ LLM (`llm_api_key`, по умолчанию для OpenAI) и, для каждой площадки, свои ключи (HeadHunter секретов не требует — вход браузерный, по номеру телефона и SMS, см. GUIDE.md; SuperJob — https://api.superjob.ru/register/, Telegram — https://my.telegram.org/apps, см. GUIDE.md). Провайдер LLM не обязан быть OpenAI — поддерживаются Groq/Gemini/DeepSeek/NVIDIA NIM/OpenRouter/Mistral/Cohere/Hugging Face/Ollama Cloud/LLM7.io/Cloudflare/Vercel/Ollama, каждый со своим ключом в блоке `llm_api_keys:` (переключение, выбор модели и ввод ключей — в дашборде, вкладка Настройки, без правки `config.py`; ссылки на страницу получения ключа для каждого провайдера — в GUIDE.md). **Рекомендация по умолчанию — Groq, модель `openai/gpt-oss-120b`** (помечена короной 👑 в выборе модели): бесплатно и достаточно для оценки вакансий/писем, при таком объёме вызовов LLM платный провайдер за день накапает заметный счёт.
 - `data_folder/work_preferences.yaml` — позиции, локации, чёрные списки компаний/названий/локаций, фильтры по опыту/типу занятости/дате, и опциональные блоки `headhunter:`/`superjob:` (`auto_apply`, `resume_id`) и `telegram:` (`channels`, `auto_message`, `daily_message_limit`, `max_post_age_days`, `intro_message_template`). Любую площадку, включая Telegram, можно точечно переопределить своими `positions`/`locations` внутри её блока — пусто там означает "используй общий список сверху".
 - `data_folder/resume.pdf` — резюме как есть; используется только для генерации сопроводительных писем.
 
 Первый запуск действия по каждой площадке откроет браузер для одноразового входа (OAuth); дальше токен обновляется автоматически. Для Telegram вместо браузера — ввод номера телефона и кода в консоли при первом запуске поиска.
+
+## Насколько умные модели
+
+Для каждого провайдера в проекте есть модель по умолчанию (👑 в выборе модели дашборда) — вот как они соотносятся по независимому бенчмарку [Artificial Analysis Intelligence Index](https://artificialanalysis.ai/leaderboards/models), сверенному живыми запросами 29.08.2026. Это снимок на конкретный момент — сами модели и веса провайдеры обновляют без предупреждения (то же самое уже происходило с моделями Groq и с gemini-2.5-flash, см. комментарии в `src/job_sources/llm_provider.py`), поэтому абсолютные цифры со временем устареют, но относительный разброс — какая модель заметно умнее, а какая проще — ориентир и так. Показана только рекомендованная модель каждого провайдера, не весь список альтернатив (его видно в дашборде или в `PROVIDER_MODELS` в `src/job_sources/llm_provider.py`).
+
+![Насколько умные модели, которые мы используем](assets/llm-intelligence.svg)
 
 ## Лицензия
 
