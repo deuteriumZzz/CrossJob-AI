@@ -223,3 +223,24 @@ linkedin:
   #   - "Netherlands"
   locations: []
 
+# Optional: only needed for the "Search & Apply on Wellfound" action.
+# Keep auto_apply: false until you've reviewed a dry run — this flow is
+# unverified against a live wellfound.com account, see docs/GUIDE.md.
+# positions above are matched against wellfound's own role taxonomy
+# (e.g. "python developer", "product manager") — not every position
+# will find a match there.
+wellfound:
+  auto_apply: false
+
+# Optional: only needed for the "Search & Apply on careerist.ru" action.
+# Keep auto_apply: false until you've reviewed a dry run — this flow is
+# unverified against a live careerist.ru account, see docs/GUIDE.md.
+careerist:
+  auto_apply: false
+
+# Optional: only needed for the "Search & Apply on Habr Career" action.
+# Keep auto_apply: false until you've reviewed a dry run — this flow is
+# unverified against a live career.habr.com account, see docs/GUIDE.md.
+habr_career:
+  auto_apply: false
+

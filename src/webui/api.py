@@ -225,6 +225,9 @@ _CREDENTIAL_REQUIREMENTS: dict = {
     "telegram": ("api_id", "api_hash"),
     "getmatch": ("email",),
     "linkedin": None,
+    "wellfound": None,
+    "careerist": None,
+    "habr_career": None,
 }
 
 

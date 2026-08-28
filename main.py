@@ -39,6 +39,9 @@ from src.job_sources.block_detection import (
     is_still_blocked,
     mark_blocked,
 )
+from src.job_sources.careerist.auth import CareeristSession
+from src.job_sources.careerist.client import CareeristClient
+from src.job_sources.careerist.source import CareeristSource
 from src.job_sources.cover_letter import generate_cover_letter_for_job
 from src.job_sources.geekjob.auth import GeekjobSession
 from src.job_sources.geekjob.client import GeekjobClient
@@ -47,6 +50,9 @@ from src.job_sources.getmatch.auth import GetMatchSession
 from src.job_sources.getmatch.client import GetMatchClient
 from src.job_sources.getmatch.source import GetMatchSource
 from src.job_sources.github_context import fetch_github_summary
+from src.job_sources.habr_career.auth import HabrCareerSession
+from src.job_sources.habr_career.client import HabrCareerClient
+from src.job_sources.habr_career.source import HabrCareerSource
 from src.job_sources.headhunter.browser_client import HeadHunterBrowserClient
 from src.job_sources.headhunter.browser_negotiations import (
     list_withdrawable_negotiations,
@@ -82,6 +88,7 @@ from src.job_sources.headhunter.telegram_approval import (
     save_pending_form,
     update_pending_form_answers,
 )
+from src.job_sources.html_text import html_letter_to_plain_text
 from src.job_sources.job_fit import classify_fit, score_job_fit
 from src.job_sources.linkedin.answerer import EasyApplyAnswerer
 from src.job_sources.linkedin.auth import LinkedInSession
@@ -133,6 +140,9 @@ from src.job_sources.telegram.contact import extract_contact
 from src.job_sources.telegram.source import TelegramSource
 from src.job_sources.telegram_conversations import TelegramConversations
 from src.job_sources.telegram_notify import notify_from_secrets
+from src.job_sources.wellfound.auth import WellfoundSession
+from src.job_sources.wellfound.client import WellfoundClient
+from src.job_sources.wellfound.source import WellfoundSource
 from src.job_sources.zarplata.auth import ZarplataAuth
 from src.job_sources.zarplata.client import ZarplataClient
 from src.job_sources.zarplata.source import ZarplataSource
@@ -1549,10 +1559,19 @@ def search_geekjob(parameters: dict, llm_api_key: str):
         return
 
     profile_dir = output_folder / ".chrome_profile_geekjob"
-    client = GeekjobClient()
+
+    # Вход — до поиска, а не после: если auto_apply включён, всё равно
+    # придётся логиниться, чтобы откликаться — лучше сразу запросить
+    # вход (быстро), чем заставлять ждать несколько минут поиска ради
+    # окна логина в конце.
+    if auto_apply:
+        GeekjobSession(profile_dir).ensure_logged_in()
+
+    client = GeekjobClient(profile_dir)
     source: JobSource = GeekjobSource(client)
     try:
-        jobs = source.search(parameters)
+        with client:
+            jobs = source.search(parameters)
     except PlatformBlockedError as e:
         logger.error(f"geekjob.ru appears to have blocked us: {e}")
         mark_blocked(output_folder, "geekjob")
@@ -1563,9 +1582,6 @@ def search_geekjob(parameters: dict, llm_api_key: str):
         )
         return
     logger.info(f"Found {len(jobs)} matching geekjob.ru vacancies.")
-
-    if auto_apply:
-        GeekjobSession(profile_dir).ensure_logged_in()
 
     sent_count = 0
     job_max_applications = _job_max_applications(parameters, "geekjob")
@@ -2236,6 +2252,455 @@ def search_and_apply_linkedin(parameters: dict, llm_api_key: str):
         session.quit()
 
 
+def search_and_apply_wellfound(parameters: dict, llm_api_key: str):
+    """
+    Ищет вакансии на wellfound.com (роли из positions в
+    work_preferences.yaml сопоставляются с таксономией ролей
+    wellfound — совпадение не гарантировано на каждую позицию, см.
+    src/job_sources/wellfound/client.py) и, если wellfound.auto_apply
+    выставлен в true, пробует откликнуться через модалку "Apply Now".
+
+    Вход/регистрация — вручную в открывшемся браузере
+    (WellfoundSession), как и у остальных площадок проекта: бот
+    никогда не создаёт аккаунт и не подставляет пароль сам. Реальный
+    apply НЕ подтверждён на живом залогиненном аккаунте (см. docstring
+    WellfoundClient.apply) — если после клика "Apply Now" модалка
+    всё ещё просит пароль (то есть сессия не аутентифицирована),
+    вакансия тихо считается dry-run, ничего не отправляется.
+
+    auto_apply: false по умолчанию независимо от того, что в итоге
+    стоит в work_preferences.yaml — первый запуск всегда dry-run.
+    """
+    data_folder: Path = parameters["dataFolder"]
+    resume_pdf_path = data_folder / RESUME_PDF_LINKEDIN
+    if resume_pdf_path.exists():
+        logger.info(f"Using {RESUME_PDF_LINKEDIN} for wellfound.com.")
+    else:
+        resume_pdf_path = data_folder / RESUME_PDF
+        logger.info(
+            f"{RESUME_PDF_LINKEDIN} not found — falling back to "
+            f"{RESUME_PDF} for wellfound.com (English-language "
+            "startup market — add "
+            f"{RESUME_PDF_LINKEDIN} to use a separate resume here)."
+        )
+    if not resume_pdf_path.exists():
+        raise FileNotFoundError(
+            f"Resume PDF not found: {resume_pdf_path}. Place your "
+            f"resume as '{RESUME_PDF}' (or '{RESUME_PDF_LINKEDIN}') "
+            f"in {data_folder}."
+        )
+
+    profile_path = data_folder / "job_application_profile.yaml"
+    if not profile_path.exists():
+        raise FileNotFoundError(
+            f"job_application_profile.yaml not found: {profile_path}. "
+            "Required for wellfound's application questions "
+            "(see data_folder_example/)."
+        )
+    profile = JobApplicationProfile(profile_path.read_text(encoding="utf-8"))
+
+    wf_preferences = parameters.get("wellfound") or {}
+    auto_apply = bool(wf_preferences.get("auto_apply", False))
+
+    output_folder: Path = parameters["outputFileDirectory"]
+    applied_log = AppliedLog(output_folder / "applied_log.json")
+
+    if is_still_blocked(output_folder, "wellfound"):
+        logger.warning("wellfound.com is cooling down after a block — skipping.")
+        return
+
+    profile_dir = output_folder / ".chrome_profile_wellfound"
+    client = WellfoundClient()
+    source: JobSource = WellfoundSource(client)
+    try:
+        jobs = source.search(parameters)
+    except PlatformBlockedError as e:
+        logger.error(f"wellfound.com appears to have blocked us: {e}")
+        mark_blocked(output_folder, "wellfound")
+        notify(
+            parameters,
+            f"wellfound.com: похоже на блокировку ({e}). "
+            "Площадка поставлена на паузу на 24ч.",
+        )
+        return
+    logger.info(f"Found {len(jobs)} matching wellfound.com vacancies.")
+
+    if auto_apply:
+        WellfoundSession(profile_dir).ensure_logged_in()
+
+    resume_text = extract_pdf_text(str(resume_pdf_path))
+    sent_count = 0
+    job_max_applications = _job_max_applications(parameters, "wellfound")
+    daily_limit = randomized_daily_limit(_daily_limit(parameters, "wellfound"))
+    for job in jobs:
+        if sent_count >= job_max_applications:
+            logger.info(
+                f"Reached JOB_MAX_APPLICATIONS "
+                f"({job_max_applications}) for this run."
+            )
+            break
+        if _total_daily_limit_reached(parameters, applied_log):
+            break
+        if applied_log.already_applied(job):
+            continue
+        if (
+            auto_apply
+            and applied_log.applied_today_count("wellfound") >= daily_limit
+        ):
+            logger.info(
+                f"Reached daily application limit ({daily_limit}) "
+                "for wellfound.com today."
+            )
+            break
+
+        fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+        tier = classify_fit(fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE)
+        if tier == "skip":
+            logger.info(
+                f"Skipping {job.role} at {job.company}: fit score "
+                f"{fit.score}/10 below minimum."
+            )
+            applied_log.record(
+                job, "", "", "skipped_low_fit", fit.score, fit.gaps
+            )
+            continue
+        if tier == "weak":
+            logger.info(
+                f"{job.role} at {job.company}: weak fit "
+                f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
+            )
+
+        try:
+            cover_letter = generate_cover_letter_for_job(
+                resume_pdf_path, job, llm_api_key, force_russian=False
+            )
+        except Exception as e:
+            logger.exception(
+                f"Failed to generate cover letter for {job.role} at "
+                f"{job.company}, skipping this vacancy: {e}"
+            )
+            continue
+
+        if auto_apply:
+            answerer = EasyApplyAnswerer(
+                resume_text, profile, job, llm_api_key
+            )
+            applied = client.apply(job.link, profile_dir, answerer.answer)
+            if applied:
+                status: Literal["applied", "dry_run"] = "applied"
+                logger.info(
+                    f"Applied to {job.role} at {job.company} ({job.link})"
+                )
+            else:
+                status = "dry_run"
+                logger.warning(
+                    "Не удалось подтверждённо отправить отклик на "
+                    f"{job.link} — записано как dry-run."
+                )
+        else:
+            status = "dry_run"
+            logger.info(
+                f"[manual apply needed] {job.role} at {job.company} "
+                f"({job.link})"
+            )
+
+        applied_log.record(
+            job,
+            cover_letter,
+            resume_id="",
+            status=status,
+            score=fit.score,
+            gaps=fit.gaps,
+        )
+        sent_count += 1
+
+
+def search_and_apply_careerist(parameters: dict, llm_api_key: str):
+    """
+    Ищет вакансии на careerist.ru (positions из work_preferences.yaml
+    транслитерируются самим сайтом в SEO-URL /jobs-{query}/ — совпадение
+    не гарантировано на каждую позицию, см.
+    src/job_sources/careerist/client.py) и, если careerist.auto_apply
+    выставлен в true, пробует откликнуться (загрузка резюме + кнопка
+    отправки).
+
+    Вход — вручную в открывшемся браузере (CareeristSession), как и у
+    остальных площадок проекта: бот никогда не создаёт аккаунт и не
+    подставляет пароль сам. Реальный apply НЕ подтверждён на живом
+    залогиненном аккаунте (см. docstring CareeristClient.apply) —
+    анонимно кнопка "ОТПРАВИТЬ РЕЗЮМЕ" ведёт на register.html; если
+    после загрузки резюме на странице так и не нашлось кнопки
+    отправки, не ведущей на регистрацию, вакансия тихо считается
+    dry-run.
+
+    auto_apply: false по умолчанию независимо от того, что в итоге
+    стоит в work_preferences.yaml — первый запуск всегда dry-run.
+    """
+    data_folder: Path = parameters["dataFolder"]
+    resume_pdf_path = data_folder / RESUME_PDF
+    if not resume_pdf_path.exists():
+        raise FileNotFoundError(
+            f"Resume PDF not found: {resume_pdf_path}. Place your "
+            f"resume as '{RESUME_PDF}' in {data_folder}."
+        )
+
+    cr_preferences = parameters.get("careerist") or {}
+    auto_apply = bool(cr_preferences.get("auto_apply", False))
+
+    output_folder: Path = parameters["outputFileDirectory"]
+    applied_log = AppliedLog(output_folder / "applied_log.json")
+
+    if is_still_blocked(output_folder, "careerist"):
+        logger.warning("careerist.ru is cooling down after a block — skipping.")
+        return
+
+    profile_dir = output_folder / ".chrome_profile_careerist"
+    client = CareeristClient()
+    source: JobSource = CareeristSource(client)
+    try:
+        jobs = source.search(parameters)
+    except PlatformBlockedError as e:
+        logger.error(f"careerist.ru appears to have blocked us: {e}")
+        mark_blocked(output_folder, "careerist")
+        notify(
+            parameters,
+            f"careerist.ru: похоже на блокировку ({e}). "
+            "Площадка поставлена на паузу на 24ч.",
+        )
+        return
+    logger.info(f"Found {len(jobs)} matching careerist.ru vacancies.")
+
+    if auto_apply:
+        CareeristSession(profile_dir).ensure_logged_in()
+
+    sent_count = 0
+    job_max_applications = _job_max_applications(parameters, "careerist")
+    daily_limit = randomized_daily_limit(_daily_limit(parameters, "careerist"))
+    for job in jobs:
+        if sent_count >= job_max_applications:
+            logger.info(
+                f"Reached JOB_MAX_APPLICATIONS "
+                f"({job_max_applications}) for this run."
+            )
+            break
+        if _total_daily_limit_reached(parameters, applied_log):
+            break
+        if applied_log.already_applied(job):
+            continue
+        if (
+            auto_apply
+            and applied_log.applied_today_count("careerist") >= daily_limit
+        ):
+            logger.info(
+                f"Reached daily application limit ({daily_limit}) "
+                "for careerist.ru today."
+            )
+            break
+
+        fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+        tier = classify_fit(fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE)
+        if tier == "skip":
+            logger.info(
+                f"Skipping {job.role} at {job.company}: fit score "
+                f"{fit.score}/10 below minimum."
+            )
+            applied_log.record(
+                job, "", "", "skipped_low_fit", fit.score, fit.gaps
+            )
+            continue
+        if tier == "weak":
+            logger.info(
+                f"{job.role} at {job.company}: weak fit "
+                f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
+            )
+
+        try:
+            cover_letter = generate_cover_letter_for_job(
+                resume_pdf_path, job, llm_api_key
+            )
+        except Exception as e:
+            logger.exception(
+                f"Failed to generate cover letter for {job.role} at "
+                f"{job.company}, skipping this vacancy: {e}"
+            )
+            continue
+
+        if auto_apply:
+            applied = client.apply(job.link, profile_dir, resume_pdf_path)
+            if applied:
+                status: Literal["applied", "dry_run"] = "applied"
+                logger.info(
+                    f"Applied to {job.role} at {job.company} ({job.link})"
+                )
+            else:
+                status = "dry_run"
+                logger.warning(
+                    "Не удалось подтверждённо отправить отклик на "
+                    f"{job.link} — записано как dry-run."
+                )
+        else:
+            status = "dry_run"
+            logger.info(
+                f"[manual apply needed] {job.role} at {job.company} "
+                f"({job.link})"
+            )
+
+        applied_log.record(
+            job,
+            cover_letter,
+            resume_id="",
+            status=status,
+            score=fit.score,
+            gaps=fit.gaps,
+        )
+        sent_count += 1
+
+
+def search_and_apply_habr_career(parameters: dict, llm_api_key: str):
+    """
+    Ищет вакансии на career.habr.com (positions из work_preferences.yaml
+    ищутся через ?q= — свободный текстовый поиск, в отличие от wellfound/
+    careerist) и, если habr_career.auto_apply выставлен в true, пробует
+    откликнуться через модалку "Откликнуться".
+
+    Официального API для личных ботов у Хабра нет (доступ — по ручному
+    одобрению, не для этого сценария) — вход вручную в открывшемся
+    браузере (HabrCareerSession, единый аккаунт Хабра), как и у
+    остальных площадок без API в проекте: бот никогда не создаёт
+    аккаунт и не подставляет пароль сам. Реальный apply НЕ подтверждён
+    на живом залогиненном аккаунте (см. docstring HabrCareerClient.apply)
+    — анонимно подтверждено только, что кнопка "Откликнуться" открывает
+    JS-модалку; если после клика не нашлось второй кнопки отправки —
+    вакансия тихо считается dry-run.
+
+    auto_apply: false по умолчанию независимо от того, что в итоге
+    стоит в work_preferences.yaml — первый запуск всегда dry-run.
+    """
+    data_folder: Path = parameters["dataFolder"]
+    resume_pdf_path = data_folder / RESUME_PDF
+    if not resume_pdf_path.exists():
+        raise FileNotFoundError(
+            f"Resume PDF not found: {resume_pdf_path}. Place your "
+            f"resume as '{RESUME_PDF}' in {data_folder}."
+        )
+
+    hc_preferences = parameters.get("habr_career") or {}
+    auto_apply = bool(hc_preferences.get("auto_apply", False))
+
+    output_folder: Path = parameters["outputFileDirectory"]
+    applied_log = AppliedLog(output_folder / "applied_log.json")
+
+    if is_still_blocked(output_folder, "habr_career"):
+        logger.warning(
+            "career.habr.com is cooling down after a block — skipping."
+        )
+        return
+
+    profile_dir = output_folder / ".chrome_profile_habr_career"
+    client = HabrCareerClient()
+    source: JobSource = HabrCareerSource(client)
+    try:
+        jobs = source.search(parameters)
+    except PlatformBlockedError as e:
+        logger.error(f"career.habr.com appears to have blocked us: {e}")
+        mark_blocked(output_folder, "habr_career")
+        notify(
+            parameters,
+            f"career.habr.com: похоже на блокировку ({e}). "
+            "Площадка поставлена на паузу на 24ч.",
+        )
+        return
+    logger.info(f"Found {len(jobs)} matching career.habr.com vacancies.")
+
+    if auto_apply:
+        HabrCareerSession(profile_dir).ensure_logged_in()
+
+    sent_count = 0
+    job_max_applications = _job_max_applications(parameters, "habr_career")
+    daily_limit = randomized_daily_limit(
+        _daily_limit(parameters, "habr_career")
+    )
+    for job in jobs:
+        if sent_count >= job_max_applications:
+            logger.info(
+                f"Reached JOB_MAX_APPLICATIONS "
+                f"({job_max_applications}) for this run."
+            )
+            break
+        if _total_daily_limit_reached(parameters, applied_log):
+            break
+        if applied_log.already_applied(job):
+            continue
+        if (
+            auto_apply
+            and applied_log.applied_today_count("habr_career") >= daily_limit
+        ):
+            logger.info(
+                f"Reached daily application limit ({daily_limit}) "
+                "for career.habr.com today."
+            )
+            break
+
+        fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+        tier = classify_fit(fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE)
+        if tier == "skip":
+            logger.info(
+                f"Skipping {job.role} at {job.company}: fit score "
+                f"{fit.score}/10 below minimum."
+            )
+            applied_log.record(
+                job, "", "", "skipped_low_fit", fit.score, fit.gaps
+            )
+            continue
+        if tier == "weak":
+            logger.info(
+                f"{job.role} at {job.company}: weak fit "
+                f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
+            )
+
+        try:
+            cover_letter = generate_cover_letter_for_job(
+                resume_pdf_path, job, llm_api_key
+            )
+        except Exception as e:
+            logger.exception(
+                f"Failed to generate cover letter for {job.role} at "
+                f"{job.company}, skipping this vacancy: {e}"
+            )
+            continue
+
+        if auto_apply:
+            cover_letter_text = html_letter_to_plain_text(cover_letter)
+            applied = client.apply(job.link, profile_dir, cover_letter_text)
+            if applied:
+                status: Literal["applied", "dry_run"] = "applied"
+                logger.info(
+                    f"Applied to {job.role} at {job.company} ({job.link})"
+                )
+            else:
+                status = "dry_run"
+                logger.warning(
+                    "Не удалось подтверждённо отправить отклик на "
+                    f"{job.link} — записано как dry-run."
+                )
+        else:
+            status = "dry_run"
+            logger.info(
+                f"[manual apply needed] {job.role} at {job.company} "
+                f"({job.link})"
+            )
+
+        applied_log.record(
+            job,
+            cover_letter,
+            resume_id="",
+            status=status,
+            score=fit.score,
+            gaps=fit.gaps,
+        )
+        sent_count += 1
+
+
 ALL_SOURCES = [
     ("headhunter", search_and_apply_headhunter),
     ("superjob", search_and_apply_superjob),
@@ -2245,6 +2710,9 @@ ALL_SOURCES = [
     ("telegram", search_telegram),
     ("getmatch", search_getmatch),
     ("linkedin", search_and_apply_linkedin),
+    ("wellfound", search_and_apply_wellfound),
+    ("careerist", search_and_apply_careerist),
+    ("habr_career", search_and_apply_habr_career),
 ]
 
 
@@ -3225,6 +3693,18 @@ def handle_inquiries(
                 logger.info("Searching LinkedIn Easy Apply jobs...")
                 search_and_apply_linkedin(parameters, llm_api_key)
 
+            if "Search & Apply on Wellfound" == selected_actions:
+                logger.info("Searching wellfound.com...")
+                search_and_apply_wellfound(parameters, llm_api_key)
+
+            if "Search & Apply on careerist.ru" == selected_actions:
+                logger.info("Searching careerist.ru...")
+                search_and_apply_careerist(parameters, llm_api_key)
+
+            if "Search & Apply on Habr Career" == selected_actions:
+                logger.info("Searching career.habr.com...")
+                search_and_apply_habr_career(parameters, llm_api_key)
+
             if "Search selected sources" == selected_actions:
                 names = prompt_selected_sources()
                 if names:
@@ -3280,6 +3760,9 @@ def prompt_user_action() -> str:
                     "Search Telegram channels (manual reply)",
                     "Search & Apply on GetMatch",
                     "Search & Apply on LinkedIn",
+                    "Search & Apply on Wellfound",
+                    "Search & Apply on careerist.ru",
+                    "Search & Apply on Habr Career",
                     "Search selected sources",
                     "Check HeadHunter replies",
                     "Clean up stale HeadHunter negotiations",
@@ -3322,6 +3805,18 @@ def prompt_selected_sources() -> list[str]:
                     "LinkedIn (experimental, not verified live)",
                     "linkedin",
                 ),
+                (
+                    "Wellfound (experimental, not verified live)",
+                    "wellfound",
+                ),
+                (
+                    "careerist.ru (experimental, not verified live)",
+                    "careerist",
+                ),
+                (
+                    "Habr Career (experimental, not verified live)",
+                    "habr_career",
+                ),
             ],
         ),
     ]
@@ -3337,8 +3832,10 @@ def prompt_selected_sources() -> list[str]:
     help=(
         "Run non-interactively (for cron) instead of showing the menu: "
         "one of headhunter/superjob/zarplata/geekjob/rabota_ru/telegram/"
-        "getmatch/linkedin/all/check_hh_replies/check_sj_replies/"
-        "check_zp_replies/check_telegram_replies/"
+        "getmatch/linkedin/wellfound/careerist/habr_career/all/"
+        "check_hh_replies/"
+        "check_sj_replies/check_zp_replies/"
+        "check_telegram_replies/"
         "cleanup_hh_negotiations, or "
         "'selected:hh,superjob' for a comma-separated subset of sources."
     ),
@@ -3462,6 +3959,18 @@ def main(auto: Optional[str], daemon: bool):
 
         if auto == "linkedin":
             search_and_apply_linkedin(config, llm_api_key)
+            return
+
+        if auto == "wellfound":
+            search_and_apply_wellfound(config, llm_api_key)
+            return
+
+        if auto == "careerist":
+            search_and_apply_careerist(config, llm_api_key)
+            return
+
+        if auto == "habr_career":
+            search_and_apply_habr_career(config, llm_api_key)
             return
 
         if auto == "all":

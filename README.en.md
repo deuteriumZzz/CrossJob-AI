@@ -37,9 +37,32 @@ A bot that searches and auto-applies to job postings on Russian job boards, plus
 | geekjob        | ✅ search + auto-apply (scraping; manual OAuth login only — best-effort, not verified on a live account, see [GUIDE.md](docs/GUIDE.md) (RU)) |
 | rabota.ru      | ✅ search + auto-apply (scraping; manual OAuth/code login only — best-effort, not verified on a live account, see [GUIDE.md](docs/GUIDE.md) (RU)) |
 | GetMatch       | ✅ search + auto-apply (Next.js SPA — rendered via a real Selenium browser; login via a Telegram code, not a password) |
-| Habr Career    | planned (has an API, but app registration needs Habr's manual approval) |
+| wellfound.com  | ✅ search (verified live 2026-08-28, schema.org JobPosting — 25/25 results for a test position) + best-effort auto-apply (manual login/signup; real apply is NOT verified on a live logged-in account — if the form still asks for a password after clicking "Apply Now", the job is silently recorded as dry-run, see [GUIDE.md](docs/GUIDE.md) (RU)). Search matches wellfound's own role taxonomy, not free text — not every position will find a match |
+| careerist.ru   | ✅ search (verified live 2026-08-28, schema.org JobPosting, search via the `/jobs-{query}/` SEO redirect — the site transliterates Cyrillic itself; the site occasionally returns sporadic 502s, one retry built in) + best-effort auto-apply (manual login; real apply is NOT verified on a live logged-in account — anonymously the submit button redirects to registration, see [GUIDE.md](docs/GUIDE.md) (RU)) |
+| Habr Career    | planned (the official API isn't usable for this project — access needs Habr's manual approval and isn't meant for personal bots; needs a full browser-based integration like HH: login via Habr's SSO, search and apply via scraping — verified live 2026-08-28: the "Откликнуться" (Apply) button on a vacancy page is a plain JS `<button>` with no link, and there's no standalone `/users/login` page) |
+| careerspace.app| planned, low priority (confirmed: `/jobs` is a small personalized feed — no keyword search, no pagination; "Ссылка на отклик" requires login and where it leads is unconfirmed) |
+| hirify.me      | planned (job aggregator, including Telegram channels) |
+| himalayas.app  | planned (search only — apply redirects to the company's external ATS, no auto-apply) |
 | Telegram channels | ✅ search + optional cold outreach to contacts found in posts (personal account via the official Telegram API; no auto-reply to incoming messages — replying is manual, from the dashboard, see [GUIDE.md](docs/GUIDE.md) (RU)) |
 | LinkedIn       | ✅ search (worldwide/by-country, remote only) + Easy Apply auto-apply (`undetected-chromedriver`, LLM answers screening questions in English) — verified on a live account 2026-08-23, see [GUIDE.md](docs/GUIDE.md) (RU) |
+
+## Chances of landing a job, by platform (based on 2026 data)
+
+The table above is about what the bot can technically do. This one is about the platform's actual market effectiveness — what candidates are saying about it right now and what public 2026 statistics show. These are rough estimates (every candidate's situation differs), but they help prioritize where to look first.
+
+| Platform | Chance | Why |
+|---|---|---|
+| HeadHunter | 🟢 High | The largest database in Russia — 70M resumes, market leader ([Similarweb](https://www.similarweb.com/ru/website/hh.ru/competitors/), July 2026) |
+| SuperJob | 🟢 High | ~29M monthly users (2025), a quality/active audience, strong in the public sector/manufacturing/education ([rb.ru](https://rb.ru/reviews/gde-iskat-rabotu-v-2026/)) |
+| Habr Career | 🟢 High (for IT) | One of the clearest platforms specifically for IT job search, a mature ecosystem (company ratings, salaries, a journal) — but not yet integrated into the bot: it needs a full browser-based integration like HH (see the table above), not just an API |
+| Telegram channels | 🟢 High (digital/marketing/sales) | Per HR-community data, over 60% of marketing specialists find jobs via Telegram rather than classic job sites — direct contact with HR, no middlemen ([vc.ru](https://vc.ru/hr___/2878466-luchshie-telegram-kanaly-dlya-udalyonnoy-rabotyi)) |
+| GetMatch | 🟡 Medium-high (IT) | Open salaries, honest rules of the game, but an expensive platform for employers and high competition — averages ~92 applications per listing ([vc.ru](https://vc.ru/id5887884/2870166-saity-dlya-poiska-raboty-v-it)) |
+| rabota.ru | 🟡 Medium | Reliable listings from stable companies, but there are complaints about stale postings and fewer interview invitations than on hh.ru ([otzovik.com](https://otzovik.com/reviews/rabota_ru-internet-servis_po_poisku_raboti_i_podboru_personala/)) |
+| LinkedIn | 🟡 Medium | 87% of recruiters call LinkedIn the best tool for vetting candidates, but the response rate on direct applications is only 3-13% — 85% of actual hires close through networking/referrals, not job-posting applications ([Zippia](https://www.zippia.com/advice/linkedin-statistics/), [LinkedCraft](https://linkedcraft.io/blog/linkedin-networking-statistics-2026)) |
+| geekjob.ru | 🟡 Medium-low (IT) | A niche platform (averages 15-20 listings/month across classic IT tracks), HR experts are more skeptical of it than of hh.ru/Habr Career — useful as a secondary channel, not a primary one ([hrtime.ru](https://hrtime.ru/material/geekjob-ploshchadka-rabotaet-ili-net-59698/)) |
+| Wellfound (AngelList) | 🟠 Low-medium | Good for discovering startup roles and direct founder contact, but per Scale.jobs' 2026 analysis most applications expire before an employer even reviews them — low apply-to-offer conversion ([remote100k.com](https://remote100k.com/blog/is-wellfound-legit), [whatjobs.com](https://www.whatjobs.com/news/wellfound-angellist-review-2026-the-startup-holy-grail-or-tech-bubble/)) |
+| careerist.ru | 🔴 Low | Reviews are mixed and often negative: email spam, and real listings are mixed in with dubious ones (network marketing, forex, lending) — worth double-checking every listing before applying ([otzovik.com](https://otzovik.com/reviews/careerist_ru-internet-servis_po_poisku_raboti_i_podboru_personala/), [eto-razvod.ru](https://eto-razvod.ru/review/careerist/)) |
+| zarplata.ru | 🔴 Low | Based on this project's own usage experience — a low real-reply rate (same underlying platform as HH, but a smaller, less active audience) |
 
 ## Limits & anti-ban
 
@@ -57,6 +80,8 @@ The values below are defaults from `config.py`. You can change them on the fly, 
 | GetMatch | No daily limit of its own — uses `job_max_applications` per run | 5 | No official API — same cooldown |
 | Telegram channels | `telegram.daily_message_limit` = 15 cold messages/day (only if `auto_message` is on) | `messages_per_channel` = 100 messages per channel per run | Personal account, not an API integration — no platform limit; the risk is Telegram itself limiting the account for spam-like behavior |
 | LinkedIn | `LINKEDIN_DAILY_APPLICATION_LIMIT` = 8 (±70-100%) | 5 | No official API — automation is against ToS, see the caveat in [GUIDE.md](docs/GUIDE.md) (RU) |
+| wellfound.com | `limits.daily_application_limit` (shared default, ±70-100%) | 5 | No official API — apply is best-effort, not verified on a live account |
+| careerist.ru | `limits.daily_application_limit` (shared default, ±70-100%) | 5 | No official API — apply is best-effort, not verified on a live account |
 
 `±70-100%` is `randomized_daily_limit()`: the real limit for the day is picked randomly within this range once per run, so the daily limit isn't identical every single day (see [GUIDE.md](docs/GUIDE.md) (RU) on anti-ban).
 
@@ -85,7 +110,7 @@ cp -r data_folder_example data_folder
 Non-interactive run (for cron):
 
 ```bash
-python main.py --auto headhunter   # or --auto superjob / --auto zarplata / --auto geekjob / --auto rabota_ru / --auto telegram / --auto getmatch / --auto linkedin
+python main.py --auto headhunter   # or --auto superjob / --auto zarplata / --auto geekjob / --auto rabota_ru / --auto telegram / --auto getmatch / --auto linkedin / --auto wellfound / --auto careerist
 python main.py --auto check_telegram_replies   # checks for new replies in Telegram conversations (notification only)
 ```
 

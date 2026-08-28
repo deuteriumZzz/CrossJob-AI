@@ -7,6 +7,9 @@ const SOURCE_LABELS = {
   telegram: "Telegram",
   getmatch: "GetMatch",
   linkedin: "LinkedIn",
+  wellfound: "Wellfound",
+  careerist: "careerist.ru",
+  habr_career: "Habr Career",
 };
 
 const STATUS_DOT = {
