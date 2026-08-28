@@ -192,6 +192,68 @@ function applyLLMSelection(provider, currentModel) {
     llmCatalog.api_key_previews[provider] || "—";
 }
 
+function relativeTimeRu(iso) {
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "только что";
+  if (mins < 60) return `${mins} мин назад`;
+  return `${Math.round(mins / 60)} ч назад`;
+}
+
+function applyLLMProviderStatus(statusMap) {
+  // Свежесть статуса — 15 минут: дальше "сейчас отвечает"/ошибка
+  // считаются устаревшими и подсветка гаснет сама, без отдельного
+  // запроса на "провайдер снова онлайн".
+  const FRESH_MS = 15 * 60 * 1000;
+  let liveProvider = null;
+  let liveAt = 0;
+  for (const [provider, info] of Object.entries(statusMap || {})) {
+    const okAt = info.last_ok_at ? new Date(info.last_ok_at).getTime() : 0;
+    if (okAt > liveAt) {
+      liveAt = okAt;
+      liveProvider = provider;
+    }
+  }
+  const liveIsFresh = liveAt && Date.now() - liveAt < FRESH_MS;
+
+  document
+    .querySelectorAll("#provider-grid .provider-card")
+    .forEach((card) => {
+      const provider = card.dataset.provider;
+      const info = (statusMap || {})[provider];
+      card.classList.toggle(
+        "llm-live",
+        Boolean(liveIsFresh && provider === liveProvider)
+      );
+
+      const okAt = info?.last_ok_at
+        ? new Date(info.last_ok_at).getTime()
+        : 0;
+      const errAt = info?.last_error_at
+        ? new Date(info.last_error_at).getTime()
+        : 0;
+      const showError = errAt > okAt && Date.now() - errAt < FRESH_MS;
+
+      let note = card.querySelector(".provider-status-note");
+      if (showError) {
+        if (!note) {
+          note = document.createElement("span");
+          note.className = "provider-status-note";
+          card.appendChild(note);
+        }
+        note.classList.toggle(
+          "rate-limit",
+          info.last_error_kind === "rate_limit"
+        );
+        note.textContent =
+          (info.last_error_kind === "rate_limit"
+            ? "лимит исчерпан "
+            : "недоступен ") + relativeTimeRu(info.last_error_at);
+      } else if (note) {
+        note.remove();
+      }
+    });
+}
+
 function renderTotalBudget(status, totalLimit) {
   const el = document.getElementById("total-budget-info");
   if (!totalLimit) {
@@ -495,6 +557,8 @@ const render = {
       document.getElementById("llm-fallback-enabled").checked =
         llm.fallback_enabled !== false;
     });
+
+    api("/api/settings/llm/status").then(applyLLMProviderStatus);
 
     api("/api/settings/limits").then((limits) => {
       document.getElementById("limit-total").value =
@@ -1352,6 +1416,15 @@ function initDashboard() {
   setInterval(() => {
     const active = document.querySelector("nav.tabs button.active")?.dataset.tab;
     if (active && LIVE_TABS.has(active)) render[active]();
+  }, 7000);
+  // Отдельный тикер только для подсветки провайдеров (не полный
+  // render.settings()) — тот перезатирал бы несохранённый ввод в
+  // полях ключа/модели, см. комментарий выше про LIVE_TABS.
+  setInterval(() => {
+    const active = document.querySelector("nav.tabs button.active")?.dataset.tab;
+    if (active === "settings") {
+      api("/api/settings/llm/status").then(applyLLMProviderStatus);
+    }
   }, 7000);
 }
 

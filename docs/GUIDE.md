@@ -78,6 +78,23 @@ notifications:
 провайдера свой ключ, они не путаются при переключении) и
 применяется сразу, без перезапуска.
 
+Где взять ключ для каждого провайдера:
+
+| Провайдер | Страница ключа | Примечание |
+|---|---|---|
+| OpenAI | https://platform.openai.com/api-keys | Платный |
+| Groq | https://console.groq.com/keys | Бесплатно, рекомендуется |
+| Gemini | https://aistudio.google.com/apikey | Бесплатный тир |
+| DeepSeek | https://platform.deepseek.com/api_keys | Платный |
+| NVIDIA NIM | https://build.nvidia.com | Войти → профиль → Settings → API Keys → Generate API Key |
+| OpenRouter | https://openrouter.ai/keys | Бесплатные модели — с суффиксом `:free` |
+| Mistral | https://console.mistral.ai/api-keys | Бесплатный тир на младших моделях |
+| Cohere | https://dashboard.cohere.com/api-keys | Бесплатный trial-ключ, лимит по вызовам/месяц |
+| Hugging Face | https://huggingface.co/settings/tokens | Кредитный бесплатный тир |
+| Ollama Cloud | https://ollama.com/settings/keys | Отдельно от локального Ollama ниже |
+| LLM7.io | https://token.llm7.io | Ввести email — токен придёт сразу, без пароля |
+| Ollama (локально) | — | Ключ не нужен, см. ниже |
+
 **Рекомендация по умолчанию — Groq, `openai/gpt-oss-120b`.**
 Бесплатно, быстрый инференс (собственное железо Groq, не GPU-облако),
 и для наших задач (оценка вакансии 1-10, сопроводительное письмо,

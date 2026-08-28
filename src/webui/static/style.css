@@ -1209,3 +1209,29 @@ pre.logs {
   border-radius: 50%;
   background: var(--ok);
 }
+
+.provider-card.llm-live {
+  border-color: var(--ok);
+  box-shadow: 0 0 0 1px var(--ok), 0 0 16px -3px var(--ok);
+}
+
+.provider-status-note {
+  position: absolute;
+  bottom: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--err);
+  color: var(--err);
+}
+
+.provider-status-note.rate-limit {
+  border-color: var(--warn);
+  color: var(--warn);
+}

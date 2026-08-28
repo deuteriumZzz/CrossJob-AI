@@ -760,6 +760,31 @@ def test_get_llm_settings_defaults_to_config(client):
     assert "sk-test" not in body["api_key_previews"]["openai"]
 
 
+def test_get_llm_provider_status_empty_then_populated(client):
+    response = client.get("/api/settings/llm/status")
+    assert response.status_code == 200
+    assert response.json() == {}
+
+    from src.job_sources.llm_usage import record_provider_status
+
+    output_folder = api.get_ctx().output_folder
+    record_provider_status(
+        output_folder, "groq", "openai/gpt-oss-120b", ok=True
+    )
+    record_provider_status(
+        output_folder,
+        "gemini",
+        "gemini-3.6-flash",
+        ok=False,
+        error=Exception("429 rate limit"),
+    )
+
+    follow_up = client.get("/api/settings/llm/status")
+    body = follow_up.json()
+    assert body["groq"]["last_ok_model"] == "openai/gpt-oss-120b"
+    assert body["gemini"]["last_error_kind"] == "rate_limit"
+
+
 def test_post_llm_settings_switches_provider(client):
     response = client.post(
         "/api/settings/llm",

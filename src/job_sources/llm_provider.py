@@ -102,6 +102,54 @@ PROVIDER_MODELS: dict = {
             "recommended": False,
         },
     ],
+    # Mistral La Plateforme — свой отдельный бесплатный пул (~1 RPS/
+    # 500K TPM на "Experiment"-тарифе). ponytail: границу free/paid
+    # между их моделями — по общим знаниям, не подтверждено живым
+    # ключом — при "model not found"/403 проверить console.mistral.ai.
+    "mistral": [
+        {"id": "ministral-3-8b-latest", "free": True, "recommended": True},
+        {"id": "ministral-3-3b-latest", "free": True, "recommended": False},
+        {"id": "mistral-small-latest", "free": False, "recommended": False},
+    ],
+    # Cohere — OpenAI-совместимый v2 эндпоинт, отдельный лимит trial-
+    # ключа (20 RPM, 1000 вызовов/месяц — маленький, но ещё один
+    # независимый пул). ponytail: не подтверждено живым ключом.
+    "cohere": [
+        {"id": "command-r7b-12-2024", "free": True, "recommended": True},
+        {"id": "command-r-plus", "free": False, "recommended": False},
+    ],
+    # Hugging Face Inference Router — OpenAI-совместимый, кредитный
+    # бесплатный тариф ($0.10/мес). ponytail: не подтверждено живым
+    # ключом.
+    "huggingface": [
+        {
+            "id": "meta-llama/Llama-3.1-8B-Instruct",
+            "free": True,
+            "recommended": True,
+        },
+        {"id": "Qwen/Qwen2.5-7B-Instruct", "free": True, "recommended": False},
+        {"id": "microsoft/phi-4", "free": True, "recommended": False},
+    ],
+    # Ollama Cloud (ollama.com, аккаунт + API-ключ) — отдельный от
+    # локального "ollama" ниже провайдер: те же модельные веса, но
+    # хостятся у Ollama, а не на машине пользователя. ponytail: не
+    # подтверждено живым ключом.
+    "ollama_cloud": [
+        {"id": "gpt-oss:120b", "free": True, "recommended": True},
+        {"id": "gpt-oss:20b", "free": True, "recommended": False},
+        {"id": "deepseek-v4-flash", "free": True, "recommended": False},
+    ],
+    # LLM7.io — анонимный бесплатный шлюз без обязательной
+    # регистрации (10 RPM/60 запросов в час без ключа). ponytail: не
+    # подтверждено живым ключом.
+    "llm7": [
+        {"id": "gpt-oss:20b", "free": True, "recommended": True},
+        {
+            "id": "mistral-nemo-instruct-2407",
+            "free": True,
+            "recommended": False,
+        },
+    ],
     "ollama": [
         {"id": "llama3.1", "free": True, "recommended": True},
         {"id": "qwen2.5", "free": True, "recommended": False},
@@ -268,6 +316,76 @@ def _build_llm(
             ),
             resolved_model,
         )
+    if provider == "mistral":
+        from langchain_openai import ChatOpenAI
+
+        resolved_model = model or _default_model_id(provider)
+        return (
+            ChatOpenAI(
+                model=resolved_model,
+                api_key=SecretStr(api_key),
+                base_url=base_url or "https://api.mistral.ai/v1",
+                temperature=temperature,
+                max_retries=0,
+            ),
+            resolved_model,
+        )
+    if provider == "cohere":
+        from langchain_openai import ChatOpenAI
+
+        resolved_model = model or _default_model_id(provider)
+        return (
+            ChatOpenAI(
+                model=resolved_model,
+                api_key=SecretStr(api_key),
+                base_url=base_url or "https://api.cohere.com/v2",
+                temperature=temperature,
+                max_retries=0,
+            ),
+            resolved_model,
+        )
+    if provider == "huggingface":
+        from langchain_openai import ChatOpenAI
+
+        resolved_model = model or _default_model_id(provider)
+        return (
+            ChatOpenAI(
+                model=resolved_model,
+                api_key=SecretStr(api_key),
+                base_url=base_url or "https://router.huggingface.co/v1",
+                temperature=temperature,
+                max_retries=0,
+            ),
+            resolved_model,
+        )
+    if provider == "ollama_cloud":
+        from langchain_openai import ChatOpenAI
+
+        resolved_model = model or _default_model_id(provider)
+        return (
+            ChatOpenAI(
+                model=resolved_model,
+                api_key=SecretStr(api_key),
+                base_url=base_url or "https://ollama.com/v1",
+                temperature=temperature,
+                max_retries=0,
+            ),
+            resolved_model,
+        )
+    if provider == "llm7":
+        from langchain_openai import ChatOpenAI
+
+        resolved_model = model or _default_model_id(provider)
+        return (
+            ChatOpenAI(
+                model=resolved_model,
+                api_key=SecretStr(api_key),
+                base_url=base_url or "https://api.llm7.io/v1",
+                temperature=temperature,
+                max_retries=0,
+            ),
+            resolved_model,
+        )
     if provider == "ollama":
         from langchain_ollama import ChatOllama
 
@@ -294,22 +412,31 @@ def _build_llm(
     )
 
 
+def _fallback_models(provider: str) -> list[dict]:
+    """Модели провайдера, отфильтрованные под _fallback_mode — в
+    "auto" бесплатные впереди платных (внутри провайдера), не только
+    между провайдерами. Раньше фолбэк брал ровно одну (recommended)
+    модель на провайдера — при 429 конкретно на неё (лимиты у Groq
+    считаются per-model, не per-account, см. TPM-ошибку на
+    openai/gpt-oss-120b) цепочка сразу прыгала на другого провайдера,
+    хотя у того же провайдера были ещё свободные бесплатные модели."""
+    models = PROVIDER_MODELS.get(provider) or []
+    if _fallback_mode == "free":
+        return [m for m in models if m.get("free")]
+    if _fallback_mode == "paid":
+        return [m for m in models if not m.get("free")]
+    return sorted(models, key=lambda m: not m.get("free", False))
+
+
 def _build_fallback_llms(
     exclude_provider: str, temperature: float
 ) -> list[BaseChatModel]:
     if not _fallback_enabled:
         return []
     others = [p for p in _fallback_keys if p != exclude_provider]
+    others = [p for p in others if _fallback_models(p)]
 
-    if _fallback_mode == "free":
-        others = [
-            p for p in others if (_recommended_model(p) or {}).get("free")
-        ]
-    elif _fallback_mode == "paid":
-        others = [
-            p for p in others if not (_recommended_model(p) or {}).get("free")
-        ]
-    else:
+    if _fallback_mode == "auto":
         others.sort(
             key=lambda p: not (_recommended_model(p) or {}).get("free", False)
         )
@@ -319,18 +446,19 @@ def _build_fallback_llms(
         api_key = _fallback_keys.get(provider)
         if not api_key:
             continue
-        try:
-            llm, resolved_model = _build_llm(
-                provider, api_key, None, None, temperature
-            )
-        except Exception:
-            continue
-        output_folder = get_output_folder()
-        if output_folder is not None:
-            llm.callbacks = [
-                UsageCallback(output_folder, provider, resolved_model)
-            ]
-        fallbacks.append(llm)
+        for model_entry in _fallback_models(provider):
+            try:
+                llm, resolved_model = _build_llm(
+                    provider, api_key, model_entry["id"], None, temperature
+                )
+            except Exception:
+                continue
+            output_folder = get_output_folder()
+            if output_folder is not None:
+                llm.callbacks = [
+                    UsageCallback(output_folder, provider, resolved_model)
+                ]
+            fallbacks.append(llm)
     return fallbacks
 
 

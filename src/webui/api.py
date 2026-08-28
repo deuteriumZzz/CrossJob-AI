@@ -54,6 +54,7 @@ from src.job_sources.llm_usage import (
 )
 from src.job_sources.llm_usage import (
     llm_exhausted_today,
+    provider_status_snapshot,
     summarize_usage,
 )
 from src.job_sources.telegram.client import (
@@ -471,6 +472,11 @@ def get_usage(ctx: AppContext = Depends(get_ctx)) -> dict:
         **summarize_usage(ctx.output_folder),
         "llm_exhausted_today": llm_exhausted_today(ctx.output_folder),
     }
+
+
+@app.get("/api/settings/llm/status")
+def get_llm_provider_status(ctx: AppContext = Depends(get_ctx)) -> dict:
+    return provider_status_snapshot(ctx.output_folder)
 
 
 @app.get("/api/analytics/gaps")
@@ -1095,6 +1101,11 @@ _KNOWN_LLM_PROVIDERS = {
     "deepseek",
     "nvidia",
     "openrouter",
+    "mistral",
+    "cohere",
+    "huggingface",
+    "ollama_cloud",
+    "llm7",
     "ollama",
 }
 

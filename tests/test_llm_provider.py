@@ -5,10 +5,22 @@ import pytest
 from src.job_sources import llm_usage
 from src.job_sources.llm_provider import (
     PROVIDER_MODELS,
+    _build_fallback_llms,
     get_active_provider,
     get_chat_llm,
+    set_fallback_enabled,
+    set_fallback_keys,
+    set_fallback_mode,
     set_provider_override,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_fallback_state():
+    yield
+    set_fallback_keys(None)
+    set_fallback_mode(None)
+    set_fallback_enabled(None)
 
 
 @pytest.fixture(autouse=True)
@@ -141,6 +153,11 @@ def test_provider_models_catalog_covers_known_providers():
         "deepseek",
         "nvidia",
         "openrouter",
+        "mistral",
+        "cohere",
+        "huggingface",
+        "ollama_cloud",
+        "llm7",
         "ollama",
     ):
         models = PROVIDER_MODELS[provider]
@@ -153,10 +170,38 @@ def test_provider_models_catalog_covers_known_providers():
         assert sum(m["recommended"] for m in models) == 1
 
 
+def test_new_openai_compatible_providers_use_own_base_url():
+    for provider, expected_base_url in (
+        ("mistral", "https://api.mistral.ai/v1"),
+        ("cohere", "https://api.cohere.com/v2"),
+        ("huggingface", "https://router.huggingface.co/v1"),
+        ("ollama_cloud", "https://ollama.com/v1"),
+        ("llm7", "https://api.llm7.io/v1"),
+    ):
+        llm = get_chat_llm("test-key", provider=provider)
+        assert llm.openai_api_base == expected_base_url
+
+
+def test_fallback_depth_tries_every_free_model_of_a_provider():
+    """Раньше на 429 конкретно у recommended-модели цепочка сразу
+    прыгала на другого провайдера, хотя у текущего провайдера были
+    ещё свободные бесплатные модели (Groq лимитирует TPM per-model,
+    не per-account) — теперь фолбэк должен перебрать их все."""
+    set_fallback_mode("free")
+    set_fallback_keys({"groq": "gsk-test"})
+    pytest.importorskip("langchain_groq")
+    fallbacks = _build_fallback_llms("openai", temperature=0)
+    free_groq_models = [m["id"] for m in PROVIDER_MODELS["groq"] if m["free"]]
+    assert len(fallbacks) == len(free_groq_models)
+    assert [llm.model_name for llm in fallbacks] == free_groq_models
+
+
 if __name__ == "__main__":
     test_default_provider_is_openai()
     test_openai_provider_uses_given_model()
     test_deepseek_provider_uses_deepseek_base_url()
     test_nvidia_provider_uses_nvidia_base_url()
     test_openrouter_provider_uses_openrouter_base_url()
+    test_new_openai_compatible_providers_use_own_base_url()
+    test_fallback_depth_tries_every_free_model_of_a_provider()
     print("All tests passed.")

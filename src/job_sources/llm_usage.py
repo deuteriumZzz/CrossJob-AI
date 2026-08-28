@@ -200,6 +200,77 @@ def llm_health_today(output_folder: Path) -> dict:
     return data.get(today) or {"ok": 0, "error": 0}
 
 
+def _provider_status_path(output_folder: Path) -> Path:
+    return output_folder / ".llm_provider_status.json"
+
+
+# Ключевые слова из реальных сообщений об ошибках 429/квоте у разных
+# SDK (OpenAI/Groq — "rate limit"/"429", Google — "RESOURCE_EXHAUSTED"/
+# "quota") — единообразного типа исключения между провайдерами нет,
+# поэтому классифицируем по тексту, не по классу исключения.
+_RATE_LIMIT_MARKERS = (
+    "429",
+    "rate limit",
+    "rate_limit",
+    "ratelimit",
+    "quota",
+    "resource_exhausted",
+    "resource exhausted",
+)
+
+
+def _classify_error(error: BaseException) -> str:
+    text = str(error).lower()
+    return (
+        "rate_limit"
+        if any(marker in text for marker in _RATE_LIMIT_MARKERS)
+        else "error"
+    )
+
+
+def record_provider_status(
+    output_folder: Path,
+    provider: str,
+    model: str,
+    ok: bool,
+    error: Optional[BaseException] = None,
+) -> None:
+    """Пер-провайдерный статус (когда провайдер в последний раз
+    реально ответил / когда и почему в последний раз упал) — для
+    дашборда: подсветить, какой провайдер отвечает прямо сейчас, и
+    показать остальным время и причину последнего сбоя (лимит vs
+    прочее). Отдельно от llm_health_today() выше — тот суммирует всю
+    фолбэк-цепочку за день одним числом, этот — конкретный провайдер
+    сейчас."""
+    path = _provider_status_path(output_folder)
+    with state_file_lock(path):
+        data = (
+            json.loads(path.read_text(encoding="utf-8"))
+            if path.exists()
+            else {}
+        )
+        entry = data.setdefault(provider, {})
+        now = datetime.now(timezone.utc).isoformat()
+        if ok:
+            entry["last_ok_at"] = now
+            entry["last_ok_model"] = model
+        else:
+            entry["last_error_at"] = now
+            entry["last_error_model"] = model
+            entry["last_error_kind"] = (
+                _classify_error(error) if error else "error"
+            )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def provider_status_snapshot(output_folder: Path) -> dict:
+    path = _provider_status_path(output_folder)
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def llm_exhausted_today(output_folder: Path) -> bool:
     """Не меньше 3 ошибок за сегодня и ни одного успеха — порог,
     чтобы одна случайная сетевая ошибка в начале дня не поднимала
@@ -251,9 +322,31 @@ class UsageCallback(BaseCallbackHandler):
         **kwargs,
     ) -> None:
         record_llm_result(self.output_folder, ok=True)
+        record_provider_status(
+            self.output_folder, self.provider, self.model, ok=True
+        )
         usage = (response.llm_output or {}).get("token_usage") or {}
         prompt = usage.get("prompt_tokens", 0)
         completion = usage.get("completion_tokens", 0)
+        if not prompt and not completion:
+            # OpenAI-совместимые клиенты (Groq/OpenAI/DeepSeek/...)
+            # кладут счётчик в llm_output["token_usage"] — Gemini
+            # (ChatGoogleGenerativeAI) оставляет llm_output пустым
+            # ({}) и вместо этого вешает usage_metadata на само
+            # сообщение (подтверждено живым вызовом 2026-08-28) —
+            # без этого фолбэка каждый успешный вызов через Gemini
+            # молча выпадал из .llm_usage.json, создавая иллюзию,
+            # что провайдер вообще не срабатывает.
+            for generations in response.generations:
+                for generation in generations:
+                    usage_metadata = getattr(
+                        getattr(generation, "message", None),
+                        "usage_metadata",
+                        None,
+                    )
+                    if usage_metadata:
+                        prompt += usage_metadata.get("input_tokens", 0)
+                        completion += usage_metadata.get("output_tokens", 0)
         if prompt or completion:
             record_usage(
                 self.output_folder,
@@ -272,3 +365,6 @@ class UsageCallback(BaseCallbackHandler):
         **kwargs,
     ) -> None:
         record_llm_result(self.output_folder, ok=False)
+        record_provider_status(
+            self.output_folder, self.provider, self.model, ok=False, error=error
+        )
