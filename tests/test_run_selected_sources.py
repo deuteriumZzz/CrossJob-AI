@@ -69,30 +69,24 @@ def test_scheduler_sources_includes_check_hh_replies():
     assert dict(main.ALL_SOURCES).items() <= main.SCHEDULER_SOURCES.items()
 
 
-def test_scheduler_sources_includes_check_sj_and_zp_replies():
+def test_scheduler_sources_includes_check_sj_replies():
     """Тот же баг, что у check_hh_replies (не входил в ALL_SOURCES/
-    Scheduler, поэтому не проверялся в фоне) — есть и у SuperJob/
-    Zarplata: check_superjob_replies/check_zarplata_replies принимают
-    один аргумент (parameters), а Scheduler.run_once() всегда зовёт
-    source_map[name](parameters, llm_api_key) — поэтому в SCHEDULER_SOURCES
-    они завёрнуты в обёртки, игнорирующие llm_api_key."""
+    Scheduler, поэтому не проверялся в фоне) — есть и у SuperJob:
+    check_superjob_replies принимает один аргумент (parameters), а
+    Scheduler.run_once() всегда зовёт source_map[name](parameters,
+    llm_api_key) — поэтому в SCHEDULER_SOURCES она завёрнута в обёртку,
+    игнорирующую llm_api_key."""
     assert "check_sj_replies" not in dict(main.ALL_SOURCES)
-    assert "check_zp_replies" not in dict(main.ALL_SOURCES)
 
     calls = []
     with patch.object(
         main,
         "check_superjob_replies",
         side_effect=lambda parameters: calls.append(("sj", parameters)),
-    ), patch.object(
-        main,
-        "check_zarplata_replies",
-        side_effect=lambda parameters: calls.append(("zp", parameters)),
     ):
         main.SCHEDULER_SOURCES["check_sj_replies"]({"x": 1}, "key")
-        main.SCHEDULER_SOURCES["check_zp_replies"]({"x": 1}, "key")
 
-    assert calls == [("sj", {"x": 1}), ("zp", {"x": 1})]
+    assert calls == [("sj", {"x": 1})]
 
 
 def test_run_selected_sources_ignores_unknown_names():

@@ -5,8 +5,7 @@ from src.job_sources.html_text import strip_html
 
 
 def _format_salary(salary: dict | None) -> str:
-    """Формат {from, to, currency} от HH (zarplata.ru использует тот же —
-    это одна платформа), схлопнутый в одну строку для отображения."""
+    """Формат {from, to, currency} от HH, схлопнутый в одну строку для отображения."""
     if not salary:
         return ""
     lo, hi = salary.get("from"), salary.get("to")
@@ -21,9 +20,7 @@ def _format_salary(salary: dict | None) -> str:
 
 
 def hh_vacancy_to_job(raw: dict, source: str = "headhunter") -> Job:
-    """Преобразует ответ GET /vacancies/{id} от api.hh.ru (или другого
-    хоста HeadHunter-Group с той же схемой, например api.zarplata.ru)
-    в Job."""
+    """Преобразует ответ GET /vacancies/{id} от api.hh.ru в Job."""
     return Job(
         role=raw.get("name", ""),
         company=(raw.get("employer") or {}).get("name", ""),

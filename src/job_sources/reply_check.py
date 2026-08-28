@@ -37,7 +37,7 @@ def print_negotiation_replies(
     applied_log: AppliedLog,
     on_new_reply: Optional[OnNewReply] = None,
 ) -> None:
-    """Для клиентов HH-семейства (HeadHunter, Zarplata.ru), у которых
+    """Для клиентов в духе HeadHunter API, у которых
     формат list_negotiations() подтверждён:
     [{"vacancy": {"id": ...}, "state": {"name": ...}}, ...].
     """

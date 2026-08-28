@@ -131,14 +131,11 @@
           <option value="">Все площадки</option>
           <option value="headhunter">HeadHunter</option>
           <option value="superjob">SuperJob</option>
-          <option value="zarplata">Zarplata.ru</option>
           <option value="geekjob">geekjob.ru</option>
           <option value="rabota_ru">rabota.ru</option>
           <option value="telegram">Telegram</option>
           <option value="getmatch">GetMatch</option>
           <option value="linkedin">LinkedIn</option>
-          <option value="wellfound">Wellfound</option>
-          <option value="careerist">careerist.ru</option>
           <option value="habr_career">Habr Career</option>
         </select>
         <select id="filter-status">
@@ -427,7 +424,7 @@
         <div class="risk-banner">
           ⚠️ Официальных цифр лимитов не публикует ни одна площадка — заданные здесь значения только уменьшают риск, но не гарантируют, что бота не заметят. Чем выше лимиты и чем ближе они к количеству найденных вакансий, тем больше активность похожа на бота. Повышайте постепенно, начните с малого. LinkedIn блокирует автоматизацию агрессивнее остальных — держите его лимит ниже.
           <br /><br />
-          <strong>Ориентир для старта</strong> (это дефолты самого бота, не гарантия от бана): HH / SuperJob / Zarplata — 15/день, LinkedIn — 8/день, не больше 5 откликов за один прогон, интервал между прогонами — от 3ч. Поднимайте эти числа только если несколько дней подряд не видите капчи/блокировок.
+          <strong>Ориентир для старта</strong> (это дефолты самого бота, не гарантия от бана): HH / SuperJob — 15/день, LinkedIn — 8/день, не больше 5 откликов за один прогон, интервал между прогонами — от 3ч. Поднимайте эти числа только если несколько дней подряд не видите капчи/блокировок.
         </div>
         <div class="limits-grid">
           <label class="limit-field">
@@ -435,7 +432,7 @@
             <input id="limit-total" type="number" min="1" placeholder="напр. 20" />
           </label>
           <label class="limit-field">
-            <span>Дневной лимит — HH / SuperJob / Zarplata (дефолт, если у площадки нет своего в таблице ниже)</span>
+            <span>Дневной лимит — HH / SuperJob (дефолт, если у площадки нет своего в таблице ниже)</span>
             <input id="limit-daily" type="number" min="1" />
           </label>
           <label class="limit-field">
@@ -452,7 +449,7 @@
         <div class="filters">
           <button id="limits-save" class="btn btn-primary">Сохранить</button>
           <button id="limits-distribute" class="btn btn-secondary" title="Раскидывает общий дневной лимит по площадкам в расписании случайными долями (LinkedIn — меньше остальных)">🎲 Распределить по площадкам</button>
-          <button id="limits-reset-recommended" class="btn btn-ghost" title="HH/SuperJob/Zarplata — 15/день, LinkedIn — 8/день, 5 откликов за прогон">Сбросить к рекомендованным</button>
+          <button id="limits-reset-recommended" class="btn btn-ghost" title="HH/SuperJob — 15/день, LinkedIn — 8/день, 5 откликов за прогон">Сбросить к рекомендованным</button>
           <span id="limits-status" class="muted small"></span>
         </div>
       </div>
@@ -569,14 +566,11 @@
             <option value="">Все источники</option>
             <option value="headhunter">HeadHunter</option>
             <option value="superjob">SuperJob</option>
-            <option value="zarplata">Zarplata.ru</option>
             <option value="geekjob">geekjob.ru</option>
             <option value="rabota_ru">rabota.ru</option>
             <option value="telegram">Telegram</option>
             <option value="getmatch">GetMatch</option>
             <option value="linkedin">LinkedIn</option>
-            <option value="wellfound">Wellfound</option>
-            <option value="careerist">careerist.ru</option>
             <option value="habr_career">Habr Career</option>
           </select>
         </div>

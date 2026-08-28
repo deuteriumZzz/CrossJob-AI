@@ -35,7 +35,7 @@ def generate_cover_letter_for_job(
 ) -> str:
     """force_russian=True (по умолчанию) — обычный текстовый ответ
     для поля отклика на русскоязычных площадках (HH/GetMatch/
-    SuperJob/Zarplata/geekjob/rabota.ru): без HTML/бланка-письма
+    SuperJob/geekjob/rabota.ru): без HTML/бланка-письма
     (см. plain_cover_letter_prompt/strings.py — почему это отдельный
     от PDF-версии шаблон) и с языком, принудительно закреплённым за
     русским, а не угаданным по тексту вакансии — определяющая ставка

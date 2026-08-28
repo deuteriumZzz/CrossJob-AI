@@ -14,8 +14,8 @@ from src.logging import logger
 
 
 class _EmployerLookupClient(Protocol):
-    """Структурный тип для клиентов HH-Group (HeadHunter, Zarplata, ...),
-    у которых одинаковая сигнатура get_employer(employer_id) -> dict."""
+    """Структурный тип для клиентов с сигнатурой
+    get_employer(employer_id) -> dict."""
 
     def get_employer(self, employer_id: str) -> dict: ...
 

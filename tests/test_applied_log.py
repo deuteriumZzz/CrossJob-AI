@@ -143,7 +143,7 @@ def test_applied_today_count_only_counts_applied_status_for_source():
 
         assert applied_log.applied_today_count("headhunter") == 1
         assert applied_log.applied_today_count("superjob") == 1
-        assert applied_log.applied_today_count("zarplata") == 0
+        assert applied_log.applied_today_count("geekjob") == 0
         assert applied_log.applied_today_count_all() == 2
 
 

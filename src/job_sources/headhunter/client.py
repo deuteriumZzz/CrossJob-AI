@@ -54,7 +54,7 @@ class HeadHunterClient:
     def list_negotiation_messages(self, negotiation_id: str) -> list[dict]:
         """НЕ проверено вызовом на живом аккаунте — поля по
         документированной схеме HH API, как и переписка/сообщения
-        Zarplata.ru/SuperJob в этом проекте."""
+        SuperJob в этом проекте."""
         response = self._client.get(f"/negotiations/{negotiation_id}/messages")
         response.raise_for_status()
         return response.json()["items"]

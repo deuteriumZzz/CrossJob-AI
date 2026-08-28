@@ -9,8 +9,7 @@ from src.job_sources.preferences import effective_list
 
 # ponytail: одна страница /vacancies?q=... на позицию, без пагинации —
 # ?page= поддерживается сайтом, но не подключён здесь: 20-25 вакансий
-# на запрос достаточно для старта (тот же компромисс, что у wellfound/
-# careerist).
+# на запрос достаточно для старта.
 
 
 class HabrCareerSource:

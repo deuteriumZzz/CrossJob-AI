@@ -1,14 +1,11 @@
 const SOURCE_LABELS = {
   headhunter: "HeadHunter",
   superjob: "SuperJob",
-  zarplata: "Zarplata.ru",
   geekjob: "geekjob.ru",
   rabota_ru: "rabota.ru",
   telegram: "Telegram",
   getmatch: "GetMatch",
   linkedin: "LinkedIn",
-  wellfound: "Wellfound",
-  careerist: "careerist.ru",
   habr_career: "Habr Career",
 };
 

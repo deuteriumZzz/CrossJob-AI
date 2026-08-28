@@ -31,12 +31,9 @@
 |----------------|--------------------------------------|
 | HeadHunter     | ✅ поиск + автоотклик (браузерная сессия, вход по номеру телефона + SMS — официальный API требует одобрения приложения HH, не используется; сверено на живом аккаунте, см. [GUIDE.md](docs/GUIDE.md)) |
 | SuperJob       | ✅ поиск + автоотклик (официальный API) |
-| zarplata.ru    | ✅ поиск + автоотклик (API HeadHunter Group, см. оговорку в [GUIDE.md](docs/GUIDE.md)) |
 | geekjob        | ✅ поиск + автоотклик (скрейпинг; вход только вручную через OAuth — best-effort, не сверено на живом аккаунте, см. [GUIDE.md](docs/GUIDE.md)) |
 | rabota.ru      | ✅ поиск + автоотклик (скрейпинг; вход только вручную через OAuth/код — best-effort, не сверено на живом аккаунте, см. [GUIDE.md](docs/GUIDE.md)) |
 | GetMatch       | ✅ поиск + автоотклик (SPA на Next.js — рендерится реальным Selenium-браузером; вход по коду из Telegram, не по паролю) |
-| wellfound.com  | ✅ поиск (сверено вживую 2026-08-28, schema.org JobPosting — 25/25 вакансий по тестовой позиции) + best-effort автоотклик (вход/регистрация вручную; реальный apply НЕ подтверждён на живом залогиненном аккаунте — если после клика "Apply Now" форма всё ещё просит пароль, вакансия тихо пишется как dry-run, см. [GUIDE.md](docs/GUIDE.md)). Поиск — по таксономии ролей wellfound, не по свободному тексту: не каждая позиция найдёт совпадение |
-| careerist.ru   | ✅ поиск (сверено вживую 2026-08-28, schema.org JobPosting, поиск через SEO-редирект `/jobs-{query}/` — сайт сам транслитерирует кириллицу; сайт периодически отдаёт спорадические 502, есть один повтор) + best-effort автоотклик (вход вручную; реальный apply НЕ подтверждён на живом залогиненном аккаунте — анонимно кнопка отправки резюме ведёт на регистрацию, см. [GUIDE.md](docs/GUIDE.md)) |
 | Хабр Карьера   | ✅ поиск + автоотклик (официального API для личных ботов нет — вход вручную через SSO Хабра, включая Google; для вошедшего пользователя "Откликнуться" — мгновенная отправка одним кликом, без формы и без письма) — сверено на живом аккаунте 2026-08-28, реальный отклик подтверждён и корректно распознан ботом |
 | careerspace.app| план, низкий приоритет (проверено: `/jobs` — маленькая персонализированная лента без поиска по должности и без пагинации; "Ссылка на отклик" требует входа, куда ведёт — не подтверждено) |
 | hirify.me      | план (агрегатор вакансий, включая Telegram-каналы) |
@@ -58,9 +55,6 @@
 | rabota.ru | 🟡 Средний | Надёжные вакансии от стабильных компаний, но есть жалобы на устаревшие позиции и меньше приглашений на собеседования, чем на hh.ru ([otzovik.com](https://otzovik.com/reviews/rabota_ru-internet-servis_po_poisku_raboti_i_podboru_personala/)) |
 | LinkedIn | 🟡 Средний | 87% рекрутеров считают LinkedIn лучшим инструментом для оценки кандидатов, но отклик на прямые заявки — всего 3-13%: 85% реальных найм закрывается через нетворкинг/рефералов, а не через отклики на вакансии ([Zippia](https://www.zippia.com/advice/linkedin-statistics/), [LinkedCraft](https://linkedcraft.io/blog/linkedin-networking-statistics-2026)) |
 | geekjob.ru | 🟡 Средний-низкий (IT) | Нишевая площадка (в среднем 15-20 вакансий/мес по классическим IT-направлениям), HR-эксперты относятся скептичнее, чем к hh.ru/Хабр Карьере — полезна как дополнительный канал, не основной ([hrtime.ru](https://hrtime.ru/material/geekjob-ploshchadka-rabotaet-ili-net-59698/)) |
-| Wellfound (AngelList) | 🟠 Низкий-средний | Хорош для discovery стартап-вакансий и прямого контакта с фаундерами, но по данным Scale.jobs 2026 большинство заявок истекают до того, как их успевает посмотреть работодатель — низкая конверсия отклика в оффер ([remote100k.com](https://remote100k.com/blog/is-wellfound-legit), [whatjobs.com](https://www.whatjobs.com/news/wellfound-angellist-review-2026-the-startup-holy-grail-or-tech-bubble/)) |
-| careerist.ru | 🔴 Низкий | Отзывы смешанные и часто негативные: спам на почту, среди реальных вакансий встречаются сомнительные (сетевой маркетинг, форекс, кредитование) — стоит перепроверять каждую вакансию перед откликом ([otzovik.com](https://otzovik.com/reviews/careerist_ru-internet-servis_po_poisku_raboti_i_podboru_personala/), [eto-razvod.ru](https://eto-razvod.ru/review/careerist/)) |
-| zarplata.ru | 🔴 Низкий | По собственному опыту использования в этом проекте — низкая отдача по реальным откликам (та же платформа, что и HH, но меньшая и менее активная аудитория) |
 
 ## Лимиты и анти-бан
 
@@ -72,14 +66,11 @@
 |----------|------------------------|-----------------|------------------------------|
 | HeadHunter | `DAILY_APPLICATION_LIMIT` = 15 (±случайные 70-100%) | `JOB_MAX_APPLICATIONS` = 5 | Не задокументирован публично (429 при превышении) |
 | SuperJob | 15 (±70-100%) | 5 | Не задокументирован публично |
-| zarplata.ru | 15 (±70-100%) | 5 | Не задокументирован (та же платформа, что HH) |
 | geekjob.ru | Своего дневного лимита нет — используется `job_max_applications` за прогон | 5 вакансий за прогон | Нет официального API — кулдаун 24ч при признаках капчи/бана (`block_detection.py`) |
 | rabota.ru | Своего дневного лимита нет — используется `job_max_applications` за прогон | 5 | Нет официального API — тот же кулдаун |
 | GetMatch | Своего дневного лимита нет — используется `job_max_applications` за прогон | 5 | Нет официального API — тот же кулдаун |
 | Telegram-каналы | `telegram.daily_message_limit` = 15 холодных сообщений/день (только если включён `auto_message`) | `messages_per_channel` = 100 сообщений на канал за прогон | Личный аккаунт, не API-интеграция — лимитов площадки нет, риск в самом Telegram (ограничение аккаунта за спам) |
 | LinkedIn | `LINKEDIN_DAILY_APPLICATION_LIMIT` = 8 (±70-100%) | 5 | Официального API нет — автоматизация против ToS, см. оговорку в [GUIDE.md](docs/GUIDE.md) |
-| wellfound.com | `limits.daily_application_limit` (общий дефолт, ±70-100%) | 5 | Официального API нет — apply best-effort, не подтверждён на живом аккаунте |
-| careerist.ru | `limits.daily_application_limit` (общий дефолт, ±70-100%) | 5 | Официального API нет — apply best-effort, не подтверждён на живом аккаунте |
 
 `±70-100%` — это `randomized_daily_limit()`: реальный лимит на день выбирается случайно в этом диапазоне один раз за прогон, чтобы дневной лимит не был идеально одинаковым каждый день (см. [GUIDE.md](docs/GUIDE.md) про анти-бан).
 
@@ -108,7 +99,7 @@ cp -r data_folder_example data_folder
 Неинтерактивный запуск (для cron):
 
 ```bash
-python main.py --auto headhunter   # или --auto superjob / --auto zarplata / --auto geekjob / --auto rabota_ru / --auto telegram / --auto getmatch / --auto linkedin / --auto wellfound / --auto careerist
+python main.py --auto headhunter   # или --auto superjob / --auto geekjob / --auto rabota_ru / --auto telegram / --auto getmatch / --auto linkedin
 python main.py --auto check_telegram_replies   # проверка новых ответов в Telegram-диалогах (только уведомление)
 ```
 
@@ -136,8 +127,8 @@ API-ключом на каждого — без правки `config.py`. Под
 
 ## Конфигурация
 
-- `data_folder/secrets.yaml` — ключ LLM (`llm_api_key`, по умолчанию для OpenAI) и, для каждой площадки, свои ключи (HeadHunter секретов не требует — вход браузерный, по номеру телефона и SMS, см. GUIDE.md; SuperJob — https://api.superjob.ru/register/, Zarplata.ru — тот же принцип, что у HH раньше, Telegram — https://my.telegram.org/apps, см. GUIDE.md). Провайдер LLM не обязан быть OpenAI — поддерживаются Groq/Gemini/DeepSeek/NVIDIA NIM/OpenRouter/Ollama, каждый со своим ключом в блоке `llm_api_keys:` (переключение, выбор модели и ввод ключей — в дашборде, вкладка Настройки, без правки `config.py`). **Рекомендация по умолчанию — Groq, модель `openai/gpt-oss-120b`** (помечена короной 👑 в выборе модели): бесплатно и достаточно для оценки вакансий/писем, при таком объёме вызовов LLM платный провайдер за день накапает заметный счёт.
-- `data_folder/work_preferences.yaml` — позиции, локации, чёрные списки компаний/названий/локаций, фильтры по опыту/типу занятости/дате, и опциональные блоки `headhunter:`/`superjob:`/`zarplata:` (`auto_apply`, `resume_id`) и `telegram:` (`channels`, `auto_message`, `daily_message_limit`, `max_post_age_days`, `intro_message_template`). Любую площадку, включая Telegram, можно точечно переопределить своими `positions`/`locations` внутри её блока — пусто там означает "используй общий список сверху".
+- `data_folder/secrets.yaml` — ключ LLM (`llm_api_key`, по умолчанию для OpenAI) и, для каждой площадки, свои ключи (HeadHunter секретов не требует — вход браузерный, по номеру телефона и SMS, см. GUIDE.md; SuperJob — https://api.superjob.ru/register/, Telegram — https://my.telegram.org/apps, см. GUIDE.md). Провайдер LLM не обязан быть OpenAI — поддерживаются Groq/Gemini/DeepSeek/NVIDIA NIM/OpenRouter/Ollama, каждый со своим ключом в блоке `llm_api_keys:` (переключение, выбор модели и ввод ключей — в дашборде, вкладка Настройки, без правки `config.py`). **Рекомендация по умолчанию — Groq, модель `openai/gpt-oss-120b`** (помечена короной 👑 в выборе модели): бесплатно и достаточно для оценки вакансий/писем, при таком объёме вызовов LLM платный провайдер за день накапает заметный счёт.
+- `data_folder/work_preferences.yaml` — позиции, локации, чёрные списки компаний/названий/локаций, фильтры по опыту/типу занятости/дате, и опциональные блоки `headhunter:`/`superjob:` (`auto_apply`, `resume_id`) и `telegram:` (`channels`, `auto_message`, `daily_message_limit`, `max_post_age_days`, `intro_message_template`). Любую площадку, включая Telegram, можно точечно переопределить своими `positions`/`locations` внутри её блока — пусто там означает "используй общий список сверху".
 - `data_folder/resume.pdf` — резюме как есть; используется только для генерации сопроводительных писем.
 
 Первый запуск действия по каждой площадке откроет браузер для одноразового входа (OAuth); дальше токен обновляется автоматически. Для Telegram вместо браузера — ввод номера телефона и кода в консоли при первом запуске поиска.

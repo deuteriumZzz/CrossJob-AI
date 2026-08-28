@@ -219,14 +219,11 @@ def post_setup_init(body: SetupInitRequest) -> dict:
 _CREDENTIAL_REQUIREMENTS: dict = {
     "headhunter": None,
     "superjob": ("client_id", "client_secret"),
-    "zarplata": ("client_id", "client_secret"),
     "geekjob": None,
     "rabota_ru": None,
     "telegram": ("api_id", "api_hash"),
     "getmatch": ("email",),
     "linkedin": None,
-    "wellfound": None,
-    "careerist": None,
     "habr_career": None,
 }
 
@@ -341,11 +338,6 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
         {
             "name": "check_sj_replies",
             "label": "SuperJob — статус откликов",
-            "note": "Только уведомление, без автоответа.",
-        },
-        {
-            "name": "check_zp_replies",
-            "label": "Zarplata.ru — статус откликов",
             "note": "Только уведомление, без автоответа.",
         },
         {
@@ -539,7 +531,7 @@ def post_settings(
     body: SourceSettingsUpdate, ctx: AppContext = Depends(get_ctx)
 ) -> dict:
     # SCHEDULER_SOURCES ⊃ ALL_SOURCES — включает ещё check_hh_replies/
-    # check_sj_replies/check_zp_replies/check_telegram_replies, у
+    # check_sj_replies/check_telegram_replies, у
     # которых нет своей карточки в ALL_SOURCES (это не "поиск+отклик"),
     # но schedule_enabled/interval_hours переключаются тем же способом
     # (см. панель "Проверки ответов" в дашборде).
@@ -568,7 +560,7 @@ def post_settings(
             set_source_field(ctx.config_file, body.source, field, value)
     if body.resume_id is not None:
         # resume_id — ссылка на резюме, уже загруженное вручную на
-        # самой площадке (hh.ru/superjob.ru/zarplata.ru) — бот его не
+        # самой площадке (hh.ru/superjob.ru) — бот его не
         # создаёт и не перезаписывает, только передаёт при отклике.
         # quote=True: id может содержать произвольные символы.
         set_source_field(

@@ -114,19 +114,14 @@ check_hh_replies:
   schedule_enabled: false
   interval_hours: 1
 
-# check_sj_replies/check_zp_replies — то же самое, что check_hh_replies,
-# но для SuperJob/Zarplata.ru: проверяют новые ответы работодателя и
-# шлют уведомление в Telegram (без AI-автоответа, в отличие от HH —
-# поэтому нет отдельного auto_reply-флага, единственный gate —
-# schedule_enabled здесь). Требуют superjob.client_id/client_secret
-# или zarplata.client_id/client_secret в secrets.yaml — без них
-# упадут с ConfigError (демон это переживёт, залогирует ошибку и
-# пойдёт дальше, но проверка просто не будет работать).
+# check_sj_replies — то же самое, что check_hh_replies, но для
+# SuperJob: проверяет новые ответы работодателя и шлёт уведомление в
+# Telegram (без AI-автоответа, в отличие от HH — поэтому нет
+# отдельного auto_reply-флага, единственный gate — schedule_enabled
+# здесь). Требует superjob.client_id/client_secret в secrets.yaml —
+# без них упадёт с ConfigError (демон это переживёт, залогирует ошибку
+# и пойдёт дальше, но проверка просто не будет работать).
 check_sj_replies:
-  schedule_enabled: false
-  interval_hours: 1
-
-check_zp_replies:
   schedule_enabled: false
   interval_hours: 1
 
@@ -135,14 +130,6 @@ superjob:
   auto_apply: false
   # An existing resume ID from your superjob.ru profile (used as-is, not regenerated).
   resume_id: "your-superjob-ru-resume-id"
-  schedule_enabled: false
-  interval_hours: 3
-
-# Optional: only needed for the "Search & Apply on Zarplata.ru" action.
-zarplata:
-  auto_apply: false
-  # An existing resume ID from your zarplata.ru profile (used as-is, not regenerated).
-  resume_id: "your-zarplata-ru-resume-id"
   schedule_enabled: false
   interval_hours: 3
 
@@ -222,21 +209,6 @@ linkedin:
   #   - "Germany"
   #   - "Netherlands"
   locations: []
-
-# Optional: only needed for the "Search & Apply on Wellfound" action.
-# Keep auto_apply: false until you've reviewed a dry run — this flow is
-# unverified against a live wellfound.com account, see docs/GUIDE.md.
-# positions above are matched against wellfound's own role taxonomy
-# (e.g. "python developer", "product manager") — not every position
-# will find a match there.
-wellfound:
-  auto_apply: false
-
-# Optional: only needed for the "Search & Apply on careerist.ru" action.
-# Keep auto_apply: false until you've reviewed a dry run — this flow is
-# unverified against a live careerist.ru account, see docs/GUIDE.md.
-careerist:
-  auto_apply: false
 
 # Optional: only needed for the "Search & Apply on Habr Career" action.
 # Keep auto_apply: false until you've reviewed a dry run — this flow is

@@ -29,7 +29,7 @@ DAILY_APPLICATION_LIMIT = 15
 # Отдельно для LinkedIn: лимит значительно строже, чем у остальных
 # источников — по решению самого пользователя, так как LinkedIn
 # гораздо агрессивнее блокирует автоматическую активность Easy
-# Apply, чем HH/SuperJob/Zarplata.
+# Apply, чем HH/SuperJob.
 LINKEDIN_DAILY_APPLICATION_LIMIT = 8
 
 LLM_MODEL_TYPE = "openai"

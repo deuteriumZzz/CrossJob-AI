@@ -76,9 +76,9 @@ def test_status_reports_readiness_per_source(client):
     response = client.get("/api/status")
     sources = {s["name"]: s for s in response.json()["sources"]}
     # фикстура secrets.yaml не задаёт ни одного client_id/api_id/email
-    zarplata = sources["zarplata"]
-    assert zarplata["readiness"]["ready"] is False
-    assert set(zarplata["readiness"]["missing"]) == {
+    superjob = sources["superjob"]
+    assert superjob["readiness"]["ready"] is False
+    assert set(superjob["readiness"]["missing"]) == {
         "client_id",
         "client_secret",
     }
@@ -339,7 +339,7 @@ def test_run_now_starts_selected_sources_and_reports_status(client):
         assert set(status["sources"]) == {"headhunter", "superjob"}
 
         # Второй запуск, пока первый ещё идёт — конфликт.
-        conflict = client.post("/api/run-now", json={"sources": ["zarplata"]})
+        conflict = client.post("/api/run-now", json={"sources": ["geekjob"]})
         assert conflict.status_code == 409
 
         release.set()
