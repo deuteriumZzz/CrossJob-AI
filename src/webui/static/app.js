@@ -20,6 +20,25 @@ function sourceLabel(name) {
   return SOURCE_LABELS[name] || name;
 }
 
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text == null ? "" : String(text);
+  return div.innerHTML;
+}
+
+// last_error теперь {summary, detail} от _classify_error() в api.py —
+// короткая фраза для человека + сырой текст исключения под
+// сворачиваемой деталью, а не JSON-простыня от LLM-провайдера прямо в
+// карточке площадки.
+function errorRowHtml(lastError) {
+  if (!lastError) return "";
+  return `
+    <details class="error-row">
+      <summary>${escapeHtml(lastError.summary)}</summary>
+      <pre>${escapeHtml(lastError.detail)}</pre>
+    </details>`;
+}
+
 const STATUS_LABELS = {
   applied: "отправлено",
   dry_run: "тестовый прогон",
@@ -291,7 +310,7 @@ const render = {
             <div class="row"><span>Следующий запуск</span><span>${fmtTime(s.next_run)}</span></div>
             <div class="row"><span>Откликов сегодня</span><span>${s.applied_today}/${s.daily_limit}</span></div>
             <div class="limit-bar"><div class="limit-bar-fill ${barClass}" style="width:${Math.round(ratio * 100)}%"></div></div>
-            ${s.last_error ? `<div class="error-row">${s.last_error}</div>` : ""}
+            ${errorRowHtml(s.last_error)}
           </div>`;
         })
         .join("");
@@ -308,7 +327,7 @@ const render = {
             <div class="row"><span>Последняя проверка</span><span>${fmtTime(c.last_run)}</span></div>
             <div class="row"><span>Следующая проверка</span><span>${fmtTime(c.next_run)}</span></div>
             <p class="muted small" style="margin:6px 0 0">${c.note}</p>
-            ${c.last_error ? `<div class="error-row">${c.last_error}</div>` : ""}
+            ${errorRowHtml(c.last_error)}
           </div>`;
         })
         .join("");

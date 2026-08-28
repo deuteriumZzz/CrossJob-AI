@@ -261,6 +261,52 @@ def _resume_readiness(data_folder: Path, source: str) -> Optional[dict]:
     return {"ready": False, "filename": filename}
 
 
+# ponytail: узкий набор самых частых причин ошибки прогона (упирались
+# в это вживую — Groq TPM 429 несколько раз за сессию), не общий
+# парсер всех возможных исключений. Нераспознанное — просто обрезается
+# до одной строки как summary, сырой текст всегда доступен целиком в
+# detail (сворачиваемый <details> в дашборде), так что информация не
+# теряется — ухудшается только читаемость нераспознанных случаев.
+_ERROR_PATTERNS = (
+    (
+        ("rate_limit_exceeded", "rate limit"),
+        "Провайдер LLM временно перегружен — бот подождёт и повторит "
+        "на следующем прогоне.",
+    ),
+    (
+        ("invalid_api_key", "incorrect api key", "401"),
+        "Провайдер LLM не принял API-ключ — проверьте его в "
+        "Настройки → Провайдер LLM.",
+    ),
+    (
+        ("insufficient_quota", "exceeded your current quota"),
+        "У провайдера LLM закончилась квота/баланс — проверьте счёт "
+        "или переключите провайдера в Настройках.",
+    ),
+    (
+        ("connectionerror", "connect timeout", "connection refused"),
+        "Не удалось подключиться к площадке/провайдеру — сеть или "
+        "сервис недоступны, бот повторит позже.",
+    ),
+)
+
+
+def _classify_error(raw: Optional[str]) -> Optional[dict]:
+    """Сырое исключение (str(e), может быть многострочным JSON от
+    LLM-провайдера с внутренними org_id и ссылками на чужой биллинг)
+    → короткая фраза для человека + текст целиком под сворачиваемую
+    деталь. None, если ошибки не было (last_error пуст)."""
+    if not raw:
+        return None
+    lowered = raw.lower()
+    for needles, summary in _ERROR_PATTERNS:
+        if any(needle in lowered for needle in needles):
+            return {"summary": summary, "detail": raw}
+    first_line = raw.strip().splitlines()[0]
+    summary = first_line if len(first_line) <= 160 else first_line[:157] + "..."
+    return {"summary": summary, "detail": raw}
+
+
 def _readiness(secrets: dict, data_folder: Path, source: str) -> dict:
     required = _CREDENTIAL_REQUIREMENTS.get(source)
     missing: list[str] = []
@@ -315,7 +361,7 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
                 "last_run": entry.get("last_run"),
                 "next_run": entry.get("next_run"),
                 "status": entry.get("status", "never_run"),
-                "last_error": entry.get("last_error"),
+                "last_error": _classify_error(entry.get("last_error")),
                 "applied_today": ctx.applied_log.applied_today_count(name),
                 "daily_limit": _effective_daily_limit(ctx.config, name),
                 "job_max_applications": _effective_job_max_applications(
@@ -356,7 +402,7 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
         check["last_run"] = entry.get("last_run")
         check["next_run"] = entry.get("next_run")
         check["status"] = entry.get("status", "never_run")
-        check["last_error"] = entry.get("last_error")
+        check["last_error"] = _classify_error(entry.get("last_error"))
 
     return {
         "daemon_running": ctx.scheduler_thread is not None

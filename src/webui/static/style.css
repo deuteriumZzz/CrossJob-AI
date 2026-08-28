@@ -649,6 +649,37 @@ p.muted {
   line-height: 1.4;
 }
 
+.source-card .error-row summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.source-card .error-row summary::-webkit-details-marker {
+  display: none;
+}
+
+.source-card .error-row summary::before {
+  content: "▸ ";
+}
+
+.source-card .error-row[open] summary::before {
+  content: "▾ ";
+}
+
+.source-card .error-row pre {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
 /* ---------- Panels ---------- */
 
 .panel {
