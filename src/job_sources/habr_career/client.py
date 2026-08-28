@@ -14,21 +14,55 @@ from src.utils.chrome_utils import init_browser
 HC_BASE = "https://career.habr.com"
 PAGE_LOAD_WAIT_SECONDS = 3
 _APPLY_BUTTON_TEXT = "откликнуться"
-_SUBMIT_TEXT_MARKERS = ("отправить", "откликнуться")
+_ALREADY_APPLIED_MARKERS = ("посмотреть отклик", "редактировать")
 
 
 class HabrCareerClient:
     """Официального API нет для этого проекта (доступ — по ручному
     одобрению Хабра, не для личных ботов) — /vacancies?q=... и
     /vacancies/{id} отдаются сервером, подтверждено прямым httpx-
-    запросом без исполнения JS."""
+    запросом без исполнения JS — поиск здесь всегда идёт через httpx,
+    браузер нужен только для apply().
 
-    def __init__(self, user_agent: Optional[str] = None):
+    ponytail: используйте как контекстный менеджер (`with
+    HabrCareerClient(profile_dir) as client:`), чтобы один Chrome
+    переиспользовался на все отклики за прогон (тот же паттерн, что
+    у HeadHunterBrowserClient — тоже раньше открывал/закрывал браузер
+    на каждый вызов, есть жалоба пользователя на это же поведение).
+    Без `with` — свой одноразовый driver на вызов apply()."""
+
+    def __init__(
+        self,
+        profile_dir: Optional[Path] = None,
+        user_agent: Optional[str] = None,
+    ):
+        self.profile_dir = profile_dir
+        self._driver = None
         self._client = httpx.Client(
             base_url=HC_BASE,
             headers={"User-Agent": user_agent or random_user_agent()},
             timeout=30,
         )
+
+    def __enter__(self) -> "HabrCareerClient":
+        if self.profile_dir is not None:
+            self._driver = init_browser(self.profile_dir)
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if self._driver is not None:
+            self._driver.quit()
+            self._driver = None
+
+    def _acquire_driver(self):
+        if self._driver is not None:
+            return self._driver, False
+        if self.profile_dir is None:
+            raise RuntimeError(
+                "HabrCareerClient.apply() needs profile_dir (constructor "
+                "arg or __enter__)."
+            )
+        return init_browser(self.profile_dir), True
 
     def search_html(self, position: str, page: int = 1) -> str:
         params = {"q": position}
@@ -45,18 +79,21 @@ class HabrCareerClient:
         raise_if_blocked(response)
         return response.text
 
-    def apply(
-        self, vacancy_url: str, profile_dir: Path, cover_letter_text: str
-    ) -> bool:
-        """Best-effort, НЕ проверено на живом залогиненном аккаунте —
-        анонимно подтверждено только, что "Откликнуться" на странице
-        вакансии — обычный JS-<button> без href (не форма, не якорь).
-        Кликаем, ждём модалку, ищем textarea под сопроводительное
-        письмо (заполняем, если нашлась — необязательно) и кнопку
-        отправки с текстом "отправить"/"откликнуться", отличную от
-        первой кнопки, что уже была нажата. Если такой не нашлось —
-        считаем сессию/форму неподтверждённой и возвращаем False."""
-        driver = init_browser(profile_dir)
+    def apply(self, vacancy_url: str) -> bool:
+        """Подтверждено на живом залогиненном аккаунте (2026-08-28):
+        для вошедшего пользователя "Откликнуться" — мгновенная
+        отправка ОДНИМ кликом, без модалки, без поля под письмо, без
+        кнопки подтверждения (сопроводительное письмо сюда прикрепить
+        нельзя — ponytail: если понадобится, у Хабра есть отдельное
+        "Дополнить отклик" уже ПОСЛЕ отправки, не реализовано).
+        Анонимная форма ("Откликнуться без регистрации") — под
+        reCAPTCHA, которую бот не проходит принципиально, поэтому сюда
+        не заходим вообще: если после клика не появились маркеры уже
+        отправленного отклика ("Посмотреть отклик"/"Редактировать") —
+        считаем, что сессия не аутентифицирована (сработала анонимная
+        ветка с капчей или что-то ещё), и возвращаем False, ничего
+        больше не нажимая."""
+        driver, owns_it = self._acquire_driver()
         try:
             driver.get(vacancy_url)
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
@@ -66,37 +103,23 @@ class HabrCareerClient:
                 el
                 for el in driver.find_elements(By.CSS_SELECTOR, "button")
                 if el.is_displayed()
-                and _APPLY_BUTTON_TEXT in (el.text or "").strip().lower()
+                and (el.text or "").strip().lower() == _APPLY_BUTTON_TEXT
             ]
             if not apply_buttons:
                 return False
-            first_button = apply_buttons[0]
-            driver.execute_script("arguments[0].click();", first_button)
+            driver.execute_script("arguments[0].click();", apply_buttons[0])
             time.sleep(2)
 
-            textareas = [
-                el
-                for el in driver.find_elements(By.CSS_SELECTOR, "textarea")
+            texts = [
+                (el.text or "").strip().lower()
+                for el in driver.find_elements(By.CSS_SELECTOR, "button, a")
                 if el.is_displayed()
             ]
-            if textareas and cover_letter_text:
-                textareas[0].send_keys(cover_letter_text)
-
-            submit = _find_submit_button(driver, exclude=first_button)
-            if submit is None:
-                return False
-            driver.execute_script("arguments[0].click();", submit)
-            time.sleep(1.5)
-            return True
+            return any(
+                marker in text
+                for text in texts
+                for marker in _ALREADY_APPLIED_MARKERS
+            )
         finally:
-            driver.quit()
-
-
-def _find_submit_button(driver, exclude):
-    for el in driver.find_elements(By.CSS_SELECTOR, "button"):
-        if not el.is_displayed() or el == exclude:
-            continue
-        text = (el.text or "").strip().lower()
-        if any(marker in text for marker in _SUBMIT_TEXT_MARKERS):
-            return el
-    return None
+            if owns_it:
+                driver.quit()

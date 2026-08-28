@@ -5,6 +5,7 @@ import shutil
 import sys
 import time
 import traceback
+from contextlib import nullcontext
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal, Optional, Tuple
@@ -88,7 +89,6 @@ from src.job_sources.headhunter.telegram_approval import (
     save_pending_form,
     update_pending_form_answers,
 )
-from src.job_sources.html_text import html_letter_to_plain_text
 from src.job_sources.job_fit import classify_fit, score_job_fit
 from src.job_sources.linkedin.answerer import EasyApplyAnswerer
 from src.job_sources.linkedin.auth import LinkedInSession
@@ -2560,18 +2560,20 @@ def search_and_apply_habr_career(parameters: dict, llm_api_key: str):
     """
     Ищет вакансии на career.habr.com (positions из work_preferences.yaml
     ищутся через ?q= — свободный текстовый поиск, в отличие от wellfound/
-    careerist) и, если habr_career.auto_apply выставлен в true, пробует
-    откликнуться через модалку "Откликнуться".
+    careerist) и, если habr_career.auto_apply выставлен в true, кликает
+    "Откликнуться" — для вошедшего пользователя это мгновенная отправка
+    одним кликом (подтверждено на живом аккаунте 2026-08-28, см.
+    docstring HabrCareerClient.apply), без формы и без сопроводительного
+    письма — cover_letter ниже только пишется в историю (applied_log),
+    как и у LinkedIn.
 
     Официального API для личных ботов у Хабра нет (доступ — по ручному
     одобрению, не для этого сценария) — вход вручную в открывшемся
-    браузере (HabrCareerSession, единый аккаунт Хабра), как и у
-    остальных площадок без API в проекте: бот никогда не создаёт
-    аккаунт и не подставляет пароль сам. Реальный apply НЕ подтверждён
-    на живом залогиненном аккаунте (см. docstring HabrCareerClient.apply)
-    — анонимно подтверждено только, что кнопка "Откликнуться" открывает
-    JS-модалку; если после клика не нашлось второй кнопки отправки —
-    вакансия тихо считается dry-run.
+    браузере (HabrCareerSession, единый аккаунт Хабра, включая Google —
+    бот никогда не создаёт аккаунт и не подставляет пароль сам). Один
+    Chrome-процесс переиспользуется на все отклики за прогон (см.
+    HabrCareerClient как контекстный менеджер), а не открывается заново
+    на каждую вакансию.
 
     auto_apply: false по умолчанию независимо от того, что в итоге
     стоит в work_preferences.yaml — первый запуск всегда dry-run.
@@ -2597,7 +2599,7 @@ def search_and_apply_habr_career(parameters: dict, llm_api_key: str):
         return
 
     profile_dir = output_folder / ".chrome_profile_habr_career"
-    client = HabrCareerClient()
+    client = HabrCareerClient(profile_dir=profile_dir)
     source: JobSource = HabrCareerSource(client)
     try:
         jobs = source.search(parameters)
@@ -2620,85 +2622,92 @@ def search_and_apply_habr_career(parameters: dict, llm_api_key: str):
     daily_limit = randomized_daily_limit(
         _daily_limit(parameters, "habr_career")
     )
-    for job in jobs:
-        if sent_count >= job_max_applications:
-            logger.info(
-                f"Reached JOB_MAX_APPLICATIONS "
-                f"({job_max_applications}) for this run."
-            )
-            break
-        if _total_daily_limit_reached(parameters, applied_log):
-            break
-        if applied_log.already_applied(job):
-            continue
-        if (
-            auto_apply
-            and applied_log.applied_today_count("habr_career") >= daily_limit
-        ):
-            logger.info(
-                f"Reached daily application limit ({daily_limit}) "
-                "for career.habr.com today."
-            )
-            break
-
-        fit = score_job_fit(resume_pdf_path, job, llm_api_key)
-        tier = classify_fit(fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE)
-        if tier == "skip":
-            logger.info(
-                f"Skipping {job.role} at {job.company}: fit score "
-                f"{fit.score}/10 below minimum."
-            )
-            applied_log.record(
-                job, "", "", "skipped_low_fit", fit.score, fit.gaps
-            )
-            continue
-        if tier == "weak":
-            logger.info(
-                f"{job.role} at {job.company}: weak fit "
-                f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
-            )
-
-        try:
-            cover_letter = generate_cover_letter_for_job(
-                resume_pdf_path, job, llm_api_key
-            )
-        except Exception as e:
-            logger.exception(
-                f"Failed to generate cover letter for {job.role} at "
-                f"{job.company}, skipping this vacancy: {e}"
-            )
-            continue
-
-        if auto_apply:
-            cover_letter_text = html_letter_to_plain_text(cover_letter)
-            applied = client.apply(job.link, profile_dir, cover_letter_text)
-            if applied:
-                status: Literal["applied", "dry_run"] = "applied"
+    # Один Chrome-процесс на все клики "Откликнуться" за прогон вместо
+    # открытия/закрытия браузера на каждую вакансию — client.apply()
+    # ниже просто переходит на следующую страницу тем же окном.
+    with client if auto_apply else nullcontext():
+        for job in jobs:
+            if sent_count >= job_max_applications:
                 logger.info(
-                    f"Applied to {job.role} at {job.company} ({job.link})"
+                    f"Reached JOB_MAX_APPLICATIONS "
+                    f"({job_max_applications}) for this run."
                 )
+                break
+            if _total_daily_limit_reached(parameters, applied_log):
+                break
+            if applied_log.already_applied(job):
+                continue
+            if (
+                auto_apply
+                and applied_log.applied_today_count("habr_career")
+                >= daily_limit
+            ):
+                logger.info(
+                    f"Reached daily application limit ({daily_limit}) "
+                    "for career.habr.com today."
+                )
+                break
+
+            fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+            tier = classify_fit(
+                fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE
+            )
+            if tier == "skip":
+                logger.info(
+                    f"Skipping {job.role} at {job.company}: fit score "
+                    f"{fit.score}/10 below minimum."
+                )
+                applied_log.record(
+                    job, "", "", "skipped_low_fit", fit.score, fit.gaps
+                )
+                continue
+            if tier == "weak":
+                logger.info(
+                    f"{job.role} at {job.company}: weak fit "
+                    f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
+                )
+
+            try:
+                cover_letter = generate_cover_letter_for_job(
+                    resume_pdf_path, job, llm_api_key
+                )
+            except Exception as e:
+                logger.exception(
+                    f"Failed to generate cover letter for {job.role} at "
+                    f"{job.company}, skipping this vacancy: {e}"
+                )
+                continue
+
+            if auto_apply:
+                applied = client.apply(job.link)
+                if applied:
+                    status: Literal["applied", "dry_run"] = "applied"
+                    logger.info(
+                        f"Applied to {job.role} at {job.company} "
+                        f"({job.link})"
+                    )
+                else:
+                    status = "dry_run"
+                    logger.warning(
+                        "Не удалось подтверждённо отправить отклик на "
+                        f"{job.link} — записано как dry-run."
+                    )
             else:
                 status = "dry_run"
-                logger.warning(
-                    "Не удалось подтверждённо отправить отклик на "
-                    f"{job.link} — записано как dry-run."
+                logger.info(
+                    f"[manual apply needed] {job.role} at {job.company} "
+                    f"({job.link})"
                 )
-        else:
-            status = "dry_run"
-            logger.info(
-                f"[manual apply needed] {job.role} at {job.company} "
-                f"({job.link})"
-            )
 
-        applied_log.record(
-            job,
-            cover_letter,
-            resume_id="",
-            status=status,
-            score=fit.score,
-            gaps=fit.gaps,
-        )
-        sent_count += 1
+            applied_log.record(
+                job,
+                cover_letter,
+                resume_id="",
+                status=status,
+                score=fit.score,
+                gaps=fit.gaps,
+            )
+            sent_count += 1
 
 
 ALL_SOURCES = [

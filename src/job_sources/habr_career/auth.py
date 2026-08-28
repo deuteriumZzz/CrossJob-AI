@@ -12,20 +12,29 @@ LOGIN_TIMEOUT_SECONDS = 300
 
 class HabrCareerSession:
     """Вход у career.habr.com — единый аккаунт Хабра через OAuth-редирект
-    /users/auth/tmid ("Войти через Хабр Аккаунт"), подтверждено прямым
-    запросом (2026-08-28) — отдельной простой формы логина нет. Вход/
-    пароль пользователь вводит сам в открывшемся браузере — как и
+    /users/auth/tmid ("Войти через Хабр Аккаунт", включая вход через
+    Google) — отдельной простой формы логина нет. Вход/пароль
+    пользователь вводит сам в открывшемся браузере — как и
     GeekjobSession/RabotaRuSession, бот здесь никогда не вводит пароль
-    сам. Наличие видимого элемента с классом "js-data-sign-in-btn"
-    (подтверждено на живой странице) — сигнал, что вход ещё не пройден.
-    Сессия держится через постоянный профиль Chrome (profile_dir)."""
+    сам.
+
+    ponytail: раньше проверка входа смотрела на ОТСУТСТВИЕ кнопки
+    "Войти" — ложно срабатывала во время OAuth-редиректа на
+    accounts.google.com (там кнопки "Войти" тоже нет, потому что это
+    вообще не страница Хабра), из-за чего бот выдёргивал браузер на
+    другую страницу посреди входа пользователя через Google (баг
+    найден вживую 2026-08-28). Теперь — обратный, положительный сигнал:
+    ссылка на /profile/notifications есть в шапке только у вошедшего
+    пользователя (подтверждено на живом залогиненном аккаунте)."""
 
     def __init__(self, profile_dir: Path):
         self.profile_dir = profile_dir
 
     def _is_logged_in(self, driver) -> bool:
-        return not driver.find_elements(
-            By.CSS_SELECTOR, "a.js-data-sign-in-btn"
+        return bool(
+            driver.find_elements(
+                By.CSS_SELECTOR, 'a[href$="/profile/notifications"]'
+            )
         )
 
     def ensure_logged_in(self) -> None:
