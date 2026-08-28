@@ -35,6 +35,19 @@ def test_raise_if_blocked_accepts_plain_string():
     raise_if_blocked("normal page content")
 
 
+def test_raise_if_blocked_raises_on_broader_captcha_phrases():
+    with pytest.raises(PlatformBlockedError):
+        raise_if_blocked("Пожалуйста, подтвердите, что вы не робот")
+    with pytest.raises(PlatformBlockedError):
+        raise_if_blocked("Our systems have detected unusual traffic")
+
+
+def test_raise_if_blocked_does_not_flag_robotics_vacancy():
+    # "робот" сам по себе не в списке ключевых слов — иначе вакансия
+    # вроде "Инженер по робототехнике" ложно считалась бы капчей.
+    raise_if_blocked("Инженер по робототехнике, опыт с промышленными роботами")
+
+
 def test_mark_blocked_then_is_still_blocked():
     with tempfile.TemporaryDirectory() as tmp:
         output_folder = Path(tmp)

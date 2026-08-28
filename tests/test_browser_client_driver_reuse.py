@@ -5,6 +5,7 @@
 
 from unittest.mock import MagicMock, patch
 
+from src.job_sources.geekjob.client import GeekjobClient
 from src.job_sources.getmatch.client import GetMatchClient
 from src.job_sources.headhunter.browser_client import (
     HeadHunterBrowserClient,
@@ -72,6 +73,58 @@ def test_getmatch_client_reuses_one_driver_inside_with_block():
 
         assert mock_init.call_count == 1
         assert mock_init.return_value.quit.call_count == 1
+
+
+def test_geekjob_client_reuses_one_driver_inside_with_block():
+    with patch(
+        "src.job_sources.geekjob.client.init_browser"
+    ) as mock_init, patch(
+        "src.job_sources.geekjob.client.raise_if_blocked"
+    ), patch(
+        "src.job_sources.geekjob.client.visible_text", return_value=""
+    ), patch("src.job_sources.geekjob.client.time.sleep"):
+        with GeekjobClient("profile") as client:
+            client.search_vacancies_html("python", page=1)
+            client.get_vacancy_html("123")
+
+        assert mock_init.call_count == 1
+        assert mock_init.return_value.quit.call_count == 1
+
+
+def test_geekjob_client_without_with_opens_and_closes_per_call():
+    with patch(
+        "src.job_sources.geekjob.client.init_browser"
+    ) as mock_init, patch(
+        "src.job_sources.geekjob.client.raise_if_blocked"
+    ), patch(
+        "src.job_sources.geekjob.client.visible_text", return_value=""
+    ), patch("src.job_sources.geekjob.client.time.sleep"):
+        client = GeekjobClient("profile")
+        client.get_vacancy_html("1")
+        client.get_vacancy_html("2")
+
+        assert mock_init.call_count == 2
+
+
+def test_geekjob_search_uses_qs_query_param_not_q():
+    # Настоящий параметр поиска geekjob.ru — qs (подтверждено формой
+    # поиска на живой странице), не q — раньше здесь был q, из-за чего
+    # площадка молча игнорировала запрос и всегда отдавала один и тот
+    # же дефолтный список вакансий.
+    with patch(
+        "src.job_sources.geekjob.client.init_browser"
+    ) as mock_init, patch(
+        "src.job_sources.geekjob.client.raise_if_blocked"
+    ), patch(
+        "src.job_sources.geekjob.client.visible_text", return_value=""
+    ), patch("src.job_sources.geekjob.client.time.sleep"):
+        client = GeekjobClient("profile")
+        client.search_vacancies_html("python разработчик", page=1)
+
+        driver = mock_init.return_value
+        called_url = driver.get.call_args[0][0]
+        assert "qs=" in called_url
+        assert "q=python" not in called_url
 
 
 def test_wait_for_any_returns_true_when_selector_appears():
