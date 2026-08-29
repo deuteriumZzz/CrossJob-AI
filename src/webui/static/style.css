@@ -1699,6 +1699,12 @@ nav.tabs button.active,
   transform: rotate(180deg);
 }
 
+@media (max-width: 760px) {
+  .sidebar-collapse-toggle {
+    display: none;
+  }
+}
+
 /* ---------- Command palette ---------- */
 
 .command-overlay {
@@ -1966,8 +1972,9 @@ kbd {
 .changelog-popover {
   position: fixed;
   bottom: 20px;
-  left: 252px;
-  width: 300px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(300px, calc(100vw - 40px));
   background: var(--bg-elevated);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius);

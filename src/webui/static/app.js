@@ -487,11 +487,19 @@ const render = {
           </div>`;
         })
         .join("");
-      document.getElementById("chat-checks-grid").innerHTML = status.chat_checks
+      document.getElementById("chat-checks-grid").innerHTML = applySourceOrder(status.chat_checks, "name")
         .map((c, i) => {
           const dot = STATUS_DOT[c.status] || "never_run";
           return `
-          <div class="source-card stagger-item" data-source="${c.name}" style="animation-delay:${staggerDelay(i)}">
+          <div class="source-card stagger-item" data-source="${c.name}" draggable="true" style="animation-delay:${staggerDelay(i)}">
+            <div class="source-card-actions">
+              <button type="button" class="src-goto-history" data-source="${c.name}" title="История откликов этой площадки">
+                <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.6"/><path d="M10 5.8V10l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              </button>
+              <button type="button" class="src-goto-logs" data-source="${c.name}" title="Логи этой площадки">
+                <svg viewBox="0 0 20 20" fill="none"><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M5.5 7.5 8 10l-2.5 2.5M9.8 12.5h4.7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+            </div>
             <h3>
               <input type="checkbox" class="schedule-toggle switch" data-source="${c.name}" title="В расписании демона" ${c.schedule_enabled ? "checked" : ""} />
               <span class="dot ${dot}"></span> ${c.label}
@@ -1228,7 +1236,17 @@ function initSettingsDirtyTracking() {
     if (!btn) return;
     const isSaveBtn = btn.id.includes("save") || btn.classList.contains("s-save");
     if (!isSaveBtn) return;
-    flashSaved(btn.closest(".settings-pane"), btn);
+    const pane = btn.closest(".settings-pane");
+    flashSaved(pane, btn);
+    // Клик снимает "не сохранено" сразу — отзывчивее, чем ждать ответ
+    // сервера. Но если рядом всё же выскочило "Ошибка: …", честно
+    // возвращаем метку "не сохранено" вместо того чтобы соврать об успехе.
+    setTimeout(() => {
+      const statusEl = pane?.querySelector('[id$="-status"]');
+      if (statusEl && /ошибка/i.test(statusEl.textContent || "")) {
+        markSettingsDirty(pane);
+      }
+    }, 800);
   });
 }
 
@@ -1253,7 +1271,7 @@ function initSidebarCollapse() {
 
 let commandActiveIndex = 0;
 
-function collectCommandItems() {
+function collectCommandItems(query) {
   const items = [];
   document.querySelectorAll("nav.tabs button[data-tab]").forEach((btn) => {
     items.push({
@@ -1272,6 +1290,28 @@ function collectCommandItems() {
       },
     });
   });
+  // Записи Истории ищем только когда уже что-то введено — иначе список
+  // из сотен вакансий забивал бы палитру при открытии пустой.
+  const q = (query || "").trim().toLowerCase();
+  if (q.length >= 2) {
+    lastHistoryEntries
+      .filter(
+        (e) =>
+          e.company.toLowerCase().includes(q) || e.title.toLowerCase().includes(q)
+      )
+      .slice(0, 8)
+      .forEach((e) => {
+        items.push({
+          label: `${e.company} — ${e.title}`,
+          hint: sourceLabel(e.source),
+          action: () => {
+            document.getElementById("filter-source").value = "";
+            document.getElementById("filter-query").value = e.company;
+            switchTab("history");
+          },
+        });
+      });
+  }
   return items;
 }
 
@@ -1283,7 +1323,7 @@ function updateCommandActive(results) {
 
 function renderCommandResults(query) {
   const results = document.getElementById("command-results");
-  const items = collectCommandItems().filter((it) =>
+  const items = collectCommandItems(query).filter((it) =>
     it.label.toLowerCase().includes(query.toLowerCase())
   );
   commandActiveIndex = 0;
@@ -1579,9 +1619,10 @@ function initDashboard() {
   initKeyboardShortcuts();
   initHistoryViewToggle();
   initDragReorder("source-grid");
+  initDragReorder("chat-checks-grid");
   initChangelogPopover();
 
-  document.getElementById("source-grid").addEventListener("click", (e) => {
+  function handleSourceCardActionClick(e) {
     const historyBtn = e.target.closest(".src-goto-history");
     const logsBtn = e.target.closest(".src-goto-logs");
     if (historyBtn) {
@@ -1591,7 +1632,9 @@ function initDashboard() {
       document.getElementById("log-source").value = logsBtn.dataset.source;
       switchTab("logs");
     }
-  });
+  }
+  document.getElementById("source-grid").addEventListener("click", handleSourceCardActionClick);
+  document.getElementById("chat-checks-grid").addEventListener("click", handleSourceCardActionClick);
   requestAnimationFrame(repositionTabIndicators);
   window.addEventListener("resize", repositionTabIndicators);
 
