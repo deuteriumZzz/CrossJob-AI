@@ -21,7 +21,9 @@ def test_headhunter_client_reuses_one_driver_inside_with_block():
     ), patch(
         "src.job_sources.headhunter.browser_client.visible_text",
         return_value="",
-    ), patch("src.job_sources.headhunter.browser_client.time.sleep"):
+    ), patch(
+        "src.job_sources.headhunter.browser_client.time.sleep"
+    ):
         mock_init.return_value.find_elements.return_value = []
 
         with HeadHunterBrowserClient("profile") as client:
@@ -45,7 +47,9 @@ def test_headhunter_client_without_with_opens_and_closes_per_call():
     ), patch(
         "src.job_sources.headhunter.browser_client.visible_text",
         return_value="",
-    ), patch("src.job_sources.headhunter.browser_client.time.sleep"):
+    ), patch(
+        "src.job_sources.headhunter.browser_client.time.sleep"
+    ):
         mock_init.return_value.find_elements.return_value = []
 
         client = HeadHunterBrowserClient("profile")
@@ -64,7 +68,9 @@ def test_getmatch_client_reuses_one_driver_inside_with_block():
         "src.job_sources.getmatch.client.raise_if_blocked"
     ), patch(
         "src.job_sources.getmatch.client.visible_text", return_value=""
-    ), patch("src.job_sources.getmatch.client.time.sleep"):
+    ), patch(
+        "src.job_sources.getmatch.client.time.sleep"
+    ):
         mock_init.return_value.find_elements.return_value = []
 
         with GetMatchClient("profile") as client:
@@ -82,7 +88,9 @@ def test_geekjob_client_reuses_one_driver_inside_with_block():
         "src.job_sources.geekjob.client.raise_if_blocked"
     ), patch(
         "src.job_sources.geekjob.client.visible_text", return_value=""
-    ), patch("src.job_sources.geekjob.client.time.sleep"):
+    ), patch(
+        "src.job_sources.geekjob.client.time.sleep"
+    ):
         with GeekjobClient("profile") as client:
             client.search_vacancies_html("python", page=1)
             client.get_vacancy_html("123")
@@ -98,7 +106,9 @@ def test_geekjob_client_without_with_opens_and_closes_per_call():
         "src.job_sources.geekjob.client.raise_if_blocked"
     ), patch(
         "src.job_sources.geekjob.client.visible_text", return_value=""
-    ), patch("src.job_sources.geekjob.client.time.sleep"):
+    ), patch(
+        "src.job_sources.geekjob.client.time.sleep"
+    ):
         client = GeekjobClient("profile")
         client.get_vacancy_html("1")
         client.get_vacancy_html("2")
@@ -117,7 +127,9 @@ def test_geekjob_search_uses_qs_query_param_not_q():
         "src.job_sources.geekjob.client.raise_if_blocked"
     ), patch(
         "src.job_sources.geekjob.client.visible_text", return_value=""
-    ), patch("src.job_sources.geekjob.client.time.sleep"):
+    ), patch(
+        "src.job_sources.geekjob.client.time.sleep"
+    ):
         client = GeekjobClient("profile")
         client.search_vacancies_html("python разработчик", page=1)
 
@@ -132,9 +144,7 @@ def test_wait_for_any_returns_true_when_selector_appears():
     driver.find_elements.return_value = [MagicMock(is_displayed=lambda: True)]
     with patch("src.job_sources.headhunter.browser_client.time.sleep"):
         assert (
-            _wait_for_any(
-                driver, ['[data-qa="x"]'], timeout=1, interval=0.1
-            )
+            _wait_for_any(driver, ['[data-qa="x"]'], timeout=1, interval=0.1)
             is True
         )
 

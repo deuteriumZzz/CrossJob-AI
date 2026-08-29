@@ -53,7 +53,9 @@ from src.job_sources.llm_provider import get_active_provider as _active_llm
 from src.job_sources.llm_provider import (
     set_fallback_base_urls as _set_llm_fallback_base_urls,
 )
-from src.job_sources.llm_provider import set_fallback_keys as _set_llm_fallback_keys
+from src.job_sources.llm_provider import (
+    set_fallback_keys as _set_llm_fallback_keys,
+)
 from src.job_sources.llm_usage import (
     set_output_folder as set_llm_usage_output_folder,
 )
@@ -327,7 +329,9 @@ def _classify_error(raw: Optional[str]) -> Optional[dict]:
         if any(needle in lowered for needle in needles):
             return {"summary": summary, "detail": raw}
     first_line = raw.strip().splitlines()[0]
-    summary = first_line if len(first_line) <= 160 else first_line[:157] + "..."
+    summary = (
+        first_line if len(first_line) <= 160 else first_line[:157] + "..."
+    )
     return {"summary": summary, "detail": raw}
 
 
@@ -399,7 +403,9 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
                 "job_max_applications": _effective_job_max_applications(
                     ctx.config, name
                 ),
-                "readiness": _readiness(secrets, ctx.config["dataFolder"], name),
+                "readiness": _readiness(
+                    secrets, ctx.config["dataFolder"], name
+                ),
             }
         )
     # Проверки чата/ответов — НЕ "площадка" (нет поиска/отклика), а
@@ -744,7 +750,10 @@ def post_limits_settings(
             body.llm_daily_cost_alert_usd,
         )
 
-    if body.job_min_score is not None or body.job_suitability_score is not None:
+    if (
+        body.job_min_score is not None
+        or body.job_suitability_score is not None
+    ):
         for field in ("job_min_score", "job_suitability_score"):
             value = getattr(body, field)
             if value is not None and not (0 <= value <= 10):
@@ -1184,7 +1193,9 @@ def post_telegram_send_resume(
     conversations = TelegramConversations(
         ctx.output_folder / "telegram_conversations.json"
     )
-    conversations.record_outbound(contact, f"📎 Отправлено резюме ({RESUME_PDF})")
+    conversations.record_outbound(
+        contact, f"📎 Отправлено резюме ({RESUME_PDF})"
+    )
     return conversations.get(contact)
 
 
@@ -1268,7 +1279,8 @@ def post_salary_settings(
         profile_file = _profile_file(ctx)
         if not profile_file.exists():
             raise HTTPException(
-                400, f"{_JOB_APPLICATION_PROFILE_YAML} not found: {profile_file}"
+                400,
+                f"{_JOB_APPLICATION_PROFILE_YAML} not found: {profile_file}",
             )
         set_source_field(
             profile_file,
@@ -1431,7 +1443,11 @@ def post_llm_provider_base_url(
     if not url:
         raise HTTPException(400, "base_url must not be empty")
     set_source_field(
-        ctx.secrets_file, "llm_provider_base_urls", body.provider, url, quote=True
+        ctx.secrets_file,
+        "llm_provider_base_urls",
+        body.provider,
+        url,
+        quote=True,
     )
     ctx.reload_config()
     return {"provider": body.provider, "base_url": url}
@@ -1569,7 +1585,11 @@ def post_telegram_token(
     except Exception as e:
         raise HTTPException(400, f"Неверный токен бота: {e}")
     set_source_field(
-        ctx.secrets_file, "notifications", "telegram_bot_token", token, quote=True
+        ctx.secrets_file,
+        "notifications",
+        "telegram_bot_token",
+        token,
+        quote=True,
     )
     return {
         "username": username,
@@ -1616,7 +1636,10 @@ def post_telegram_connect(ctx: AppContext = Depends(get_ctx)) -> dict:
             )
         except Exception:
             pass
-        ctx.telegram_connect_status = {"status": "connected", "chat_id": chat_id}
+        ctx.telegram_connect_status = {
+            "status": "connected",
+            "chat_id": chat_id,
+        }
 
     ctx.telegram_connect_thread = threading.Thread(target=_poll, daemon=True)
     ctx.telegram_connect_thread.start()

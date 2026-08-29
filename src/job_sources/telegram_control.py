@@ -72,11 +72,15 @@ def poll_control_commands(
             continue
         match = _PAUSE_RE.match(text)
         if match:
-            commands.append({"action": "pause", "source": match.group(1).lower()})
+            commands.append(
+                {"action": "pause", "source": match.group(1).lower()}
+            )
             continue
         match = _RESUME_RE.match(text)
         if match:
-            commands.append({"action": "resume", "source": match.group(1).lower()})
+            commands.append(
+                {"action": "resume", "source": match.group(1).lower()}
+            )
             continue
 
     if updates:

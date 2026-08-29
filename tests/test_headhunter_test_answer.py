@@ -16,7 +16,9 @@ def _make_option(text: str) -> MagicMock:
     return option
 
 
-def _make_block(options=None, free_text_field=None, text: str = "") -> MagicMock:
+def _make_block(
+    options=None, free_text_field=None, text: str = ""
+) -> MagicMock:
     block = MagicMock()
     block.is_displayed.return_value = True
     block.text = text
@@ -39,7 +41,11 @@ def test_no_test_present_returns_false():
 
 
 def test_multiple_choice_prefers_yes_option():
-    options = [_make_option("Нет"), _make_option("Да"), _make_option("Не знаю")]
+    options = [
+        _make_option("Нет"),
+        _make_option("Да"),
+        _make_option("Не знаю"),
+    ]
     block = _make_block(options=options)
     driver = MagicMock()
     driver.find_elements.return_value = [block]
@@ -134,15 +140,13 @@ def _make_questionnaire_driver(
     radios=None, free_text_fields=None, buttons=None, labels_by_for=None
 ):
     driver = MagicMock()
-    driver.current_url = (
-        "https://hh.ru/applicant/vacancy_response?vacancyId=1"
-    )
+    driver.current_url = "https://hh.ru/applicant/vacancy_response?vacancyId=1"
     labels_by_for = labels_by_for or {}
 
     def find_elements(by, selector):
         if selector == 'input[type="radio"]':
             return radios or []
-        if selector == "textarea, input[type=\"text\"]":
+        if selector == 'textarea, input[type="text"]':
             return free_text_fields or []
         if selector.startswith("label[for="):
             field_id = selector.split('"')[1]
@@ -186,9 +190,7 @@ def test_full_page_questionnaire_prefers_yes_radio_and_submits():
 
     yes_radio.click.assert_called_once()
     no_radio.click.assert_not_called()
-    driver.execute_script.assert_any_call(
-        "arguments[0].click();", submit
-    )
+    driver.execute_script.assert_any_call("arguments[0].click();", submit)
 
 
 def test_full_page_questionnaire_fills_free_text_via_ai():

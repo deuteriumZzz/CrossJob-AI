@@ -129,7 +129,9 @@ class TelegramConversations:
 
         def _mutate(data: dict) -> None:
             data["conversations"] = [
-                c for c in data["conversations"] if c["contact"].lower() != contact.lower()
+                c
+                for c in data["conversations"]
+                if c["contact"].lower() != contact.lower()
             ]
 
         self._write_locked(_mutate)

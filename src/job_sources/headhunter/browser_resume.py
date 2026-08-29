@@ -92,9 +92,7 @@ def start_resume_draft(driver, desired_title: str) -> str | None:
         logger.warning(f"Не удалось начать создание резюме: {e}")
         return None
 
-    title_inputs = driver.find_elements(
-        By.CSS_SELECTOR, _TITLE_INPUT_SELECTOR
-    )
+    title_inputs = driver.find_elements(By.CSS_SELECTOR, _TITLE_INPUT_SELECTOR)
     if title_inputs and title_inputs[0].is_displayed():
         try:
             title_inputs[0].send_keys(desired_title)
@@ -106,9 +104,7 @@ def start_resume_draft(driver, desired_title: str) -> str | None:
             "черновик создан без предзаполнения, доделайте вручную."
         )
 
-    next_buttons = driver.find_elements(
-        By.CSS_SELECTOR, _NEXT_BUTTON_SELECTOR
-    )
+    next_buttons = driver.find_elements(By.CSS_SELECTOR, _NEXT_BUTTON_SELECTOR)
     if next_buttons and next_buttons[0].is_displayed():
         try:
             next_buttons[0].click()

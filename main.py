@@ -141,7 +141,10 @@ from src.job_sources.telegram.client import TelegramSourceClient
 from src.job_sources.telegram.contact import extract_contact
 from src.job_sources.telegram.source import TelegramSource
 from src.job_sources.telegram_conversations import TelegramConversations
-from src.job_sources.telegram_notify import notify_from_secrets, send_notification
+from src.job_sources.telegram_notify import (
+    notify_from_secrets,
+    send_notification,
+)
 from src.libs.resume_and_cover_builder import (
     ResumeFacade,
     ResumeGenerator,
@@ -1212,7 +1215,11 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
                 break
 
             fit = score_job_fit(resume_pdf_path, job, llm_api_key)
-            tier = classify_fit(fit.score, _job_min_score(parameters), _job_suitability_score(parameters))
+            tier = classify_fit(
+                fit.score,
+                _job_min_score(parameters),
+                _job_suitability_score(parameters),
+            )
             if tier == "skip":
                 logger.info(
                     f"Skipping {job.role} at {job.company}: fit score "
@@ -1288,7 +1295,9 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
                     f"({job.link})"
                 )
 
-            applied_log.record(job, cover_letter, "", status, fit.score, fit.gaps)
+            applied_log.record(
+                job, cover_letter, "", status, fit.score, fit.gaps
+            )
             sent_count += 1
 
 
@@ -1374,7 +1383,11 @@ def search_and_apply_superjob(parameters: dict, llm_api_key: str):
             break
 
         fit = score_job_fit(resume_pdf_path, job, llm_api_key)
-        tier = classify_fit(fit.score, _job_min_score(parameters), _job_suitability_score(parameters))
+        tier = classify_fit(
+            fit.score,
+            _job_min_score(parameters),
+            _job_suitability_score(parameters),
+        )
         if tier == "skip":
             logger.info(
                 f"Skipping {job.role} at {job.company}: fit score "
@@ -1488,7 +1501,11 @@ def search_geekjob(parameters: dict, llm_api_key: str):
             continue
 
         fit = score_job_fit(resume_pdf_path, job, llm_api_key)
-        tier = classify_fit(fit.score, _job_min_score(parameters), _job_suitability_score(parameters))
+        tier = classify_fit(
+            fit.score,
+            _job_min_score(parameters),
+            _job_suitability_score(parameters),
+        )
         if tier == "skip":
             logger.info(
                 f"Skipping {job.role} at {job.company}: fit score "
@@ -1609,7 +1626,11 @@ def search_rabota_ru(parameters: dict, llm_api_key: str):
             continue
 
         fit = score_job_fit(resume_pdf_path, job, llm_api_key)
-        tier = classify_fit(fit.score, _job_min_score(parameters), _job_suitability_score(parameters))
+        tier = classify_fit(
+            fit.score,
+            _job_min_score(parameters),
+            _job_suitability_score(parameters),
+        )
         if tier == "skip":
             logger.info(
                 f"Skipping {job.role} at {job.company}: fit score "
@@ -1759,7 +1780,9 @@ def search_telegram(parameters: dict, llm_api_key: str):
 
             fit = score_job_fit(resume_pdf_path, job, llm_api_key)
             tier = classify_fit(
-                fit.score, _job_min_score(parameters), _job_suitability_score(parameters)
+                fit.score,
+                _job_min_score(parameters),
+                _job_suitability_score(parameters),
             )
             if tier == "skip":
                 logger.info(
@@ -1909,7 +1932,11 @@ def search_getmatch(parameters: dict, llm_api_key: str):
                 continue
 
             fit = score_job_fit(resume_pdf_path, job, llm_api_key)
-            tier = classify_fit(fit.score, _job_min_score(parameters), _job_suitability_score(parameters))
+            tier = classify_fit(
+                fit.score,
+                _job_min_score(parameters),
+                _job_suitability_score(parameters),
+            )
             if tier == "skip":
                 logger.info(
                     f"Skipping {job.role} at {job.company}: fit score "
@@ -2074,7 +2101,9 @@ def search_and_apply_linkedin(parameters: dict, llm_api_key: str):
 
             fit = score_job_fit(resume_pdf_path, job, llm_api_key)
             tier = classify_fit(
-                fit.score, _job_min_score(parameters), _job_suitability_score(parameters)
+                fit.score,
+                _job_min_score(parameters),
+                _job_suitability_score(parameters),
             )
             if tier == "skip":
                 logger.info(
@@ -2236,7 +2265,9 @@ def search_and_apply_habr_career(parameters: dict, llm_api_key: str):
 
             fit = score_job_fit(resume_pdf_path, job, llm_api_key)
             tier = classify_fit(
-                fit.score, _job_min_score(parameters), _job_suitability_score(parameters)
+                fit.score,
+                _job_min_score(parameters),
+                _job_suitability_score(parameters),
             )
             if tier == "skip":
                 logger.info(
@@ -2340,7 +2371,12 @@ def run_selected_sources(
             notify(parameters, f"CrossJob-AI: {name} упал — {e}")
             if output_folder:
                 record_run_result(
-                    output_folder, name, "error", next_run, run_at, error=str(e)
+                    output_folder,
+                    name,
+                    "error",
+                    next_run,
+                    run_at,
+                    error=str(e),
                 )
         else:
             # ponytail: без этого "Последний запуск"/статус на дашборде
@@ -2850,7 +2886,9 @@ def check_telegram_commands(parameters: dict, llm_api_key: str) -> None:
             send_notification(bot_token, chat_id, _TELEGRAM_HELP_TEXT)
         elif action == "status":
             send_notification(
-                bot_token, chat_id, _format_telegram_status(parameters, applied_log)
+                bot_token,
+                chat_id,
+                _format_telegram_status(parameters, applied_log),
             )
         elif action in ("pause", "resume"):
             source = cmd["source"]
@@ -2865,7 +2903,9 @@ def check_telegram_commands(parameters: dict, llm_api_key: str) -> None:
                 "schedule_enabled",
                 action == "resume",
             )
-            verb = "возобновлена" if action == "resume" else "поставлена на паузу"
+            verb = (
+                "возобновлена" if action == "resume" else "поставлена на паузу"
+            )
             send_notification(bot_token, chat_id, f"{source}: {verb}.")
 
 
@@ -2947,13 +2987,13 @@ def block_headhunter_employer(parameters: dict, company: str) -> bool:
         driver.quit()
 
     if ok:
-        notify(parameters, f"HeadHunter: работодатель '{company}' заблокирован.")
+        notify(
+            parameters, f"HeadHunter: работодатель '{company}' заблокирован."
+        )
     return ok
 
 
-def clone_headhunter_resume(
-    parameters: dict, resume_id: str
-) -> Optional[str]:
+def clone_headhunter_resume(parameters: dict, resume_id: str) -> Optional[str]:
     """Клонирует резюме на hh.ru кликом (браузерный аналог
     hh-applicant-tool clone_resume.py — та операция там идёт через
     OAuth API, здесь заменена на клик, см. browser_resume.clone_resume).
@@ -2979,9 +3019,7 @@ def create_headhunter_resume_draft(parameters: dict) -> Optional[str]:
     вручную, см. browser_resume.start_resume_draft про обоснование.
     Вызывается ТОЛЬКО вручную из дашборда."""
     hh_preferences = parameters.get("headhunter") or {}
-    positions = hh_preferences.get("positions") or parameters.get(
-        "positions"
-    )
+    positions = hh_preferences.get("positions") or parameters.get("positions")
     desired_title = (positions or [""])[0]
     if not desired_title:
         logger.warning(
@@ -3512,7 +3550,11 @@ def main(auto: Optional[str], daemon: bool):
             (ConfigValidator.load_yaml(secrets_file).get("llm_api_keys")) or {}
         )
         set_llm_fallback_base_urls(
-            (ConfigValidator.load_yaml(secrets_file).get("llm_provider_base_urls"))
+            (
+                ConfigValidator.load_yaml(secrets_file).get(
+                    "llm_provider_base_urls"
+                )
+            )
             or {}
         )
 

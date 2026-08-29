@@ -59,9 +59,7 @@ def list_withdrawable_negotiations(
             raw_datetime = time_elements[0].get_attribute("datetime")
             try:
                 updated_at = datetime.fromisoformat(raw_datetime)
-                days_old = (
-                    datetime.now(updated_at.tzinfo) - updated_at
-                ).days
+                days_old = (datetime.now(updated_at.tzinfo) - updated_at).days
             except (TypeError, ValueError):
                 days_old = None
 

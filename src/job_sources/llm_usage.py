@@ -372,5 +372,9 @@ class UsageCallback(BaseCallbackHandler):
     ) -> None:
         record_llm_result(self.output_folder, ok=False)
         record_provider_status(
-            self.output_folder, self.provider, self.model, ok=False, error=error
+            self.output_folder,
+            self.provider,
+            self.model,
+            ok=False,
+            error=error,
         )

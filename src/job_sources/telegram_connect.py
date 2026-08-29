@@ -12,12 +12,16 @@ def get_bot_username(bot_token: str) -> str:
     """getMe — заодно служит проверкой, что токен вообще валиден,
     прежде чем сохранять его и показывать deep-link на несуществующего
     бота."""
-    response = httpx.get(f"{TELEGRAM_API_BASE}/bot{bot_token}/getMe", timeout=10)
+    response = httpx.get(
+        f"{TELEGRAM_API_BASE}/bot{bot_token}/getMe", timeout=10
+    )
     response.raise_for_status()
     return response.json()["result"]["username"]
 
 
-def wait_for_start(bot_token: str, timeout_seconds: int = 180) -> Optional[str]:
+def wait_for_start(
+    bot_token: str, timeout_seconds: int = 180
+) -> Optional[str]:
     """Поллит getUpdates (long-polling, timeout прямо в запросе — не
     долбит API раз в секунду) в ожидании /start от пользователя, чтобы
     достать chat_id автоматически — замена ручному походу на

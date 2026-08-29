@@ -35,7 +35,9 @@ def habr_vacancy_to_job(html: str, vacancy_id: str) -> Job:
 
     title = soup.select_one(".vacancy-header__title .page-title__title")
     company = soup.select_one(".vacancy-company__title")
-    salary = soup.select_one(".vacancy-header__salary .predicted-salary__title")
+    salary = soup.select_one(
+        ".vacancy-header__salary .predicted-salary__title"
+    )
     description = soup.select_one(".vacancy-description__text")
 
     return Job(

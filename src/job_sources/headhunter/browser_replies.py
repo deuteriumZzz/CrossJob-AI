@@ -48,9 +48,7 @@ def fetch_new_employer_messages(driver) -> list[dict]:
         By.CSS_SELECTOR, '[data-qa*="negotiations-item"]'
     )
     for item in items:
-        links = item.find_elements(
-            By.CSS_SELECTOR, 'a[href*="/vacancy/"]'
-        )
+        links = item.find_elements(By.CSS_SELECTOR, 'a[href*="/vacancy/"]')
         if not links:
             continue
         href = links[0].get_attribute("href") or ""

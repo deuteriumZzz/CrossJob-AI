@@ -191,9 +191,7 @@ class _RadioOption:
 
 def _group_radio_options_by_name(driver) -> list[list]:
     groups: dict[str, list] = {}
-    for radio in driver.find_elements(
-        By.CSS_SELECTOR, 'input[type="radio"]'
-    ):
+    for radio in driver.find_elements(By.CSS_SELECTOR, 'input[type="radio"]'):
         if not radio.is_displayed():
             continue
         name = radio.get_attribute("name") or ""
@@ -216,9 +214,7 @@ def _label_text_for(driver, field) -> str:
         if labels:
             return labels[0].text.strip()
     try:
-        ancestor_labels = field.find_elements(
-            By.XPATH, "./ancestor::label[1]"
-        )
+        ancestor_labels = field.find_elements(By.XPATH, "./ancestor::label[1]")
         if ancestor_labels:
             return ancestor_labels[0].text.strip()
     except Exception:

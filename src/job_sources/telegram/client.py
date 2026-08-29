@@ -29,6 +29,7 @@ def _ensure_event_loop() -> None:
     except RuntimeError:
         asyncio.set_event_loop(asyncio.new_event_loop())
 
+
 # Один файл сессии (SQLite) не рассчитан на параллельный доступ сразу из
 # нескольких клиентов — а в вебui это реально происходит: демон может в
 # этот момент читать каналы, пока пользователь открывает статус
@@ -48,7 +49,7 @@ def normalize_channel(raw: str) -> str:
     value = raw.strip()
     for prefix in ("https://t.me/", "http://t.me/", "t.me/", "@"):
         if value.lower().startswith(prefix):
-            value = value[len(prefix):]
+            value = value[len(prefix) :]
             break
     return value.split("/")[0].strip()
 
@@ -79,7 +80,9 @@ class TelegramSourceClient:
     def send_message(self, contact: str, text: str) -> Message:
         return self._client.send_message(contact, text)
 
-    def send_file(self, contact: str, file_path: Path, caption: str = "") -> Message:
+    def send_file(
+        self, contact: str, file_path: Path, caption: str = ""
+    ) -> Message:
         return self._client.send_file(contact, str(file_path), caption=caption)
 
     def new_incoming_messages(

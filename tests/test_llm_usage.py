@@ -149,9 +149,7 @@ def test_usage_callback_records_provider_status_on_success_and_error():
         callback.on_llm_end(
             LLMResult(generations=[], llm_output={}), run_id=uuid.uuid4()
         )
-        callback.on_llm_error(
-            Exception("429 rate limit"), run_id=uuid.uuid4()
-        )
+        callback.on_llm_error(Exception("429 rate limit"), run_id=uuid.uuid4())
         snapshot = llm_usage.provider_status_snapshot(out)
         assert snapshot["groq"]["last_ok_model"] == "openai/gpt-oss-120b"
         assert snapshot["groq"]["last_error_kind"] == "rate_limit"

@@ -55,9 +55,7 @@ def test_list_withdrawable_selects_discard_status_by_default():
     driver = MagicMock()
     driver.find_elements.return_value = [discard_item, active_item]
 
-    with patch(
-        "src.job_sources.headhunter.browser_negotiations.time.sleep"
-    ):
+    with patch("src.job_sources.headhunter.browser_negotiations.time.sleep"):
         entries = list_withdrawable_negotiations(driver)
 
     assert len(entries) == 1
@@ -71,9 +69,7 @@ def test_list_withdrawable_selects_by_age_when_older_than_given():
     driver = MagicMock()
     driver.find_elements.return_value = [old_item, recent_item]
 
-    with patch(
-        "src.job_sources.headhunter.browser_negotiations.time.sleep"
-    ):
+    with patch("src.job_sources.headhunter.browser_negotiations.time.sleep"):
         entries = list_withdrawable_negotiations(driver, older_than_days=30)
 
     assert len(entries) == 1
@@ -92,9 +88,7 @@ def test_withdraw_negotiation_clicks_cancel_button():
     driver = MagicMock()
     driver.find_elements.return_value = []  # no confirm popup
 
-    with patch(
-        "src.job_sources.headhunter.browser_negotiations.time.sleep"
-    ):
+    with patch("src.job_sources.headhunter.browser_negotiations.time.sleep"):
         assert withdraw_negotiation(driver, entry) is True
     item._cancel_button.click.assert_called_once()
 
