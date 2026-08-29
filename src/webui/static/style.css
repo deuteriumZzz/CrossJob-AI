@@ -1342,6 +1342,27 @@ pre.logs {
   color: var(--warn);
 }
 
+.provider-sparkline {
+  display: flex;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.spark-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--border-soft);
+}
+
+.spark-dot.ok {
+  background: var(--ok);
+}
+
+.spark-dot.err {
+  background: var(--err);
+}
+
 /* ---------- Toggle switches (native checkbox, restyled) ---------- */
 
 input[type="checkbox"].switch {

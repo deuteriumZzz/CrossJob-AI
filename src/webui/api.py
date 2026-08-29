@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 import sys
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -129,6 +129,7 @@ class AppContext:
         self.applied_log = AppliedLog(self.output_folder / "applied_log.json")
         self.scheduler: Optional[Scheduler] = None
         self.scheduler_thread: Optional[threading.Thread] = None
+        self.daemon_started_at: Optional[str] = None
         self.run_now_thread: Optional[threading.Thread] = None
         self.run_now_sources: list[str] = []
         self.generate_thread: Optional[threading.Thread] = None
@@ -435,9 +436,12 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
         check["status"] = entry.get("status", "never_run")
         check["last_error"] = _classify_error(entry.get("last_error"))
 
+    daemon_running = (
+        ctx.scheduler_thread is not None and ctx.scheduler_thread.is_alive()
+    )
     return {
-        "daemon_running": ctx.scheduler_thread is not None
-        and ctx.scheduler_thread.is_alive(),
+        "daemon_running": daemon_running,
+        "daemon_started_at": ctx.daemon_started_at if daemon_running else None,
         "sources": sources,
         "chat_checks": chat_checks,
         "total_applied_today": ctx.applied_log.applied_today_count_all(),
@@ -1465,6 +1469,7 @@ def start_daemon(ctx: AppContext = Depends(get_ctx)) -> dict:
         target=ctx.scheduler.run_forever, daemon=True
     )
     ctx.scheduler_thread.start()
+    ctx.daemon_started_at = datetime.now(timezone.utc).isoformat()
     return {"running": True}
 
 
@@ -1476,6 +1481,7 @@ def stop_daemon(ctx: AppContext = Depends(get_ctx)) -> dict:
         ctx.scheduler_thread.join(timeout=5)
     ctx.scheduler = None
     ctx.scheduler_thread = None
+    ctx.daemon_started_at = None
     return {"running": False}
 
 

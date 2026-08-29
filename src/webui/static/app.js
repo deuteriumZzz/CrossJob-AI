@@ -282,6 +282,15 @@ function relativeTimeRu(iso) {
   return `${Math.round(mins / 60)} ч назад`;
 }
 
+function formatElapsed(iso) {
+  const mins = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
+  if (mins < 1) return "только что запущен";
+  if (mins < 60) return `${mins} мин`;
+  const hours = Math.floor(mins / 60);
+  const rest = mins % 60;
+  return rest ? `${hours} ч ${rest} мин` : `${hours} ч`;
+}
+
 function applyLLMProviderStatus(statusMap) {
   // Свежесть статуса — 15 минут: дальше "сейчас отвечает"/ошибка
   // считаются устаревшими и подсветка гаснет сама, без отдельного
@@ -315,6 +324,25 @@ function applyLLMProviderStatus(statusMap) {
         ? new Date(info.last_error_at).getTime()
         : 0;
       const showError = errAt > okAt && Date.now() - errAt < FRESH_MS;
+
+      const history = info?.history || [];
+      let spark = card.querySelector(".provider-sparkline");
+      if (history.length) {
+        if (!spark) {
+          spark = document.createElement("div");
+          spark.className = "provider-sparkline";
+          card.appendChild(spark);
+        }
+        spark.innerHTML = history
+          .slice(-10)
+          .map(
+            (h) =>
+              `<span class="spark-dot ${h.ok ? "ok" : "err"}" title="${fmtTime(h.at)}"></span>`
+          )
+          .join("");
+      } else if (spark) {
+        spark.remove();
+      }
 
       let note = card.querySelector(".provider-status-note");
       if (showError) {
@@ -412,9 +440,12 @@ const render = {
     lastOverviewSnapshot = snapshot;
 
     const badge = document.getElementById("daemon-badge");
-    badge.innerHTML = `<span class="badge-dot"></span>${
-      status.daemon_running ? "демон работает" : "демон остановлен"
-    }`;
+    const runningLabel = status.daemon_started_at
+      ? `демон работает · ${formatElapsed(status.daemon_started_at)}`
+      : "демон работает";
+    badge.innerHTML = `<span class="badge-dot"></span><span class="btn-label">${
+      status.daemon_running ? runningLabel : "демон остановлен"
+    }</span>`;
     badge.classList.toggle("on", status.daemon_running);
     badge.classList.toggle("off", !status.daemon_running);
     document.getElementById("daemon-start").disabled = status.daemon_running;

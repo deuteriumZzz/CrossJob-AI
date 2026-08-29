@@ -260,6 +260,12 @@ def record_provider_status(
             entry["last_error_kind"] = (
                 _classify_error(error) if error else "error"
             )
+        # Последние 20 звонков этого провайдера — для мини-спарклайна
+        # на дашборде, не для аналитики: тот же JSON, что уже пишется
+        # на каждый вызов, без отдельного файла.
+        history = entry.setdefault("history", [])
+        history.append({"ok": ok, "at": now})
+        entry["history"] = history[-20:]
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data), encoding="utf-8")
 
