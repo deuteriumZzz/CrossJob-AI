@@ -149,12 +149,16 @@ async function refreshTelegramConnectStatus() {
 }
 
 function switchTab(name) {
+  const prevName = document.querySelector("nav.tabs button.active")?.dataset.tab;
   document
     .querySelectorAll("nav.tabs button")
     .forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document
     .querySelectorAll("main .view")
     .forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
+  if (prevName && prevName !== name) {
+    directionalReveal(document.getElementById(`view-${name}`), prevName, name);
+  }
   // URL отражает текущую вкладку — иначе обновление страницы (F5) всегда
   // сбрасывает на "Обзор", даже если человек читал длинный тред в Telegram
   // или таблицу в Истории. replaceState, а не location.hash — не плодит
@@ -174,6 +178,7 @@ let lastHistorySnapshot = null;
 let lastHistoryEntries = [];
 let repliesLoaded = false;
 let lastRepliesSnapshot = null;
+let lastRepliesCount = 0;
 let logsLoaded = false;
 let lastLogsSnapshot = null;
 let llmCatalog = { models: {}, api_key_previews: {}, provider_base_urls: {} };
@@ -453,6 +458,9 @@ const render = {
 
     if (!unchanged) {
       const statsRow = document.getElementById("stats-row");
+      statsRow.classList.remove("content-fade-in");
+      void statsRow.offsetWidth;
+      statsRow.classList.add("content-fade-in");
       statsRow.innerHTML = `
         <div class="stat-card"><div class="value" data-target="${stats.day}">0</div><div class="label">Сегодня</div></div>
         <div class="stat-card"><div class="value" data-target="${stats.week}">0</div><div class="label">За неделю</div></div>
@@ -601,8 +609,8 @@ const render = {
       <tr class="reveal" style="transition-delay:${staggerDelay(i, 25)}">
         <td>${fmtTime(e.applied_at)}</td>
         <td>${sourceLabel(e.source)}</td>
-        <td>${e.company}</td>
-        <td><a href="${e.link}" target="_blank" rel="noopener">${e.title}</a></td>
+        <td>${escapeHtml(e.company)}</td>
+        <td><a href="${escapeHtml(e.link)}" target="_blank" rel="noopener">${escapeHtml(e.title)}</a></td>
         <td>${statusLabel(e.status)}</td>
         <td>${e.score ?? ""}</td>
       </tr>`
@@ -617,6 +625,14 @@ const render = {
     if (!repliesLoaded) tbody.innerHTML = skeletonRows(3, 4);
 
     const entries = await api("/api/replies");
+    // Конфетти — только на реально новый ответ, появившийся после
+    // первой загрузки за сессию, не на каждое открытие вкладки с уже
+    // существующими данными.
+    if (repliesLoaded && entries.length > lastRepliesCount) {
+      fireConfetti();
+      showToast("Новый ответ от работодателя!", "success");
+    }
+    lastRepliesCount = entries.length;
     repliesLoaded = true;
 
     const repliesSnapshot = JSON.stringify(entries);
@@ -633,8 +649,8 @@ const render = {
       <tr class="reveal" style="transition-delay:${staggerDelay(i, 25)}">
         <td>${fmtTime(e.applied_at)}</td>
         <td>${sourceLabel(e.source)}</td>
-        <td><a href="${e.link}" target="_blank" rel="noopener">${e.company} — ${e.title}</a></td>
-        <td>${e.last_known_state}</td>
+        <td><a href="${escapeHtml(e.link)}" target="_blank" rel="noopener">${escapeHtml(e.company)} — ${escapeHtml(e.title)}</a></td>
+        <td>${escapeHtml(e.last_known_state)}</td>
       </tr>`
       )
       .join("");
@@ -643,22 +659,25 @@ const render = {
 
   async analytics() {
     renderActivityHeatmap();
+    const gapsEl = document.getElementById("gaps-list");
+    const candidatesEl = document.getElementById("blacklist-candidates");
+    gapsEl.innerHTML = Array.from({ length: 3 }, () => `<li><div class="skeleton" style="height:14px"></div></li>`).join("");
+    candidatesEl.innerHTML = Array.from({ length: 2 }, () => `<div class="skeleton" style="height:20px;margin-bottom:6px"></div>`).join("");
+
     const [gaps, candidates] = await Promise.all([
       api("/api/analytics/gaps"),
       api("/api/analytics/blacklist-candidates"),
     ]);
 
-    const gapsEl = document.getElementById("gaps-list");
     gapsEl.innerHTML = gaps.length
       ? gaps
           .map(
             ([gap, count], i) =>
-              `<li class="stagger-item" style="animation-delay:${staggerDelay(i)}">${gap} — ${count}</li>`
+              `<li class="stagger-item" style="animation-delay:${staggerDelay(i)}">${escapeHtml(gap)} — ${count}</li>`
           )
           .join("")
       : `<li>${emptyStateHtml("Пока нет данных.")}</li>`;
 
-    const candidatesEl = document.getElementById("blacklist-candidates");
     if (!candidates.length) {
       candidatesEl.innerHTML = emptyStateHtml("Нет кандидатов на чёрный список.");
       return;
@@ -667,9 +686,9 @@ const render = {
       .map(
         (c, i) => `
       <div class="candidate-row stagger-item" style="animation-delay:${staggerDelay(i)}">
-        <input type="checkbox" value="${c}" class="blacklist-check" />
-        <span>${c}</span>
-        <button class="btn btn-secondary btn-small block-hh-employer" data-company="${c}" title="Заблокировать работодателя на hh.ru (серверный бан, только для HeadHunter)">🔒 hh.ru</button>
+        <input type="checkbox" value="${escapeHtml(c)}" class="blacklist-check" />
+        <span>${escapeHtml(c)}</span>
+        <button class="btn btn-secondary btn-small block-hh-employer" data-company="${escapeHtml(c)}" title="Заблокировать работодателя на hh.ru (серверный бан, только для HeadHunter)">🔒 hh.ru</button>
       </div>`
       )
       .join("");
@@ -1111,7 +1130,7 @@ async function startGenerate(kind) {
   const styleName = document.getElementById("gen-style").value || null;
   const jobUrl = document.getElementById("gen-job-url").value.trim() || null;
   if (kind !== "resume" && !jobUrl) {
-    alert("Укажите ссылку на вакансию.");
+    showToast("Укажите ссылку на вакансию.", "error");
     return;
   }
   downloadEl.style.display = "none";
@@ -1176,11 +1195,14 @@ function updateProviderVisibility() {
   }
 }
 
+// Тот же концентрический мотив, что в лого (brand-mark) — приглушённый
+// и без ядра, чтобы empty-state читался как "эхо" бренда, а не
+// дженерик-иконка пустой коробки, как раньше.
 function emptyStateHtml(message) {
   return `<div class="empty-state">
-    <svg viewBox="0 0 48 48" fill="none" width="36" height="36">
-      <rect x="6" y="14" width="36" height="26" rx="4" stroke="currentColor" stroke-width="1.5" opacity="0.35"/>
-      <path d="M6 24h10l3 5h10l3-5h10" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" opacity="0.5"/>
+    <svg viewBox="0 0 40 40" fill="none" width="36" height="36">
+      <circle cx="20" cy="20" r="17" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 4" opacity="0.3"/>
+      <circle cx="20" cy="20" r="10" stroke="currentColor" stroke-width="1.6" opacity="0.35"/>
     </svg>
     <p>${escapeHtml(message)}</p>
   </div>`;
@@ -1268,6 +1290,8 @@ function initSettingsDirtyTracking() {
     const isSaveBtn = btn.id.includes("save") || btn.classList.contains("s-save");
     if (!isSaveBtn) return;
     const pane = btn.closest(".settings-pane");
+    btn.classList.add("is-loading");
+    setTimeout(() => btn.classList.remove("is-loading"), 350);
     flashSaved(pane, btn);
     // Клик снимает "не сохранено" сразу — отзывчивее, чем ждать ответ
     // сервера. Но если рядом всё же выскочило "Ошибка: …", честно
@@ -1466,6 +1490,135 @@ function initKeyboardShortcuts() {
   });
 }
 
+// ---------- Cursor-spotlight + magnetic primary buttons ----------
+// Один делегированный слушатель на весь документ вместо одного на
+// карточку — дешевле при десятках карточек на Обзоре.
+function initPointerEffects() {
+  if (REDUCE_MOTION) return;
+  document.addEventListener("mousemove", (e) => {
+    const card = e.target.closest(".source-card, .provider-card");
+    if (card) {
+      const rect = card.getBoundingClientRect();
+      card.style.setProperty("--spot-x", `${e.clientX - rect.left}px`);
+      card.style.setProperty("--spot-y", `${e.clientY - rect.top}px`);
+    }
+    const btn = e.target.closest(".btn-primary:not(:disabled)");
+    document.querySelectorAll(".btn-primary.is-magnetic").forEach((el) => {
+      if (el !== btn) {
+        el.style.transform = "";
+        el.classList.remove("is-magnetic");
+      }
+    });
+    if (btn) {
+      btn.classList.add("is-magnetic");
+      const rect = btn.getBoundingClientRect();
+      const dx = (e.clientX - (rect.left + rect.width / 2)) * 0.15;
+      const dy = (e.clientY - (rect.top + rect.height / 2)) * 0.25;
+      btn.style.transform = `translate(${dx}px, ${dy}px)`;
+    }
+  });
+}
+
+// ---------- Directional переходы между вкладками ----------
+
+const NAV_ORDER = ["overview", "history", "replies", "telegram", "analytics", "settings", "logs"];
+
+function directionalReveal(viewEl, fromName, toName) {
+  if (REDUCE_MOTION || !viewEl) return;
+  const fromIdx = NAV_ORDER.indexOf(fromName);
+  const toIdx = NAV_ORDER.indexOf(toName);
+  if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return;
+  const cls = toIdx > fromIdx ? "slide-right" : "slide-left";
+  viewEl.classList.remove("slide-right", "slide-left");
+  void viewEl.offsetWidth;
+  viewEl.classList.add(cls);
+}
+
+// ---------- Спиннер загрузки на кнопке во время async-действия ----------
+
+async function withButtonLoading(btn, fn) {
+  if (!btn) return fn();
+  btn.classList.add("is-loading");
+  try {
+    return await fn();
+  } finally {
+    btn.classList.remove("is-loading");
+  }
+}
+
+// ---------- Confetti на реальное достижение (первый ответ работодателя) ----------
+
+function fireConfetti() {
+  if (REDUCE_MOTION) return;
+  const colors = ["#7ab8ff", "#6fdc8c", "#e0c05a", "#e08787"];
+  for (let i = 0; i < 24; i++) {
+    const piece = document.createElement("div");
+    piece.className = "confetti-piece";
+    piece.style.left = `${Math.random() * 100}vw`;
+    piece.style.background = colors[i % colors.length];
+    piece.style.animationDuration = `${1.4 + Math.random() * 1.2}s`;
+    piece.style.animationDelay = `${Math.random() * 0.3}s`;
+    document.body.appendChild(piece);
+    piece.addEventListener("animationend", () => piece.remove());
+  }
+}
+
+// ---------- Онбординг-тур (только при первом запуске) ----------
+
+const TOUR_STEPS = [
+  { tab: "overview", text: "«Обзор» — статус всех площадок и дневная статистика откликов сразу на входе." },
+  { tab: "history", text: "«История» — что уже отправлено, с фильтрами и таймлайном." },
+  { tab: "telegram", text: "«Telegram» — поиск по каналам вакансий и переписка с контактами." },
+  { tab: "settings", text: "«Настройки» — расписание, LLM-провайдер, лимиты откликов и всё остальное по вкладкам." },
+];
+
+function initOnboardingTour() {
+  if (localStorage.getItem("cj-seen-tour") === "1") return;
+  let step = 0;
+  const overlay = document.createElement("div");
+  overlay.className = "tour-overlay";
+  const highlight = document.createElement("div");
+  highlight.className = "tour-highlight";
+  const tooltip = document.createElement("div");
+  tooltip.className = "tour-tooltip";
+  overlay.append(highlight, tooltip);
+
+  function renderStep() {
+    const { tab, text } = TOUR_STEPS[step];
+    const btn = document.querySelector(`nav.tabs button[data-tab="${tab}"]`);
+    if (!btn) return finish();
+    const rect = btn.getBoundingClientRect();
+    Object.assign(highlight.style, {
+      top: `${rect.top - 4}px`,
+      left: `${rect.left - 4}px`,
+      width: `${rect.width + 8}px`,
+      height: `${rect.height + 8}px`,
+    });
+    const isLast = step === TOUR_STEPS.length - 1;
+    tooltip.innerHTML = `
+      <p>${escapeHtml(text)}</p>
+      <div class="tour-actions">
+        <span class="tour-step">${step + 1} / ${TOUR_STEPS.length}</span>
+        <button type="button" class="btn btn-primary btn-small" id="tour-next">${isLast ? "Готово" : "Дальше"}</button>
+      </div>`;
+    tooltip.style.top = `${Math.min(rect.top, window.innerHeight - 160)}px`;
+    tooltip.style.left = `${Math.min(rect.right + 16, window.innerWidth - 280)}px`;
+    document.getElementById("tour-next").addEventListener("click", () => {
+      step += 1;
+      if (step >= TOUR_STEPS.length) finish();
+      else renderStep();
+    });
+  }
+
+  function finish() {
+    localStorage.setItem("cj-seen-tour", "1");
+    overlay.remove();
+  }
+
+  document.body.appendChild(overlay);
+  renderStep();
+}
+
 function renderHistoryTimeline(reversedEntries) {
   const el = document.getElementById("history-timeline");
   if (!reversedEntries.length) return;
@@ -1474,7 +1627,7 @@ function renderHistoryTimeline(reversedEntries) {
       (e, i) => `
     <div class="timeline-item reveal" style="transition-delay:${staggerDelay(i, 20)}">
       <div class="timeline-date">${fmtTime(e.applied_at)}</div>
-      <div class="timeline-title"><a href="${e.link}" target="_blank" rel="noopener">${e.company} — ${e.title}</a></div>
+      <div class="timeline-title"><a href="${escapeHtml(e.link)}" target="_blank" rel="noopener">${escapeHtml(e.company)} — ${escapeHtml(e.title)}</a></div>
       <div class="timeline-meta">${sourceLabel(e.source)} · ${statusLabel(e.status)}${e.score != null ? ` · балл ${e.score}` : ""}</div>
     </div>`
     )
@@ -1534,7 +1687,7 @@ function copyToClipboard(text, btn) {
   navigator.clipboard.writeText(text).then(() => {
     btn.classList.add("copied");
     const original = btn.innerHTML;
-    btn.innerHTML = `<svg viewBox="0 0 20 20" fill="none"><path d="m4 10.5 4 4 8-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    btn.innerHTML = `<svg viewBox="0 0 20 20" fill="none"><path d="m4 10.5 4 4 8-9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     setTimeout(() => {
       btn.classList.remove("copied");
       btn.innerHTML = original;
@@ -1542,7 +1695,7 @@ function copyToClipboard(text, btn) {
   });
 }
 
-const COPY_ICON_SVG = `<svg viewBox="0 0 20 20" fill="none"><rect x="7" y="7" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M4.5 13V4.5a1 1 0 0 1 1-1H13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+const COPY_ICON_SVG = `<svg viewBox="0 0 20 20" fill="none"><rect x="7" y="7" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M4.5 13V4.5a1 1 0 0 1 1-1H13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`;
 
 // ---------- Drag-to-reorder карточек площадок ----------
 
@@ -1605,6 +1758,10 @@ const CHANGELOG_ITEMS = [
 
 function initChangelogPopover() {
   if (localStorage.getItem("cj-seen-changelog") === CHANGELOG_VERSION) return;
+  // Не показываем поверх онбординг-тура на самом первом запуске —
+  // одновременно два оверлея это перегруз, а не "круто". Чейнджлог
+  // подождёт следующего открытия, когда тур уже пройден.
+  if (localStorage.getItem("cj-seen-tour") !== "1") return;
   const el = document.createElement("div");
   el.className = "changelog-popover";
   el.innerHTML = `
@@ -1652,6 +1809,8 @@ function initDashboard() {
   initDragReorder("source-grid");
   initDragReorder("chat-checks-grid");
   initChangelogPopover();
+  initPointerEffects();
+  initOnboardingTour();
 
   function handleSourceCardActionClick(e) {
     const historyBtn = e.target.closest(".src-goto-history");
@@ -1761,13 +1920,13 @@ function initDashboard() {
     }
   });
 
-  document.getElementById("daemon-start").addEventListener("click", async () => {
-    await api("/api/daemon/start", { method: "POST" });
+  document.getElementById("daemon-start").addEventListener("click", async (ev) => {
+    await withButtonLoading(ev.currentTarget, () => api("/api/daemon/start", { method: "POST" }));
     showToast("Демон запущен", "success");
     render.overview();
   });
-  document.getElementById("daemon-stop").addEventListener("click", async () => {
-    await api("/api/daemon/stop", { method: "POST" });
+  document.getElementById("daemon-stop").addEventListener("click", async (ev) => {
+    await withButtonLoading(ev.currentTarget, () => api("/api/daemon/stop", { method: "POST" }));
     showToast("Демон остановлен", "info");
     render.overview();
   });

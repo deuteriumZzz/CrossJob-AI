@@ -36,8 +36,8 @@
   --muted-2: #8a8f9e;
   --accent: #2f6fd6;
   --accent-dim: #5c8fdd;
-  --ok: #1c9a4b;
-  --warn: #a6790a;
+  --ok: #157a3c;
+  --warn: #8a6208;
   --err: #cc3f3f;
   --shadow: 0 1px 2px rgba(20, 24, 40, 0.05), 0 8px 24px -14px rgba(20, 24, 40, 0.15);
 }
@@ -494,8 +494,15 @@ nav.tabs button.active {
 main {
   flex: 1;
   padding: 28px 34px 60px;
-  max-width: 1180px;
+  max-width: 1400px;
   min-width: 0;
+}
+
+/* Таблицы и сетки карточек — данные, им нужна вся доступная ширина.
+   Формы/текстовые панели — читаемая колонка, а не растянутая на весь
+   широкий монитор строка. */
+.panel {
+  max-width: 720px;
 }
 
 .view {
@@ -916,8 +923,7 @@ td a:hover {
 }
 
 .filters input,
-.filters select,
-.settings-table select {
+select {
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--border);
@@ -932,9 +938,29 @@ td a:hover {
 }
 
 .filters input:focus,
-.filters select:focus {
+select:focus {
   outline: none;
   border-color: var(--accent-dim);
+}
+
+/* Нативная стрелка select'а не подстраивается под тему и на разных
+   ОС выглядит по-разному — рисуем свою, а системную прячем.
+   Явно перечисляем все контексты: .limit-field/.filters/.settings-table
+   select уже задают background/padding через shorthand, который иначе
+   тихо стирает background-image ниже по каскаду. */
+select,
+.filters select,
+.settings-table select,
+.limit-field select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  cursor: pointer;
+  padding-right: 30px !important;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'><path d='M5.5 8L10 12.5L14.5 8' stroke='%238b93a1' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>") !important;
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 14px;
 }
 
 .settings-table input[type="number"] {
@@ -2020,4 +2046,218 @@ kbd {
 .changelog-popover .btn {
   width: 100%;
   justify-content: center;
+}
+
+/* ---------- LLM provider brand-color accents ----------
+   Значки — не настоящие логотипы (свои геометрические формы), но
+   фирменный цвет хотя бы даёт зацепку для глаза вместо одинаковых
+   серых плиток. */
+
+.provider-card[data-provider="openai"] { --brand: #74aa9c; }
+.provider-card[data-provider="groq"] { --brand: #f55036; }
+.provider-card[data-provider="gemini"] { --brand: #4285f4; }
+.provider-card[data-provider="deepseek"] { --brand: #4d6bfe; }
+.provider-card[data-provider="nvidia"] { --brand: #76b900; }
+.provider-card[data-provider="openrouter"] { --brand: #8b8ff0; }
+.provider-card[data-provider="mistral"] { --brand: #fa5209; }
+.provider-card[data-provider="cohere"] { --brand: #39594d; }
+.provider-card[data-provider="huggingface"] { --brand: #ffcc4d; }
+.provider-card[data-provider="ollama_cloud"],
+.provider-card[data-provider="ollama"] { --brand: #6e6e6e; }
+.provider-card[data-provider="llm7"] { --brand: #d946ef; }
+.provider-card[data-provider="cloudflare"] { --brand: #f6821f; }
+.provider-card[data-provider="vercel"] { --brand: #999999; }
+
+.provider-card svg {
+  color: var(--brand, currentColor);
+}
+
+.provider-card.active {
+  border-color: var(--brand, var(--accent));
+}
+
+/* ---------- Button loading state ---------- */
+
+.btn.is-loading {
+  position: relative;
+  color: transparent !important;
+  pointer-events: none;
+}
+
+.btn.is-loading svg,
+.btn.is-loading .btn-label {
+  visibility: hidden;
+}
+
+.btn.is-loading::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  color: var(--text);
+  animation: btn-spin 0.6s linear infinite;
+}
+
+.btn-primary.is-loading::after {
+  color: #0b1520;
+}
+
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- Cursor-spotlight on cards ---------- */
+
+.source-card,
+.provider-card {
+  --spot-x: 50%;
+  --spot-y: 50%;
+}
+
+.source-card::before,
+.provider-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    240px circle at var(--spot-x) var(--spot-y),
+    rgba(122, 184, 255, 0.08),
+    transparent 70%
+  );
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
+}
+
+.source-card:hover::before,
+.provider-card:hover::before {
+  opacity: 1;
+}
+
+/* ---------- Magnetic primary buttons ---------- */
+
+.btn-primary {
+  transition: border-color 0.15s var(--ease-out), background 0.15s var(--ease-out),
+    transform 0.15s var(--ease-out);
+}
+
+/* ---------- Skeleton → content crossfade ---------- */
+
+.content-fade-in {
+  animation: content-fade-in 0.25s var(--ease-out);
+}
+
+@keyframes content-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ---------- Directional tab transitions ---------- */
+
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.view.slide-right {
+  animation: slide-in-right 0.22s var(--ease-out);
+}
+
+.view.slide-left {
+  animation: slide-in-left 0.22s var(--ease-out);
+}
+
+/* ---------- Confetti ---------- */
+
+.confetti-piece {
+  position: fixed;
+  top: -10px;
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 1500;
+  animation: confetti-fall linear forwards;
+}
+
+@keyframes confetti-fall {
+  to {
+    transform: translateY(105vh) rotate(540deg);
+    opacity: 0.4;
+  }
+}
+
+/* ---------- Onboarding tour ---------- */
+
+.tour-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1800;
+  pointer-events: none;
+}
+
+.tour-highlight {
+  position: fixed;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 4px rgba(122, 184, 255, 0.35), 0 0 0 2000px rgba(5, 6, 9, 0.55);
+  transition: top 0.3s var(--ease-out), left 0.3s var(--ease-out),
+    width 0.3s var(--ease-out), height 0.3s var(--ease-out);
+  pointer-events: none;
+}
+
+.tour-tooltip {
+  position: fixed;
+  width: 260px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  box-shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.5);
+  padding: 14px 16px;
+  pointer-events: auto;
+  transition: top 0.3s var(--ease-out), left 0.3s var(--ease-out);
+}
+
+.tour-tooltip p {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.tour-tooltip .tour-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tour-tooltip .tour-step {
+  font-size: 11.5px;
+  color: var(--muted-2);
 }
