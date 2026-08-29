@@ -1,3 +1,13 @@
+// Применяем сохранённую тему сразу при загрузке скрипта (до
+// DOMContentLoaded) — иначе будет видна вспышка тёмной темы перед
+// переключением на светлую.
+(function initTheme() {
+  const saved = localStorage.getItem("cj-theme");
+  if (saved === "light" || saved === "dark") {
+    document.documentElement.dataset.theme = saved;
+  }
+})();
+
 const SOURCE_LABELS = {
   headhunter: "HeadHunter",
   superjob: "SuperJob",
@@ -215,6 +225,7 @@ function applyLLMSelection(provider, currentModel) {
         Boolean(llmCatalog.api_key_previews[card.dataset.provider])
       );
     });
+  updateProviderVisibility();
 
   const modelSelect = document.getElementById("llm-model");
   const models = llmCatalog.models[provider] || [];
@@ -334,13 +345,15 @@ function renderTotalBudget(status, totalLimit) {
   const usedClass =
     usedRatio >= 1 ? "full" : usedRatio >= 0.7 ? "warn" : "";
   const overBudget = sumPerPlatform > totalLimit;
+  const distributionLine = `Распределено по площадкам (сумма лимитов в таблице ниже): ${sumPerPlatform} / ${totalLimit}`;
   el.innerHTML = `
     <p class="muted small">Сегодня отправлено: ${appliedToday} / ${totalLimit} (общий лимит)</p>
     <div class="limit-bar"><div class="limit-bar-fill ${usedClass}" style="width:${Math.round(usedRatio * 100)}%"></div></div>
-    <p class="muted small" style="margin-top:8px${overBudget ? ";color:var(--err)" : ""}">
-      ${overBudget ? "⚠️ " : ""}Распределено по площадкам (сумма лимитов в таблице ниже): ${sumPerPlatform} / ${totalLimit}
-      ${overBudget ? " — превышает общий лимит, снизьте лимиты отдельных площадок." : ""}
-    </p>
+    ${
+      overBudget
+        ? `<div class="risk-banner" style="margin-top:10px;margin-bottom:0">⚠️ ${distributionLine} — превышает общий лимит, снизьте лимиты отдельных площадок.</div>`
+        : `<p class="muted small" style="margin-top:8px">${distributionLine}</p>`
+    }
   `;
 }
 
@@ -1043,9 +1056,87 @@ async function startGenerate(kind) {
   pollGenerateStatus();
 }
 
+function switchSettingsTab(paneId) {
+  document
+    .querySelectorAll("#settings-jump button")
+    .forEach((b) => b.classList.toggle("active", b.dataset.settingsTab === paneId));
+  document.querySelectorAll(".settings-pane").forEach((pane) => {
+    const isTarget = pane.id === paneId;
+    pane.classList.toggle("active", isTarget);
+    if (isTarget && window.gsap && !REDUCE_MOTION) {
+      gsap.fromTo(
+        pane,
+        { opacity: 0, y: 6 },
+        { opacity: 1, y: 0, duration: 0.28, ease: "power2.out" }
+      );
+    }
+  });
+}
+
+// Провайдеров стало 14 — большинство пользователей смотрят только на
+// активный + уже настроенные с ключом, остальные шумят на экране.
+// Сворачиваем неактивные/без ключа за кнопку "Показать все", если
+// пользователь сам не развернул список.
+function updateProviderVisibility() {
+  const grid = document.getElementById("provider-grid");
+  const toggle = document.getElementById("provider-grid-toggle");
+  if (!grid || !toggle) return;
+  let hiddenCount = 0;
+  grid.querySelectorAll(".provider-card").forEach((card) => {
+    const keep = card.classList.contains("active") || card.classList.contains("has-key");
+    card.classList.toggle("provider-hideable", !keep);
+    if (!keep) hiddenCount += 1;
+  });
+  if (hiddenCount === 0) {
+    toggle.style.display = "none";
+    grid.classList.remove("collapsed");
+    return;
+  }
+  toggle.style.display = "";
+  if (toggle.dataset.expanded !== "1") {
+    toggle.textContent = `Показать все провайдеры (+${hiddenCount})`;
+  }
+}
+
 function initDashboard() {
   document.querySelectorAll("nav.tabs button").forEach((b) => {
     b.addEventListener("click", () => switchTab(b.dataset.tab));
+  });
+
+  document.getElementById("theme-toggle").addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem("cj-theme", next);
+  });
+
+  document.querySelectorAll("#settings-jump button").forEach((b) => {
+    b.addEventListener("click", () => switchSettingsTab(b.dataset.settingsTab));
+  });
+
+  const providerToggle = document.getElementById("provider-grid-toggle");
+  const providerGrid = document.getElementById("provider-grid");
+  providerGrid.classList.add("collapsed");
+  providerToggle.addEventListener("click", () => {
+    const expanded = providerToggle.dataset.expanded === "1";
+    providerToggle.dataset.expanded = expanded ? "" : "1";
+    if (expanded) {
+      providerGrid.classList.add("collapsed");
+      updateProviderVisibility();
+      return;
+    }
+    providerToggle.textContent = "Свернуть";
+    const hidden = providerGrid.querySelectorAll(".provider-hideable");
+    providerGrid.classList.remove("collapsed");
+    if (window.gsap && !REDUCE_MOTION) {
+      gsap.from(hidden, {
+        opacity: 0,
+        y: -6,
+        scale: 0.96,
+        duration: 0.3,
+        stagger: 0.03,
+        ease: "power2.out",
+      });
+    }
   });
 
   refreshTelegramConnectStatus();

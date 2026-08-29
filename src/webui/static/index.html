@@ -10,7 +10,7 @@
   href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&display=swap"
   rel="stylesheet"
 />
-<link rel="stylesheet" href="/style.css" />
+<link rel="stylesheet" href="/style.css?v=3" />
 </head>
 <body>
 <div id="setup-screen" class="setup-screen" style="display:none">
@@ -48,6 +48,10 @@
         <div class="brand-name">CrossJob<span>-AI</span></div>
         <div class="brand-sub">панель управления</div>
       </div>
+      <button id="theme-toggle" class="theme-toggle" title="Переключить тему" aria-label="Переключить тему">
+        <svg class="theme-icon-sun" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="4" stroke="currentColor" stroke-width="1.6"/><path d="M10 1.8v2M10 16.2v2M18.2 10h-2M3.8 10h-2M15.6 4.4l-1.4 1.4M5.8 14.2l-1.4 1.4M15.6 15.6l-1.4-1.4M5.8 5.8 4.4 4.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <svg class="theme-icon-moon" viewBox="0 0 20 20" fill="none"><path d="M17 11.5A7.5 7.5 0 0 1 8.5 3 7.5 7.5 0 1 0 17 11.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+      </button>
     </div>
 
     <nav class="tabs">
@@ -313,19 +317,19 @@
           <p class="muted">Расписание, автоотклик и уведомления</p>
         </div>
       </div>
-      <nav class="settings-jump">
-        <a href="#settings-search">Поиск</a>
-        <a href="#settings-llm">Провайдер LLM</a>
-        <a href="#settings-limits">Лимиты откликов</a>
-        <a href="#settings-notifications">Уведомления</a>
-        <a href="#settings-autostart">Автозапуск</a>
-        <a href="#settings-resume">Резюме и письмо</a>
-        <a href="#settings-usage">Расходы на LLM</a>
-        <a href="#settings-table">Площадки</a>
-        <a href="#settings-hh-resume">Резюме на hh.ru</a>
+      <nav class="settings-jump" id="settings-jump">
+        <button type="button" class="active" data-settings-tab="settings-search">Поиск</button>
+        <button type="button" data-settings-tab="settings-llm">Провайдер LLM</button>
+        <button type="button" data-settings-tab="settings-limits">Лимиты откликов</button>
+        <button type="button" data-settings-tab="settings-notifications">Уведомления</button>
+        <button type="button" data-settings-tab="settings-autostart">Автозапуск</button>
+        <button type="button" data-settings-tab="settings-resume">Резюме и письмо</button>
+        <button type="button" data-settings-tab="settings-usage">Расходы на LLM</button>
+        <button type="button" data-settings-tab="settings-table">Площадки</button>
+        <button type="button" data-settings-tab="settings-hh-resume">Резюме на hh.ru</button>
       </nav>
 
-      <div class="panel" id="settings-search">
+      <div class="panel settings-pane active" id="settings-search">
         <h3>Поиск</h3>
         <p class="muted small">Должности (ключевые слова поиска, они же — ключевые слова для Telegram-каналов) и локации — без правки work_preferences.yaml вручную. Настройки самого Telegram (каналы, автосообщения, диалоги) — на вкладке «Telegram» слева.</p>
         <div class="limits-grid">
@@ -362,7 +366,7 @@
         </div>
       </div>
 
-      <div class="panel" id="settings-llm">
+      <div class="panel settings-pane" id="settings-llm">
         <h3>Провайдер LLM</h3>
         <p class="muted small">Переключение применяется сразу, без перезапуска — для всех вызовов LLM (оценка вакансий, письма, резюме).</p>
         <div class="provider-grid" id="provider-grid">
@@ -423,6 +427,7 @@
             <span>Ollama</span>
           </button>
         </div>
+        <button type="button" id="provider-grid-toggle" class="btn btn-ghost btn-small" style="margin:-6px 0 16px">Показать все провайдеры</button>
         <div class="limits-grid">
           <label class="limit-field">
             <span>Модель</span>
@@ -477,7 +482,7 @@
         </div>
       </div>
 
-      <div class="panel" id="settings-limits">
+      <div class="panel settings-pane" id="settings-limits">
         <h3>Лимиты откликов</h3>
         <div class="risk-banner">
           ⚠️ Официальных цифр лимитов не публикует ни одна площадка — заданные здесь значения только уменьшают риск, но не гарантируют, что бота не заметят. Чем выше лимиты и чем ближе они к количеству найденных вакансий, тем больше активность похожа на бота. Повышайте постепенно, начните с малого. LinkedIn блокирует автоматизацию агрессивнее остальных — держите его лимит ниже.
@@ -520,7 +525,7 @@
         </div>
       </div>
 
-      <div class="panel" id="settings-notifications">
+      <div class="panel settings-pane" id="settings-notifications">
         <h3>Уведомления (Telegram-бот)</h3>
         <p class="muted small">
           Отдельный бот только для уведомлений вам — не путать с вкладкой "Telegram" слева
@@ -553,7 +558,7 @@
         </div>
       </div>
 
-      <div class="panel" id="settings-autostart">
+      <div class="panel settings-pane" id="settings-autostart">
         <h3>Автозапуск</h3>
         <p class="muted small">
           Запускать приложение (и демон внутри него) автоматически при входе в систему —
@@ -569,7 +574,7 @@
         <p class="muted small" id="autostart-status"></p>
       </div>
 
-      <div class="panel" id="settings-resume">
+      <div class="panel settings-pane" id="settings-resume">
         <h3>Резюме и сопроводительное письмо</h3>
         <p class="muted small">Рендерится через Selenium (то же, что в консольном меню) — может занять до минуты.</p>
         <div class="filters">
@@ -590,7 +595,7 @@
           <span id="refresh-plain-text-status" class="muted small"></span>
         </div>
       </div>
-      <div class="panel" id="settings-usage">
+      <div class="panel settings-pane" id="settings-usage">
         <h3>Расходы на LLM</h3>
         <div id="llm-exhausted-banner" class="risk-banner" style="display:none">
           ⚠️ Похоже, все настроенные LLM-провайдеры сегодня недоступны (несколько ошибок подряд, ни одного успешного вызова) — вероятно, исчерпаны бесплатные лимиты. Вакансии пока оцениваются с fallback, без реальной LLM-проверки. Добавьте платный ключ или подождите до завтра (лимиты бесплатных провайдеров обычно сбрасываются раз в сутки).
@@ -607,7 +612,7 @@
         </div>
       </div>
 
-      <div class="table-wrap" id="settings-table">
+      <div class="table-wrap settings-pane" id="settings-table">
         <table class="settings-table">
           <thead>
             <tr><th>Площадка</th><th>Готовность</th><th>В расписании</th><th>Интервал, ч</th><th title="auto_apply — реально откликаться, не только показывать">Автоотклик</th><th title="auto_reply — только HeadHunter, автоответ в чате">Автоответ в чате</th><th title="auto_bump_resume — только HeadHunter, бамп резюме">Бамп резюме</th><th>Resume ID</th><th>Откликов за прогон</th><th>Дневной лимит</th><th></th><th title="Свои должности/локации/зарплата для этой площадки">Фильтры</th></tr>
@@ -616,14 +621,14 @@
         </table>
       </div>
 
-      <div class="panel" id="settings-hh-resume">
+      <div class="panel settings-pane" id="settings-hh-resume">
         <h3>Резюме на hh.ru</h3>
         <p class="muted small">
           Ручные действия (открывают реальный браузер) — не часть
           автоматического цикла. Клонирование и создание — best-effort
           клики, разметка не подтверждена на живом аккаунте.
         </p>
-        <div class="row">
+        <div class="filters">
           <input type="text" id="hh-resume-clone-id" placeholder="id резюме для клонирования" aria-label="ID резюме для клонирования" />
           <button id="hh-resume-clone" class="btn btn-secondary">Клонировать</button>
           <button id="hh-resume-create-draft" class="btn btn-secondary">Начать новое резюме (черновик)</button>
@@ -657,6 +662,7 @@
   </main>
 </div>
 
-<script src="/app.js"></script>
+<script src="/vendor/gsap.min.js"></script>
+<script src="/app.js?v=3"></script>
 </body>
 </html>
