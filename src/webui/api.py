@@ -15,6 +15,8 @@ from pydantic import BaseModel
 from config import (
     DAILY_APPLICATION_LIMIT,
     JOB_MAX_APPLICATIONS,
+    JOB_MIN_SCORE,
+    JOB_SUITABILITY_SCORE,
     LINKEDIN_DAILY_APPLICATION_LIMIT,
     LLM_API_URL,
     LLM_MODEL,
@@ -61,15 +63,19 @@ from src.job_sources.llm_usage import (
     summarize_usage,
 )
 from src.job_sources.telegram.client import (
+    TelegramLoginSession,
     TelegramSourceClient,
     TelegramStatusClient,
 )
+from src.job_sources.telegram_connect import get_bot_username, wait_for_start
+from src.job_sources.telegram_control import HELP_TEXT as _TELEGRAM_HELP_TEXT
 from src.job_sources.telegram_conversations import TelegramConversations
 from src.job_sources.telegram_notify import send_notification
 from src.libs.resume_and_cover_builder import StyleManager
 from src.logging import logger
 from src.scheduler import DEFAULT_INTERVAL_HOURS, Scheduler
 from src.scheduler_state import load_state
+from src.utils import autostart
 from src.utils.constants import RESUME_PDF, RESUME_PDF_LINKEDIN, SECRETS_YAML
 
 # В PyInstaller-сборке (desktop_app.spec) __file__ не указывает на
@@ -127,6 +133,9 @@ class AppContext:
         self.run_now_sources: list[str] = []
         self.generate_thread: Optional[threading.Thread] = None
         self.generate_result: dict = {}
+        self.telegram_connect_thread: Optional[threading.Thread] = None
+        self.telegram_connect_status: dict = {"status": "idle"}
+        self.telegram_login_session: Optional[TelegramLoginSession] = None
 
     def reload_config(self) -> None:
         fresh = ConfigValidator.validate_config(self.config_file)
@@ -350,6 +359,12 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
                     source_config.get("schedule_enabled")
                 ),
                 "auto_apply": bool(source_config.get("auto_apply")),
+                # Только у telegram (auto_message) — остальные площадки
+                # ключа не имеют, будет False, безвредно. Фронтенд
+                # использует это + auto_apply, чтобы показать "только
+                # поиск" вместо счётчика откликов там, где ничего не
+                # отправляется (см. app.js source-grid).
+                "auto_message": bool(source_config.get("auto_message")),
                 # auto_reply/auto_bump_resume — HH-специфичные флаги
                 # (чат-автоответ/бамп резюме), но приходят для каждого
                 # источника: для остальных площадок просто останутся
@@ -359,7 +374,9 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
                     source_config.get("auto_bump_resume")
                 ),
                 "resume_id": source_config.get("resume_id") or "",
-                "interval_hours": source_config.get("interval_hours"),
+                "interval_hours": source_config.get(
+                    "interval_hours", DEFAULT_INTERVAL_HOURS
+                ),
                 # Свои positions/locations площадки (пусто — используется
                 # общий список из панели "Поиск") + что реально ищется
                 # прямо сейчас с учётом фолбэка — для панели "Фильтры"
@@ -653,6 +670,8 @@ class LimitsSettingsUpdate(BaseModel):
     total_daily_application_limit: Optional[int] = None
     job_max_applications: Optional[int] = None
     llm_daily_cost_alert_usd: Optional[float] = None
+    job_min_score: Optional[float] = None
+    job_suitability_score: Optional[float] = None
 
 
 def _limits_snapshot(ctx: AppContext) -> dict:
@@ -675,6 +694,14 @@ def _limits_snapshot(ctx: AppContext) -> dict:
             "job_max_applications", JOB_MAX_APPLICATIONS
         ),
         "llm_daily_cost_alert_usd": limits.get("llm_daily_cost_alert_usd"),
+        # Порог фита вакансии (score_job_fit, 0-10): ниже job_min_score
+        # — skipped_low_fit, письмо не генерируется; между
+        # job_min_score и job_suitability_score — weak, но отклик всё
+        # равно уходит (см. main.classify_fit).
+        "job_min_score": limits.get("job_min_score", JOB_MIN_SCORE),
+        "job_suitability_score": limits.get(
+            "job_suitability_score", JOB_SUITABILITY_SCORE
+        ),
     }
 
 
@@ -712,6 +739,37 @@ def post_limits_settings(
             "llm_daily_cost_alert_usd",
             body.llm_daily_cost_alert_usd,
         )
+
+    if body.job_min_score is not None or body.job_suitability_score is not None:
+        for field in ("job_min_score", "job_suitability_score"):
+            value = getattr(body, field)
+            if value is not None and not (0 <= value <= 10):
+                raise HTTPException(400, f"{field} must be between 0 and 10")
+        # Валидация ДО записи на диск — иначе при невалидном сочетании
+        # (min > suitability) одно из полей уже сохранится раньше, чем
+        # долетит ошибка. current — то, что уже эффективно действует
+        # (ctx.config ещё не тронут set_source_field ниже), подставляем
+        # его как дефолт для поля, не переданного в этом запросе.
+        current = _limits_snapshot(ctx)
+        min_score = (
+            body.job_min_score
+            if body.job_min_score is not None
+            else current["job_min_score"]
+        )
+        suitability = (
+            body.job_suitability_score
+            if body.job_suitability_score is not None
+            else current["job_suitability_score"]
+        )
+        if min_score > suitability:
+            raise HTTPException(
+                400, "job_min_score must not exceed job_suitability_score"
+            )
+        for field in ("job_min_score", "job_suitability_score"):
+            value = getattr(body, field)
+            if value is not None:
+                set_source_field(ctx.config_file, "limits", field, value)
+
     ctx.reload_config()
     return _limits_snapshot(ctx)
 
@@ -909,6 +967,117 @@ def get_telegram_status(ctx: AppContext = Depends(get_ctx)) -> dict:
         logger.warning(f"Failed to check Telegram session status: {e}")
         return {"configured": True, "connected": False}
     return {"configured": True, "connected": connected}
+
+
+class TelegramLoginPhone(BaseModel):
+    phone: str
+
+
+class TelegramLoginCode(BaseModel):
+    code: str
+
+
+class TelegramLoginPassword(BaseModel):
+    password: str
+
+
+@app.post("/api/telegram/login/start")
+def post_telegram_login_start(
+    body: TelegramLoginPhone, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Шаг 1 веб-визарда входа (вместо консольного): подключается,
+    просит Telegram выслать код на указанный номер. Держит живой
+    TelegramLoginSession в ctx между запросами — code/password должны
+    прийти на ТОТ ЖЕ клиент, Telethon хранит phone_code_hash на нём."""
+    creds = _telegram_secrets(ctx)
+    if creds is None:
+        raise HTTPException(
+            400, "telegram.api_id/api_hash не заданы в secrets.yaml."
+        )
+    if ctx.telegram_login_session is not None:
+        ctx.telegram_login_session.close()
+        ctx.telegram_login_session = None
+    session = TelegramLoginSession(
+        int(creds[0]), creds[1], _telegram_session_path(ctx)
+    )
+    try:
+        session.send_code(body.phone.strip())
+    except Exception as e:
+        session.close()
+        raise HTTPException(400, f"Не удалось отправить код: {e}")
+    ctx.telegram_login_session = session
+    return {"sent": True}
+
+
+@app.post("/api/telegram/login/code")
+def post_telegram_login_code(
+    body: TelegramLoginCode, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Шаг 2: код, присланный Telegram. True — сразу вошли; иначе
+    needs_password (включена 2FA) — фронт показывает третье поле."""
+    session = ctx.telegram_login_session
+    if session is None:
+        raise HTTPException(400, "Сначала запросите код (шаг 1).")
+    try:
+        signed_in = session.submit_code(body.code.strip())
+    except Exception as e:
+        raise HTTPException(400, f"Неверный код: {e}")
+    if signed_in:
+        session.close()
+        ctx.telegram_login_session = None
+        return {"connected": True, "needs_password": False}
+    return {"connected": False, "needs_password": True}
+
+
+@app.post("/api/telegram/login/password")
+def post_telegram_login_password(
+    body: TelegramLoginPassword, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Шаг 3 (только если включена 2FA)."""
+    session = ctx.telegram_login_session
+    if session is None:
+        raise HTTPException(400, "Сначала пройдите шаги 1 и 2.")
+    try:
+        session.submit_password(body.password)
+    except Exception as e:
+        raise HTTPException(400, f"Неверный пароль: {e}")
+    session.close()
+    ctx.telegram_login_session = None
+    return {"connected": True}
+
+
+class AutostartUpdate(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/settings/autostart")
+def get_autostart() -> dict:
+    supported = autostart.is_supported()
+    return {
+        "supported": supported,
+        "enabled": autostart.is_enabled() if supported else False,
+    }
+
+
+@app.post("/api/settings/autostart")
+def post_autostart(body: AutostartUpdate) -> dict:
+    if not autostart.is_supported():
+        raise HTTPException(
+            400, f"Автозапуск не поддерживается на {sys.platform}."
+        )
+    try:
+        autostart.set_enabled(body.enabled)
+    except Exception as e:
+        raise HTTPException(500, f"Не удалось изменить автозапуск: {e}")
+    return {"supported": True, "enabled": autostart.is_enabled()}
+
+
+@app.post("/api/telegram/login/cancel")
+def post_telegram_login_cancel(ctx: AppContext = Depends(get_ctx)) -> dict:
+    if ctx.telegram_login_session is not None:
+        ctx.telegram_login_session.close()
+        ctx.telegram_login_session = None
+    return {"cancelled": True}
 
 
 @app.get("/api/telegram/conversations")
@@ -1373,6 +1542,94 @@ def post_test_notification(ctx: AppContext = Depends(get_ctx)) -> dict:
     except Exception as e:
         raise HTTPException(502, f"Не удалось отправить: {e}")
     return {"sent": True}
+
+
+class TelegramTokenUpdate(BaseModel):
+    bot_token: str
+
+
+@app.post("/api/settings/telegram/token")
+def post_telegram_token(
+    body: TelegramTokenUpdate, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Сохраняет только bot_token и проверяет его через getMe — chat_id
+    достаётся отдельным шагом (POST .../connect), автоматически, без
+    похода в браузер за getUpdates вручную."""
+    token = body.bot_token.strip()
+    if not token:
+        raise HTTPException(400, "bot_token must not be empty")
+    try:
+        username = get_bot_username(token)
+    except Exception as e:
+        raise HTTPException(400, f"Неверный токен бота: {e}")
+    set_source_field(
+        ctx.secrets_file, "notifications", "telegram_bot_token", token, quote=True
+    )
+    return {
+        "username": username,
+        "connect_url": f"https://t.me/{username}?start=connect",
+    }
+
+
+@app.post("/api/settings/telegram/connect")
+def post_telegram_connect(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Запускает фоновый поллинг getUpdates в ожидании /start от
+    пользователя (см. wait_for_start) — пишет chat_id и шлёт
+    приветствие сам, без ручного копипаста id из JSON."""
+    secrets = ConfigValidator.load_yaml(ctx.secrets_file)
+    bot_token = (secrets.get("notifications") or {}).get("telegram_bot_token")
+    if not bot_token:
+        raise HTTPException(400, "Сначала сохраните bot_token.")
+    if (
+        ctx.telegram_connect_thread is not None
+        and ctx.telegram_connect_thread.is_alive()
+    ):
+        return ctx.telegram_connect_status
+
+    ctx.telegram_connect_status = {"status": "waiting"}
+
+    def _poll() -> None:
+        chat_id = wait_for_start(bot_token, timeout_seconds=180)
+        if chat_id is None:
+            ctx.telegram_connect_status = {"status": "timeout"}
+            return
+        set_source_field(
+            ctx.secrets_file,
+            "notifications",
+            "telegram_chat_id",
+            chat_id,
+            quote=True,
+        )
+        try:
+            send_notification(
+                bot_token,
+                chat_id,
+                "✅ CrossJob-AI подключён! Сюда будут приходить уведомления "
+                "о статусе площадок, лимитах и подтверждения нестандартных "
+                "анкет.\n\n" + _TELEGRAM_HELP_TEXT,
+            )
+        except Exception:
+            pass
+        ctx.telegram_connect_status = {"status": "connected", "chat_id": chat_id}
+
+    ctx.telegram_connect_thread = threading.Thread(target=_poll, daemon=True)
+    ctx.telegram_connect_thread.start()
+    return ctx.telegram_connect_status
+
+
+@app.get("/api/settings/telegram/connect/status")
+def get_telegram_connect_status(ctx: AppContext = Depends(get_ctx)) -> dict:
+    # idle (свежий процесс, ещё не запускали /connect в этом сеансе)
+    # не значит "не подключено" — secrets.yaml мог быть настроен в
+    # прошлом запуске приложения; проверяем файл, чтобы UI сразу
+    # показал "подключено", а не заставлял проходить шаги заново.
+    if ctx.telegram_connect_status.get("status") == "idle":
+        secrets = ConfigValidator.load_yaml(ctx.secrets_file)
+        notifications = secrets.get("notifications") or {}
+        chat_id = notifications.get("telegram_chat_id")
+        if notifications.get("telegram_bot_token") and chat_id:
+            return {"status": "connected", "chat_id": chat_id}
+    return ctx.telegram_connect_status
 
 
 @app.post("/api/resume/refresh-plain-text")

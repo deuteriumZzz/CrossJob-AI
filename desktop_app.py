@@ -53,6 +53,19 @@ def main() -> None:
     # ещё нет, и проверка готовности никогда бы не прошла.
     _wait_until_ready(f"{url}api/setup/status")
 
+    # Автостарт демона при каждом запуске приложения — раньше нужно
+    # было руками жать "Запустить" после каждого перезапуска процесса
+    # (состояние демона живёт только в памяти AppContext), из-за чего
+    # LaunchAgent-автозапуск (см. scripts/install_launch_agent.sh) сам
+    # по себе ничего не планировал бы. Best-effort: если data_folder
+    # ещё не настроен (первый запуск), /api/daemon/start вернёт 428 —
+    # не мешает открытию окна, дашборд покажет мастер настройки как
+    # обычно.
+    try:
+        httpx.post(f"{url}api/daemon/start", timeout=5).raise_for_status()
+    except httpx.HTTPError:
+        pass
+
     webview.create_window(
         "CrossJob-AI", url, width=1200, height=800, min_size=(900, 600)
     )

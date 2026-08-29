@@ -110,6 +110,31 @@ async function api(path, options) {
   return response.json();
 }
 
+async function refreshTelegramConnectStatus() {
+  const statusEl = document.getElementById("telegram-connect-status");
+  if (!statusEl) return true; // элемент есть только внутри вкладки "Настройки"
+  try {
+    const data = await api("/api/settings/telegram/connect/status");
+    if (data.status === "connected") {
+      statusEl.textContent = `✅ Подключено (chat_id: ${data.chat_id}).`;
+      return true;
+    }
+    if (data.status === "timeout") {
+      statusEl.textContent =
+        "Не дождались Start за 3 минуты — попробуйте снова.";
+      return true;
+    }
+    if (data.status === "waiting") {
+      statusEl.textContent = "Ждём, когда вы нажмёте Start у бота…";
+      return false;
+    }
+    statusEl.textContent = "Ещё не подключено — вставьте токен и нажмите «Подключить».";
+  } catch (e) {
+    // тихая фоновая проверка — idle/сеть не показываем как ошибку
+  }
+  return true;
+}
+
 function switchTab(name) {
   document
     .querySelectorAll("nav.tabs button")
@@ -400,6 +425,17 @@ const render = {
             : 0;
           const barClass =
             ratio >= 1 ? "full" : ratio >= 0.7 ? "warn" : "";
+          // telegram отправляет (пишет контакту) только при
+          // auto_message; остальные площадки — при auto_apply. Без
+          // этого "Откликов сегодня 0/N" выглядит как площадка не
+          // работает, хотя она специально настроена только искать и
+          // класть найденное в Историю, ничего не отправляя.
+          const isSearchOnly =
+            s.name === "telegram" ? !s.auto_message : !s.auto_apply;
+          const responseRow = isSearchOnly
+            ? `<div class="row"><span>Режим</span><span>🔍 только поиск</span></div>`
+            : `<div class="row"><span>Откликов сегодня</span><span>${s.applied_today}/${s.daily_limit}</span></div>
+            <div class="limit-bar"><div class="limit-bar-fill ${barClass}" style="width:${Math.round(ratio * 100)}%"></div></div>`;
           return `
           <div class="source-card stagger-item" style="animation-delay:${staggerDelay(i)}">
             <h3>
@@ -409,8 +445,7 @@ const render = {
             <div class="row"><span>Расписание</span><span>${s.schedule_enabled ? `каждые ${s.interval_hours}ч` : "выключено"}</span></div>
             <div class="row"><span>Последний запуск</span><span>${fmtTime(s.last_run)}</span></div>
             <div class="row"><span>Следующий запуск</span><span>${fmtTime(s.next_run)}</span></div>
-            <div class="row"><span>Откликов сегодня</span><span>${s.applied_today}/${s.daily_limit}</span></div>
-            <div class="limit-bar"><div class="limit-bar-fill ${barClass}" style="width:${Math.round(ratio * 100)}%"></div></div>
+            ${responseRow}
             ${errorRowHtml(s.last_error)}
           </div>`;
         })
@@ -599,6 +634,17 @@ const render = {
     });
 
     api("/api/settings/llm/status").then(applyLLMProviderStatus);
+    refreshTelegramConnectStatus();
+
+    api("/api/settings/autostart").then((autostart) => {
+      const toggle = document.getElementById("autostart-toggle");
+      const note = document.getElementById("autostart-status");
+      toggle.checked = autostart.enabled;
+      toggle.disabled = !autostart.supported;
+      note.textContent = autostart.supported
+        ? ""
+        : "Не поддерживается на этой ОС.";
+    });
 
     api("/api/settings/limits").then((limits) => {
       document.getElementById("limit-total").value =
@@ -609,6 +655,9 @@ const render = {
         limits.linkedin_daily_application_limit;
       document.getElementById("limit-per-run").value =
         limits.job_max_applications;
+      document.getElementById("limit-min-score").value = limits.job_min_score;
+      document.getElementById("limit-suitability-score").value =
+        limits.job_suitability_score;
       renderTotalBudget(status, limits.total_daily_application_limit);
       if (limits.llm_daily_cost_alert_usd != null) {
         document.getElementById("llm-alert-usd").value =
@@ -814,8 +863,19 @@ const render = {
     } else {
       badge.className = "badge off";
       badge.innerHTML = '<span class="badge-dot"></span>не авторизовано';
-      note.textContent =
-        "Запустите поиск по Telegram один раз вручную (--auto telegram) и введите код входа в консоли.";
+      note.textContent = "Введите номер телефона и код ниже.";
+    }
+    // Форма входа (телефон/код/пароль) нужна только пока не
+    // подключено — если уже авторизовано, незачем занимать место и
+    // сбивать с толку полем для повторного ввода номера.
+    document.getElementById("telegram-login-row").style.display =
+      status.connected ? "none" : "";
+    if (status.connected) {
+      document.getElementById("telegram-login-code-row").style.display =
+        "none";
+      document.getElementById("telegram-login-password-row").style.display =
+        "none";
+      document.getElementById("telegram-login-status").textContent = "";
     }
 
     document.getElementById("tg-channels").value = (
@@ -988,6 +1048,61 @@ function initDashboard() {
     b.addEventListener("click", () => switchTab(b.dataset.tab));
   });
 
+  refreshTelegramConnectStatus();
+
+  document
+    .getElementById("telegram-connect-btn")
+    .addEventListener("click", async () => {
+      const tokenInput = document.getElementById("telegram-bot-token");
+      const statusEl = document.getElementById("telegram-connect-status");
+      const token = tokenInput.value.trim();
+      if (!token) {
+        statusEl.textContent = "Вставьте токен бота.";
+        return;
+      }
+      statusEl.textContent = "Проверяю токен…";
+      try {
+        const { connect_url } = await api("/api/settings/telegram/token", {
+          method: "POST",
+          body: JSON.stringify({ bot_token: token }),
+        });
+        window.open(connect_url, "_blank");
+        statusEl.textContent = "Открылся чат с ботом — нажмите там Start…";
+        await api("/api/settings/telegram/connect", { method: "POST" });
+        const timer = setInterval(async () => {
+          const done = await refreshTelegramConnectStatus();
+          if (done) clearInterval(timer);
+        }, 3000);
+      } catch (e) {
+        statusEl.textContent = `Ошибка: ${e.message}`;
+      }
+    });
+
+  document
+    .getElementById("autostart-toggle")
+    .addEventListener("change", async (ev) => {
+      const toggle = ev.target;
+      const note = document.getElementById("autostart-status");
+      const wanted = toggle.checked;
+      toggle.disabled = true;
+      note.textContent = "Сохранение…";
+      try {
+        const result = await api("/api/settings/autostart", {
+          method: "POST",
+          body: JSON.stringify({ enabled: wanted }),
+        });
+        toggle.checked = result.enabled;
+        note.textContent = result.enabled
+          ? "✅ Будет запускаться при входе в систему."
+          : "Автозапуск выключен.";
+      } catch (e) {
+        toggle.checked = !wanted;
+        note.textContent = `Ошибка: ${e.message}`;
+      } finally {
+        toggle.disabled = false;
+      }
+    });
+
   document.getElementById("notif-test").addEventListener("click", async () => {
     const status = document.getElementById("notif-test-status");
     status.textContent = "Отправка…";
@@ -1119,6 +1234,12 @@ function initDashboard() {
     // set_source_field() нет удаления поля из YAML, только запись.
     const totalRaw = document.getElementById("limit-total").value.trim();
     const total = totalRaw ? parseInt(totalRaw, 10) : null;
+    const minScore = parseFloat(
+      document.getElementById("limit-min-score").value
+    );
+    const suitabilityScore = parseFloat(
+      document.getElementById("limit-suitability-score").value
+    );
     status.textContent = "Сохранение…";
     try {
       await api("/api/settings/limits", {
@@ -1128,6 +1249,10 @@ function initDashboard() {
           linkedin_daily_application_limit: linkedin,
           total_daily_application_limit: total,
           job_max_applications: perRun,
+          job_min_score: Number.isFinite(minScore) ? minScore : null,
+          job_suitability_score: Number.isFinite(suitabilityScore)
+            ? suitabilityScore
+            : null,
         }),
       });
       status.textContent = "Сохранено.";
@@ -1258,6 +1383,85 @@ function initDashboard() {
   document
     .getElementById("telegram-status-refresh")
     .addEventListener("click", () => render.telegram());
+
+  document
+    .getElementById("telegram-login-send-code")
+    .addEventListener("click", async () => {
+      const status = document.getElementById("telegram-login-status");
+      const phone = document.getElementById("telegram-login-phone").value.trim();
+      if (!phone) {
+        status.textContent = "Введите номер телефона.";
+        return;
+      }
+      status.textContent = "Отправляю код…";
+      try {
+        await api("/api/telegram/login/start", {
+          method: "POST",
+          body: JSON.stringify({ phone }),
+        });
+        status.textContent = "Код отправлен в Telegram — введите его ниже.";
+        document.getElementById("telegram-login-code-row").style.display = "";
+      } catch (e) {
+        status.textContent = `Ошибка: ${e.message}`;
+      }
+    });
+
+  document
+    .getElementById("telegram-login-submit-code")
+    .addEventListener("click", async () => {
+      const status = document.getElementById("telegram-login-status");
+      const code = document.getElementById("telegram-login-code").value.trim();
+      if (!code) {
+        status.textContent = "Введите код.";
+        return;
+      }
+      status.textContent = "Проверяю код…";
+      try {
+        const result = await api("/api/telegram/login/code", {
+          method: "POST",
+          body: JSON.stringify({ code }),
+        });
+        if (result.needs_password) {
+          status.textContent = "Включена двухфакторка — введите пароль.";
+          document.getElementById(
+            "telegram-login-password-row"
+          ).style.display = "";
+        } else {
+          status.textContent = "✅ Вход выполнен.";
+          document.getElementById("telegram-login-code-row").style.display =
+            "none";
+          await render.telegram();
+        }
+      } catch (e) {
+        status.textContent = `Ошибка: ${e.message}`;
+      }
+    });
+
+  document
+    .getElementById("telegram-login-submit-password")
+    .addEventListener("click", async () => {
+      const status = document.getElementById("telegram-login-status");
+      const password = document.getElementById(
+        "telegram-login-password"
+      ).value;
+      if (!password) {
+        status.textContent = "Введите пароль.";
+        return;
+      }
+      status.textContent = "Проверяю пароль…";
+      try {
+        await api("/api/telegram/login/password", {
+          method: "POST",
+          body: JSON.stringify({ password }),
+        });
+        status.textContent = "✅ Вход выполнен.";
+        document.getElementById("telegram-login-password-row").style.display =
+          "none";
+        await render.telegram();
+      } catch (e) {
+        status.textContent = `Ошибка: ${e.message}`;
+      }
+    });
 
   document
     .getElementById("tg-settings-save")
@@ -1490,19 +1694,27 @@ function initDashboard() {
     "logs",
     "telegram",
   ]);
-  setInterval(() => {
+  function refreshActiveTab() {
     const active = document.querySelector("nav.tabs button.active")?.dataset.tab;
     if (active && LIVE_TABS.has(active)) render[active]();
-  }, 7000);
-  // Отдельный тикер только для подсветки провайдеров (не полный
-  // render.settings()) — тот перезатирал бы несохранённый ввод в
-  // полях ключа/модели, см. комментарий выше про LIVE_TABS.
-  setInterval(() => {
-    const active = document.querySelector("nav.tabs button.active")?.dataset.tab;
-    if (active === "settings") {
+    else if (active === "settings") {
+      // Только подсветка провайдеров + статус Telegram, не полный
+      // render.settings() — тот перезатирал бы несохранённый ввод в
+      // полях ключа/модели. telegram-connect-status — отдельный
+      // элемент, ничего не перезатирает.
       api("/api/settings/llm/status").then(applyLLMProviderStatus);
+      refreshTelegramConnectStatus();
     }
-  }, 7000);
+  }
+  setInterval(refreshActiveTab, 7000);
+  // Десктопное окно (pywebview/WKWebView) троттлит setInterval, пока
+  // не в фокусе — без этого прогресс отклика "зависает" на экране,
+  // пока пользователь не кликнет по вкладке вручную. window.focus не
+  // всегда всплывает в WKWebView, поэтому дублируем visibilitychange.
+  window.addEventListener("focus", refreshActiveTab);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refreshActiveTab();
+  });
 }
 
 function initSetupScreen() {

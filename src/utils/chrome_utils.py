@@ -1,3 +1,4 @@
+import os
 import time
 import urllib
 from pathlib import Path
@@ -9,6 +10,29 @@ from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
 
 from src.logging import logger
+
+
+def clear_stale_chrome_lock(profile_dir: Path) -> None:
+    """Chrome пишет SingletonLock/-Cookie/-Socket в папку профиля на
+    время своей работы; если процесс убили/он упал (сеть моргнула,
+    OOM, форс-килл), эти файлы остаются висеть и указывают на мёртвый
+    PID. Следующий запуск с тем же --user-data-dir тогда молча не
+    может достучаться до Chrome ("session not created: chrome not
+    reachable") вместо того, чтобы просто стартовать — живой Chrome
+    создаёт эти файлы заново сам, удалять их для него не проблема."""
+    lock = profile_dir / "SingletonLock"
+    if not lock.is_symlink():
+        return
+    try:
+        target = os.readlink(lock)
+        pid = int(target.rsplit("-", 1)[-1])
+        os.kill(pid, 0)
+        return  # PID жив — не наш случай, второй Chrome и правда работает
+    except (OSError, ValueError):
+        pass
+    for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+        (profile_dir / name).unlink(missing_ok=True)
+    logger.debug(f"Cleared stale Chrome singleton lock in {profile_dir}")
 
 
 def chrome_browser_options(profile_dir: Optional[Path] = None):
@@ -66,6 +90,8 @@ SCRIPT_TIMEOUT_SECONDS = 30
 
 def init_browser(profile_dir: Optional[Path] = None) -> webdriver.Chrome:
     try:
+        if profile_dir is not None:
+            clear_stale_chrome_lock(profile_dir)
         options = chrome_browser_options(profile_dir)
         # webdriver_manager сам скачивает и обновляет подходящий
         # ChromeDriver, не требуя ручного управления версиями

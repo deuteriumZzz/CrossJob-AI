@@ -5,6 +5,8 @@ from typing import Optional
 
 import undetected_chromedriver as uc
 
+from src.utils.chrome_utils import clear_stale_chrome_lock
+
 
 def _installed_chrome_major_version() -> Optional[int]:
     """undetected-chromedriver's own auto-detection иногда подсовывает
@@ -29,6 +31,7 @@ def init_linkedin_browser(profile_dir: Path) -> uc.Chrome:
     отпечатку браузера, в отличие от остальных площадок проекта.
     Постоянная папка профиля сохраняет сессию входа между запусками."""
     profile_dir.mkdir(parents=True, exist_ok=True)
+    clear_stale_chrome_lock(profile_dir)
     options = uc.ChromeOptions()
     options.add_argument(f"--user-data-dir={profile_dir}")
     options.add_argument("--start-maximized")

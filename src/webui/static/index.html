@@ -197,6 +197,19 @@
           <button id="telegram-status-refresh" class="btn btn-secondary">Проверить подключение</button>
           <span id="telegram-status-note" class="muted small"></span>
         </div>
+        <div class="filters" id="telegram-login-row">
+          <input type="text" id="telegram-login-phone" placeholder="Номер телефона, напр. +79991234567" style="flex:1;min-width:220px" />
+          <button id="telegram-login-send-code" class="btn btn-primary">Прислать код</button>
+        </div>
+        <div class="filters" id="telegram-login-code-row" style="display:none">
+          <input type="text" id="telegram-login-code" placeholder="Код из Telegram" style="flex:1;min-width:160px" />
+          <button id="telegram-login-submit-code" class="btn btn-primary">Подтвердить</button>
+        </div>
+        <div class="filters" id="telegram-login-password-row" style="display:none">
+          <input type="password" id="telegram-login-password" placeholder="Пароль двухфакторной аутентификации" style="flex:1;min-width:220px" />
+          <button id="telegram-login-submit-password" class="btn btn-primary">Войти</button>
+        </div>
+        <p class="muted small" id="telegram-login-status"></p>
       </div>
 
       <div class="panel">
@@ -305,6 +318,7 @@
         <a href="#settings-llm">Провайдер LLM</a>
         <a href="#settings-limits">Лимиты откликов</a>
         <a href="#settings-notifications">Уведомления</a>
+        <a href="#settings-autostart">Автозапуск</a>
         <a href="#settings-resume">Резюме и письмо</a>
         <a href="#settings-usage">Расходы на LLM</a>
         <a href="#settings-table">Площадки</a>
@@ -487,6 +501,14 @@
             <span>Откликов за один прогон (все площадки)</span>
             <input id="limit-per-run" type="number" min="1" />
           </label>
+          <label class="limit-field">
+            <span>Порог отсева — балл фита ниже (0-10), при котором вакансия пропускается без письма</span>
+            <input id="limit-min-score" type="number" min="0" max="10" step="0.5" />
+          </label>
+          <label class="limit-field">
+            <span>Порог уверенного фита (0-10) — между этим и порогом отсева отклик уходит, но помечается как слабый</span>
+            <input id="limit-suitability-score" type="number" min="0" max="10" step="0.5" />
+          </label>
         </div>
         <p class="muted small">Общий лимит — это жёсткий потолок: как только сегодня суммарно по ВСЕМ площадкам отправлено столько откликов, автооткликер останавливается везде, даже если у отдельной площадки в таблице ниже свой лимит ещё не исчерпан. Лимиты по площадкам — то, как этот общий бюджет распределяется между ними (например 10 на HH + 2 на GetMatch + 8 на LinkedIn = 20).</p>
         <div id="total-budget-info" class="limit-bar-info"></div>
@@ -502,29 +524,24 @@
         <h3>Уведомления (Telegram-бот)</h3>
         <p class="muted small">
           Отдельный бот только для уведомлений вам — не путать с вкладкой "Telegram" слева
-          (там про поиск по каналам и переписку с контактами). Нужен для уведомлений (новые
-          ответы работодателей, дневной лимит откликов исчерпан,
-          расходы на LLM) на всех площадках, а для HeadHunter — ещё и для подтверждения
-          автозаполнения внешних анкет (Google Forms по ссылке из чата с работодателем):
-          бот присылает черновик ответов и ждёт вашего "да &lt;id&gt;" / "заново &lt;id&gt;" /
-          "правка &lt;id&gt; &lt;номер&gt; &lt;текст&gt;" в ответ, прежде чем что-то отправить.
+          (там про поиск по каналам и переписку с контактами). Присылает статус площадок,
+          исчерпание лимитов, расходы на LLM, подтверждение нестандартных анкет HH — и
+          отвечает на команды <code>/status</code>, <code>/pause &lt;площадка&gt;</code>,
+          <code>/resume &lt;площадка&gt;</code> прямо из чата.
         </p>
+        <div class="filters" id="telegram-connect-row">
+          <input type="text" id="telegram-bot-token" placeholder="Токен бота от @BotFather (/newbot)" style="flex:1;min-width:220px" />
+          <button id="telegram-connect-btn" class="btn btn-primary">Подключить</button>
+        </div>
+        <p class="muted small" id="telegram-connect-status"></p>
         <details class="muted small">
-          <summary>Как получить токен и chat_id (один раз)</summary>
+          <summary>Ещё нет бота?</summary>
           <ol>
             <li>В Telegram напишите <strong>@BotFather</strong>, отправьте <code>/newbot</code>,
-              задайте имя — в ответ придёт <em>telegram_bot_token</em>.</li>
-            <li>Напишите своему новому боту любое сообщение (например "привет") — иначе бот не
-              сможет писать вам первым.</li>
-            <li>Откройте в браузере
-              <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> и найдите
-              <code>"chat":{"id": ...}</code> — это <em>telegram_chat_id</em>.</li>
-            <li>Впишите оба значения в <code>data_folder/secrets.yaml</code>:
-              <pre>notifications:
-  telegram_bot_token: "..."
-  telegram_chat_id: "..."</pre>
-              (правится только руками в файле — то же самое, что и ключ LLM-провайдера выше).
-            </li>
+              задайте имя — в ответ придёт токен.</li>
+            <li>Вставьте токен в поле выше и нажмите "Подключить" — откроется чат с ботом,
+              нажмите там <code>Start</code>, дальше всё подхватится само (chat_id
+              и приветственное сообщение).</li>
           </ol>
         </details>
         <div class="filters">
@@ -534,6 +551,22 @@
           </button>
           <span id="notif-test-status" class="muted small"></span>
         </div>
+      </div>
+
+      <div class="panel" id="settings-autostart">
+        <h3>Автозапуск</h3>
+        <p class="muted small">
+          Запускать приложение (и демон внутри него) автоматически при входе в систему —
+          не нужно вручную открывать CrossJob-AI после перезагрузки. macOS — LaunchAgent,
+          Windows — автозапуск через реестр.
+        </p>
+        <div class="filters">
+          <label class="limit-field" style="flex-direction:row;align-items:center;gap:8px">
+            <input id="autostart-toggle" type="checkbox" disabled />
+            <span>Запускать при входе в систему</span>
+          </label>
+        </div>
+        <p class="muted small" id="autostart-status"></p>
       </div>
 
       <div class="panel" id="settings-resume">

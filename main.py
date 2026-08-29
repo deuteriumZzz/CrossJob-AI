@@ -24,7 +24,7 @@ from config import (
     LINKEDIN_DAILY_APPLICATION_LIMIT,
     LLM_MODEL_TYPE,
 )
-from src.config_patch import set_top_level_field
+from src.config_patch import set_source_field, set_top_level_field
 from src.job import Job
 from src.job_sources.applied_log import AppliedLog
 from src.job_sources.apply_pacing import (
@@ -86,6 +86,8 @@ from src.job_sources.headhunter.telegram_approval import (
     save_pending_form,
     update_pending_form_answers,
 )
+from src.job_sources.telegram_control import HELP_TEXT as _TELEGRAM_HELP_TEXT
+from src.job_sources.telegram_control import poll_control_commands
 from src.job_sources.job_fit import classify_fit, score_job_fit
 from src.job_sources.linkedin.answerer import EasyApplyAnswerer
 from src.job_sources.linkedin.auth import LinkedInSession
@@ -139,7 +141,7 @@ from src.job_sources.telegram.client import TelegramSourceClient
 from src.job_sources.telegram.contact import extract_contact
 from src.job_sources.telegram.source import TelegramSource
 from src.job_sources.telegram_conversations import TelegramConversations
-from src.job_sources.telegram_notify import notify_from_secrets
+from src.job_sources.telegram_notify import notify_from_secrets, send_notification
 from src.libs.resume_and_cover_builder import (
     ResumeFacade,
     ResumeGenerator,
@@ -149,7 +151,7 @@ from src.logging import logger
 from src.resume_schemas.job_application_profile import JobApplicationProfile
 from src.resume_schemas.resume import Resume
 from src.scheduler import DEFAULT_INTERVAL_HOURS, Scheduler
-from src.scheduler_state import record_run_result
+from src.scheduler_state import load_state, record_run_result
 from src.utils.chrome_utils import HTML_to_PDF, init_browser
 from src.utils.constants import (
     PLAIN_TEXT_RESUME_YAML,
@@ -951,6 +953,27 @@ def apply_llm_provider_override(parameters: dict) -> None:
     set_llm_fallback_enabled(llm_config.get("fallback_enabled"))
 
 
+def _job_min_score(parameters: dict) -> float:
+    """Порог отсева (score_job_fit ниже — сразу skipped_low_fit, письмо
+    не генерируется). Приоритет: limits.job_min_score (дашборд —
+    панель "Лимиты") > config.JOB_MIN_SCORE."""
+    return float(
+        (parameters.get("limits") or {}).get("job_min_score", JOB_MIN_SCORE)
+    )
+
+
+def _job_suitability_score(parameters: dict) -> float:
+    """Порог "уверенного" фита — между job_min_score и этим значением
+    отклик всё равно уходит, но помечается как weak и логируется
+    отдельно (см. main.classify_fit). Приоритет: тот же, что
+    _job_min_score."""
+    return float(
+        (parameters.get("limits") or {}).get(
+            "job_suitability_score", JOB_SUITABILITY_SCORE
+        )
+    )
+
+
 def _daily_limit(parameters: dict, source: Optional[str] = None) -> int:
     """Дневной лимит откликов. Приоритет: daily_application_limit
     внутри блока конкретной площадки (headhunter:/superjob:/...,
@@ -1189,7 +1212,7 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
                 break
 
             fit = score_job_fit(resume_pdf_path, job, llm_api_key)
-            tier = classify_fit(fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE)
+            tier = classify_fit(fit.score, _job_min_score(parameters), _job_suitability_score(parameters))
             if tier == "skip":
                 logger.info(
                     f"Skipping {job.role} at {job.company}: fit score "
@@ -1351,7 +1374,7 @@ def search_and_apply_superjob(parameters: dict, llm_api_key: str):
             break
 
         fit = score_job_fit(resume_pdf_path, job, llm_api_key)
-        tier = classify_fit(fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE)
+        tier = classify_fit(fit.score, _job_min_score(parameters), _job_suitability_score(parameters))
         if tier == "skip":
             logger.info(
                 f"Skipping {job.role} at {job.company}: fit score "
@@ -1465,7 +1488,7 @@ def search_geekjob(parameters: dict, llm_api_key: str):
             continue
 
         fit = score_job_fit(resume_pdf_path, job, llm_api_key)
-        tier = classify_fit(fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE)
+        tier = classify_fit(fit.score, _job_min_score(parameters), _job_suitability_score(parameters))
         if tier == "skip":
             logger.info(
                 f"Skipping {job.role} at {job.company}: fit score "
@@ -1586,7 +1609,7 @@ def search_rabota_ru(parameters: dict, llm_api_key: str):
             continue
 
         fit = score_job_fit(resume_pdf_path, job, llm_api_key)
-        tier = classify_fit(fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE)
+        tier = classify_fit(fit.score, _job_min_score(parameters), _job_suitability_score(parameters))
         if tier == "skip":
             logger.info(
                 f"Skipping {job.role} at {job.company}: fit score "
@@ -1736,7 +1759,7 @@ def search_telegram(parameters: dict, llm_api_key: str):
 
             fit = score_job_fit(resume_pdf_path, job, llm_api_key)
             tier = classify_fit(
-                fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE
+                fit.score, _job_min_score(parameters), _job_suitability_score(parameters)
             )
             if tier == "skip":
                 logger.info(
@@ -1886,7 +1909,7 @@ def search_getmatch(parameters: dict, llm_api_key: str):
                 continue
 
             fit = score_job_fit(resume_pdf_path, job, llm_api_key)
-            tier = classify_fit(fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE)
+            tier = classify_fit(fit.score, _job_min_score(parameters), _job_suitability_score(parameters))
             if tier == "skip":
                 logger.info(
                     f"Skipping {job.role} at {job.company}: fit score "
@@ -2051,7 +2074,7 @@ def search_and_apply_linkedin(parameters: dict, llm_api_key: str):
 
             fit = score_job_fit(resume_pdf_path, job, llm_api_key)
             tier = classify_fit(
-                fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE
+                fit.score, _job_min_score(parameters), _job_suitability_score(parameters)
             )
             if tier == "skip":
                 logger.info(
@@ -2213,7 +2236,7 @@ def search_and_apply_habr_career(parameters: dict, llm_api_key: str):
 
             fit = score_job_fit(resume_pdf_path, job, llm_api_key)
             tier = classify_fit(
-                fit.score, JOB_MIN_SCORE, JOB_SUITABILITY_SCORE
+                fit.score, _job_min_score(parameters), _job_suitability_score(parameters)
             )
             if tier == "skip":
                 logger.info(
@@ -2775,6 +2798,77 @@ def check_headhunter_replies(parameters: dict, llm_api_key: str):
     _process_pending_form_approvals(parameters, llm_api_key)
 
 
+def _format_telegram_status(parameters: dict, applied_log: AppliedLog) -> str:
+    output_folder: Path = parameters["outputFileDirectory"]
+    state = load_state(output_folder)
+    lines = [
+        f"Всего откликов сегодня: {applied_log.applied_today_count_all()}"
+    ]
+    for name, _ in ALL_SOURCES:
+        source_config = parameters.get(name) or {}
+        if not source_config.get("schedule_enabled"):
+            continue
+        info = state.get(name) or {}
+        status = info.get("status")
+        dot = "🟢" if status == "ok" else "🔴" if status == "error" else "⚪"
+        count = applied_log.applied_today_count(name)
+        limit = _daily_limit(parameters, name)
+        line = f"{dot} {name}: {count}/{limit}"
+        if info.get("last_error"):
+            line += f" — {info['last_error'].splitlines()[0][:80]}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def check_telegram_commands(parameters: dict, llm_api_key: str) -> None:
+    """Раз в несколько минут проверяет Telegram на команды дистанционного
+    управления (/status, /pause <площадка>, /resume <площадка>) — тот
+    же bot_token/chat_id, что уведомления и подтверждение анкет HH, но
+    свой offset-файл (poll_control_commands) и не завязано на
+    headhunter.auto_reply, в отличие от _process_pending_form_approvals
+    (та гоняется только вместе с проверкой чата HH)."""
+    secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
+    notifications = secrets.get("notifications") or {}
+    bot_token = notifications.get("telegram_bot_token")
+    chat_id = notifications.get("telegram_chat_id")
+    if not bot_token or not chat_id:
+        return
+
+    output_folder: Path = parameters["outputFileDirectory"]
+    try:
+        commands = poll_control_commands(bot_token, chat_id, output_folder)
+    except Exception as e:
+        logger.warning(f"Failed to poll Telegram for control commands: {e}")
+        return
+    if not commands:
+        return
+
+    applied_log = AppliedLog(output_folder / "applied_log.json")
+    for cmd in commands:
+        action = cmd["action"]
+        if action == "help":
+            send_notification(bot_token, chat_id, _TELEGRAM_HELP_TEXT)
+        elif action == "status":
+            send_notification(
+                bot_token, chat_id, _format_telegram_status(parameters, applied_log)
+            )
+        elif action in ("pause", "resume"):
+            source = cmd["source"]
+            if source not in dict(SCHEDULER_SOURCES):
+                send_notification(
+                    bot_token, chat_id, f"Неизвестная площадка: {source}"
+                )
+                continue
+            set_source_field(
+                parameters["dataFolder"] / WORK_PREFERENCES_YAML,
+                source,
+                "schedule_enabled",
+                action == "resume",
+            )
+            verb = "возобновлена" if action == "resume" else "поставлена на паузу"
+            send_notification(bot_token, chat_id, f"{source}: {verb}.")
+
+
 def cleanup_headhunter_negotiations(parameters: dict) -> None:
     """Отменяет зависшие отклики на hh.ru (аналог
     hh-applicant-tool/operations/clear_negotiations.py) — деструктивно
@@ -3014,6 +3108,7 @@ SCHEDULER_SOURCES = {
     "check_hh_replies": check_headhunter_replies,
     "check_sj_replies": _check_sj_replies_scheduled,
     "check_telegram_replies": check_telegram_replies,
+    "check_telegram_commands": check_telegram_commands,
 }
 
 
