@@ -958,9 +958,13 @@ select,
   cursor: pointer;
   padding-right: 30px !important;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'><path d='M5.5 8L10 12.5L14.5 8' stroke='%238b93a1' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>") !important;
-  background-repeat: no-repeat;
-  background-position: right 9px center;
-  background-size: 14px;
+  /* !important тоже здесь: .limit-field select задаёт `background:
+     var(--panel-2)` шортхендом ниже по каскаду, который иначе молча
+     сбрасывает repeat/position/size на repeat/auto/0 0 — стрелка
+     тайлится по всей ширине вместо одной справа. */
+  background-repeat: no-repeat !important;
+  background-position: right 9px center !important;
+  background-size: 14px !important;
 }
 
 .settings-table input[type="number"] {
