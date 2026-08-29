@@ -1335,3 +1335,458 @@ pre.logs {
   border-color: var(--warn);
   color: var(--warn);
 }
+
+/* ---------- Toggle switches (native checkbox, restyled) ---------- */
+
+input[type="checkbox"].switch {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 34px;
+  height: 20px;
+  min-width: 34px;
+  border-radius: 999px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  position: relative;
+  cursor: pointer;
+  margin: 0;
+  transition: background 0.2s var(--ease-out), border-color 0.2s var(--ease-out);
+}
+
+input[type="checkbox"].switch::before {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: transform 0.2s var(--spring);
+}
+
+input[type="checkbox"].switch:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+input[type="checkbox"].switch:checked::before {
+  transform: translateX(14px);
+}
+
+input[type="checkbox"].switch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---------- Floating tab indicator ---------- */
+
+nav.tabs,
+.settings-jump {
+  position: relative;
+}
+
+.tab-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: var(--radius-sm);
+  background: rgba(122, 184, 255, 0.12);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  transition: transform 0.3s var(--ease-out), width 0.3s var(--ease-out),
+    height 0.3s var(--ease-out), opacity 0.2s ease;
+}
+
+.settings-jump .tab-indicator {
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+nav.tabs button,
+.settings-jump button {
+  position: relative;
+  z-index: 1;
+}
+
+nav.tabs button.active,
+.settings-jump button.active {
+  background: transparent;
+}
+
+.settings-jump button.active {
+  color: #0b1520;
+}
+
+/* ---------- Toast notifications ---------- */
+
+#toast-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 1000;
+  pointer-events: none;
+  max-width: min(340px, calc(100vw - 40px));
+}
+
+.toast {
+  background: var(--panel);
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  pointer-events: auto;
+}
+
+.toast-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.toast.success .toast-dot {
+  background: var(--ok);
+}
+
+.toast.error .toast-dot {
+  background: var(--err);
+}
+
+/* ---------- View Transitions theme swap ---------- */
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-new(root) {
+  animation: theme-reveal 0.5s var(--ease-out);
+}
+
+@keyframes theme-reveal {
+  from {
+    clip-path: circle(0% at var(--theme-toggle-x, 100%) var(--theme-toggle-y, 0%));
+  }
+  to {
+    clip-path: circle(150% at var(--theme-toggle-x, 100%) var(--theme-toggle-y, 0%));
+  }
+}
+
+/* ---------- Unsaved-changes indicator + save flash ---------- */
+
+.settings-jump button.dirty::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+  box-shadow: 0 0 0 2px var(--panel);
+}
+
+@keyframes save-flash {
+  0% {
+    box-shadow: 0 0 0 0 rgba(111, 220, 140, 0.5);
+  }
+  100% {
+    box-shadow: 0 0 0 8px rgba(111, 220, 140, 0);
+  }
+}
+
+.save-flash {
+  animation: save-flash 0.6s var(--ease-out);
+}
+
+/* ---------- Generation progress bar ---------- */
+
+.gen-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border-soft);
+  overflow: hidden;
+  display: none;
+  margin-top: 4px;
+}
+
+.gen-progress.active {
+  display: block;
+}
+
+.gen-progress-bar {
+  width: 40%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: gen-progress-slide 1.1s ease-in-out infinite;
+}
+
+@keyframes gen-progress-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+/* ---------- Empty states ---------- */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 36px 16px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.empty-state svg {
+  color: var(--muted-2);
+}
+
+.empty-state p {
+  margin: 0;
+  font-size: 13px;
+}
+
+/* ---------- Limit ring ---------- */
+
+.limit-ring-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.limit-ring-bg {
+  fill: none;
+  stroke: var(--border-soft);
+  stroke-width: 3;
+}
+
+.limit-ring-fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: center;
+  transition: stroke-dashoffset 0.5s var(--ease-out), stroke 0.3s ease;
+}
+
+.limit-ring-fill.warn {
+  stroke: var(--warn);
+}
+
+.limit-ring-fill.full {
+  stroke: var(--err);
+}
+
+/* ---------- Source card brand accents ---------- */
+
+.source-card {
+  border-left: 3px solid var(--border-soft);
+}
+
+.source-card[data-source="headhunter"] {
+  border-left-color: #d6001c;
+}
+
+.source-card[data-source="superjob"] {
+  border-left-color: #48b220;
+}
+
+.source-card[data-source="linkedin"] {
+  border-left-color: #0a66c2;
+}
+
+.source-card[data-source="telegram"] {
+  border-left-color: #29a9eb;
+}
+
+.source-card[data-source="getmatch"] {
+  border-left-color: #6c5ce7;
+}
+
+.source-card[data-source="habr_career"] {
+  border-left-color: #65a3be;
+}
+
+.source-card[data-source="geekjob"] {
+  border-left-color: #ff7a45;
+}
+
+.source-card[data-source="rabota_ru"] {
+  border-left-color: #ee3f24;
+}
+
+/* ---------- Sidebar collapse ---------- */
+
+.sidebar {
+  transition: width 0.25s var(--ease-out);
+}
+
+.sidebar.collapsed {
+  width: 72px;
+}
+
+.sidebar.collapsed .brand-text,
+.sidebar.collapsed .brand-sub,
+.sidebar.collapsed nav.tabs button span:not(.tab-badge),
+.sidebar.collapsed .btn-label,
+.sidebar.collapsed .daemon-buttons {
+  display: none;
+}
+
+.sidebar.collapsed .daemon-controls {
+  align-items: center;
+}
+
+.sidebar.collapsed #daemon-badge {
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.sidebar.collapsed .brand {
+  justify-content: center;
+}
+
+.sidebar-collapse-toggle {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--muted-2);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s ease, background 0.15s ease, transform 0.2s var(--ease-out);
+}
+
+.sidebar-collapse-toggle:hover {
+  color: var(--accent);
+  background: var(--panel);
+}
+
+.sidebar.collapsed .sidebar-collapse-toggle {
+  transform: rotate(180deg);
+}
+
+/* ---------- Command palette ---------- */
+
+.command-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 6, 9, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  z-index: 2000;
+}
+
+.command-palette {
+  width: min(560px, calc(100vw - 40px));
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.command-palette input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--border-soft);
+  background: transparent;
+  color: var(--text);
+  padding: 14px 16px;
+  font-size: 15px;
+  font-family: inherit;
+}
+
+.command-palette input:focus {
+  outline: none;
+}
+
+.command-results {
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.command-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13.5px;
+  color: var(--text);
+}
+
+.command-item .muted {
+  margin-left: auto;
+  font-size: 11.5px;
+}
+
+.command-item.active {
+  background: rgba(122, 184, 255, 0.12);
+}
+
+.command-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ---------- Shortcuts cheatsheet ---------- */
+
+.shortcuts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.shortcuts-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+kbd {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 2px 7px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text);
+}

@@ -10,7 +10,7 @@
   href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&display=swap"
   rel="stylesheet"
 />
-<link rel="stylesheet" href="/style.css?v=3" />
+<link rel="stylesheet" href="/style.css?v=5" />
 </head>
 <body>
 <div id="setup-screen" class="setup-screen" style="display:none">
@@ -55,6 +55,7 @@
     </div>
 
     <nav class="tabs">
+      <div class="tab-indicator" id="nav-tab-indicator"></div>
       <button data-tab="overview" title="Обзор" class="active">
         <svg viewBox="0 0 20 20" fill="none"><rect x="2.5" y="2.5" width="6.5" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="11" y="2.5" width="6.5" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="2.5" y="11" width="6.5" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="11" y="11" width="6.5" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/></svg>
         <span>Обзор</span>
@@ -87,18 +88,21 @@
     </nav>
 
     <div class="daemon-controls">
-      <span id="daemon-badge" class="badge off"><span class="badge-dot"></span>демон остановлен</span>
+      <span id="daemon-badge" class="badge off"><span class="badge-dot"></span><span class="btn-label">демон остановлен</span></span>
       <div class="daemon-buttons">
         <button id="daemon-start" class="btn btn-primary">
           <svg viewBox="0 0 20 20" fill="none"><path d="M6.5 4.7v10.6a1 1 0 0 0 1.53.85l8.4-5.3a1 1 0 0 0 0-1.7l-8.4-5.3a1 1 0 0 0-1.53.85Z" fill="currentColor"/></svg>
-          Запустить
+          <span class="btn-label">Запустить</span>
         </button>
         <button id="daemon-stop" class="btn btn-ghost" disabled>
           <svg viewBox="0 0 20 20" fill="none"><rect x="5" y="5" width="10" height="10" rx="1.5" fill="currentColor"/></svg>
-          Стоп
+          <span class="btn-label">Стоп</span>
         </button>
       </div>
     </div>
+    <button id="sidebar-collapse-toggle" class="sidebar-collapse-toggle" title="Свернуть меню" aria-label="Свернуть меню">
+      <svg viewBox="0 0 20 20" fill="none"><path d="M12.5 4.5 7 10l5.5 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
   </aside>
 
   <main>
@@ -234,7 +238,7 @@
         </div>
         <div class="limits-grid">
           <label class="limit-field" style="justify-content:flex-end">
-            <span><input id="tg-auto-message" type="checkbox" style="margin-right:6px" />Автоматически писать найденному в посте контакту первым</span>
+            <span style="display:flex;align-items:center;gap:8px"><input id="tg-auto-message" type="checkbox" class="switch" />Автоматически писать найденному в посте контакту первым</span>
           </label>
           <label class="limit-field">
             <span>Активные часы — с</span>
@@ -318,6 +322,7 @@
         </div>
       </div>
       <nav class="settings-jump" id="settings-jump">
+        <div class="tab-indicator" id="settings-tab-indicator"></div>
         <button type="button" class="active" data-settings-tab="settings-search">Поиск</button>
         <button type="button" data-settings-tab="settings-llm">Провайдер LLM</button>
         <button type="button" data-settings-tab="settings-limits">Лимиты откликов</button>
@@ -448,7 +453,7 @@
             </select>
           </label>
           <label class="limit-field" style="justify-content:flex-end">
-            <span><input id="llm-fallback-enabled" type="checkbox" checked style="margin-right:6px" />Переключаться на другой провайдер при ошибке/лимите</span>
+            <span style="display:flex;align-items:center;gap:8px"><input id="llm-fallback-enabled" type="checkbox" class="switch" checked />Переключаться на другой провайдер при ошибке/лимите</span>
           </label>
         </div>
         <p class="muted small">Если выключить переключение — используется строго выбранный выше провайдер, без ухода на другие ключи из настроек ниже, даже если они настроены. Режим (авто/бесплатно/платно) определяет, какие из настроенных ключей участвуют в цепочке переключения и в каком порядке.</p>
@@ -567,7 +572,7 @@
         </p>
         <div class="filters">
           <label class="limit-field" style="flex-direction:row;align-items:center;gap:8px">
-            <input id="autostart-toggle" type="checkbox" disabled />
+            <input id="autostart-toggle" type="checkbox" class="switch" disabled />
             <span>Запускать при входе в систему</span>
           </label>
         </div>
@@ -590,6 +595,7 @@
           <span id="gen-status" class="muted small"></span>
           <a id="gen-download" class="btn btn-accent" style="display:none" href="/api/generate/download" download>Скачать PDF</a>
         </div>
+        <div class="gen-progress" id="gen-progress"><div class="gen-progress-bar"></div></div>
         <div class="filters">
           <button id="refresh-plain-text" class="btn btn-ghost">Обновить из PDF (если заменили resume.pdf)</button>
           <span id="refresh-plain-text-status" class="muted small"></span>
@@ -662,7 +668,29 @@
   </main>
 </div>
 
+<div id="toast-container"></div>
+
+<div id="command-overlay" class="command-overlay" style="display:none">
+  <div class="command-palette">
+    <input id="command-input" type="text" placeholder="Куда перейти? Настройки, История, Telegram…" autocomplete="off" />
+    <div id="command-results" class="command-results"></div>
+  </div>
+</div>
+
+<div id="shortcuts-overlay" class="command-overlay" style="display:none">
+  <div class="command-palette" style="padding:18px 20px">
+    <h3 style="margin:0 0 4px">Горячие клавиши</h3>
+    <div class="shortcuts-list">
+      <div class="shortcuts-row"><span>Командная палитра</span><kbd>Ctrl/⌘</kbd> + <kbd>K</kbd></div>
+      <div class="shortcuts-row"><span>Переключить раздел</span><kbd>1</kbd>–<kbd>7</kbd></div>
+      <div class="shortcuts-row"><span>Свернуть/развернуть меню</span><kbd>Ctrl/⌘</kbd> + <kbd>B</kbd></div>
+      <div class="shortcuts-row"><span>Эта подсказка</span><kbd>?</kbd></div>
+      <div class="shortcuts-row"><span>Закрыть окно</span><kbd>Esc</kbd></div>
+    </div>
+  </div>
+</div>
+
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=3"></script>
+<script src="/app.js?v=5"></script>
 </body>
 </html>

@@ -158,6 +158,10 @@ function switchTab(name) {
   // отдельную запись в истории браузера на каждый клик по вкладке.
   history.replaceState(null, "", `#${name}`);
   render[name]?.();
+  moveTabIndicator(
+    document.getElementById("nav-tab-indicator"),
+    document.querySelector(`nav.tabs button[data-tab="${name}"]`)
+  );
 }
 
 let overviewLoaded = false;
@@ -438,6 +442,8 @@ const render = {
             : 0;
           const barClass =
             ratio >= 1 ? "full" : ratio >= 0.7 ? "warn" : "";
+          const ringC = 2 * Math.PI * 13;
+          const ringOffset = ringC * (1 - ratio);
           // telegram отправляет (пишет контакту) только при
           // auto_message; остальные площадки — при auto_apply. Без
           // этого "Откликов сегодня 0/N" выглядит как площадка не
@@ -447,12 +453,18 @@ const render = {
             s.name === "telegram" ? !s.auto_message : !s.auto_apply;
           const responseRow = isSearchOnly
             ? `<div class="row"><span>Режим</span><span>🔍 только поиск</span></div>`
-            : `<div class="row"><span>Откликов сегодня</span><span>${s.applied_today}/${s.daily_limit}</span></div>
-            <div class="limit-bar"><div class="limit-bar-fill ${barClass}" style="width:${Math.round(ratio * 100)}%"></div></div>`;
+            : `<div class="row"><span>Откликов сегодня</span>
+              <span class="limit-ring-wrap">
+                <svg width="18" height="18" viewBox="0 0 32 32">
+                  <circle class="limit-ring-bg" cx="16" cy="16" r="13"></circle>
+                  <circle class="limit-ring-fill ${barClass}" cx="16" cy="16" r="13" style="stroke-dasharray:${ringC.toFixed(2)};stroke-dashoffset:${ringOffset.toFixed(2)}"></circle>
+                </svg>
+                ${s.applied_today}/${s.daily_limit}
+              </span></div>`;
           return `
-          <div class="source-card stagger-item" style="animation-delay:${staggerDelay(i)}">
+          <div class="source-card stagger-item" data-source="${s.name}" style="animation-delay:${staggerDelay(i)}">
             <h3>
-              <input type="checkbox" class="schedule-toggle" data-source="${s.name}" title="В расписании демона" ${s.schedule_enabled ? "checked" : ""} />
+              <input type="checkbox" class="schedule-toggle switch" data-source="${s.name}" title="В расписании демона" ${s.schedule_enabled ? "checked" : ""} />
               <span class="dot ${dot}"></span> ${sourceLabel(s.name)}
             </h3>
             <div class="row"><span>Расписание</span><span>${s.schedule_enabled ? `каждые ${s.interval_hours}ч` : "выключено"}</span></div>
@@ -467,9 +479,9 @@ const render = {
         .map((c, i) => {
           const dot = STATUS_DOT[c.status] || "never_run";
           return `
-          <div class="source-card stagger-item" style="animation-delay:${staggerDelay(i)}">
+          <div class="source-card stagger-item" data-source="${c.name}" style="animation-delay:${staggerDelay(i)}">
             <h3>
-              <input type="checkbox" class="schedule-toggle" data-source="${c.name}" title="В расписании демона" ${c.schedule_enabled ? "checked" : ""} />
+              <input type="checkbox" class="schedule-toggle switch" data-source="${c.name}" title="В расписании демона" ${c.schedule_enabled ? "checked" : ""} />
               <span class="dot ${dot}"></span> ${c.label}
             </h3>
             <div class="row"><span>Расписание</span><span>${c.schedule_enabled ? `каждые ${c.interval_hours}ч` : "выключено"}</span></div>
@@ -526,7 +538,7 @@ const render = {
     lastHistorySnapshot = historySnapshot;
 
     if (!entries.length) {
-      tbody.innerHTML = `<tr><td colspan="6" class="muted">Ничего не найдено.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6">${emptyStateHtml("Ничего не найдено.")}</td></tr>`;
       return;
     }
     tbody.innerHTML = entries
@@ -559,7 +571,7 @@ const render = {
     lastRepliesSnapshot = repliesSnapshot;
 
     if (!entries.length) {
-      tbody.innerHTML = `<tr><td colspan="4" class="muted">Пока нет ответов.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="4">${emptyStateHtml("Пока нет ответов.")}</td></tr>`;
       return;
     }
     tbody.innerHTML = entries
@@ -590,11 +602,11 @@ const render = {
               `<li class="stagger-item" style="animation-delay:${staggerDelay(i)}">${gap} — ${count}</li>`
           )
           .join("")
-      : `<li class="muted">Пока нет данных.</li>`;
+      : `<li>${emptyStateHtml("Пока нет данных.")}</li>`;
 
     const candidatesEl = document.getElementById("blacklist-candidates");
     if (!candidates.length) {
-      candidatesEl.innerHTML = `<div class="muted">Нет кандидатов на чёрный список.</div>`;
+      candidatesEl.innerHTML = emptyStateHtml("Нет кандидатов на чёрный список.");
       return;
     }
     candidatesEl.innerHTML = candidates
@@ -711,17 +723,17 @@ const render = {
               ? s.readiness.resume.warning
               : "Данных для подключения достаточно"
         }">${s.readiness && s.readiness.ready ? "✅" : "⚠️"}</td>
-        <td><input type="checkbox" class="s-schedule" ${s.schedule_enabled ? "checked" : ""} /></td>
+        <td><input type="checkbox" class="s-schedule switch" ${s.schedule_enabled ? "checked" : ""} /></td>
         <td><input type="number" class="s-interval" min="1" value="${s.interval_hours ?? 3}" /></td>
-        <td><input type="checkbox" class="s-auto" ${s.auto_apply ? "checked" : ""} /></td>
+        <td><input type="checkbox" class="s-auto switch" ${s.auto_apply ? "checked" : ""} /></td>
         <td>${
           s.name === "headhunter"
-            ? `<input type="checkbox" class="s-auto-reply" ${s.auto_reply ? "checked" : ""} />`
+            ? `<input type="checkbox" class="s-auto-reply switch" ${s.auto_reply ? "checked" : ""} />`
             : "—"
         }</td>
         <td>${
           s.name === "headhunter"
-            ? `<input type="checkbox" class="s-auto-bump" ${s.auto_bump_resume ? "checked" : ""} />`
+            ? `<input type="checkbox" class="s-auto-bump switch" ${s.auto_bump_resume ? "checked" : ""} />`
             : "—"
         }</td>
         <td><input type="text" class="s-resume-id" value="${s.resume_id || ""}" placeholder="id резюме на площадке" /></td>
@@ -1016,19 +1028,24 @@ async function openTelegramConversation(contact) {
 async function pollGenerateStatus() {
   const statusEl = document.getElementById("gen-status");
   const downloadEl = document.getElementById("gen-download");
+  const progressEl = document.getElementById("gen-progress");
   for (;;) {
     const result = await api("/api/generate/status");
     if (!result.running) {
+      progressEl.classList.remove("active");
       if (result.error) {
         statusEl.textContent = `Ошибка: ${result.error}`;
         downloadEl.style.display = "none";
+        showToast("Не удалось сгенерировать документ", "error");
       } else if (result.ready) {
         statusEl.textContent = "Готово.";
         downloadEl.style.display = "";
+        showToast("Документ готов", "success");
       }
       return;
     }
     statusEl.textContent = "Генерация (может занять до минуты)…";
+    progressEl.classList.add("active");
     await new Promise((r) => setTimeout(r, 2000));
   }
 }
@@ -1036,6 +1053,7 @@ async function pollGenerateStatus() {
 async function startGenerate(kind) {
   const statusEl = document.getElementById("gen-status");
   const downloadEl = document.getElementById("gen-download");
+  const progressEl = document.getElementById("gen-progress");
   const styleName = document.getElementById("gen-style").value || null;
   const jobUrl = document.getElementById("gen-job-url").value.trim() || null;
   if (kind !== "resume" && !jobUrl) {
@@ -1044,6 +1062,7 @@ async function startGenerate(kind) {
   }
   downloadEl.style.display = "none";
   statusEl.textContent = "Запуск…";
+  progressEl.classList.add("active");
   try {
     await api(`/api/generate/${kind}`, {
       method: "POST",
@@ -1051,6 +1070,7 @@ async function startGenerate(kind) {
     });
   } catch (e) {
     statusEl.textContent = `Ошибка: ${e.message}`;
+    progressEl.classList.remove("active");
     return;
   }
   pollGenerateStatus();
@@ -1071,6 +1091,10 @@ function switchSettingsTab(paneId) {
       );
     }
   });
+  moveTabIndicator(
+    document.getElementById("settings-tab-indicator"),
+    document.querySelector(`#settings-jump button[data-settings-tab="${paneId}"]`)
+  );
 }
 
 // Провайдеров стало 14 — большинство пользователей смотрят только на
@@ -1098,20 +1122,295 @@ function updateProviderVisibility() {
   }
 }
 
+function emptyStateHtml(message) {
+  return `<div class="empty-state">
+    <svg viewBox="0 0 48 48" fill="none" width="36" height="36">
+      <rect x="6" y="14" width="36" height="26" rx="4" stroke="currentColor" stroke-width="1.5" opacity="0.35"/>
+      <path d="M6 24h10l3 5h10l3-5h10" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" opacity="0.5"/>
+    </svg>
+    <p>${escapeHtml(message)}</p>
+  </div>`;
+}
+
+function showToast(message, type = "info", duration = 3500) {
+  const container = document.getElementById("toast-container");
+  if (!container) return;
+  const el = document.createElement("div");
+  el.className = `toast ${type}`;
+  el.innerHTML = `<span class="toast-dot"></span><span>${escapeHtml(message)}</span>`;
+  container.appendChild(el);
+  if (window.gsap && !REDUCE_MOTION) {
+    gsap.fromTo(el, { opacity: 0, x: 24 }, { opacity: 1, x: 0, duration: 0.3, ease: "power2.out" });
+  }
+  setTimeout(() => {
+    if (window.gsap && !REDUCE_MOTION) {
+      gsap.to(el, { opacity: 0, x: 24, duration: 0.25, ease: "power2.in", onComplete: () => el.remove() });
+    } else {
+      el.remove();
+    }
+  }, duration);
+}
+
+// Общий плавающий индикатор для sidebar-nav и вкладок настроек — вместо
+// мгновенной смены фона у активной кнопки, полоска физически едет к ней.
+// CSS transition, не GSAP — двигать плоский прямоугольник по позиции
+// умеет сам браузер без тикера requestAnimationFrame, а motion-reduce
+// уже глобально обнулён через prefers-reduced-motion в style.css.
+function moveTabIndicator(indicator, btn) {
+  if (!indicator || !btn) return;
+  const parentRect = btn.parentElement.getBoundingClientRect();
+  const btnRect = btn.getBoundingClientRect();
+  const x = btnRect.left - parentRect.left;
+  const y = btnRect.top - parentRect.top;
+  indicator.style.transform = `translate(${x}px, ${y}px)`;
+  indicator.style.width = `${btnRect.width}px`;
+  indicator.style.height = `${btnRect.height}px`;
+  indicator.style.opacity = "1";
+}
+
+function repositionTabIndicators() {
+  moveTabIndicator(
+    document.getElementById("nav-tab-indicator"),
+    document.querySelector("nav.tabs button.active")
+  );
+  moveTabIndicator(
+    document.getElementById("settings-tab-indicator"),
+    document.querySelector("#settings-jump button.active")
+  );
+}
+
+// Вкладки без понятия "сохранить" (генерация резюме через Selenium,
+// ручные best-effort клики на hh.ru) — не размечаем как "не сохранено",
+// там нет настройки, которая могла бы потеряться.
+const SETTINGS_PANES_WITHOUT_SAVE = new Set(["settings-resume", "settings-hh-resume"]);
+
+function markSettingsDirty(pane) {
+  if (!pane || SETTINGS_PANES_WITHOUT_SAVE.has(pane.id)) return;
+  const tab = document.querySelector(`#settings-jump button[data-settings-tab="${pane.id}"]`);
+  if (tab) tab.classList.add("dirty");
+}
+
+function flashSaved(pane, btn) {
+  if (!pane) return;
+  const tab = document.querySelector(`#settings-jump button[data-settings-tab="${pane.id}"]`);
+  if (tab) tab.classList.remove("dirty");
+  if (!btn) return;
+  btn.classList.remove("save-flash");
+  void btn.offsetWidth;
+  btn.classList.add("save-flash");
+}
+
+function initSettingsDirtyTracking() {
+  const settingsView = document.getElementById("view-settings");
+  if (!settingsView) return;
+  ["input", "change"].forEach((evt) => {
+    settingsView.addEventListener(evt, (e) => {
+      markSettingsDirty(e.target.closest(".settings-pane"));
+    });
+  });
+  settingsView.addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    const isSaveBtn = btn.id.includes("save") || btn.classList.contains("s-save");
+    if (!isSaveBtn) return;
+    flashSaved(btn.closest(".settings-pane"), btn);
+  });
+}
+
+function toggleSidebarCollapse() {
+  const sidebar = document.querySelector(".sidebar");
+  const collapsed = sidebar.classList.toggle("collapsed");
+  localStorage.setItem("cj-sidebar-collapsed", collapsed ? "1" : "0");
+  requestAnimationFrame(repositionTabIndicators);
+}
+
+function initSidebarCollapse() {
+  const sidebar = document.querySelector(".sidebar");
+  if (localStorage.getItem("cj-sidebar-collapsed") === "1") {
+    sidebar.classList.add("collapsed");
+  }
+  document
+    .getElementById("sidebar-collapse-toggle")
+    .addEventListener("click", toggleSidebarCollapse);
+}
+
+// ---------- Командная палитра ----------
+
+let commandActiveIndex = 0;
+
+function collectCommandItems() {
+  const items = [];
+  document.querySelectorAll("nav.tabs button[data-tab]").forEach((btn) => {
+    items.push({
+      label: btn.querySelector("span")?.textContent || btn.dataset.tab,
+      hint: "Раздел",
+      action: () => switchTab(btn.dataset.tab),
+    });
+  });
+  document.querySelectorAll("#settings-jump button[data-settings-tab]").forEach((btn) => {
+    items.push({
+      label: `Настройки → ${btn.textContent}`,
+      hint: "Вкладка",
+      action: () => {
+        switchTab("settings");
+        switchSettingsTab(btn.dataset.settingsTab);
+      },
+    });
+  });
+  return items;
+}
+
+function updateCommandActive(results) {
+  results.querySelectorAll(".command-item").forEach((el, i) => {
+    el.classList.toggle("active", i === commandActiveIndex);
+  });
+}
+
+function renderCommandResults(query) {
+  const results = document.getElementById("command-results");
+  const items = collectCommandItems().filter((it) =>
+    it.label.toLowerCase().includes(query.toLowerCase())
+  );
+  commandActiveIndex = 0;
+  results.__items = items;
+  if (!items.length) {
+    results.innerHTML = `<div class="command-empty">Ничего не найдено</div>`;
+    return;
+  }
+  results.innerHTML = items
+    .map(
+      (it, i) =>
+        `<div class="command-item${i === 0 ? " active" : ""}" data-index="${i}"><span>${escapeHtml(it.label)}</span><span class="muted">${it.hint}</span></div>`
+    )
+    .join("");
+  results.querySelectorAll(".command-item").forEach((el, i) => {
+    el.addEventListener("click", () => {
+      items[i].action();
+      closeCommandPalette();
+    });
+  });
+}
+
+function openCommandPalette() {
+  const overlay = document.getElementById("command-overlay");
+  const input = document.getElementById("command-input");
+  overlay.style.display = "flex";
+  input.value = "";
+  renderCommandResults("");
+  input.focus();
+}
+
+function closeCommandPalette() {
+  document.getElementById("command-overlay").style.display = "none";
+}
+
+function isCommandPaletteOpen() {
+  return document.getElementById("command-overlay").style.display !== "none";
+}
+
+function initCommandPalette() {
+  const overlay = document.getElementById("command-overlay");
+  const input = document.getElementById("command-input");
+  input.addEventListener("input", () => renderCommandResults(input.value));
+  input.addEventListener("keydown", (e) => {
+    const results = document.getElementById("command-results");
+    const items = results.__items || [];
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      commandActiveIndex = Math.min(commandActiveIndex + 1, items.length - 1);
+      updateCommandActive(results);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      commandActiveIndex = Math.max(commandActiveIndex - 1, 0);
+      updateCommandActive(results);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (items[commandActiveIndex]) {
+        items[commandActiveIndex].action();
+        closeCommandPalette();
+      }
+    } else if (e.key === "Escape") {
+      closeCommandPalette();
+    }
+  });
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) closeCommandPalette();
+  });
+
+  const shortcutsOverlay = document.getElementById("shortcuts-overlay");
+  shortcutsOverlay.addEventListener("click", (e) => {
+    if (e.target === shortcutsOverlay) shortcutsOverlay.style.display = "none";
+  });
+}
+
+function initKeyboardShortcuts() {
+  document.addEventListener("keydown", (e) => {
+    const tag = (e.target.tagName || "").toLowerCase();
+    const isTyping = tag === "input" || tag === "textarea" || e.target.isContentEditable;
+
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      openCommandPalette();
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
+      e.preventDefault();
+      toggleSidebarCollapse();
+      return;
+    }
+    if (isCommandPaletteOpen()) return;
+
+    const shortcutsOverlay = document.getElementById("shortcuts-overlay");
+    if (e.key === "Escape") {
+      shortcutsOverlay.style.display = "none";
+      return;
+    }
+    if (isTyping) return;
+    if (e.key === "?") {
+      e.preventDefault();
+      shortcutsOverlay.style.display =
+        shortcutsOverlay.style.display === "none" ? "flex" : "none";
+      return;
+    }
+    if (/^[1-7]$/.test(e.key)) {
+      const buttons = document.querySelectorAll("nav.tabs button[data-tab]");
+      const idx = parseInt(e.key, 10) - 1;
+      if (buttons[idx]) switchTab(buttons[idx].dataset.tab);
+    }
+  });
+}
+
 function initDashboard() {
   document.querySelectorAll("nav.tabs button").forEach((b) => {
     b.addEventListener("click", () => switchTab(b.dataset.tab));
   });
 
-  document.getElementById("theme-toggle").addEventListener("click", () => {
+  document.getElementById("theme-toggle").addEventListener("click", (ev) => {
     const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
-    document.documentElement.dataset.theme = next;
-    localStorage.setItem("cj-theme", next);
+    const apply = () => {
+      document.documentElement.dataset.theme = next;
+      localStorage.setItem("cj-theme", next);
+    };
+    const rect = ev.currentTarget.getBoundingClientRect();
+    document.documentElement.style.setProperty("--theme-toggle-x", `${rect.left + rect.width / 2}px`);
+    document.documentElement.style.setProperty("--theme-toggle-y", `${rect.top + rect.height / 2}px`);
+    if (document.startViewTransition && !REDUCE_MOTION) {
+      document.startViewTransition(apply);
+    } else {
+      apply();
+    }
   });
 
   document.querySelectorAll("#settings-jump button").forEach((b) => {
     b.addEventListener("click", () => switchSettingsTab(b.dataset.settingsTab));
   });
+
+  initSidebarCollapse();
+  initSettingsDirtyTracking();
+  initCommandPalette();
+  initKeyboardShortcuts();
+  requestAnimationFrame(repositionTabIndicators);
+  window.addEventListener("resize", repositionTabIndicators);
 
   const providerToggle = document.getElementById("provider-grid-toggle");
   const providerGrid = document.getElementById("provider-grid");
@@ -1207,10 +1506,12 @@ function initDashboard() {
 
   document.getElementById("daemon-start").addEventListener("click", async () => {
     await api("/api/daemon/start", { method: "POST" });
+    showToast("Демон запущен", "success");
     render.overview();
   });
   document.getElementById("daemon-stop").addEventListener("click", async () => {
     await api("/api/daemon/stop", { method: "POST" });
+    showToast("Демон остановлен", "info");
     render.overview();
   });
 
