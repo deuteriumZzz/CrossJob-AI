@@ -126,7 +126,7 @@ async function refreshTelegramConnectStatus() {
   try {
     const data = await api("/api/settings/telegram/connect/status");
     if (data.status === "connected") {
-      statusEl.innerHTML = `✅ Подключено (chat_id: ${escapeHtml(String(data.chat_id))}) <button type="button" class="copy-btn" title="Скопировать chat_id">${COPY_ICON_SVG}</button>`;
+      statusEl.innerHTML = `✅ Подключено (chat_id: ${escapeHtml(String(data.chat_id))}) <button type="button" class="copy-btn" title="Скопировать chat_id" aria-label="Скопировать chat_id">${COPY_ICON_SVG}</button>`;
       statusEl.querySelector(".copy-btn").addEventListener("click", (e) => {
         copyToClipboard(String(data.chat_id), e.currentTarget);
       });
@@ -521,10 +521,10 @@ const render = {
           return `
           <div class="source-card stagger-item" data-source="${s.name}" draggable="true" style="animation-delay:${staggerDelay(i)}">
             <div class="source-card-actions">
-              <button type="button" class="src-goto-history" data-source="${s.name}" title="История откликов этой площадки">
+              <button type="button" class="src-goto-history" data-source="${s.name}" title="История откликов этой площадки" aria-label="История откликов ${sourceLabel(s.name)}">
                 <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.6"/><path d="M10 5.8V10l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
               </button>
-              <button type="button" class="src-goto-logs" data-source="${s.name}" title="Логи этой площадки">
+              <button type="button" class="src-goto-logs" data-source="${s.name}" title="Логи этой площадки" aria-label="Логи ${sourceLabel(s.name)}">
                 <svg viewBox="0 0 20 20" fill="none"><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M5.5 7.5 8 10l-2.5 2.5M9.8 12.5h4.7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </button>
             </div>
@@ -546,10 +546,10 @@ const render = {
           return `
           <div class="source-card stagger-item" data-source="${c.name}" draggable="true" style="animation-delay:${staggerDelay(i)}">
             <div class="source-card-actions">
-              <button type="button" class="src-goto-history" data-source="${c.name}" title="История откликов этой площадки">
+              <button type="button" class="src-goto-history" data-source="${c.name}" title="История откликов этой площадки" aria-label="История откликов ${escapeHtml(c.label)}">
                 <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.6"/><path d="M10 5.8V10l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
               </button>
-              <button type="button" class="src-goto-logs" data-source="${c.name}" title="Логи этой площадки">
+              <button type="button" class="src-goto-logs" data-source="${c.name}" title="Логи этой площадки" aria-label="Логи ${escapeHtml(c.label)}">
                 <svg viewBox="0 0 20 20" fill="none"><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M5.5 7.5 8 10l-2.5 2.5M9.8 12.5h4.7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </button>
             </div>
@@ -1415,17 +1415,74 @@ function renderCommandResults(query) {
   });
 }
 
+// Общий focus trap для модалок-оверлеев — Tab не должен уводить
+// фокус на затемнённый фон позади, а закрытие возвращает фокус туда,
+// откуда открыли (иначе клавиатурный пользователь теряет место).
+const _focusTrapRelease = new WeakMap();
+
+function trapFocus(container) {
+  const focusableSelector =
+    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  const previouslyFocused = document.activeElement;
+  const getFocusable = () =>
+    Array.from(container.querySelectorAll(focusableSelector)).filter(
+      (el) => el.offsetParent !== null
+    );
+
+  function onKeydown(e) {
+    if (e.key !== "Tab") return;
+    const focusable = getFocusable();
+    if (!focusable.length) {
+      e.preventDefault();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
+  container.addEventListener("keydown", onKeydown);
+  const focusable = getFocusable();
+  (focusable[0] || container).focus();
+
+  const release = () => {
+    container.removeEventListener("keydown", onKeydown);
+    if (previouslyFocused && typeof previouslyFocused.focus === "function") {
+      previouslyFocused.focus();
+    }
+  };
+  _focusTrapRelease.set(container, release);
+  return release;
+}
+
+function releaseFocusTrap(container) {
+  const release = _focusTrapRelease.get(container);
+  if (release) {
+    _focusTrapRelease.delete(container);
+    release();
+  }
+}
+
 function openCommandPalette() {
   const overlay = document.getElementById("command-overlay");
   const input = document.getElementById("command-input");
   overlay.style.display = "flex";
   input.value = "";
   renderCommandResults("");
+  trapFocus(overlay);
   input.focus();
 }
 
 function closeCommandPalette() {
-  document.getElementById("command-overlay").style.display = "none";
+  const overlay = document.getElementById("command-overlay");
+  overlay.style.display = "none";
+  releaseFocusTrap(overlay);
 }
 
 function isCommandPaletteOpen() {
@@ -1445,6 +1502,7 @@ function showConfirm(message) {
     const cancelBtn = document.getElementById("confirm-cancel");
     const cleanup = (result) => {
       overlay.style.display = "none";
+      releaseFocusTrap(overlay);
       okBtn.removeEventListener("click", onOk);
       cancelBtn.removeEventListener("click", onCancel);
       overlay.removeEventListener("click", onOverlay);
@@ -1464,6 +1522,7 @@ function showConfirm(message) {
     cancelBtn.addEventListener("click", onCancel);
     overlay.addEventListener("click", onOverlay);
     document.addEventListener("keydown", onKey);
+    trapFocus(overlay);
   });
 }
 
@@ -1498,8 +1557,22 @@ function initCommandPalette() {
 
   const shortcutsOverlay = document.getElementById("shortcuts-overlay");
   shortcutsOverlay.addEventListener("click", (e) => {
-    if (e.target === shortcutsOverlay) shortcutsOverlay.style.display = "none";
+    if (e.target === shortcutsOverlay) closeShortcutsOverlay();
   });
+  document.getElementById("shortcuts-close").addEventListener("click", closeShortcutsOverlay);
+}
+
+function openShortcutsOverlay() {
+  const overlay = document.getElementById("shortcuts-overlay");
+  overlay.style.display = "flex";
+  trapFocus(overlay);
+}
+
+function closeShortcutsOverlay() {
+  const overlay = document.getElementById("shortcuts-overlay");
+  if (overlay.style.display === "none") return;
+  overlay.style.display = "none";
+  releaseFocusTrap(overlay);
 }
 
 function initKeyboardShortcuts() {
@@ -1519,16 +1592,16 @@ function initKeyboardShortcuts() {
     }
     if (isCommandPaletteOpen()) return;
 
-    const shortcutsOverlay = document.getElementById("shortcuts-overlay");
     if (e.key === "Escape") {
-      shortcutsOverlay.style.display = "none";
+      closeShortcutsOverlay();
       return;
     }
     if (isTyping) return;
     if (e.key === "?") {
       e.preventDefault();
-      shortcutsOverlay.style.display =
-        shortcutsOverlay.style.display === "none" ? "flex" : "none";
+      const overlay = document.getElementById("shortcuts-overlay");
+      if (overlay.style.display === "none") openShortcutsOverlay();
+      else closeShortcutsOverlay();
       return;
     }
     if (/^[1-7]$/.test(e.key)) {

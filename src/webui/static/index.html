@@ -479,7 +479,7 @@
             </span>
             <span style="position:relative;display:block">
               <input id="llm-key-input" type="password" placeholder="вставьте ключ этого провайдера" autocomplete="off" style="width:100%;padding-right:34px" />
-              <button type="button" id="llm-key-toggle" class="copy-btn" style="position:absolute;right:6px;top:50%;transform:translateY(-50%)" title="Показать/скрыть ключ">
+              <button type="button" id="llm-key-toggle" class="copy-btn" style="position:absolute;right:6px;top:50%;transform:translateY(-50%)" title="Показать/скрыть ключ" aria-label="Показать/скрыть ключ">
                 <svg viewBox="0 0 20 20" fill="none"><path d="M2 10s3-5.5 8-5.5 8 5.5 8 5.5-3 5.5-8 5.5-8-5.5-8-5.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="10" cy="10" r="2.4" stroke="currentColor" stroke-width="1.6"/></svg>
               </button>
             </span>
@@ -682,7 +682,7 @@
   </main>
 </div>
 
-<div id="toast-container"></div>
+<div id="toast-container" role="status" aria-live="polite" aria-atomic="false"></div>
 
 <div id="command-overlay" class="command-overlay" style="display:none">
   <div class="command-palette">
@@ -711,10 +711,11 @@
       <div class="shortcuts-row"><span>Эта подсказка</span><kbd>?</kbd></div>
       <div class="shortcuts-row"><span>Закрыть окно</span><kbd>Esc</kbd></div>
     </div>
+    <button type="button" class="btn btn-secondary" id="shortcuts-close" style="width:100%;justify-content:center;margin-top:14px">Закрыть</button>
   </div>
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=11"></script>
+<script src="/app.js?v=12"></script>
 </body>
 </html>
