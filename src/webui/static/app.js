@@ -126,7 +126,10 @@ async function refreshTelegramConnectStatus() {
   try {
     const data = await api("/api/settings/telegram/connect/status");
     if (data.status === "connected") {
-      statusEl.textContent = `✅ Подключено (chat_id: ${data.chat_id}).`;
+      statusEl.innerHTML = `✅ Подключено (chat_id: ${escapeHtml(String(data.chat_id))}) <button type="button" class="copy-btn" title="Скопировать chat_id">${COPY_ICON_SVG}</button>`;
+      statusEl.querySelector(".copy-btn").addEventListener("click", (e) => {
+        copyToClipboard(String(data.chat_id), e.currentTarget);
+      });
       return true;
     }
     if (data.status === "timeout") {
@@ -168,6 +171,7 @@ let overviewLoaded = false;
 let lastOverviewSnapshot = null;
 let historyLoaded = false;
 let lastHistorySnapshot = null;
+let lastHistoryEntries = [];
 let repliesLoaded = false;
 let lastRepliesSnapshot = null;
 let logsLoaded = false;
@@ -434,7 +438,7 @@ const render = {
       // (s.schedule_enabled), а не сохраняется вручную между опросами —
       // рендер и так пропускается, пока status не изменится (см. unchanged
       // выше), так что раньше поставленная галочка не мигает.
-      document.getElementById("source-grid").innerHTML = status.sources
+      document.getElementById("source-grid").innerHTML = applySourceOrder(status.sources, "name")
         .map((s, i) => {
           const dot = STATUS_DOT[s.status] || "never_run";
           const ratio = s.daily_limit
@@ -462,7 +466,15 @@ const render = {
                 ${s.applied_today}/${s.daily_limit}
               </span></div>`;
           return `
-          <div class="source-card stagger-item" data-source="${s.name}" style="animation-delay:${staggerDelay(i)}">
+          <div class="source-card stagger-item" data-source="${s.name}" draggable="true" style="animation-delay:${staggerDelay(i)}">
+            <div class="source-card-actions">
+              <button type="button" class="src-goto-history" data-source="${s.name}" title="История откликов этой площадки">
+                <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.6"/><path d="M10 5.8V10l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              </button>
+              <button type="button" class="src-goto-logs" data-source="${s.name}" title="Логи этой площадки">
+                <svg viewBox="0 0 20 20" fill="none"><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M5.5 7.5 8 10l-2.5 2.5M9.8 12.5h4.7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+            </div>
             <h3>
               <input type="checkbox" class="schedule-toggle switch" data-source="${s.name}" title="В расписании демона" ${s.schedule_enabled ? "checked" : ""} />
               <span class="dot ${dot}"></span> ${sourceLabel(s.name)}
@@ -537,13 +549,14 @@ const render = {
     if (historySnapshot === lastHistorySnapshot) return;
     lastHistorySnapshot = historySnapshot;
 
+    lastHistoryEntries = entries;
     if (!entries.length) {
       tbody.innerHTML = `<tr><td colspan="6">${emptyStateHtml("Ничего не найдено.")}</td></tr>`;
+      document.getElementById("history-timeline").innerHTML = emptyStateHtml("Ничего не найдено.");
       return;
     }
-    tbody.innerHTML = entries
-      .slice()
-      .reverse()
+    const reversed = entries.slice().reverse();
+    tbody.innerHTML = reversed
       .map(
         (e, i) => `
       <tr class="reveal" style="transition-delay:${staggerDelay(i, 25)}">
@@ -557,6 +570,7 @@ const render = {
       )
       .join("");
     observeReveal(tbody);
+    renderHistoryTimeline(reversed);
   },
 
   async replies() {
@@ -589,6 +603,7 @@ const render = {
   },
 
   async analytics() {
+    renderActivityHeatmap();
     const [gaps, candidates] = await Promise.all([
       api("/api/analytics/gaps"),
       api("/api/analytics/blacklist-candidates"),
@@ -1380,6 +1395,159 @@ function initKeyboardShortcuts() {
   });
 }
 
+function renderHistoryTimeline(reversedEntries) {
+  const el = document.getElementById("history-timeline");
+  if (!reversedEntries.length) return;
+  el.innerHTML = reversedEntries
+    .map(
+      (e, i) => `
+    <div class="timeline-item reveal" style="transition-delay:${staggerDelay(i, 20)}">
+      <div class="timeline-date">${fmtTime(e.applied_at)}</div>
+      <div class="timeline-title"><a href="${e.link}" target="_blank" rel="noopener">${e.company} — ${e.title}</a></div>
+      <div class="timeline-meta">${sourceLabel(e.source)} · ${statusLabel(e.status)}${e.score != null ? ` · балл ${e.score}` : ""}</div>
+    </div>`
+    )
+    .join("");
+  observeReveal(el);
+}
+
+function initHistoryViewToggle() {
+  const tableBtn = document.getElementById("history-view-table");
+  const timelineBtn = document.getElementById("history-view-timeline");
+  const tableWrap = document.getElementById("history-table-wrap");
+  const timelineWrap = document.getElementById("history-timeline");
+  tableBtn.addEventListener("click", () => {
+    tableBtn.classList.add("active");
+    timelineBtn.classList.remove("active");
+    tableWrap.style.display = "";
+    timelineWrap.style.display = "none";
+  });
+  timelineBtn.addEventListener("click", () => {
+    timelineBtn.classList.add("active");
+    tableBtn.classList.remove("active");
+    tableWrap.style.display = "none";
+    timelineWrap.style.display = "";
+  });
+}
+
+// 13 недель x 7 дней, как в GitHub contributions — считаем прямо на
+// клиенте по уже существующему /api/applications, отдельного
+// backend-эндпоинта для этого заводить незачем.
+async function renderActivityHeatmap() {
+  const el = document.getElementById("activity-heatmap");
+  if (!el) return;
+  const entries = await api("/api/applications");
+  const counts = new Map();
+  entries.forEach((e) => {
+    const day = (e.applied_at || "").slice(0, 10);
+    if (day) counts.set(day, (counts.get(day) || 0) + 1);
+  });
+  const days = 91;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const cells = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    const count = counts.get(key) || 0;
+    const level = count === 0 ? 0 : count >= 5 ? 3 : count >= 2 ? 2 : 1;
+    cells.push(
+      `<div class="heatmap-cell" data-level="${level}" title="${key}: ${count} откл."></div>`
+    );
+  }
+  el.innerHTML = cells.join("");
+}
+
+function copyToClipboard(text, btn) {
+  navigator.clipboard.writeText(text).then(() => {
+    btn.classList.add("copied");
+    const original = btn.innerHTML;
+    btn.innerHTML = `<svg viewBox="0 0 20 20" fill="none"><path d="m4 10.5 4 4 8-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    setTimeout(() => {
+      btn.classList.remove("copied");
+      btn.innerHTML = original;
+    }, 1400);
+  });
+}
+
+const COPY_ICON_SVG = `<svg viewBox="0 0 20 20" fill="none"><rect x="7" y="7" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M4.5 13V4.5a1 1 0 0 1 1-1H13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+
+// ---------- Drag-to-reorder карточек площадок ----------
+
+function loadSourceOrder() {
+  try {
+    return JSON.parse(localStorage.getItem("cj-source-order") || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveSourceOrder(order) {
+  localStorage.setItem("cj-source-order", JSON.stringify(order));
+}
+
+function applySourceOrder(items, key) {
+  const order = loadSourceOrder();
+  if (!order.length) return items;
+  const rank = new Map(order.map((name, i) => [name, i]));
+  return items
+    .slice()
+    .sort((a, b) => (rank.get(a[key]) ?? 999) - (rank.get(b[key]) ?? 999));
+}
+
+function initDragReorder(gridId) {
+  const grid = document.getElementById(gridId);
+  let dragged = null;
+  grid.addEventListener("dragstart", (e) => {
+    const card = e.target.closest(".source-card");
+    if (!card) return;
+    dragged = card;
+    e.dataTransfer.effectAllowed = "move";
+  });
+  grid.addEventListener("dragover", (e) => {
+    if (!dragged) return;
+    e.preventDefault();
+    const target = e.target.closest(".source-card");
+    if (!target || target === dragged) return;
+    const rect = target.getBoundingClientRect();
+    const before = e.clientX < rect.left + rect.width / 2;
+    target.parentElement.insertBefore(dragged, before ? target : target.nextSibling);
+  });
+  grid.addEventListener("dragend", () => {
+    if (!dragged) return;
+    dragged = null;
+    const order = [...grid.querySelectorAll(".source-card")].map((c) => c.dataset.source);
+    saveSourceOrder(order);
+  });
+}
+
+// ---------- Changelog popover ----------
+
+const CHANGELOG_VERSION = "2026-08-29-motion";
+const CHANGELOG_ITEMS = [
+  "Плавающий индикатор вкладок, toggle-переключатели, toast-уведомления",
+  "Ctrl/⌘+K — командная палитра, цифры 1–7 — переход по разделам",
+  "Кольцевой прогресс и цветные акценты площадок на Обзоре",
+  "Таймлайн и heatmap-активность в Истории/Аналитике",
+];
+
+function initChangelogPopover() {
+  if (localStorage.getItem("cj-seen-changelog") === CHANGELOG_VERSION) return;
+  const el = document.createElement("div");
+  el.className = "changelog-popover";
+  el.innerHTML = `
+    <h4>✨ Что нового</h4>
+    <ul>${CHANGELOG_ITEMS.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}</ul>
+    <button class="btn btn-primary" type="button">Понятно</button>
+  `;
+  document.body.appendChild(el);
+  el.querySelector("button").addEventListener("click", () => {
+    localStorage.setItem("cj-seen-changelog", CHANGELOG_VERSION);
+    el.remove();
+  });
+}
+
 function initDashboard() {
   document.querySelectorAll("nav.tabs button").forEach((b) => {
     b.addEventListener("click", () => switchTab(b.dataset.tab));
@@ -1409,6 +1577,21 @@ function initDashboard() {
   initSettingsDirtyTracking();
   initCommandPalette();
   initKeyboardShortcuts();
+  initHistoryViewToggle();
+  initDragReorder("source-grid");
+  initChangelogPopover();
+
+  document.getElementById("source-grid").addEventListener("click", (e) => {
+    const historyBtn = e.target.closest(".src-goto-history");
+    const logsBtn = e.target.closest(".src-goto-logs");
+    if (historyBtn) {
+      document.getElementById("filter-source").value = historyBtn.dataset.source;
+      switchTab("history");
+    } else if (logsBtn) {
+      document.getElementById("log-source").value = logsBtn.dataset.source;
+      switchTab("logs");
+    }
+  });
   requestAnimationFrame(repositionTabIndicators);
   window.addEventListener("resize", repositionTabIndicators);
 

@@ -10,7 +10,7 @@
   href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&display=swap"
   rel="stylesheet"
 />
-<link rel="stylesheet" href="/style.css?v=5" />
+<link rel="stylesheet" href="/style.css?v=6" />
 </head>
 <body>
 <div id="setup-screen" class="setup-screen" style="display:none">
@@ -131,6 +131,8 @@
           <p class="muted">Все отправленные и пропущенные вакансии</p>
         </div>
         <div class="toolbar">
+          <button id="history-view-table" class="btn btn-secondary btn-small active" type="button">☰ Таблица</button>
+          <button id="history-view-timeline" class="btn btn-secondary btn-small" type="button">◷ Таймлайн</button>
           <a id="export-applied-log" class="btn btn-secondary" href="/api/export/applied-log" download>Скачать бэкап (JSON)</a>
         </div>
       </div>
@@ -155,7 +157,7 @@
         <input id="filter-query" type="text" placeholder="Поиск по компании/названию" aria-label="Поиск по компании/названию" />
         <button id="history-apply-filters" class="btn btn-secondary">Применить</button>
       </div>
-      <div class="table-wrap">
+      <div class="table-wrap" id="history-table-wrap">
         <table>
           <thead>
             <tr><th>Дата</th><th>Площадка</th><th>Компания</th><th>Вакансия</th><th>Статус</th><th>Балл</th></tr>
@@ -163,6 +165,7 @@
           <tbody id="history-rows"></tbody>
         </table>
       </div>
+      <div id="history-timeline" class="timeline" style="display:none"></div>
     </section>
 
     <section id="view-replies" class="view">
@@ -299,6 +302,11 @@
           <h2>Аналитика</h2>
           <p class="muted">Что чаще всего мешает и кого стоит вычеркнуть</p>
         </div>
+      </div>
+      <div class="panel">
+        <h3>Активность за 13 недель</h3>
+        <p class="muted small">Количество откликов по дням, как в Истории</p>
+        <div id="activity-heatmap" class="heatmap"></div>
       </div>
       <div class="analytics-grid">
         <div class="panel">
@@ -691,6 +699,6 @@
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=5"></script>
+<script src="/app.js?v=6"></script>
 </body>
 </html>
