@@ -1,8 +1,8 @@
 from src.job import Job
 from src.job_sources.blacklist_filter import passes_blacklists
-from src.job_sources.preferences import effective_list
 from src.job_sources.getmatch.client import GetMatchClient
 from src.job_sources.getmatch.mapping import parse_search_results
+from src.job_sources.preferences import effective_list
 
 # Сам поиск живёт здесь; реальный клик "Откликнуться" — в
 # GetMatchClient.apply() (main.py вызывает его при auto_apply: true),

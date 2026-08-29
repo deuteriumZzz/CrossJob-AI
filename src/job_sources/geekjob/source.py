@@ -1,11 +1,11 @@
 from src.job import Job
 from src.job_sources.blacklist_filter import passes_blacklists
-from src.job_sources.preferences import effective_list
 from src.job_sources.geekjob.client import GeekjobClient
 from src.job_sources.geekjob.mapping import (
     geekjob_vacancy_to_job,
     parse_search_results,
 )
+from src.job_sources.preferences import effective_list
 
 # ponytail: фиксированная неглубокая пагинация (2 страницы на должность)
 # вместо обхода всех страниц, увеличить, если это перестанет давать

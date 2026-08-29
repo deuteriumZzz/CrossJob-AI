@@ -1,10 +1,10 @@
 from src.job import Job
 from src.job_sources.blacklist_filter import passes_blacklists
-from src.job_sources.preferences import effective_list
 from src.job_sources.linkedin.search import (
     load_job_description,
     search_easy_apply_jobs,
 )
+from src.job_sources.preferences import effective_list
 
 
 class LinkedInSource:

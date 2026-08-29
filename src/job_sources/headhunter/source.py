@@ -6,10 +6,10 @@ import httpx
 
 from src.job import Job
 from src.job_sources.blacklist_filter import passes_blacklists
-from src.job_sources.preferences import effective_list
 from src.job_sources.headhunter.client import HeadHunterClient
 from src.job_sources.headhunter.mapping import hh_vacancy_to_job
 from src.job_sources.html_text import strip_html
+from src.job_sources.preferences import effective_list
 from src.logging import logger
 
 

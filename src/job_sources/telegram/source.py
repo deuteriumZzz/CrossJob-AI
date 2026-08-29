@@ -1,12 +1,12 @@
 from datetime import datetime, timedelta, timezone
 
 from src.job import Job
+from src.job_sources.preferences import effective_list
 from src.job_sources.telegram.client import (
     TelegramSourceClient,
     normalize_channel,
 )
 from src.job_sources.telegram.mapping import telegram_message_to_job
-from src.job_sources.preferences import effective_list
 
 # ponytail: фиксированное число сообщений на канал вместо обхода всей
 # истории, увеличить, если это перестанет давать достаточно постов.

@@ -86,8 +86,6 @@ from src.job_sources.headhunter.telegram_approval import (
     save_pending_form,
     update_pending_form_answers,
 )
-from src.job_sources.telegram_control import HELP_TEXT as _TELEGRAM_HELP_TEXT
-from src.job_sources.telegram_control import poll_control_commands
 from src.job_sources.job_fit import classify_fit, score_job_fit
 from src.job_sources.linkedin.answerer import EasyApplyAnswerer
 from src.job_sources.linkedin.auth import LinkedInSession
@@ -97,10 +95,10 @@ from src.job_sources.llm_provider import (
     get_active_provider as get_active_llm_provider,
 )
 from src.job_sources.llm_provider import (
-    set_fallback_enabled as set_llm_fallback_enabled,
+    set_fallback_base_urls as set_llm_fallback_base_urls,
 )
 from src.job_sources.llm_provider import (
-    set_fallback_base_urls as set_llm_fallback_base_urls,
+    set_fallback_enabled as set_llm_fallback_enabled,
 )
 from src.job_sources.llm_provider import (
     set_fallback_keys as set_llm_fallback_keys,
@@ -140,6 +138,8 @@ from src.job_sources.superjob.source import SuperJobSource
 from src.job_sources.telegram.client import TelegramSourceClient
 from src.job_sources.telegram.contact import extract_contact
 from src.job_sources.telegram.source import TelegramSource
+from src.job_sources.telegram_control import HELP_TEXT as _TELEGRAM_HELP_TEXT
+from src.job_sources.telegram_control import poll_control_commands
 from src.job_sources.telegram_conversations import TelegramConversations
 from src.job_sources.telegram_notify import (
     notify_from_secrets,
