@@ -2250,7 +2250,7 @@ kbd {
   color: var(--muted);
 }
 
-.tour-tooltip .tour-actions {
+.tour-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;

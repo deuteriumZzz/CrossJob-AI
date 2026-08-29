@@ -10,7 +10,7 @@
   href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&display=swap"
   rel="stylesheet"
 />
-<link rel="stylesheet" href="/style.css?v=10" />
+<link rel="stylesheet" href="/style.css?v=11" />
 </head>
 <body>
 <div id="setup-screen" class="setup-screen" style="display:none">
@@ -59,6 +59,7 @@
       <button data-tab="overview" title="Обзор" class="active">
         <svg viewBox="0 0 20 20" fill="none"><rect x="2.5" y="2.5" width="6.5" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="11" y="2.5" width="6.5" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="2.5" y="11" width="6.5" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="11" y="11" width="6.5" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/></svg>
         <span>Обзор</span>
+        <span id="overview-error-badge" class="tab-badge" style="display:none"></span>
       </button>
       <button data-tab="history" title="История">
         <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.6"/><path d="M10 5.8V10l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -476,7 +477,12 @@
               (сейчас: <span id="llm-key-preview">—</span>)
               — <a id="llm-key-get-link" href="#" target="_blank" rel="noopener">получить ключ →</a>
             </span>
-            <input id="llm-key-input" type="password" placeholder="вставьте ключ этого провайдера" autocomplete="off" />
+            <span style="position:relative;display:block">
+              <input id="llm-key-input" type="password" placeholder="вставьте ключ этого провайдера" autocomplete="off" style="width:100%;padding-right:34px" />
+              <button type="button" id="llm-key-toggle" class="copy-btn" style="position:absolute;right:6px;top:50%;transform:translateY(-50%)" title="Показать/скрыть ключ">
+                <svg viewBox="0 0 20 20" fill="none"><path d="M2 10s3-5.5 8-5.5 8 5.5 8 5.5-3 5.5-8 5.5-8-5.5-8-5.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="10" cy="10" r="2.4" stroke="currentColor" stroke-width="1.6"/></svg>
+              </button>
+            </span>
           </label>
           <button id="llm-key-save" class="btn btn-secondary">Сохранить ключ</button>
           <span id="llm-key-status" class="muted small"></span>
@@ -685,6 +691,16 @@
   </div>
 </div>
 
+<div id="confirm-overlay" class="command-overlay" style="display:none">
+  <div class="command-palette" style="padding:18px 20px">
+    <p id="confirm-message" style="margin:0 0 16px;font-size:13.5px;line-height:1.5"></p>
+    <div class="tour-actions">
+      <button type="button" class="btn btn-secondary" id="confirm-cancel">Отмена</button>
+      <button type="button" class="btn btn-primary" id="confirm-ok">Подтвердить</button>
+    </div>
+  </div>
+</div>
+
 <div id="shortcuts-overlay" class="command-overlay" style="display:none">
   <div class="command-palette" style="padding:18px 20px">
     <h3 style="margin:0 0 4px">Горячие клавиши</h3>
@@ -699,6 +715,6 @@
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=10"></script>
+<script src="/app.js?v=11"></script>
 </body>
 </html>

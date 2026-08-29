@@ -456,6 +456,20 @@ const render = {
     document.getElementById("daemon-start").disabled = status.daemon_running;
     document.getElementById("daemon-stop").disabled = !status.daemon_running;
 
+    // Проблемные площадки видно только зайдя на "Обзор" — бейдж на
+    // самой вкладке (как непрочитанные в Telegram) сигналит о них,
+    // даже если человек сейчас смотрит Историю или Настройки.
+    const errorCount = status.sources.filter(
+      (s) => s.status === "error" || s.status === "blocked"
+    ).length;
+    const overviewBadge = document.getElementById("overview-error-badge");
+    if (errorCount > 0) {
+      overviewBadge.textContent = String(errorCount);
+      overviewBadge.style.display = "";
+    } else {
+      overviewBadge.style.display = "none";
+    }
+
     if (!unchanged) {
       const statsRow = document.getElementById("stats-row");
       statsRow.classList.remove("content-fade-in");
@@ -1418,6 +1432,41 @@ function isCommandPaletteOpen() {
   return document.getElementById("command-overlay").style.display !== "none";
 }
 
+// Свой modal вместо нативного confirm() — та же причина, что и с
+// alert(): системный диалог браузера ломает визуальный язык
+// приложения. Промис резолвится true/false, вызывающий код просто
+// делает await вместо if(confirm(...)).
+function showConfirm(message) {
+  const overlay = document.getElementById("confirm-overlay");
+  document.getElementById("confirm-message").textContent = message;
+  overlay.style.display = "flex";
+  return new Promise((resolve) => {
+    const okBtn = document.getElementById("confirm-ok");
+    const cancelBtn = document.getElementById("confirm-cancel");
+    const cleanup = (result) => {
+      overlay.style.display = "none";
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      overlay.removeEventListener("click", onOverlay);
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+    const onOk = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    const onOverlay = (e) => {
+      if (e.target === overlay) cleanup(false);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") cleanup(false);
+      if (e.key === "Enter") cleanup(true);
+    };
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+    overlay.addEventListener("click", onOverlay);
+    document.addEventListener("keydown", onKey);
+  });
+}
+
 function initCommandPalette() {
   const overlay = document.getElementById("command-overlay");
   const input = document.getElementById("command-input");
@@ -1806,6 +1855,11 @@ function initDashboard() {
   initCommandPalette();
   initKeyboardShortcuts();
   initHistoryViewToggle();
+
+  document.getElementById("llm-key-toggle").addEventListener("click", () => {
+    const input = document.getElementById("llm-key-input");
+    input.type = input.type === "password" ? "text" : "password";
+  });
   initDragReorder("source-grid");
   initDragReorder("chat-checks-grid");
   initChangelogPopover();
@@ -1961,7 +2015,7 @@ function initDashboard() {
       const btn = ev.target.closest(".block-hh-employer");
       if (!btn) return;
       const company = btn.dataset.company;
-      if (!confirm(`Заблокировать "${company}" на hh.ru? Это серверная блокировка, отменить её сложнее, чем локальный чёрный список.`)) {
+      if (!(await showConfirm(`Заблокировать "${company}" на hh.ru? Это серверная блокировка, отменить её сложнее, чем локальный чёрный список.`))) {
         return;
       }
       btn.disabled = true;
@@ -2351,12 +2405,10 @@ function initDashboard() {
     .getElementById("tg-chat-delete")
     .addEventListener("click", async () => {
       if (!activeTelegramContact) return;
-      if (
-        !confirm(
-          `Удалить всю переписку с @${activeTelegramContact}? Это не архив — история удаляется без возможности восстановить, а контакт перестаёт считаться "уже написанным" (бот может написать ему заново при следующем совпадении).`
-        )
-      )
-        return;
+      const ok = await showConfirm(
+        `Удалить всю переписку с @${activeTelegramContact}? Это не архив — история удаляется без возможности восстановить, а контакт перестаёт считаться "уже написанным" (бот может написать ему заново при следующем совпадении).`
+      );
+      if (!ok) return;
       try {
         await api(`/api/telegram/conversations/${activeTelegramContact}`, {
           method: "DELETE",
