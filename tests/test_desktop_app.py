@@ -4,6 +4,9 @@
 428) — на первом запуске готовность никогда бы не подтвердилась.
 Оба места чинили одновременно с веб-визардом (POST /api/setup/init)."""
 
+import threading
+import time
+
 import httpx
 import pytest
 
@@ -43,6 +46,26 @@ def test_wait_until_ready_raises_after_timeout(monkeypatch):
         )
 
 
+def test_wait_until_ready_raises_immediately_if_server_thread_died(monkeypatch):
+    """A dead server thread (e.g. app import blew up) must fail fast
+    instead of silently burning the full timeout."""
+
+    def fake_get(url, timeout):
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    dead_thread = threading.Thread(target=lambda: None)
+    dead_thread.start()
+    dead_thread.join()
+
+    start = time.monotonic()
+    with pytest.raises(RuntimeError):
+        desktop_app._wait_until_ready(
+            "http://127.0.0.1:1/api/setup/status", dead_thread, timeout=15.0
+        )
+    assert time.monotonic() - start < 1.0
+
+
 def test_main_probes_setup_status_not_status(monkeypatch):
     """main() must never poll /api/status directly — it 428s until
     data_folder is set up, so readiness would never be confirmed."""
@@ -63,7 +86,7 @@ def test_main_probes_setup_status_not_status(monkeypatch):
         desktop_app.uvicorn, "Server", lambda *a, **k: _FakeServer()
     )
 
-    def fake_wait_until_ready(url, timeout=15.0):
+    def fake_wait_until_ready(url, server_thread=None, timeout=15.0):
         probed_urls.append(url)
 
     monkeypatch.setattr(

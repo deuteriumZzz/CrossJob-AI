@@ -21,9 +21,19 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def _wait_until_ready(url: str, timeout: float = 15.0) -> None:
+def _wait_until_ready(
+    url: str, server_thread: threading.Thread | None = None, timeout: float = 15.0
+) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        # Если поток сервера уже умер (например, ошибка импорта
+        # приложения), нет смысла молча ждать оставшийся таймаут —
+        # это только прячет настоящую причину за бесполезным
+        # "did not become ready".
+        if server_thread is not None and not server_thread.is_alive():
+            raise RuntimeError(
+                "Server thread exited before becoming ready — see traceback above."
+            )
         try:
             httpx.get(url, timeout=1).raise_for_status()
             return
@@ -51,7 +61,7 @@ def main() -> None:
     # /api/setup/status, не /api/status — последний требует
     # настроенный data_folder (иначе 428), а на первом запуске его
     # ещё нет, и проверка готовности никогда бы не прошла.
-    _wait_until_ready(f"{url}api/setup/status")
+    _wait_until_ready(f"{url}api/setup/status", server_thread)
 
     # Автостарт демона при каждом запуске приложения — раньше нужно
     # было руками жать "Запустить" после каждого перезапуска процесса
