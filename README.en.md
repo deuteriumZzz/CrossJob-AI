@@ -1,13 +1,51 @@
+<div align="center">
+
 ![CrossJob-AI](assets/banner.svg)
 
-[![Guide](https://img.shields.io/badge/📖_Guide-docs%2FGUIDE.md-2ea44f)](docs/GUIDE.md)
-[![RU](https://img.shields.io/badge/🇷🇺-RU-blue.svg)](README.md)
-[![EN](https://img.shields.io/badge/🇬🇧-EN-red.svg)](README.en.md)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+### Automated job search & apply — LLM screening, a dashboard, and anti-ban pacing
 
-A bot that searches and auto-applies to job postings on Russian job boards, plus search and optional cold outreach to contacts found in Telegram channels.
+[![CI](https://github.com/deuteriumZzz/CrossJob-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/deuteriumZzz/CrossJob-AI/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)](requirements.txt)
+[![Platform](https://img.shields.io/badge/OS-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](docs/GUIDE.md#сборка-в-exe-macos-и-windows)
+[![Guide](https://img.shields.io/badge/📖_Guide-docs%2FGUIDE.md-2ea44f)](docs/GUIDE.md)
+
+[🇷🇺 Русский](README.md) · [🇬🇧 English](README.en.md)
+
+</div>
+
+---
 
 > The setup guide ([docs/GUIDE.md](docs/GUIDE.md)) is Russian-only for now — this README covers the same ground in English, but for full setup detail you may need to translate that page.
+
+**CrossJob-AI** searches for jobs across 8 platforms (Telegram channels
+included), scores how well you fit each one, writes a personalized cover
+letter with an LLM, and applies — either for real or in dry-run mode, so
+you can check what the bot is about to send before it sends anything.
+
+## Table of contents
+
+- [What it does](#what-it-does)
+- [What's new](#whats-new-2026-08-27)
+- [Platforms](#platforms)
+- [Chances of landing a job, by platform](#chances-of-landing-a-job-by-platform-based-on-2026-data)
+- [Quick start](#quick-start)
+- [Dashboard](#dashboard)
+- [Limits & anti-ban](#limits--anti-ban)
+- [Configuration](#configuration)
+- [How smart are the models](#how-smart-are-the-models)
+- [Development](#development)
+- [License](#license)
+
+## What it does
+
+- 🔍 **Searches** for jobs matching your criteria (`work_preferences.yaml`) across connected platforms, Telegram channels included.
+- ✍️ **Writes** a personalized cover letter for each vacancy with an LLM, based on your PDF resume (`data_folder/resume.pdf`) — the resume file itself is never rewritten.
+- 🎯 **Scores fit**: before writing a letter or applying, an LLM scores 1-10 how well the resume fits the vacancy (threshold `JOB_SUITABILITY_SCORE`) — poorly matching vacancies are skipped without spending a real application.
+- 🚀 **Applies** automatically or in dry-run mode (nothing actually sent) and keeps a history — including a readable HTML report with day/week/month stats, salary, and company website. History exports to TXT/PDF.
+- 💬 **Messages first on Telegram**, where there's no "apply" button — a short greeting to the contact found in a post, then a full conversation in its own dashboard tab.
+- 🛡️ **Protects the account from bans**: randomized pauses between applications, per-platform daily limits plus an optional shared total, `apply_once_at_company`.
+- 🖥️ **Dashboard**: a native window with platform status, history, employer replies, and settings — no hand-editing YAML.
 
 ## What's new (2026-08-27)
 
@@ -18,30 +56,21 @@ A bot that searches and auto-applies to job postings on Russian job boards, plus
 - A notification fires if not a single LLM call succeeded during a whole run (a sign of an exhausted free-tier limit) — vacancies still get scored via a fallback in that case, without a real LLM check.
 - Dashboard: a "🎲 Distribute across platforms" button splits the total daily application limit across every platform with scheduling enabled, in random shares (LinkedIn gets half the weight of the rest); a new "Salary expectations" panel keeps HH (RUB/month) and LinkedIn (USD/year) as separate fields for their separate markets.
 
-## What it does
-
-- Searches for jobs matching your criteria (`work_preferences.yaml`) across connected platforms, Telegram channels included.
-- Writes a personalized cover letter for each vacancy with an LLM, based on your PDF resume (`data_folder/resume.pdf`) — the resume file itself is never rewritten.
-- Applies automatically (or in dry-run mode, without actually sending anything) and keeps an application history — including a readable HTML report (`data_folder/output/applications.html`) with day/week/month stats and a table with salary and company website (where the platform publishes them), so you always know who got what and when a reply might arrive. History can be exported to TXT or PDF via the "Export application history" menu item.
-- In Telegram channels, where there's no "apply" button — optionally messages the contact found in a post first (a short greeting, not the whole letter) and keeps a conversation with them in its own dashboard section — see "What's new" above.
-- Protects the account from bans: a random 30-90s pause between real applications (2-10 minutes between cold Telegram messages), a daily per-platform application limit (`DAILY_APPLICATION_LIMIT`) plus an optional total limit shared across every platform, and an optional `apply_once_at_company` (never apply to the same company twice).
-- Before writing a letter or applying, an LLM scores how well the resume fits the vacancy (1-10, threshold `JOB_SUITABILITY_SCORE` in `config.py`) — poorly matching vacancies are skipped without spending a real application.
-
 ## Platforms
 
 | Platform       | Status                              |
 |----------------|--------------------------------------|
 | HeadHunter     | ✅ search + auto-apply (browser session, login via phone number + SMS — the official API requires HH app approval and isn't used; verified on a live account, see [GUIDE.md](docs/GUIDE.md) (RU)) |
 | SuperJob       | ✅ search + auto-apply (official API) |
+| Habr Career    | ✅ search + auto-apply (no usable official API for personal bots — manual login via Habr's SSO, including Google; for a logged-in user "Откликнуться" is an instant one-click submit, no form and no cover letter) — verified on a live account 2026-08-28 |
 | geekjob        | ✅ search + auto-apply (scraping; manual OAuth login only — best-effort, not verified on a live account, see [GUIDE.md](docs/GUIDE.md) (RU)) |
 | rabota.ru      | ✅ search + auto-apply (scraping; manual OAuth/code login only — best-effort, not verified on a live account, see [GUIDE.md](docs/GUIDE.md) (RU)) |
 | GetMatch       | ✅ search + auto-apply (Next.js SPA — rendered via a real Selenium browser; login via a Telegram code, not a password) |
-| Habr Career    | ✅ search + auto-apply (no usable official API for personal bots — manual login via Habr's SSO, including Google; for a logged-in user "Откликнуться" is an instant one-click submit, no form and no cover letter) — verified on a live account 2026-08-28, a real application was confirmed and correctly recognized by the bot |
+| Telegram channels | ✅ search + optional cold outreach to contacts found in posts (personal account via the official Telegram API; no auto-reply to incoming messages, see [GUIDE.md](docs/GUIDE.md) (RU)) |
+| LinkedIn       | ✅ search (worldwide/by-country, remote only) + Easy Apply auto-apply (`undetected-chromedriver`, LLM answers screening questions in English) — verified on a live account 2026-08-23, see [GUIDE.md](docs/GUIDE.md) (RU) |
 | careerspace.app| planned, low priority (confirmed: `/jobs` is a small personalized feed — no keyword search, no pagination; "Ссылка на отклик" requires login and where it leads is unconfirmed) |
 | hirify.me      | planned (job aggregator, including Telegram channels) |
 | himalayas.app  | planned (search only — apply redirects to the company's external ATS, no auto-apply) |
-| Telegram channels | ✅ search + optional cold outreach to contacts found in posts (personal account via the official Telegram API; no auto-reply to incoming messages — replying is manual, from the dashboard, see [GUIDE.md](docs/GUIDE.md) (RU)) |
-| LinkedIn       | ✅ search (worldwide/by-country, remote only) + Easy Apply auto-apply (`undetected-chromedriver`, LLM answers screening questions in English) — verified on a live account 2026-08-23, see [GUIDE.md](docs/GUIDE.md) (RU) |
 
 ## Chances of landing a job, by platform (based on 2026 data)
 
@@ -58,39 +87,18 @@ The table above is about what the bot can technically do. This one is about the 
 | LinkedIn | 🟡 Medium | 87% of recruiters call LinkedIn the best tool for vetting candidates, but the response rate on direct applications is only 3-13% — 85% of actual hires close through networking/referrals, not job-posting applications ([Zippia](https://www.zippia.com/advice/linkedin-statistics/), [LinkedCraft](https://linkedcraft.io/blog/linkedin-networking-statistics-2026)) |
 | geekjob.ru | 🟡 Medium-low (IT) | A niche platform (averages 15-20 listings/month across classic IT tracks), HR experts are more skeptical of it than of hh.ru/Habr Career — useful as a secondary channel, not a primary one ([hrtime.ru](https://hrtime.ru/material/geekjob-ploshchadka-rabotaet-ili-net-59698/)) |
 
-## Limits & anti-ban
-
-The daily limit and per-run limit are **our own** settings (pacing, so the account doesn't look like a bot) — not official platform numbers, which are either undocumented publicly (HH says outright: exceed it and you get a 429, contact api@hh.ru for higher volume) or don't apply (geekjob/rabota.ru/GetMatch have no official API at all, only scraping; Telegram is a personal account, not an API integration with platform-side limits).
-
-The values below are defaults from `config.py`. You can change them on the fly, without restarting or editing code, in the dashboard: **Settings → Application Limits** tab — either globally (all platforms at once, including a separate total daily limit `limits.total_daily_application_limit` and a "🎲 Distribute across platforms" button), or overridden per platform (or by hand — the `limits:` block, or `job_max_applications`/`daily_application_limit` inside that platform's own block in `work_preferences.yaml`). Higher values mean a higher chance the platform flags the automation; the dashboard shows this risk right next to the setting, but the decision is yours.
-
-| Platform | Daily application limit | Per run | Platform's official limit |
-|----------|------------------------|-----------------|------------------------------|
-| HeadHunter | `DAILY_APPLICATION_LIMIT` = 15 (±random 70-100%) | `JOB_MAX_APPLICATIONS` = 5 | Not publicly documented (429 if exceeded) |
-| SuperJob | 15 (±70-100%) | 5 | Not publicly documented |
-| geekjob.ru | No daily limit of its own — uses `job_max_applications` per run | 5 vacancies per run | No official API — 24h cooldown on captcha/ban signs (`block_detection.py`) |
-| rabota.ru | No daily limit of its own — uses `job_max_applications` per run | 5 | No official API — same cooldown |
-| GetMatch | No daily limit of its own — uses `job_max_applications` per run | 5 | No official API — same cooldown |
-| Telegram channels | `telegram.daily_message_limit` = 15 cold messages/day (only if `auto_message` is on) | `messages_per_channel` = 100 messages per channel per run | Personal account, not an API integration — no platform limit; the risk is Telegram itself limiting the account for spam-like behavior |
-| LinkedIn | `LINKEDIN_DAILY_APPLICATION_LIMIT` = 8 (±70-100%) | 5 | No official API — automation is against ToS, see the caveat in [GUIDE.md](docs/GUIDE.md) (RU) |
-
-`±70-100%` is `randomized_daily_limit()`: the real limit for the day is picked randomly within this range once per run, so the daily limit isn't identical every single day (see [GUIDE.md](docs/GUIDE.md) (RU) on anti-ban).
-
-"Per run" (`job_max_applications`) is a shared limit across all platforms at once, changed with a single dashboard setting.
-
-A detailed setup guide (where to put your resume, how to fill in `secrets.yaml`/`work_preferences.yaml`, what the bot does at each step) — [docs/GUIDE.md](docs/GUIDE.md) (Russian only).
-
-## Installation
+## Quick start
 
 ```bash
+git clone https://github.com/deuteriumZzz/CrossJob-AI.git
+cd CrossJob-AI
 pip install -r requirements.txt
 python main.py
 ```
 
 On first run without a `data_folder/`, the bot offers to create one from
 the template and asks for an LLM key (press Enter to skip and fill it in
-later). Everything else (platforms, resume) — by hand, following the
-steps below or [docs/GUIDE.md](docs/GUIDE.md) (RU). The same result by hand:
+later). The same result by hand:
 
 ```bash
 cp -r data_folder_example data_folder
@@ -98,49 +106,95 @@ cp -r data_folder_example data_folder
 # place your resume as data_folder/resume.pdf
 ```
 
+Full step-by-step detail (where to put your resume, what to fill in
+`secrets.yaml`/`work_preferences.yaml`, what the bot does at each step) is
+in [docs/GUIDE.md](docs/GUIDE.md) (Russian only).
+
 Non-interactive run (for cron):
 
 ```bash
-python main.py --auto headhunter   # or --auto superjob / --auto geekjob / --auto rabota_ru / --auto telegram / --auto getmatch / --auto linkedin
-python main.py --auto check_telegram_replies   # checks for new replies in Telegram conversations (notification only)
+python main.py --auto headhunter   # or superjob / geekjob / rabota_ru / telegram / getmatch / linkedin / habr_career
+python main.py --auto all          # all platforms in sequence, with pauses
 ```
 
-Instead of an external cron job you can use the built-in scheduler
-(`python main.py --daemon`) or the desktop app with a web dashboard
-(`python desktop_app.py`, requires `pip install -r
-requirements-desktop.txt`) — platform status, history, employer replies,
-Telegram conversations, and settings all in one window instead of
-hand-editing YAML. The dashboard can also handle first-time setup from
-scratch (its own web wizard — no need for `data_folder/` to exist
-beforehand), and targeted changes without restarting: edit
-positions/locations/blacklists (Settings → Search tab) — including a
-"Generate positions from resume" button (the LLM suggests 2-4 matching
-positions from your PDF resume, no manual `work_preferences.yaml`
-editing needed), configure Telegram on its own tab (channels,
-auto-messaging, conversations), distribute the daily application limit
-across platforms with one button, set salary expectations separately
-for HH and LinkedIn, rebuild `plain_text_resume.yaml` from the PDF,
-export `applied_log.json` as a backup, get a Telegram notification when
-daily LLM spend crosses a set threshold (or when every LLM provider is
-unavailable), and switch the LLM provider/model
-(OpenAI/Groq/Gemini/DeepSeek/NVIDIA NIM/OpenRouter/Mistral/Cohere/Hugging Face/Ollama Cloud/LLM7.io/Cloudflare/Vercel/Ollama) with your own
-API key for each — no `config.py` editing needed. Details in
-[docs/GUIDE.md](docs/GUIDE.md) (RU).
+Instead of external cron — the built-in scheduler:
+
+```bash
+python main.py --daemon
+```
+
+## Dashboard
+
+Instead of raw CLI/cron — a desktop app with a web dashboard in a native window:
+
+```bash
+pip install -r requirements-desktop.txt
+python desktop_app.py
+```
+
+Platform status, application history, employer replies, Telegram
+conversations, and every setting — all in one window, no hand-editing
+YAML. The dashboard can also handle first-time setup from scratch (its
+own web wizard, no `data_folder/` needed beforehand), plus targeted
+changes without restarting:
+
+- edit positions/locations/blacklists, including a "Generate positions from resume" button (the LLM suggests 2-4 matching positions from your PDF resume);
+- configure Telegram on its own tab — channels, auto-messaging, conversations;
+- distribute the daily application limit across platforms with one button ("🎲");
+- set salary expectations separately for HH (₽/month) and LinkedIn ($/year);
+- rebuild `plain_text_resume.yaml` from the PDF, export `applied_log.json` as a backup;
+- get a Telegram notification when daily LLM spend crosses a threshold (or when every LLM provider is unavailable);
+- switch the LLM provider/model (OpenAI/Groq/Gemini/DeepSeek/NVIDIA NIM/OpenRouter/Mistral/Cohere/Hugging Face/Ollama Cloud/LLM7.io/Cloudflare/Vercel/Ollama) with your own API key for each — no `config.py` editing.
+
+The same server can be run directly and opened in a regular browser:
+`uvicorn src.webui.api:app --reload` (listens on `127.0.0.1` only).
+Building a standalone `.app`/`.exe` — see [GUIDE.md](docs/GUIDE.md#сборка-в-exe-macos-и-windows) (RU).
+
+## Limits & anti-ban
+
+The daily limit and per-run limit are **our own** settings (pacing, so the account doesn't look like a bot) — not official platform numbers, which are either undocumented publicly or don't apply (geekjob/rabota.ru/GetMatch have no official API at all, only scraping; Telegram is a personal account, not an API integration with platform-side limits).
+
+The values below are defaults from `config.py`, changed on the fly in the dashboard (**Settings → Application Limits**) without restarting or editing code.
+
+| Platform | Daily application limit | Per run | Platform's official limit |
+|----------|------------------------|-----------------|------------------------------|
+| HeadHunter | `DAILY_APPLICATION_LIMIT` = 15 (±random 70-100%) | `JOB_MAX_APPLICATIONS` = 5 | Not publicly documented (429 if exceeded) |
+| SuperJob | 15 (±70-100%) | 5 | Not publicly documented |
+| geekjob.ru | No daily limit of its own — `job_max_applications` per run | 5 | No official API — 24h cooldown on captcha/ban signs |
+| rabota.ru | No daily limit of its own — `job_max_applications` per run | 5 | No official API — same cooldown |
+| GetMatch | No daily limit of its own — `job_max_applications` per run | 5 | No official API — same cooldown |
+| Telegram channels | `telegram.daily_message_limit` = 15 cold messages/day | `messages_per_channel` = 100 messages per channel per run | Personal account, not an API integration — no platform limit |
+| LinkedIn | `LINKEDIN_DAILY_APPLICATION_LIMIT` = 8 (±70-100%) | 5 | No official API — automation is against ToS, see the caveat in [GUIDE.md](docs/GUIDE.md) (RU) |
+
+Plus an optional `apply_once_at_company` (never apply to the same company twice) and an optional `limits.total_daily_application_limit` — a hard ceiling across all platforms at once. More on anti-ban pacing in [GUIDE.md](docs/GUIDE.md) (RU).
 
 ## Configuration
 
-- `data_folder/secrets.yaml` — your LLM key (`llm_api_key`, defaults to OpenAI) and, for each platform, its own keys (HeadHunter needs no secrets — login is browser-based, by phone number and SMS, see GUIDE.md; SuperJob — https://api.superjob.ru/register/, Telegram — https://my.telegram.org/apps, see GUIDE.md). The LLM provider doesn't have to be OpenAI — Groq/Gemini/DeepSeek/NVIDIA NIM/OpenRouter/Mistral/Cohere/Hugging Face/Ollama Cloud/LLM7.io/Cloudflare/Vercel/Ollama are all supported, each with its own key under the `llm_api_keys:` block (switching provider, picking a model, and entering keys — all in the dashboard's Settings tab, no `config.py` editing; links to each provider's key page are in GUIDE.md). **Default recommendation — Groq, model `openai/gpt-oss-120b`** (marked with a crown 👑 in the model picker): free, and good enough for scoring vacancies/writing letters — at this call volume a paid provider would add up to a noticeable daily bill.
-- `data_folder/work_preferences.yaml` — positions, locations, company/title/location blacklists, filters by experience/employment type/date, and optional `headhunter:`/`superjob:` blocks (`auto_apply`, `resume_id`) and a `telegram:` block (`channels`, `auto_message`, `daily_message_limit`, `max_post_age_days`, `intro_message_template`). Any platform, Telegram included, can override `positions`/`locations` just for itself inside its own block — empty there means "use the shared list above".
-- `data_folder/resume.pdf` — your resume as-is; used only to generate cover letters.
+- **`data_folder/secrets.yaml`** — your LLM key (`llm_api_key`, defaults to OpenAI) and, for each platform, its own keys (HeadHunter needs no secrets — login is browser-based; SuperJob — https://api.superjob.ru/register/, Telegram — https://my.telegram.org/apps). The LLM provider doesn't have to be OpenAI — 12 providers are supported, each with its own key under `llm_api_keys:` (switching provider and entering keys — in the dashboard, no `config.py` editing). **Default recommendation — Groq, model `openai/gpt-oss-120b`** (👑 in the model picker): free, and good enough for scoring vacancies/writing letters.
+- **`data_folder/work_preferences.yaml`** — positions, locations, company/title/location blacklists, filters by experience/employment type/date, and optional per-platform blocks (`auto_apply`, `resume_id`, `schedule_enabled`/`interval_hours`) plus a `telegram:` block (`channels`, `auto_message`, `daily_message_limit`, `max_post_age_days`). Any platform can override `positions`/`locations` just for itself inside its own block — empty there means "use the shared list above".
+- **`data_folder/resume.pdf`** — your resume as-is; used only to generate cover letters and score fit.
 
-The first run of each platform's action opens a browser for a one-time login (OAuth); the token refreshes automatically after that. For Telegram, instead of a browser, it's a phone number and login code typed into the console on the first search run.
+The first run of each platform's action opens a browser for a one-time login; the session/token refreshes automatically after that. The full field-by-field reference is in [GUIDE.md](docs/GUIDE.md) (RU).
 
 ## How smart are the models
 
-Every provider in the project has a default model (👑 in the dashboard's model picker) — here's how they compare on an independent benchmark, [Artificial Analysis Intelligence Index](https://artificialanalysis.ai/leaderboards/models), checked live on 2026-08-29. This is a snapshot — providers update models and weights without notice (the same thing already happened to Groq's lineup and to gemini-2.5-flash, see the comments in `src/job_sources/llm_provider.py`), so the exact numbers will drift, but the relative spread — which model is clearly smarter vs. simpler — still holds as a guide. Only each provider's recommended model is shown, not every alternative it offers (see the dashboard or `PROVIDER_MODELS` in `src/job_sources/llm_provider.py` for the full list).
+Every provider in the project has a default model (👑 in the dashboard's model picker) — here's how they compare on an independent benchmark, [Artificial Analysis Intelligence Index](https://artificialanalysis.ai/leaderboards/models), checked live on 2026-08-29. This is a snapshot — providers update models and weights without notice, so the exact numbers will drift, but the relative spread — which model is clearly smarter vs. simpler — still holds as a guide.
 
 ![How smart are the models we use](assets/llm-intelligence.en.svg)
 
+## Development
+
+```bash
+pip install -r requirements.txt -r requirements-desktop.txt
+black --line-length 79 --check .
+isort --profile black --line-length 79 --check .
+flake8 --max-line-length=79 --select=E,F --extend-ignore=E704
+mypy --ignore-missing-imports main.py src desktop_app.py
+python -m pytest tests/ -q
+```
+
+The same checks run in CI on every push/PR to `main` (see [ci.yml](.github/workflows/ci.yml)). Project layout: `main.py`/`desktop_app.py` are the entry points, `src/job_sources/` has one module per platform plus shared logic (LLM, anti-ban, applications, history), `src/webui/` is the FastAPI dashboard, `src/libs/resume_and_cover_builder/` generates resume/cover-letter PDFs, `tests/` holds the unit tests.
+
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE) — Dmitry Vologdin, 2026.
