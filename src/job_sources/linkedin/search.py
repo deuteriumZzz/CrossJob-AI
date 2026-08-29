@@ -54,7 +54,9 @@ def search_easy_apply_jobs(driver, keywords: str, location: str) -> list[Job]:
         title_el = card.select_one(".job-card-list__title--link")
         if not title_el:
             continue
-        title = title_el.get("aria-label") or title_el.get_text(strip=True)
+        title = str(
+            title_el.get("aria-label") or title_el.get_text(strip=True)
+        )
         seen_ids.add(job_id)
         company_el = card.select_one(".artdeco-entity-lockup__subtitle")
 

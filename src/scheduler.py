@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Mapping, Optional
 
 from src.job_sources.llm_usage import check_and_mark_alert
 from src.job_sources.telegram_notify import notify_from_secrets
@@ -23,14 +23,14 @@ class Scheduler:
 
     def __init__(
         self,
-        source_map: dict[str, Callable[[dict, str], None]],
+        source_map: Mapping[str, Callable[[dict, str], Any]],
         parameters: dict,
         llm_api_key: str,
         output_folder: Path,
         now_fn: Callable[[], datetime] = datetime.now,
         stop_event: Optional[threading.Event] = None,
     ):
-        self.source_map = source_map
+        self.source_map: Mapping[str, Callable[[dict, str], Any]] = source_map
         self.parameters = parameters
         self.llm_api_key = llm_api_key
         self.output_folder = output_folder

@@ -38,7 +38,7 @@ class FitAssessment(BaseModel):
     gaps: list[str] = Field(default_factory=list)
 
 
-def classify_fit(score: int, min_score: int, good_score: int) -> FitTier:
+def classify_fit(score: int, min_score: float, good_score: float) -> FitTier:
     """Три уровня вместо одного порога: ниже min_score — вообще не
     откликаемся; между min_score и good_score — откликаемся, но это
     помечается как слабый матч в статистике; выше good_score — как

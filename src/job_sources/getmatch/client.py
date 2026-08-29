@@ -2,6 +2,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from selenium import webdriver
 from selenium.webdriver.common.by import By
 
 from src.job_sources.block_detection import raise_if_blocked, visible_text
@@ -34,7 +35,7 @@ class GetMatchClient:
 
     def __init__(self, profile_dir: Optional[Path] = None):
         self.profile_dir = profile_dir
-        self._driver = None
+        self._driver: Optional[webdriver.Chrome] = None
 
     def __enter__(self) -> "GetMatchClient":
         self._driver = init_browser(self.profile_dir)

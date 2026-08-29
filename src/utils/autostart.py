@@ -116,8 +116,8 @@ def _windows_is_enabled() -> bool:
     import winreg
 
     try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _WINDOWS_RUN_KEY) as key:
-            winreg.QueryValueEx(key, _LABEL)
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _WINDOWS_RUN_KEY) as key:  # type: ignore[attr-defined]
+            winreg.QueryValueEx(key, _LABEL)  # type: ignore[attr-defined]
             return True
     except FileNotFoundError:
         return False
@@ -127,18 +127,21 @@ def _windows_enable() -> None:
     import winreg
 
     value = " ".join(f'"{c}"' for c in _launch_command())
-    with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, _WINDOWS_RUN_KEY) as key:
-        winreg.SetValueEx(key, _LABEL, 0, winreg.REG_SZ, value)
+    with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, _WINDOWS_RUN_KEY) as key:  # type: ignore[attr-defined]
+        winreg.SetValueEx(key, _LABEL, 0, winreg.REG_SZ, value)  # type: ignore[attr-defined]
 
 
 def _windows_disable() -> None:
     import winreg
 
     try:
-        with winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER, _WINDOWS_RUN_KEY, 0, winreg.KEY_SET_VALUE
+        with winreg.OpenKey(  # type: ignore[attr-defined]
+            winreg.HKEY_CURRENT_USER,  # type: ignore[attr-defined]
+            _WINDOWS_RUN_KEY,
+            0,
+            winreg.KEY_SET_VALUE,  # type: ignore[attr-defined]
         ) as key:
-            winreg.DeleteValue(key, _LABEL)
+            winreg.DeleteValue(key, _LABEL)  # type: ignore[attr-defined]
     except FileNotFoundError:
         pass
 

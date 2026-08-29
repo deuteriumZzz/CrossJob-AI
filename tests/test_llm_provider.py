@@ -215,7 +215,10 @@ def test_fallback_uses_configured_provider_base_url():
     set_fallback_keys({"cloudflare": "cf-test-key"})
     set_fallback_base_urls(
         {
-            "cloudflare": "https://api.cloudflare.com/client/v4/accounts/acct123/ai/v1"
+            "cloudflare": (
+                "https://api.cloudflare.com/client/v4/accounts/"
+                "acct123/ai/v1"
+            )
         }
     )
     fallbacks = _build_fallback_llms("openai", temperature=0)

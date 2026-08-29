@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
+from selenium import webdriver
 from selenium.webdriver.common.by import By
 
 from src.job_sources.block_detection import raise_if_blocked, visible_text
@@ -37,7 +38,7 @@ class HabrCareerClient:
         user_agent: Optional[str] = None,
     ):
         self.profile_dir = profile_dir
-        self._driver = None
+        self._driver: Optional[webdriver.Chrome] = None
         self._client = httpx.Client(
             base_url=HC_BASE,
             headers={"User-Agent": user_agent or random_user_agent()},

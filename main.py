@@ -124,10 +124,7 @@ from src.job_sources.reply_answerer import (
     generate_reply,
     message_needs_reply,
 )
-from src.job_sources.reply_check import (
-    print_negotiation_replies,
-    print_superjob_replies,
-)
+from src.job_sources.reply_check import print_superjob_replies
 from src.job_sources.resume_profile import (
     extract_plain_text_resume,
     infer_positions_from_resume,
@@ -1263,8 +1260,9 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
                     )
                 except Exception as e:
                     logger.exception(
-                        f"Failed to apply/generate cover letter for {job.role} "
-                        f"at {job.company}, skipping this vacancy: {e}"
+                        "Failed to apply/generate cover letter for "
+                        f"{job.role} at {job.company}, skipping this "
+                        f"vacancy: {e}"
                     )
                     continue
                 if applied:
@@ -1813,7 +1811,7 @@ def search_telegram(parameters: dict, llm_api_key: str):
             # https://t.me/{channel}/{message_id} — см. mapping.py.
             channel = job.link.rsplit("/", 2)[-2]
             contact = extract_contact(job.description, channel)
-            status = "dry_run"
+            status: Literal["dry_run", "applied"] = "dry_run"
             if (
                 contact
                 and auto_message

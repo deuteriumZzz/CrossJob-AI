@@ -5,7 +5,7 @@ from src.job_sources.html_text import strip_html
 
 
 def _format_salary(salary: dict | None) -> str:
-    """Формат {from, to, currency} от HH, схлопнутый в одну строку для отображения."""
+    """Формат {from, to, currency} от HH, схлопнутый в одну строку."""
     if not salary:
         return ""
     lo, hi = salary.get("from"), salary.get("to")

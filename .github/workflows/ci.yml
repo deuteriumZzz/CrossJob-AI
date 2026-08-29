@@ -37,12 +37,19 @@ jobs:
       # actual gate, same as every manual check this project runs.
       # E704 ignored: black deliberately keeps `def f(...) -> T: ...`
       # Protocol stubs on one line (verified — black reverts a
-      # multi-line split back). config.py's E501 is a URL inside a
-      # vendored HTML template string, not real code.
+      # multi-line split back). E203 ignored: black adds a space
+      # before `:` in slices with a non-trivial expression (e.g.
+      # `x[len(prefix) :]`), which E203 flags — a known black/flake8
+      # conflict, not a real style issue. Per-file E501 ignores below
+      # are all unsplittable template/fixture strings, not real code:
+      # config.py has a URL inside a vendored HTML template;
+      # autostart.py has the required macOS plist DOCTYPE line;
+      # test_habr_career_mapping.py has raw HTML test fixtures.
       - name: flake8
         run: |
-          flake8 --max-line-length=79 --select=E,F --extend-ignore=E704 \
-            --per-file-ignores="src/libs/resume_and_cover_builder/config.py:E501"
+          flake8 --max-line-length=79 --select=E,F \
+            --extend-ignore=E704,E203 \
+            --per-file-ignores="src/libs/resume_and_cover_builder/config.py:E501,src/utils/autostart.py:E501,tests/test_habr_career_mapping.py:E501"
 
       - name: mypy
         run: mypy --ignore-missing-imports main.py src desktop_app.py

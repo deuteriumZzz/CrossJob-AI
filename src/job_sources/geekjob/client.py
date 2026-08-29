@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import Optional
 from urllib.parse import urlencode
 
+from selenium import webdriver
 from selenium.webdriver.common.by import By
 
 from src.job_sources.block_detection import raise_if_blocked, visible_text
@@ -34,7 +36,7 @@ class GeekjobClient:
 
     def __init__(self, profile_dir: Path):
         self.profile_dir = profile_dir
-        self._driver = None
+        self._driver: Optional[webdriver.Chrome] = None
 
     def __enter__(self) -> "GeekjobClient":
         self._driver = init_browser(self.profile_dir)

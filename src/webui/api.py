@@ -5,7 +5,7 @@ import sys
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -35,25 +35,16 @@ from main import _daily_limit as _effective_daily_limit
 from main import _job_max_applications as _effective_job_max_applications
 from main import _total_daily_limit as _effective_total_daily_limit
 from main import append_to_company_blacklist as _append_to_blacklist
-from main import (
-    apply_llm_provider_override,
-    block_headhunter_employer,
-)
+from main import apply_llm_provider_override, block_headhunter_employer
 from main import bootstrap_data_folder as _bootstrap_data_folder
-from main import (
-    clone_headhunter_resume,
-)
+from main import clone_headhunter_resume
 from main import create_cover_letter as _create_cover_letter
-from main import (
-    create_headhunter_resume_draft,
-)
+from main import create_headhunter_resume_draft
 from main import create_resume_pdf as _create_resume_pdf
 from main import create_resume_pdf_job_tailored as _create_resume_tailored
 from main import force_refresh_plain_text_resume as _refresh_plain_text
 from main import generate_positions_from_resume as _generate_positions
-from main import (
-    run_selected_sources,
-)
+from main import run_selected_sources
 from src.config_patch import (
     set_list_field,
     set_source_field,
@@ -61,9 +52,7 @@ from src.config_patch import (
     set_top_level_field,
 )
 from src.job_sources.applied_log import AppliedLog
-from src.job_sources.llm_provider import (
-    PROVIDER_MODELS,
-)
+from src.job_sources.llm_provider import PROVIDER_MODELS
 from src.job_sources.llm_provider import get_active_provider as _active_llm
 from src.job_sources.llm_provider import (
     set_fallback_base_urls as _set_llm_fallback_base_urls,
@@ -78,9 +67,7 @@ from src.job_sources.llm_usage import (
 from src.job_sources.llm_usage import (
     set_output_folder as set_llm_usage_output_folder,
 )
-from src.job_sources.llm_usage import (
-    summarize_usage,
-)
+from src.job_sources.llm_usage import summarize_usage
 from src.job_sources.preferences import effective_list
 from src.job_sources.telegram.client import (
     TelegramLoginSession,
@@ -431,7 +418,7 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
     # (см. SCHEDULER_SOURCES в main.py). Раньше не было видно в
     # дашборде вообще — только правкой YAML — из-за чего непонятно,
     # включена ли реально проверка чата HH или нет.
-    chat_checks = [
+    chat_checks: list[dict[str, Any]] = [
         {
             "name": "check_hh_replies",
             "label": "HeadHunter — ответы в чате",
@@ -445,7 +432,10 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
         {
             "name": "check_telegram_replies",
             "label": "Telegram — новые сообщения в диалогах",
-            "note": "Только уведомление — отвечать нужно вручную во вкладке Telegram.",
+            "note": (
+                "Только уведомление — отвечать нужно вручную "
+                "во вкладке Telegram."
+            ),
         },
     ]
     for check in chat_checks:
@@ -1145,6 +1135,8 @@ def get_telegram_conversation(
     if conv.get("unread"):
         conversations.mark_read(contact)
         conv = conversations.get(contact)
+        if conv is None:
+            raise HTTPException(404, f"No conversation with @{contact}")
     return conv
 
 
@@ -1181,7 +1173,10 @@ def post_telegram_message(
         ctx.output_folder / "telegram_conversations.json"
     )
     conversations.record_outbound(contact, body.text)
-    return conversations.get(contact)
+    conv = conversations.get(contact)
+    if conv is None:
+        raise HTTPException(500, "Conversation vanished after send")
+    return conv
 
 
 @app.post("/api/telegram/conversations/{contact}/send-resume")
@@ -1214,7 +1209,10 @@ def post_telegram_send_resume(
     conversations.record_outbound(
         contact, f"📎 Отправлено резюме ({RESUME_PDF})"
     )
-    return conversations.get(contact)
+    conv = conversations.get(contact)
+    if conv is None:
+        raise HTTPException(500, "Conversation vanished after send")
+    return conv
 
 
 @app.delete("/api/telegram/conversations/{contact}")

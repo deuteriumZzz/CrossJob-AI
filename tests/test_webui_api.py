@@ -849,7 +849,10 @@ def test_post_llm_provider_base_url_updates_secrets(client):
         "/api/settings/llm-provider-base-url",
         json={
             "provider": "cloudflare",
-            "base_url": "https://api.cloudflare.com/client/v4/accounts/acct123/ai/v1",
+            "base_url": (
+                "https://api.cloudflare.com/client/v4/accounts/"
+                "acct123/ai/v1"
+            ),
         },
     )
     assert response.status_code == 200
