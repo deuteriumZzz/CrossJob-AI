@@ -20,6 +20,17 @@ h1 {
   margin: 0 0 5px 0;
 }
 
+.role-title {
+  font-size: 13pt;
+  font-weight: 600;
+  color: #0077b5;
+  margin: 0 0 5px 0;
+}
+
+#core-strengths .strengths-list {
+  line-height: 1.6;
+}
+
 .contact-info {
   display: flex;
   justify-content: center;

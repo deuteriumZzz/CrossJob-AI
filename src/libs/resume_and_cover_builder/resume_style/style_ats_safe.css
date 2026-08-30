@@ -2,6 +2,7 @@
 :root {
   --text: #202632;
   --heading: #16233f;
+  --accent: #2554c7;
   --muted: #5b6472;
   --line: #d8dbe0;
   --font: "Barlow", Arial, Helvetica, sans-serif;
@@ -43,6 +44,13 @@ h1 {
   font-weight: 700;
   letter-spacing: 0.01em;
   color: var(--heading);
+}
+
+.role-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.02em;
 }
 
 .contact-info {
@@ -127,7 +135,12 @@ section h2 {
 
 .entry-title {
   font-weight: 600;
-  color: var(--heading);
+  color: var(--accent);
+}
+
+#core-strengths .strengths-list {
+  color: var(--text);
+  line-height: 1.7;
 }
 
 .compact-list {
@@ -167,23 +180,29 @@ a {
   text-decoration: none;
 }
 
-#work-experience {
+#summary {
   order: 1;
 }
-#education {
+#core-strengths {
   order: 2;
 }
-#achievements {
+#work-experience {
   order: 3;
 }
-#side-projects {
+#education {
   order: 4;
 }
-#certifications {
+#achievements {
   order: 5;
 }
-#skills-languages {
+#side-projects {
   order: 6;
+}
+#certifications {
+  order: 7;
+}
+#skills-languages {
+  order: 8;
 }
 
 @media print {

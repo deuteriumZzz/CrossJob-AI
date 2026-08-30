@@ -62,15 +62,66 @@ class LLMResumer:
         """
         data=None даёт подклассам (например, генерации резюме под
         вакансию) передать свой набор данных вместо резюме по
-        умолчанию.
+        умолчанию. target_role_hint — самая свежая должность из
+        experience_details (первая запись, резюме обычно в обратном
+        хронологическом порядке) — LLM либо использует её как
+        подзаголовок роли под именем, либо сама подберёт похожую, если
+        опыта нет вообще (см. prompt_header в resume_prompt/strings.py).
         """
         header_prompt_template = self._preprocess_template_string(
             self.strings.prompt_header
         )
         prompt = ChatPromptTemplate.from_template(header_prompt_template)
         chain = prompt | self.llm_cheap | StrOutputParser()
+        if data is None:
+            target_role_hint = (
+                self.resume.experience_details[0].position
+                if self.resume.experience_details
+                else ""
+            )
+            input_data = {
+                "personal_information": self.resume.personal_information,
+                "target_role_hint": target_role_hint,
+            }
+        else:
+            input_data = data
+        output = chain.invoke(input_data)
+        return output
+
+    def generate_summary_section(self, data=None) -> str:
+        """data=None даёт подклассам передать свой набор данных
+        вместо резюме по умолчанию (см. generate_header)."""
+        summary_prompt_template = self._preprocess_template_string(
+            self.strings.prompt_summary
+        )
+        prompt = ChatPromptTemplate.from_template(summary_prompt_template)
+        chain = prompt | self.llm_cheap | StrOutputParser()
         input_data = (
-            {"personal_information": self.resume.personal_information}
+            {
+                "personal_information": self.resume.personal_information,
+                "experience_details": self.resume.experience_details,
+            }
+            if data is None
+            else data
+        )
+        output = chain.invoke(input_data)
+        return output
+
+    def generate_core_strengths_section(self, data=None) -> str:
+        """data=None даёт подклассам передать свой набор данных
+        вместо резюме по умолчанию (см. generate_header)."""
+        core_strengths_prompt_template = self._preprocess_template_string(
+            self.strings.prompt_core_strengths
+        )
+        prompt = ChatPromptTemplate.from_template(
+            core_strengths_prompt_template
+        )
+        chain = prompt | self.llm_cheap | StrOutputParser()
+        input_data = (
+            {
+                "experience_details": self.resume.experience_details,
+                "education_details": self.resume.education_details,
+            }
             if data is None
             else data
         )
@@ -272,6 +323,16 @@ class LLMResumer:
                 return self.generate_header()
             return ""
 
+        def summary_fn():
+            if self.resume.personal_information or self.resume.experience_details:
+                return self.generate_summary_section()
+            return ""
+
+        def core_strengths_fn():
+            if self.resume.experience_details or self.resume.education_details:
+                return self.generate_core_strengths_section()
+            return ""
+
         def education_fn():
             if self.resume.education_details:
                 return self.generate_education_section()
@@ -310,6 +371,8 @@ class LLMResumer:
         # Словарь: имя секции -> функция, которая её генерирует
         functions = {
             "header": header_fn,
+            "summary": summary_fn,
+            "core_strengths": core_strengths_fn,
             "education": education_fn,
             "work_experience": work_experience_fn,
             "projects": projects_fn,
@@ -336,6 +399,8 @@ class LLMResumer:
         full_resume = "<body>\n"
         full_resume += f"  {results.get('header', '')}\n"
         full_resume += "  <main>\n"
+        full_resume += f"    {results.get('summary', '')}\n"
+        full_resume += f"    {results.get('core_strengths', '')}\n"
         full_resume += f"    {results.get('education', '')}\n"
         full_resume += f"    {results.get('work_experience', '')}\n"
         full_resume += f"    {results.get('projects', '')}\n"

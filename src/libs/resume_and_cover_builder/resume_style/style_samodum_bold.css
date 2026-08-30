@@ -66,6 +66,17 @@ h1 {
   color: var(--accentColor);
 }
 
+.role-title {
+  font-family: var(--HFont);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--textColor);
+}
+
+#core-strengths .strengths-list {
+  font-family: var(--PFont);
+}
+
 .contact-info {
   display: flex;
   flex-direction: column;
@@ -174,18 +185,27 @@ section h2 {
   grid-column: 1;
 }
 
-#work-experience {
+#summary {
   order: 1;
 }
-#education {
+#core-strengths {
   order: 2;
 }
-#achievements {
+#work-experience {
   order: 3;
 }
-#side-projects {
+#education {
   order: 4;
 }
-#skills-languages {
+#achievements {
   order: 5;
+}
+#side-projects {
+  order: 6;
+}
+#certifications {
+  order: 7;
+}
+#skills-languages {
+  order: 8;
 }

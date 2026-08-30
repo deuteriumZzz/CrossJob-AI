@@ -47,6 +47,7 @@ prompt_header_template = """
 ```
 <header>
   <h1>[Name and Surname]</h1>
+  <p class="role-title">[Target Job Title]</p>
   <div class="contact-info">
     <p class="fas fa-map-marker-alt">
       <span>[Your City, Your Country]</span>
@@ -65,6 +66,36 @@ prompt_header_template = """
     </p>
   </div>
 </header>
+```
+The results should be provided in html format, Provide only the html code for
+the resume, without any explanations or additional text and also without
+```html ```
+"""
+
+prompt_summary_template = """
+- **Template to Use**
+```
+<section id="summary">
+    <h2>Professional Summary</h2>
+    <p>[2-4 sentence professional summary: years of experience, core
+professional identity, and the strongest, most quantifiable
+achievements/expertise]</p>
+</section>
+```
+The results should be provided in html format, Provide only the html code for
+the resume, without any explanations or additional text and also without
+```html ```
+"""
+
+prompt_core_strengths_template = """
+- **Template to Use**
+```
+<section id="core-strengths">
+    <h2>Core Strengths</h2>
+    <p class="strengths-list">[Skill or strength] | [Skill or strength] |
+[Skill or strength] | [Skill or strength] | [Skill or strength] | [Skill or
+strength]</p>
+</section>
 ```
 The results should be provided in html format, Provide only the html code for
 the resume, without any explanations or additional text and also without

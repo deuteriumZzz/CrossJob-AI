@@ -2,22 +2,27 @@ from src.libs.resume_and_cover_builder.template_base import (
     prompt_achievements_template,
     prompt_additional_skills_template,
     prompt_certifications_template,
+    prompt_core_strengths_template,
     prompt_education_template,
     prompt_header_template,
     prompt_projects_template,
+    prompt_summary_template,
     prompt_working_experience_template,
 )
 
 prompt_header = (
     """
 Act as an HR expert and resume writer specializing in ATS-friendly resumes.
-Your task is to create a professional and polished header for the resume. The
-header should:
+Your task is to create a professional and polished header for the resume,
+tailored to the job description below. The header should:
 
 1. **Contact Information**: Include your full name, city and country, phone
 number, email address, LinkedIn profile, and GitHub profile.
 2. **Formatting**: Ensure the contact details are presented clearly and are
 easy to read.
+3. **Target Job Title**: Directly below the name, a short professional title
+line — use the job title from the job description below (or the closest
+natural match to it), not a generic title.
 
 To implement this:
 - If any of the contact information fields (e.g., LinkedIn profile, GitHub
@@ -25,8 +30,56 @@ profile) are not provided (i.e., `None`), omit them from the header.
 
 - **My information:**
   {personal_information}
+
+- **Job Description:**
+  {job_description}
 """
     + prompt_header_template
+)
+
+
+prompt_summary = (
+    """
+Act as an HR expert and resume writer specializing in ATS-friendly resumes.
+Your task is to write a concise professional summary (2-4 sentences) tailored
+to the job description below:
+
+1. Opens with years of experience and core professional identity relevant to
+this role.
+2. Highlights the strongest achievements from the data below that best match
+what the job description is looking for.
+3. Uses natural, keyword-rich language mirroring the job description's own
+terminology where it genuinely applies — never invent experience that isn't
+in the data below.
+4. Avoids generic filler — every sentence must carry real information.
+
+- **My information:**
+  {personal_information}
+  {experience_details}
+
+- **Job Description:**
+  {job_description}
+"""
+    + prompt_summary_template
+)
+
+
+prompt_core_strengths = (
+    """
+Act as an HR expert and resume writer specializing in ATS-friendly resumes.
+Your task is to extract 6-10 short core-strength keywords/phrases (2-4 words
+each) from the work experience and education below that most closely match
+what the job description is asking for — the kind of terms an ATS keyword
+match would look for. Never invent a skill that isn't supported by the data.
+
+- **My information:**
+  {experience_details}
+  {education_details}
+
+- **Job Description:**
+  {job_description}
+"""
+    + prompt_core_strengths_template
 )
 
 prompt_education = (

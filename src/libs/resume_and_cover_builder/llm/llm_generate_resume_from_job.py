@@ -61,6 +61,28 @@ class LLMResumeJobDescription(LLMResumer):
             }
         )
 
+    def generate_summary_section(self, data: Any = None) -> str:
+        """Как у родителя, но с job_description в data — под неё
+        LLM подстраивает формулировки секции."""
+        return super().generate_summary_section(
+            data={
+                "personal_information": self.resume.personal_information,
+                "experience_details": self.resume.experience_details,
+                "job_description": self.job_description,
+            }
+        )
+
+    def generate_core_strengths_section(self, data: Any = None) -> str:
+        """Как у родителя, но с job_description в data — под неё
+        LLM подстраивает формулировки секции."""
+        return super().generate_core_strengths_section(
+            data={
+                "experience_details": self.resume.experience_details,
+                "education_details": self.resume.education_details,
+                "job_description": self.job_description,
+            }
+        )
+
     def generate_education_section(self, data: Any = None) -> str:
         """Как у родителя, но с job_description в data — под неё
         LLM подстраивает формулировки секции."""

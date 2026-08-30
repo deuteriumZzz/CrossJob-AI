@@ -2,9 +2,11 @@ from src.libs.resume_and_cover_builder.template_base import (
     prompt_achievements_template,
     prompt_additional_skills_template,
     prompt_certifications_template,
+    prompt_core_strengths_template,
     prompt_education_template,
     prompt_header_template,
     prompt_projects_template,
+    prompt_summary_template,
     prompt_working_experience_template,
 )
 
@@ -19,11 +21,56 @@ number, email address, LinkedIn profile, and GitHub profile. Exclude any
 information that is not provided.
 2. **Formatting**: Ensure the contact details are presented clearly and are
 easy to read.
+3. **Target Job Title**: Directly below the name, a short professional title
+line describing the role the candidate is positioning themselves for. Use the
+hint below if it is given (polish the wording if needed); otherwise infer the
+single most fitting title from the information provided.
 
 - **My information:**
   {personal_information}
+
+- **Likely target role (hint, may be empty):**
+  {target_role_hint}
 """
     + prompt_header_template
+)
+
+
+prompt_summary = (
+    """
+Act as an HR expert and resume writer specializing in ATS-friendly resumes.
+Your task is to write a concise professional summary (2-4 sentences) that:
+
+1. Opens with years of experience and core professional identity.
+2. Highlights the strongest, most quantifiable achievements or areas of
+expertise from the data below.
+3. Uses natural, keyword-rich language that mirrors common terminology for
+this field — no jargon-stuffing, it must read naturally.
+4. Avoids generic filler ("hard-working team player") — every sentence must
+carry real information from the data below, never invented.
+
+- **My information:**
+  {personal_information}
+  {experience_details}
+"""
+    + prompt_summary_template
+)
+
+
+prompt_core_strengths = (
+    """
+Act as an HR expert and resume writer specializing in ATS-friendly resumes.
+Your task is to extract 6-10 short core-strength keywords/phrases (2-4 words
+each) that best represent the candidate's expertise — the kind of terms an
+ATS keyword match or a recruiter skimming the page would look for. Pull them
+from the work experience and education below, not generic buzzwords, and
+never invent a skill that isn't supported by the data.
+
+- **My information:**
+  {experience_details}
+  {education_details}
+"""
+    + prompt_core_strengths_template
 )
 
 
