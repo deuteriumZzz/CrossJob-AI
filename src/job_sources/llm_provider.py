@@ -645,17 +645,32 @@ def get_chat_llm(
     if resolved_provider not in PROVIDER_MODELS:
         resolved_provider = "openai"
     provider = resolved_provider
-    llm, resolved_model = _build_llm(
-        provider, api_key, model, base_url, temperature
-    )
+    try:
+        llm, resolved_model = _build_llm(
+            provider, api_key, model, base_url, temperature
+        )
+    except Exception:
+        # Основной провайдер выбран, но его сборка падает ещё до
+        # первого запроса (например не установлен langchain-groq) —
+        # такое исключение летит мимо RunnableWithFallbacks (она
+        # оборачивает только invoke, не конструирование) и раньше
+        # ронял весь прогон источника, даже когда рабочие фолбэки
+        # были настроены. _build_fallback_llms() уже собирает
+        # фолбэки безопасно (глотает ошибку каждого кандидата) —
+        # переиспользуем её и берём первый рабочий как основную
+        # модель вместо недоступного провайдера.
+        fallbacks = _build_fallback_llms(provider, temperature)
+        if not fallbacks:
+            raise
+        llm = fallbacks.pop(0)
+    else:
+        output_folder = get_output_folder()
+        if output_folder is not None:
+            llm.callbacks = [
+                UsageCallback(output_folder, provider, resolved_model)
+            ]
+        fallbacks = _build_fallback_llms(provider, temperature)
 
-    output_folder = get_output_folder()
-    if output_folder is not None:
-        llm.callbacks = [
-            UsageCallback(output_folder, provider, resolved_model)
-        ]
-
-    fallbacks = _build_fallback_llms(provider, temperature)
     result: Runnable = llm
     if fallbacks:
         result = _ChatModelWithFallbacks(runnable=llm, fallbacks=fallbacks)

@@ -230,6 +230,41 @@ def test_fallback_uses_configured_provider_base_url():
         )
 
 
+def test_falls_back_when_primary_provider_fails_to_build(monkeypatch):
+    """Если сборка основного провайдера падает ещё до первого запроса
+    (например не установлен langchain-groq для groq) — get_chat_llm()
+    не должен ронять весь вызов, если настроен рабочий фолбэк:
+    падение при .invoke() ловит RunnableWithFallbacks, но падение
+    при самой сборке модели раньше происходило до него."""
+    import src.job_sources.llm_provider as llm_provider_module
+
+    real_build_llm = llm_provider_module._build_llm
+
+    def fake_build_llm(provider, api_key, model, base_url, temperature):
+        if provider == "groq":
+            raise ModuleNotFoundError("No module named 'langchain_groq'")
+        return real_build_llm(provider, api_key, model, base_url, temperature)
+
+    monkeypatch.setattr(llm_provider_module, "_build_llm", fake_build_llm)
+    set_fallback_keys({"openai": "sk-fallback"})
+
+    result = get_chat_llm("gsk-test", provider="groq")
+    primary = result.runnable if hasattr(result, "runnable") else result
+    assert type(primary).__name__ == "ChatOpenAI"
+
+
+def test_reraises_when_primary_provider_fails_and_no_fallback(monkeypatch):
+    import src.job_sources.llm_provider as llm_provider_module
+
+    def fake_build_llm(provider, api_key, model, base_url, temperature):
+        raise ModuleNotFoundError("No module named 'langchain_groq'")
+
+    monkeypatch.setattr(llm_provider_module, "_build_llm", fake_build_llm)
+
+    with pytest.raises(ModuleNotFoundError):
+        get_chat_llm("gsk-test", provider="groq")
+
+
 def test_fallback_depth_tries_every_free_model_of_a_provider():
     """Раньше на 429 конкретно у recommended-модели цепочка сразу
     прыгала на другого провайдера, хотя у текущего провайдера были
