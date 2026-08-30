@@ -1,11 +1,16 @@
 import re
 import subprocess
+import time
 from pathlib import Path
 from typing import Optional
 
 import undetected_chromedriver as uc
 
 from src.utils.chrome_utils import clear_stale_chrome_lock
+
+# ponytail: тот же фиксированный retry, что и chrome_utils.init_browser
+# — покрывает транзиентные сбои запуска Chrome без диагностики причины.
+_RETRY_DELAY_SECONDS = 5
 
 
 def _installed_chrome_major_version() -> Optional[int]:
@@ -31,10 +36,16 @@ def init_linkedin_browser(profile_dir: Path) -> uc.Chrome:
     отпечатку браузера, в отличие от остальных площадок проекта.
     Постоянная папка профиля сохраняет сессию входа между запусками."""
     profile_dir.mkdir(parents=True, exist_ok=True)
-    clear_stale_chrome_lock(profile_dir)
-    options = uc.ChromeOptions()
-    options.add_argument(f"--user-data-dir={profile_dir}")
-    options.add_argument("--start-maximized")
-    return uc.Chrome(
-        options=options, version_main=_installed_chrome_major_version()
-    )
+    version_main = _installed_chrome_major_version()
+    for attempt in (1, 2):
+        clear_stale_chrome_lock(profile_dir)
+        options = uc.ChromeOptions()
+        options.add_argument(f"--user-data-dir={profile_dir}")
+        options.add_argument("--start-maximized")
+        try:
+            return uc.Chrome(options=options, version_main=version_main)
+        except Exception:
+            if attempt == 1:
+                time.sleep(_RETRY_DELAY_SECONDS)
+                continue
+            raise

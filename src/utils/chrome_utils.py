@@ -88,24 +88,41 @@ PAGE_LOAD_TIMEOUT_SECONDS = 45
 SCRIPT_TIMEOUT_SECONDS = 30
 
 
+# ponytail: один retry через фиксированную паузу — покрывает
+# транзиентные сбои запуска Chrome (например, сразу после входа в
+# систему/пробуждения Mac, пока графическая сессия ещё не готова),
+# без диагностики конкретной причины. Причина не транзиентная (Chrome
+# не установлен вовсе) — вторая попытка тоже упадёт и ошибка уйдёт
+# наверх как раньше.
+_BROWSER_INIT_RETRY_DELAY_SECONDS = 5
+
+
 def init_browser(profile_dir: Optional[Path] = None) -> webdriver.Chrome:
-    try:
-        if profile_dir is not None:
-            clear_stale_chrome_lock(profile_dir)
-        options = chrome_browser_options(profile_dir)
-        # webdriver_manager сам скачивает и обновляет подходящий
-        # ChromeDriver, не требуя ручного управления версиями
-        driver = webdriver.Chrome(
-            service=ChromeService(ChromeDriverManager().install()),
-            options=options,
-        )
-        driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT_SECONDS)
-        driver.set_script_timeout(SCRIPT_TIMEOUT_SECONDS)
-        logger.debug("Chrome browser initialized successfully.")
-        return driver
-    except Exception as e:
-        logger.error(f"Failed to initialize browser: {str(e)}")
-        raise RuntimeError(f"Failed to initialize browser: {str(e)}")
+    for attempt in (1, 2):
+        try:
+            if profile_dir is not None:
+                clear_stale_chrome_lock(profile_dir)
+            options = chrome_browser_options(profile_dir)
+            # webdriver_manager сам скачивает и обновляет подходящий
+            # ChromeDriver, не требуя ручного управления версиями
+            driver = webdriver.Chrome(
+                service=ChromeService(ChromeDriverManager().install()),
+                options=options,
+            )
+            driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT_SECONDS)
+            driver.set_script_timeout(SCRIPT_TIMEOUT_SECONDS)
+            logger.debug("Chrome browser initialized successfully.")
+            return driver
+        except Exception as e:
+            if attempt == 1:
+                logger.warning(
+                    f"Chrome failed to start (attempt 1/2), retrying "
+                    f"in {_BROWSER_INIT_RETRY_DELAY_SECONDS}s: {e}"
+                )
+                time.sleep(_BROWSER_INIT_RETRY_DELAY_SECONDS)
+                continue
+            logger.error(f"Failed to initialize browser: {str(e)}")
+            raise RuntimeError(f"Failed to initialize browser: {str(e)}")
 
 
 def HTML_to_PDF(html_content, driver):
