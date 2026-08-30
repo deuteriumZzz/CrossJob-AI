@@ -2639,6 +2639,10 @@ function initDashboard() {
       refreshTelegramConnectStatus();
     }
   }
+  // ponytail: desktop_app.py pokes this directly via evaluate_js — WKWebView
+  // throttles setInterval/focus/visibilitychange alike when the window isn't
+  // key, so none of those alone kept this reliable in the packaged app.
+  window.__refreshActiveTab = refreshActiveTab;
   setInterval(refreshActiveTab, 7000);
   // Десктопное окно (pywebview/WKWebView) троттлит setInterval, пока
   // не в фокусе — без этого прогресс отклика "зависает" на экране,

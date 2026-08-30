@@ -76,9 +76,27 @@ def main() -> None:
     except httpx.HTTPError:
         pass
 
-    webview.create_window(
+    window = webview.create_window(
         "CrossJob-AI", url, width=1200, height=800, min_size=(900, 600)
     )
+
+    def _pump_live_refresh() -> None:
+        # ponytail: macOS WKWebView throttles in-page setInterval (and even
+        # focus/visibilitychange) once the window isn't key, so daemon
+        # progress froze until the user clicked a tab. evaluate_js is a
+        # native call, not a timer callback, so it keeps firing regardless —
+        # daemon thread, so no impact if the window is already closed.
+        while True:
+            time.sleep(5)
+            try:
+                window.evaluate_js(
+                    "window.__refreshActiveTab && window.__refreshActiveTab()"
+                )
+            except Exception:
+                pass
+
+    threading.Thread(target=_pump_live_refresh, daemon=True).start()
+
     webview.start()
 
     server.should_exit = True
