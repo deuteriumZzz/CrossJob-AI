@@ -257,6 +257,18 @@ function switchTab(name) {
     document.getElementById("nav-tab-indicator"),
     document.querySelector(`nav.tabs button[data-tab="${name}"]`)
   );
+  if (name === "settings") {
+    // switchSettingsTab() двигает #settings-tab-indicator только по
+    // клику на саб-вкладку — при первом заходе в "Настройки" за сессию
+    // активная по умолчанию "Поиск" ни разу не получала позицию
+    // индикатора, а .active у самой кнопки специально прозрачный (фон
+    // даёт индикатор) — с тёмным текстом поверх это выглядело как
+    // пустая таблетка вместо подписи "Поиск".
+    moveTabIndicator(
+      document.getElementById("settings-tab-indicator"),
+      document.querySelector("#settings-jump button.active")
+    );
+  }
 }
 
 let overviewLoaded = false;
