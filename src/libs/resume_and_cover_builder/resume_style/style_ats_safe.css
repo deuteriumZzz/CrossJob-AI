@@ -1,0 +1,197 @@
+/*ATS Safe$CrossJob-AI*/
+:root {
+  --text: #202632;
+  --heading: #16233f;
+  --muted: #5b6472;
+  --line: #d8dbe0;
+  --font: "Barlow", Arial, Helvetica, sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: var(--font);
+  color: var(--text);
+}
+
+body {
+  max-width: 47rem;
+  margin: 0 auto;
+  padding: 2.5rem 2rem;
+  font-size: 10.5pt;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+}
+
+/* Ни одной колонки нигде — вся раскладка это flex-direction:column
+   (в один ряд стоят только короткие однострочные пары вроде
+   "Компания — Локация", это не риск: экстрактор текста из PDF читает
+   такую строку слева направо как обычно, ломается только когда
+   колонка тянется на несколько строк разной высоты). */
+header {
+  order: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+h1 {
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--heading);
+}
+
+.contact-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 1rem;
+}
+
+.contact-info p {
+  font-size: 9.5pt;
+  color: var(--muted);
+}
+
+/* Иконки Font Awesome грузятся с CDN в общем HTML-шаблоне для всех
+   стилей (config.py) — если сеть недоступна или шрифт не извлечётся
+   из PDF как текст, от иконки ничего не останется. Тот же приём, что
+   уже проверенно безопасен в Clean Blue: подписываем поля обычным
+   текстом через ::before, а не полагаемся на глиф иконки. */
+.contact-info p::before {
+  font-family: var(--font);
+  font-weight: 600;
+  margin-right: 0.2rem;
+}
+.contact-info p:nth-child(1)::before {
+  content: "Локация:";
+}
+.contact-info p:nth-child(2)::before {
+  content: "Тел:";
+}
+.contact-info p:nth-child(3)::before {
+  content: "Email:";
+}
+.contact-info p:nth-child(4)::before {
+  content: "LinkedIn:";
+}
+.contact-info p:nth-child(5)::before {
+  content: "GitHub:";
+}
+
+section h2 {
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--heading);
+  border-bottom: 1.5px solid var(--line);
+  padding-bottom: 0.3rem;
+  margin-bottom: 0.6rem;
+}
+
+.entry {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-bottom: 0.9rem;
+}
+
+.entry:last-child {
+  margin-bottom: 0;
+}
+
+.entry-header,
+.entry-details {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.3rem;
+}
+
+.entry-name {
+  font-weight: 700;
+}
+
+.entry-location,
+.entry-year {
+  color: var(--muted);
+  font-size: 9.5pt;
+  font-style: normal;
+}
+
+.entry-title {
+  font-weight: 600;
+  color: var(--heading);
+}
+
+.compact-list {
+  margin-top: 0.3rem;
+  padding-left: 1.1rem;
+  list-style: disc;
+}
+
+.compact-list li {
+  margin-bottom: 0.15rem;
+}
+
+/* side-projects: <i class="fab fa-github"> перед ссылкой — тот же
+   риск иконки без текста, тот же приём с текстовой заменой. */
+#side-projects .entry-name i {
+  font-style: normal;
+}
+#side-projects .entry-name i::before {
+  content: "GitHub:";
+  font-weight: 600;
+  margin-right: 0.2rem;
+}
+
+.two-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding-top: 0.1rem;
+}
+
+.two-column .compact-list {
+  margin-top: 0.2rem;
+}
+
+a {
+  color: var(--heading);
+  text-decoration: none;
+}
+
+#work-experience {
+  order: 1;
+}
+#education {
+  order: 2;
+}
+#achievements {
+  order: 3;
+}
+#side-projects {
+  order: 4;
+}
+#certifications {
+  order: 5;
+}
+#skills-languages {
+  order: 6;
+}
+
+@media print {
+  body {
+    padding: 0;
+    max-width: 100%;
+  }
+  @page {
+    margin: 1.4cm;
+  }
+}
