@@ -59,6 +59,7 @@ from src.config_patch import (
     set_source_field,
     set_source_list_field,
     set_top_level_field,
+    unset_source_field,
 )
 from src.job_sources.applied_log import AppliedLog
 from src.job_sources.llm_provider import (
@@ -431,6 +432,15 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
                 "job_max_applications": _effective_job_max_applications(
                     ctx.config, name
                 ),
+                # True — площадка хранит своё явное значение (см.
+                # override-чекбоксы в таблице настроек); False —
+                # число выше вычислено из общего дефолта
+                # (limits.daily_application_limit/job_max_applications)
+                # и меняется вместе с ним.
+                "daily_limit_override": "daily_application_limit"
+                in source_config,
+                "job_max_applications_override": "job_max_applications"
+                in source_config,
                 "readiness": _readiness(
                     secrets, ctx.config["dataFolder"], name
                 ),
@@ -643,6 +653,12 @@ class SourceSettingsUpdate(BaseModel):
     resume_id: Optional[str] = None
     job_max_applications: Optional[int] = None
     daily_application_limit: Optional[int] = None
+    # True — снять override для этой площадки, значение выше (если
+    # пришло) игнорируется, площадка возвращается к общему дефолту
+    # из limits.* (см. override-чекбоксы "своё значение" в таблице
+    # настроек дашборда).
+    clear_job_max_applications: bool = False
+    clear_daily_application_limit: bool = False
     # Свои positions/locations для этой площадки — пусто/не задано
     # означает "используй общие из панели Поиск" (см. effective_list).
     positions: Optional[list[str]] = None
@@ -666,19 +682,26 @@ def post_settings(
         "auto_bump_resume",
         "schedule_enabled",
         "interval_hours",
-        "job_max_applications",
-        "daily_application_limit",
     ):
         value = getattr(body, field)
         if value is not None:
-            if (
-                field
-                in (
-                    "job_max_applications",
-                    "daily_application_limit",
-                )
-                and value < 1
-            ):
+            set_source_field(ctx.config_file, body.source, field, value)
+
+    # daily_application_limit/job_max_applications поддерживают
+    # override-чекбокс в дашборде: чекбокс выключен → clear_* — поле
+    # реально удаляется из блока площадки, а не просто перестаёт
+    # обновляться, иначе старое явное значение продолжало бы
+    # действовать в обход общего дефолта (см. unset_source_field).
+    for field, clear in (
+        ("daily_application_limit", body.clear_daily_application_limit),
+        ("job_max_applications", body.clear_job_max_applications),
+    ):
+        if clear:
+            unset_source_field(ctx.config_file, body.source, field)
+            continue
+        value = getattr(body, field)
+        if value is not None:
+            if value < 1:
                 raise HTTPException(400, f"{field} must be >= 1")
             set_source_field(ctx.config_file, body.source, field, value)
     if body.resume_id is not None:

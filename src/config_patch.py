@@ -88,6 +88,40 @@ def set_source_field(
     config_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def unset_source_field(config_file: Path, source: str, key: str) -> None:
+    """Удаляет одно поле из блока источника, если оно там явно
+    задано — обратная операция к set_source_field. Нужна для
+    override-чекбоксов дневного лимита/лимита за прогон в дашборде:
+    "своё значение для площадки" выключили — площадка должна снова
+    наследовать общий дефолт, а не просто перестать редактироваться
+    в UI, храня старое явное число в YAML. Молча ничего не делает,
+    если блока или поля нет — сброс несуществующего override и так
+    уже "сброшен"."""
+    text = config_file.read_text(encoding="utf-8")
+    lines = text.splitlines()
+
+    block_start = None
+    for index, line in enumerate(lines):
+        if line.strip() == f"{source}:" and not line.startswith((" ", "\t")):
+            block_start = index
+            break
+    if block_start is None:
+        return
+
+    block_end = len(lines)
+    for index in range(block_start + 1, len(lines)):
+        line = lines[index]
+        if line.strip() and not line.startswith((" ", "\t")):
+            block_end = index
+            break
+
+    for index in range(block_start + 1, block_end):
+        if lines[index].strip().startswith(f"{key}:"):
+            del lines[index]
+            config_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            return
+
+
 def set_list_field(config_file: Path, key: str, values: list[str]) -> None:
     """Заменяет ЦЕЛИКОМ top-level YAML-список (positions, locations,
     company_blacklist/title_blacklist/location_blacklist в

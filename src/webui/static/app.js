@@ -36,6 +36,94 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+// Тег-инпут поверх textarea со списком "один пункт на строку"
+// (должности/локации/чёрные списки, свои должности/локации
+// площадки) — textarea остаётся источником правды (просто скрыта),
+// поэтому существующие обработчики "Сохранить" (linesOfEl и
+// аналоги, читающие .value построчно) не меняются вообще. initTagInput
+// идемпотентна: повторный вызов на уже обёрнутой textarea (например
+// после programmatic .value = "..." с сервера) просто перерисовывает
+// чипы из актуального значения, не создавая обёртку заново.
+function tagItemsOf(textarea) {
+  return textarea.value
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function renderTagChips(textarea) {
+  const chips = textarea._tagChipsEl;
+  if (!chips) return;
+  const items = tagItemsOf(textarea);
+  chips.innerHTML = items
+    .map(
+      (item, i) =>
+        `<span class="tag-chip">${escapeHtml(item)}<button type="button" class="tag-chip-remove" data-i="${i}" aria-label="Удалить">×</button></span>`
+    )
+    .join("");
+  chips.querySelectorAll(".tag-chip-remove").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const current = tagItemsOf(textarea);
+      current.splice(parseInt(btn.dataset.i, 10), 1);
+      textarea.value = current.join("\n");
+      renderTagChips(textarea);
+    });
+  });
+}
+
+function initTagInput(textarea) {
+  if (textarea.dataset.tagInputInit) {
+    renderTagChips(textarea);
+    return;
+  }
+  textarea.dataset.tagInputInit = "1";
+  textarea.style.display = "none";
+
+  const wrap = document.createElement("div");
+  wrap.className = "tag-input";
+  const chips = document.createElement("div");
+  chips.className = "tag-chips";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "tag-input-field";
+  // Плейсхолдер textarea рассчитан на несколько строк ("пример1\nпример2")
+  // — в однострочном input это слипается в "пример1пример2" без
+  // разделителя, если не заменить переносы явно.
+  input.placeholder = textarea.placeholder
+    ? textarea.placeholder.replace(/\n/g, " · ")
+    : "Добавить, Enter";
+  wrap.append(chips, input);
+  textarea.insertAdjacentElement("afterend", wrap);
+  textarea._tagChipsEl = chips;
+
+  function commit() {
+    const value = input.value.trim();
+    if (!value) return;
+    const items = tagItemsOf(textarea);
+    if (!items.includes(value)) {
+      items.push(value);
+      textarea.value = items.join("\n");
+      renderTagChips(textarea);
+    }
+    input.value = "";
+  }
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      commit();
+    } else if (e.key === "Backspace" && !input.value) {
+      const items = tagItemsOf(textarea);
+      items.pop();
+      textarea.value = items.join("\n");
+      renderTagChips(textarea);
+    }
+  });
+  input.addEventListener("blur", commit);
+
+  renderTagChips(textarea);
+}
+
 // last_error теперь {summary, detail} от _classify_error() в api.py —
 // короткая фраза для человека + сырой текст исключения под
 // сворачиваемой деталью, а не JSON-простыня от LLM-провайдера прямо в
@@ -181,6 +269,7 @@ let lastRepliesSnapshot = null;
 let lastRepliesCount = 0;
 let logsLoaded = false;
 let lastLogsSnapshot = null;
+let lastLogsLines = [];
 let llmCatalog = { models: {}, api_key_previews: {}, provider_base_urls: {} };
 // Провайдеры без единого статического эндпоинта — нужен свой
 // base_url на аккаунт (сейчас только Cloudflare Workers AI, у
@@ -709,27 +798,25 @@ const render = {
   },
 
   async settings() {
-    const [status, salary] = await Promise.all([
+    const [status, salary, limits] = await Promise.all([
       api("/api/status"),
       api("/api/settings/salary"),
+      api("/api/settings/limits"),
     ]);
 
     api("/api/settings/search").then((search) => {
-      document.getElementById("search-positions").value = (
-        search.positions || []
-      ).join("\n");
-      document.getElementById("search-locations").value = (
-        search.locations || []
-      ).join("\n");
-      document.getElementById("search-company-blacklist").value = (
-        search.company_blacklist || []
-      ).join("\n");
-      document.getElementById("search-title-blacklist").value = (
-        search.title_blacklist || []
-      ).join("\n");
-      document.getElementById("search-location-blacklist").value = (
-        search.location_blacklist || []
-      ).join("\n");
+      const fields = [
+        ["search-positions", search.positions],
+        ["search-locations", search.locations],
+        ["search-company-blacklist", search.company_blacklist],
+        ["search-title-blacklist", search.title_blacklist],
+        ["search-location-blacklist", search.location_blacklist],
+      ];
+      fields.forEach(([id, list]) => {
+        const el = document.getElementById(id);
+        el.value = (list || []).join("\n");
+        initTagInput(el);
+      });
     });
 
     api("/api/settings/llm").then((llm) => {
@@ -758,24 +845,22 @@ const render = {
         : "Не поддерживается на этой ОС.";
     });
 
-    api("/api/settings/limits").then((limits) => {
-      document.getElementById("limit-total").value =
-        limits.total_daily_application_limit || "";
-      document.getElementById("limit-daily").value =
-        limits.daily_application_limit;
-      document.getElementById("limit-linkedin").value =
-        limits.linkedin_daily_application_limit;
-      document.getElementById("limit-per-run").value =
-        limits.job_max_applications;
-      document.getElementById("limit-min-score").value = limits.job_min_score;
-      document.getElementById("limit-suitability-score").value =
-        limits.job_suitability_score;
-      renderTotalBudget(status, limits.total_daily_application_limit);
-      if (limits.llm_daily_cost_alert_usd != null) {
-        document.getElementById("llm-alert-usd").value =
-          limits.llm_daily_cost_alert_usd;
-      }
-    });
+    document.getElementById("limit-total").value =
+      limits.total_daily_application_limit || "";
+    document.getElementById("limit-daily").value =
+      limits.daily_application_limit;
+    document.getElementById("limit-linkedin").value =
+      limits.linkedin_daily_application_limit;
+    document.getElementById("limit-per-run").value =
+      limits.job_max_applications;
+    document.getElementById("limit-min-score").value = limits.job_min_score;
+    document.getElementById("limit-suitability-score").value =
+      limits.job_suitability_score;
+    renderTotalBudget(status, limits.total_daily_application_limit);
+    if (limits.llm_daily_cost_alert_usd != null) {
+      document.getElementById("llm-alert-usd").value =
+        limits.llm_daily_cost_alert_usd;
+    }
 
     api("/api/usage").then((usage) => {
       const fmtTokens = (n) => n.toLocaleString("ru-RU");
@@ -809,28 +894,48 @@ const render = {
             : s.readiness && s.readiness.resume && s.readiness.resume.warning
               ? s.readiness.resume.warning
               : "Данных для подключения достаточно"
-        }">${s.readiness && s.readiness.ready ? "✅" : "⚠️"}</td>
+        }">
+          ${s.readiness && s.readiness.ready ? "✅" : "⚠️"}
+          ${
+            // Не только title="..." (недоступен без наведения мышью
+            // — тач-экран, узкое окно) — если чего-то не хватает,
+            // причина видна и так, текстом под иконкой.
+            s.readiness && s.readiness.missing.length
+              ? `<div class="readiness-note">${s.readiness.missing.join(", ")}</div>`
+              : ""
+          }
+        </td>
         <td><input type="checkbox" class="s-schedule switch" ${s.schedule_enabled ? "checked" : ""} /></td>
         <td><input type="number" class="s-interval" min="1" value="${s.interval_hours ?? 3}" /></td>
         <td><input type="checkbox" class="s-auto switch" ${s.auto_apply ? "checked" : ""} /></td>
-        <td>${
-          s.name === "headhunter"
-            ? `<input type="checkbox" class="s-auto-reply switch" ${s.auto_reply ? "checked" : ""} />`
-            : "—"
-        }</td>
-        <td>${
-          s.name === "headhunter"
-            ? `<input type="checkbox" class="s-auto-bump switch" ${s.auto_bump_resume ? "checked" : ""} />`
-            : "—"
-        }</td>
         <td><input type="text" class="s-resume-id" value="${s.resume_id || ""}" placeholder="id резюме на площадке" /></td>
-        <td><input type="number" class="s-max-applications" min="1" value="${s.job_max_applications}" /></td>
-        <td><input type="number" class="s-daily-limit" min="1" value="${s.daily_limit}" /></td>
+        <td>
+          <div class="override-field">
+            <input type="number" class="s-max-applications" min="1"
+              value="${s.job_max_applications_override ? s.job_max_applications : ""}"
+              placeholder="${limits.job_max_applications}"
+              ${s.job_max_applications_override ? "" : "disabled"} />
+            <label class="override-toggle" title="Своё значение только для этой площадки — иначе используется дефолт из панели «Лимиты откликов»">
+              <input type="checkbox" class="s-max-applications-override" ${s.job_max_applications_override ? "checked" : ""} /> своё
+            </label>
+          </div>
+        </td>
+        <td>
+          <div class="override-field">
+            <input type="number" class="s-daily-limit" min="1"
+              value="${s.daily_limit_override ? s.daily_limit : ""}"
+              placeholder="${s.name === "linkedin" ? limits.linkedin_daily_application_limit : limits.daily_application_limit}"
+              ${s.daily_limit_override ? "" : "disabled"} />
+            <label class="override-toggle" title="Своё значение только для этой площадки — иначе используется дефолт из панели «Лимиты откликов»">
+              <input type="checkbox" class="s-daily-limit-override" ${s.daily_limit_override ? "checked" : ""} /> своё
+            </label>
+          </div>
+        </td>
         <td><button class="btn btn-secondary s-save">Сохранить</button></td>
-        <td><button class="btn btn-ghost btn-small s-filters-toggle" title="Свои должности/локации/зарплата для этой площадки">⚙ Фильтры</button></td>
+        <td><button class="btn btn-ghost btn-small s-filters-toggle" title="Свои должности/локации/зарплата для этой площадки${s.name === "headhunter" ? ", автоответ в чате и бамп резюме" : ""}">⚙ Фильтры</button></td>
       </tr>
       <tr class="filters-detail" data-source="${s.name}" style="display:none">
-        <td colspan="12">
+        <td colspan="10">
           <div class="limits-grid" style="margin:10px 0">
             <label class="limit-field">
               <span>Свои должности для ${sourceLabel(s.name)} (пусто — общие из "Поиск")</span>
@@ -842,7 +947,13 @@ const render = {
             </label>
             ${
               s.name === "headhunter"
-                ? `<label class="limit-field">
+                ? `<label class="limit-field" style="justify-content:flex-end">
+                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="f-auto-reply switch" ${s.auto_reply ? "checked" : ""} />Автоответ в чате HH</span>
+              </label>
+              <label class="limit-field" style="justify-content:flex-end">
+                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="f-auto-bump switch" ${s.auto_bump_resume ? "checked" : ""} />Бамп резюме на HH</span>
+              </label>
+              <label class="limit-field">
                 <span>Зарплата для автоответа в чате HH</span>
                 <input type="text" class="f-hh-salary" value="${salary.hh_salary_expectations || ""}" placeholder="250000-300000 RUR" />
               </label>`
@@ -871,29 +982,66 @@ const render = {
       )
       .join("");
     observeReveal(tbody);
+    tbody
+      .querySelectorAll(".f-positions, .f-locations")
+      .forEach(initTagInput);
+
+    // Чекбокс "своё" выключен → инпут задизейблен и показывает
+    // дефолт как placeholder, не как значение (см. render шапки
+    // ряда выше) — тот же паттерн inherited/override, что в
+    // Stripe/AWS для лимитов бюджета.
+    tbody
+      .querySelectorAll(
+        ".s-max-applications-override, .s-daily-limit-override"
+      )
+      .forEach((cb) => {
+        cb.addEventListener("change", () => {
+          const input = cb
+            .closest(".override-field")
+            .querySelector("input[type=number]");
+          input.disabled = !cb.checked;
+          if (cb.checked) input.focus();
+        });
+      });
 
     tbody.querySelectorAll(".s-save").forEach((btn) => {
       btn.addEventListener("click", async (ev) => {
         const row = ev.target.closest("tr");
         const source = row.dataset.source;
-        const autoReplyEl = row.querySelector(".s-auto-reply");
-        const autoBumpEl = row.querySelector(".s-auto-bump");
+        const jobMaxOverride = row.querySelector(
+          ".s-max-applications-override"
+        ).checked;
+        const dailyOverride = row.querySelector(
+          ".s-daily-limit-override"
+        ).checked;
         const body = {
           source,
           schedule_enabled: row.querySelector(".s-schedule").checked,
           interval_hours: parseInt(row.querySelector(".s-interval").value, 10),
           auto_apply: row.querySelector(".s-auto").checked,
-          ...(autoReplyEl ? { auto_reply: autoReplyEl.checked } : {}),
-          ...(autoBumpEl ? { auto_bump_resume: autoBumpEl.checked } : {}),
           resume_id: row.querySelector(".s-resume-id").value.trim(),
-          job_max_applications: parseInt(
-            row.querySelector(".s-max-applications").value,
-            10
-          ),
-          daily_application_limit: parseInt(
-            row.querySelector(".s-daily-limit").value,
-            10
-          ),
+          // "своё" выключено → clear_* удаляет override в YAML,
+          // площадка возвращается к общему дефолту (см.
+          // unset_source_field на бэкенде); включено → пишем
+          // введённое число как явное значение этой площадки.
+          clear_job_max_applications: !jobMaxOverride,
+          clear_daily_application_limit: !dailyOverride,
+          ...(jobMaxOverride
+            ? {
+                job_max_applications: parseInt(
+                  row.querySelector(".s-max-applications").value,
+                  10
+                ),
+              }
+            : {}),
+          ...(dailyOverride
+            ? {
+                daily_application_limit: parseInt(
+                  row.querySelector(".s-daily-limit").value,
+                  10
+                ),
+              }
+            : {}),
         };
         await api("/api/settings", {
           method: "POST",
@@ -925,12 +1073,16 @@ const render = {
         const row = ev.target.closest("tr.filters-detail");
         const source = row.dataset.source;
         const statusEl = row.querySelector(".f-status");
+        const autoReplyEl = row.querySelector(".f-auto-reply");
+        const autoBumpEl = row.querySelector(".f-auto-bump");
         await api("/api/settings", {
           method: "POST",
           body: JSON.stringify({
             source,
             positions: linesOfEl(row.querySelector(".f-positions")),
             locations: linesOfEl(row.querySelector(".f-locations")),
+            ...(autoReplyEl ? { auto_reply: autoReplyEl.checked } : {}),
+            ...(autoBumpEl ? { auto_bump_resume: autoBumpEl.checked } : {}),
           }),
         });
         const hhSalaryEl = row.querySelector(".f-hh-salary");
@@ -1059,12 +1211,32 @@ const render = {
     lastLogsSnapshot = logsSnapshot;
 
     if (data.note) {
+      lastLogsLines = [];
       pre.textContent = data.note;
       return;
     }
-    pre.textContent = data.lines.join("\n") || "(пусто)";
+    lastLogsLines = data.lines || [];
+    renderLogLines();
   },
 };
+
+// Фильтр по тексту — чисто на клиенте: сервер и так уже отдаёт не
+// больше 300 строк за раз, дозапрашивать их под каждую букву поиска
+// незачем. Позиция прокрутки сохраняется при автообновлении раз в
+// 7с, кроме случая "уже был внизу" — тогда новые строки уезжают вниз
+// вместе с прокруткой, как ожидается от live-хвоста лога.
+function renderLogLines() {
+  const pre = document.getElementById("log-output");
+  const query = document.getElementById("log-search").value.trim().toLowerCase();
+  const lines = query
+    ? lastLogsLines.filter((l) => l.toLowerCase().includes(query))
+    : lastLogsLines;
+  const wasAtBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
+  const prevScrollTop = pre.scrollTop;
+  pre.textContent =
+    lines.join("\n") || (query ? "(совпадений нет)" : "(пусто)");
+  pre.scrollTop = wasAtBottom ? pre.scrollHeight : prevScrollTop;
+}
 
 async function openTelegramConversation(contact) {
   activeTelegramContact = contact;
@@ -1718,6 +1890,7 @@ function initOnboardingTour() {
     });
     const isLast = step === TOUR_STEPS.length - 1;
     tooltip.innerHTML = `
+      <button type="button" class="tour-skip" id="tour-skip" title="Пропустить" aria-label="Пропустить">✕</button>
       <p>${escapeHtml(text)}</p>
       <div class="tour-actions">
         <span class="tour-step">${step + 1} / ${TOUR_STEPS.length}</span>
@@ -1730,6 +1903,7 @@ function initOnboardingTour() {
       if (step >= TOUR_STEPS.length) finish();
       else renderStep();
     });
+    document.getElementById("tour-skip").addEventListener("click", finish);
   }
 
   function finish() {
@@ -2061,9 +2235,24 @@ function initDashboard() {
   document
     .getElementById("history-apply-filters")
     .addEventListener("click", () => render.history());
+  // Согласовано с "Логи" ниже: смена площадки/статуса фильтрует
+  // сразу, а не только по клику "Применить" — раньше эти два похожих
+  // выпадающих списка в одном приложении вели себя по-разному.
+  document
+    .getElementById("filter-source")
+    .addEventListener("change", () => render.history());
+  document
+    .getElementById("filter-status")
+    .addEventListener("change", () => render.history());
+  document.getElementById("filter-query").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") render.history();
+  });
   document
     .getElementById("log-source")
     .addEventListener("change", () => render.logs());
+  document
+    .getElementById("log-search")
+    .addEventListener("input", () => renderLogLines());
 
   document
     .getElementById("blacklist-add")
@@ -2175,6 +2364,8 @@ function initDashboard() {
     const suitabilityScore = parseFloat(
       document.getElementById("limit-suitability-score").value
     );
+    const llmAlertRaw = document.getElementById("llm-alert-usd").value;
+    const llmAlert = llmAlertRaw ? parseFloat(llmAlertRaw) : null;
     status.textContent = "Сохранение…";
     try {
       await api("/api/settings/limits", {
@@ -2188,6 +2379,7 @@ function initDashboard() {
           job_suitability_score: Number.isFinite(suitabilityScore)
             ? suitabilityScore
             : null,
+          ...(llmAlert !== null ? { llm_daily_cost_alert_usd: llmAlert } : {}),
         }),
       });
       status.textContent = "Сохранено.";
@@ -2211,49 +2403,60 @@ function initDashboard() {
       }
     });
 
-  document
-    .getElementById("limits-reset-recommended")
-    .addEventListener("click", async () => {
-      const status = document.getElementById("limits-status");
-      status.textContent = "Сохранение…";
-      try {
-        await api("/api/settings/limits", {
+  // Профили риска: одним кликом задают общий дефолт (daily/linkedin/
+  // per-run) И снимают "своё значение" (override) со всех площадок в
+  // таблице ниже, плюс выставляют интервал между прогонами — иначе
+  // площадки, у которых уже есть явное число, остались бы на нём,
+  // кнопка ничего бы для них не меняла. Эта функция живёт в
+  // initDashboard(), не в render.settings() — своего "status" с
+  // .sources в области видимости нет, поэтому список площадок
+  // запрашивается заново, а не через внешнюю переменную.
+  async function applyRiskPreset(daily, linkedin, perRun, intervalHours) {
+    const statusEl = document.getElementById("limits-status");
+    statusEl.textContent = "Сохранение…";
+    try {
+      const status = await api("/api/status");
+      await api("/api/settings/limits", {
+        method: "POST",
+        body: JSON.stringify({
+          daily_application_limit: daily,
+          linkedin_daily_application_limit: linkedin,
+          job_max_applications: perRun,
+        }),
+      });
+      // Последовательно, не Promise.all: set_source_field/
+      // unset_source_field в config_patch.py читают и переписывают
+      // весь YAML-файл без блокировки — несколько параллельных
+      // запросов гонятся за одним файлом и портят его (поймано здесь
+      // же при проверке: ConfigError "expected <block end>, but
+      // found <scalar>" после параллельной записи по всем площадкам).
+      for (const s of status.sources) {
+        await api("/api/settings", {
           method: "POST",
           body: JSON.stringify({
-            daily_application_limit: 15,
-            linkedin_daily_application_limit: 8,
-            job_max_applications: 5,
+            source: s.name,
+            clear_daily_application_limit: true,
+            clear_job_max_applications: true,
+            interval_hours: intervalHours,
           }),
         });
-        status.textContent = "Готово.";
-        await render.settings();
-      } catch (e) {
-        status.textContent = `Ошибка: ${e.message}`;
       }
-    });
+      statusEl.textContent = "Готово.";
+      await render.settings();
+    } catch (e) {
+      statusEl.textContent = `Ошибка: ${e.message}`;
+    }
+  }
 
   document
-    .getElementById("llm-alert-save")
-    .addEventListener("click", async () => {
-      const status = document.getElementById("llm-alert-status");
-      const raw = document.getElementById("llm-alert-usd").value;
-      const value = raw ? parseFloat(raw) : null;
-      if (value === null) {
-        status.textContent = "Введите значение.";
-        return;
-      }
-      status.textContent = "Сохранение…";
-      try {
-        await api("/api/settings/limits", {
-          method: "POST",
-          body: JSON.stringify({ llm_daily_cost_alert_usd: value }),
-        });
-        status.textContent = "Сохранено.";
-        setTimeout(() => (status.textContent = ""), 2000);
-      } catch (e) {
-        status.textContent = `Ошибка: ${e.message}`;
-      }
-    });
+    .getElementById("limits-preset-cautious")
+    .addEventListener("click", () => applyRiskPreset(8, 4, 3, 4));
+  document
+    .getElementById("limits-preset-standard")
+    .addEventListener("click", () => applyRiskPreset(15, 8, 5, 3));
+  document
+    .getElementById("limits-preset-aggressive")
+    .addEventListener("click", () => applyRiskPreset(25, 12, 8, 2));
 
   document.querySelectorAll("#provider-grid .provider-card").forEach((card) => {
     card.addEventListener("click", () => {

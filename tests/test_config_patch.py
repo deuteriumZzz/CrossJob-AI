@@ -6,6 +6,7 @@ from src.config_patch import (
     set_source_field,
     set_source_list_field,
     set_top_level_field,
+    unset_source_field,
 )
 
 
@@ -65,6 +66,51 @@ def test_set_source_field_creates_block_if_missing():
         text = config_file.read_text(encoding="utf-8")
         assert "geekjob:" in text
         assert "schedule_enabled: true" in text
+
+
+def test_unset_source_field_removes_existing_value():
+    with tempfile.TemporaryDirectory() as tmp:
+        config_file = Path(tmp) / "work_preferences.yaml"
+        config_file.write_text(
+            "headhunter:\n"
+            "  auto_apply: false\n"
+            "  daily_application_limit: 40\n"
+            "\n"
+            "superjob:\n"
+            "  daily_application_limit: 12\n",
+            encoding="utf-8",
+        )
+
+        unset_source_field(config_file, "headhunter", "daily_application_limit")
+
+        text = config_file.read_text(encoding="utf-8")
+        hh_block = text.split("superjob:")[0]
+        assert "daily_application_limit" not in hh_block
+        assert "auto_apply: false" in hh_block
+        # соседний блок не тронут
+        assert "superjob:\n  daily_application_limit: 12" in text
+
+
+def test_unset_source_field_noop_when_field_missing():
+    with tempfile.TemporaryDirectory() as tmp:
+        config_file = Path(tmp) / "work_preferences.yaml"
+        original = "headhunter:\n  auto_apply: false\n"
+        config_file.write_text(original, encoding="utf-8")
+
+        unset_source_field(config_file, "headhunter", "daily_application_limit")
+
+        assert config_file.read_text(encoding="utf-8") == original
+
+
+def test_unset_source_field_noop_when_block_missing():
+    with tempfile.TemporaryDirectory() as tmp:
+        config_file = Path(tmp) / "work_preferences.yaml"
+        original = "positions:\n  - QA\n"
+        config_file.write_text(original, encoding="utf-8")
+
+        unset_source_field(config_file, "linkedin", "daily_application_limit")
+
+        assert config_file.read_text(encoding="utf-8") == original
 
 
 def test_set_top_level_field_updates_existing_value():
@@ -220,6 +266,9 @@ if __name__ == "__main__":
     test_set_source_field_updates_existing_value()
     test_set_source_field_adds_field_to_existing_block()
     test_set_source_field_creates_block_if_missing()
+    test_unset_source_field_removes_existing_value()
+    test_unset_source_field_noop_when_field_missing()
+    test_unset_source_field_noop_when_block_missing()
     test_set_top_level_field_updates_existing_value()
     test_set_top_level_field_inserts_when_missing()
     test_set_top_level_field_escapes_single_quotes()

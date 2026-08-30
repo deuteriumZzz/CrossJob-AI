@@ -313,6 +313,35 @@ def test_settings_update_rejects_job_max_applications_below_one(client):
     assert response.status_code == 400
 
 
+def test_settings_update_daily_limit_override_flag_reflects_in_status(client):
+    from config import DAILY_APPLICATION_LIMIT
+
+    unset = client.get("/api/status").json()
+    hh = next(s for s in unset["sources"] if s["name"] == "headhunter")
+    assert hh["daily_limit"] == DAILY_APPLICATION_LIMIT
+    assert hh["daily_limit_override"] is False
+
+    client.post(
+        "/api/settings",
+        json={"source": "headhunter", "daily_application_limit": 42},
+    )
+    overridden = client.get("/api/status").json()
+    hh = next(s for s in overridden["sources"] if s["name"] == "headhunter")
+    assert hh["daily_limit"] == 42
+    assert hh["daily_limit_override"] is True
+
+    # Снятие override ("своё" выключили в дашборде) должно вернуть
+    # площадку к общему дефолту, а не оставить старое явное число.
+    client.post(
+        "/api/settings",
+        json={"source": "headhunter", "clear_daily_application_limit": True},
+    )
+    cleared = client.get("/api/status").json()
+    hh = next(s for s in cleared["sources"] if s["name"] == "headhunter")
+    assert hh["daily_limit"] == DAILY_APPLICATION_LIMIT
+    assert hh["daily_limit_override"] is False
+
+
 def test_run_now_starts_selected_sources_and_reports_status(client):
     release = threading.Event()
     calls = []

@@ -335,7 +335,7 @@
         <button type="button" class="active" data-settings-tab="settings-search">Поиск</button>
         <button type="button" data-settings-tab="settings-llm">Провайдер LLM</button>
         <button type="button" data-settings-tab="settings-limits">Лимиты откликов</button>
-        <button type="button" data-settings-tab="settings-notifications">Уведомления</button>
+        <button type="button" data-settings-tab="settings-notifications" title="Не путать с вкладкой «Telegram» слева — там поиск по каналам">Уведомления (Telegram-бот)</button>
         <button type="button" data-settings-tab="settings-autostart">Автозапуск</button>
         <button type="button" data-settings-tab="settings-resume">Резюме и письмо</button>
         <button type="button" data-settings-tab="settings-usage">Расходы на LLM</button>
@@ -506,7 +506,7 @@
         <div class="risk-banner">
           ⚠️ Официальных цифр лимитов не публикует ни одна площадка — заданные здесь значения только уменьшают риск, но не гарантируют, что бота не заметят. Чем выше лимиты и чем ближе они к количеству найденных вакансий, тем больше активность похожа на бота. Повышайте постепенно, начните с малого. LinkedIn блокирует автоматизацию агрессивнее остальных — держите его лимит ниже.
           <br /><br />
-          <strong>Ориентир для старта</strong> (это дефолты самого бота, не гарантия от бана): HH / SuperJob — 15/день, LinkedIn — 8/день, не больше 5 откликов за один прогон, интервал между прогонами — от 3ч. Поднимайте эти числа только если несколько дней подряд не видите капчи/блокировок.
+          <strong>Ориентир для старта</strong>: HH / SuperJob — 15/день, LinkedIn — 8/день, не больше 5 откликов за один прогон, интервал между прогонами — от 3ч. Поднимайте эти числа только если несколько дней подряд не видите капчи/блокировок.
         </div>
         <div class="limits-grid">
           <label class="limit-field">
@@ -514,15 +514,15 @@
             <input id="limit-total" type="number" min="1" placeholder="напр. 20" />
           </label>
           <label class="limit-field">
-            <span>Дневной лимит — HH / SuperJob (дефолт, если у площадки нет своего в таблице ниже)</span>
+            <span>Дневной лимит по умолчанию — HH / SuperJob / остальные</span>
             <input id="limit-daily" type="number" min="1" />
           </label>
           <label class="limit-field">
-            <span>Дневной лимит — LinkedIn (дефолт)</span>
+            <span>Дневной лимит по умолчанию — LinkedIn</span>
             <input id="limit-linkedin" type="number" min="1" />
           </label>
           <label class="limit-field">
-            <span>Откликов за один прогон (все площадки)</span>
+            <span title="Максимум откликов за один заход площадки, не за день — защита от всплеска, чтобы дневная квота набиралась за несколько запусков по расписанию, а не за один">Максимум за один заход по умолчанию (не дневной лимит)</span>
             <input id="limit-per-run" type="number" min="1" />
           </label>
           <label class="limit-field">
@@ -533,13 +533,19 @@
             <span>Порог уверенного фита (0-10) — между этим и порогом отсева отклик уходит, но помечается как слабый</span>
             <input id="limit-suitability-score" type="number" min="0" max="10" step="0.5" />
           </label>
+          <label class="limit-field">
+            <span>Уведомить, если расходы на LLM за день превысят ($)</span>
+            <input id="llm-alert-usd" type="number" min="0.01" step="0.01" placeholder="не задано" />
+          </label>
         </div>
-        <p class="muted small">Общий лимит — это жёсткий потолок: как только сегодня суммарно по ВСЕМ площадкам отправлено столько откликов, автооткликер останавливается везде, даже если у отдельной площадки в таблице ниже свой лимит ещё не исчерпан. Лимиты по площадкам — то, как этот общий бюджет распределяется между ними (например 10 на HH + 2 на GetMatch + 8 на LinkedIn = 20).</p>
+        <p class="muted small">Общий лимит — это жёсткий потолок: как только сегодня суммарно по ВСЕМ площадкам отправлено столько откликов, автооткликер останавливается везде, даже если у отдельной площадки в таблице ниже свой лимит ещё не исчерпан. Дневной лимит и максимум за один заход выше — то, что действует для площадки, у которой нет своего значения в таблице ниже (галочка "своё значение" в соответствующей колонке выключена). Включите галочку у нужной площадки, чтобы задать число только для неё — не трогая остальные.</p>
         <div id="total-budget-info" class="limit-bar-info"></div>
         <div class="filters">
           <button id="limits-save" class="btn btn-primary">Сохранить</button>
           <button id="limits-distribute" class="btn btn-secondary" title="Раскидывает общий дневной лимит по площадкам в расписании случайными долями (LinkedIn — меньше остальных)">🎲 Распределить по площадкам</button>
-          <button id="limits-reset-recommended" class="btn btn-ghost" title="HH/SuperJob — 15/день, LinkedIn — 8/день, 5 откликов за прогон">Сбросить к рекомендованным</button>
+          <button id="limits-preset-cautious" class="btn btn-ghost" title="HH/SuperJob — 8/день, LinkedIn — 4/день, 3 за заход, интервал 4ч. Также снимает «своё значение» со всех площадок в таблице ниже.">🐢 Осторожно</button>
+          <button id="limits-preset-standard" class="btn btn-ghost" title="HH/SuperJob — 15/день, LinkedIn — 8/день, 5 за заход, интервал 3ч. Также снимает «своё значение» со всех площадок в таблице ниже.">⚖️ Стандартно</button>
+          <button id="limits-preset-aggressive" class="btn btn-ghost" title="HH/SuperJob — 25/день, LinkedIn — 12/день, 8 за заход, интервал 2ч. Выше риск капчи/блокировки. Также снимает «своё значение» со всех площадок в таблице ниже.">🚀 Агрессивно</button>
           <span id="limits-status" class="muted small"></span>
         </div>
       </div>
@@ -622,20 +628,13 @@
         </div>
         <p id="usage-summary" class="muted small">Загрузка…</p>
         <p id="usage-note" class="muted small"></p>
-        <div class="filters">
-          <label class="limit-field" style="flex:0 0 260px">
-            <span>Уведомить, если расходы за день превысят ($)</span>
-            <input id="llm-alert-usd" type="number" min="0.01" step="0.01" placeholder="не задано" />
-          </label>
-          <button id="llm-alert-save" class="btn btn-secondary">Сохранить</button>
-          <span id="llm-alert-status" class="muted small"></span>
-        </div>
+        <p class="muted small">Лимит расходов задаётся на вкладке «Лимиты откликов» — рядом с остальными лимитами.</p>
       </div>
 
       <div class="table-wrap settings-pane" id="settings-table">
         <table class="settings-table">
           <thead>
-            <tr><th>Площадка</th><th>Готовность</th><th>В расписании</th><th>Интервал, ч</th><th title="auto_apply — реально откликаться, не только показывать">Автоотклик</th><th title="auto_reply — только HeadHunter, автоответ в чате">Автоответ в чате</th><th title="auto_bump_resume — только HeadHunter, бамп резюме">Бамп резюме</th><th>Resume ID</th><th>Откликов за прогон</th><th>Дневной лимит</th><th></th><th title="Свои должности/локации/зарплата для этой площадки">Фильтры</th></tr>
+            <tr><th>Площадка</th><th>Готовность</th><th>В расписании</th><th>Интервал, ч</th><th title="auto_apply — реально откликаться, не только показывать">Автоотклик</th><th>Resume ID</th><th title="Максимум откликов за один заход — площадка запускается по расписанию каждые N часов (колонка «Интервал, ч»), и дневной лимит набирается за несколько таких заходов, а не за один. Это защита от всплеска: чтобы бот не отправил всю дневную квоту разом за пару минут.">За один заход</th><th>Дневной лимит</th><th></th><th title="Свои должности/локации/зарплата для этой площадки">Фильтры</th></tr>
           </thead>
           <tbody id="settings-rows"></tbody>
         </table>
@@ -675,6 +674,7 @@
             <option value="linkedin">LinkedIn</option>
             <option value="habr_career">Habr Career</option>
           </select>
+          <input id="log-search" type="text" placeholder="Поиск по тексту…" aria-label="Поиск по тексту лога" />
         </div>
       </div>
       <pre id="log-output" class="logs"></pre>
