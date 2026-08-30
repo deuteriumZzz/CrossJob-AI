@@ -14,6 +14,8 @@ import httpx
 import uvicorn
 import webview
 
+from src.utils import autostart
+
 
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -63,18 +65,18 @@ def main() -> None:
     # ещё нет, и проверка готовности никогда бы не прошла.
     _wait_until_ready(f"{url}api/setup/status", server_thread)
 
-    # Автостарт демона при каждом запуске приложения — раньше нужно
-    # было руками жать "Запустить" после каждого перезапуска процесса
-    # (состояние демона живёт только в памяти AppContext), из-за чего
-    # LaunchAgent-автозапуск (см. scripts/install_launch_agent.sh) сам
-    # по себе ничего не планировал бы. Best-effort: если data_folder
-    # ещё не настроен (первый запуск), /api/daemon/start вернёт 428 —
-    # не мешает открытию окна, дашборд покажет мастер настройки как
-    # обычно.
-    try:
-        httpx.post(f"{url}api/daemon/start", timeout=5).raise_for_status()
-    except httpx.HTTPError:
-        pass
+    # Автостарт демона — только когда пользователь сам включил запуск
+    # приложения при входе в систему (autostart.is_enabled(),
+    # см. src/utils/autostart.py и GET/POST /api/settings/autostart).
+    # При обычном ручном открытии приложения демон должен оставаться
+    # выключенным, пока не нажмут "Запустить" на дашборде. Best-effort:
+    # если data_folder ещё не настроен (первый запуск), /api/daemon/start
+    # вернёт 428 — не мешает открытию окна.
+    if autostart.is_supported() and autostart.is_enabled():
+        try:
+            httpx.post(f"{url}api/daemon/start", timeout=5).raise_for_status()
+        except httpx.HTTPError:
+            pass
 
     window = webview.create_window(
         "CrossJob-AI", url, width=1200, height=800, min_size=(900, 600)
