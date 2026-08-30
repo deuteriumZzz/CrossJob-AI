@@ -460,6 +460,15 @@ def test_generate_styles_returns_style_names(client):
     assert "Default" in response.json()
 
 
+def test_generate_styles_ats_report_flags_known_risky_style(client):
+    response = client.get("/api/generate/styles/ats-report")
+    assert response.status_code == 200
+    body = response.json()
+    assert "Clean Blue" in body
+    assert body["Clean Blue"]  # известно, что двухколоночный .entry
+    assert isinstance(body["Modern Grey"], list)
+
+
 def test_generate_resume_tailored_requires_job_url(client):
     response = client.post("/api/generate/resume-tailored", json={})
     assert response.status_code == 400

@@ -2373,10 +2373,28 @@ function initDashboard() {
       statusEl.textContent = "Запрошено, ссылка на черновик — в логах/уведомлениях.";
     });
 
-  api("/api/generate/styles").then((styles) => {
-    document.getElementById("gen-style").innerHTML = styles
-      .map((s) => `<option value="${s}">${s}</option>`)
+  Promise.all([
+    api("/api/generate/styles"),
+    api("/api/generate/styles/ats-report"),
+  ]).then(([styles, atsReport]) => {
+    const select = document.getElementById("gen-style");
+    const note = document.getElementById("gen-style-ats-note");
+    select.innerHTML = styles
+      .map((s) => {
+        const risks = atsReport[s] || [];
+        const warn = risks.length ? "⚠️ " : "";
+        const title = risks.length ? ` title="${escapeHtml(risks.join(" "))}"` : "";
+        return `<option value="${s}"${title}>${warn}${escapeHtml(s)}</option>`;
+      })
       .join("");
+    const updateNote = () => {
+      const risks = atsReport[select.value] || [];
+      note.innerHTML = risks.length
+        ? `⚠️ Возможные проблемы с ATS у стиля «${escapeHtml(select.value)}»: ${risks.map(escapeHtml).join(" ")}`
+        : `✅ У стиля «${escapeHtml(select.value)}» известных проблем с ATS не найдено (проверка эвристическая, не гарантия).`;
+    };
+    select.addEventListener("change", updateNote);
+    if (styles.length) updateNote();
   });
   document
     .getElementById("gen-resume")

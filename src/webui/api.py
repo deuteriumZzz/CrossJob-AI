@@ -1744,6 +1744,14 @@ def get_generate_styles() -> list[str]:
     return list(StyleManager().get_styles().keys())
 
 
+@app.get("/api/generate/styles/ats-report")
+def get_generate_styles_ats_report() -> dict[str, list[str]]:
+    """Риски ATS по каждому стилю (пустой список — риск не найден),
+    см. StyleManager.get_ats_report()/analyze_ats_risks — статическая
+    проверка CSS-шаблона, не требует реальной генерации PDF."""
+    return StyleManager().get_ats_report()
+
+
 class GenerateRequest(BaseModel):
     style_name: Optional[str] = None
     job_url: Optional[str] = None

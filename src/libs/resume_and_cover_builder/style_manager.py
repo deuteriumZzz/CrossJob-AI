@@ -1,4 +1,5 @@
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -7,6 +8,72 @@ from typing import Dict, List, Optional, Tuple
 logging.basicConfig(
     level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s"
 )
+
+_CSS_RULE_RE = re.compile(r"([^{}]+)\{([^{}]*)\}")
+
+
+def _select_block(css_text: str, selector: str) -> str:
+    """Тело ПЕРВОГО CSS-правила, у которого ровно этот селектор
+    (после split по запятой) — не префиксные варианты вроде
+    .entry-header при поиске .entry. Все текущие resume_style/*.css —
+    плоский, не вложенный CSS (только один uncommented @media-блок в
+    конце каждого файла), поэтому разбор по []{}[^{}]* без стека
+    вложенности достаточен и не требует полноценного CSS-парсера."""
+    for raw_selectors, body in _CSS_RULE_RE.findall(css_text):
+        selectors = {s.strip() for s in raw_selectors.split(",")}
+        if selector in selectors:
+            return body
+    return ""
+
+
+def _is_multi_column(block: str) -> bool:
+    """display:grid с 2+ треками или display:flex без
+    flex-direction:column — оба варианта кладут дочерние элементы в
+    ряд side-by-side вместо друг под другом."""
+    if not block:
+        return False
+    grid_match = re.search(r"grid-template-columns\s*:\s*([^;]+);", block)
+    if grid_match and len(grid_match.group(1).split()) >= 2:
+        return True
+    return bool(
+        re.search(r"display\s*:\s*flex", block)
+    ) and not re.search(r"flex-direction\s*:\s*column", block)
+
+
+def analyze_ats_risks(css_text: str) -> List[str]:
+    """Точечные эвристики по трём известным точкам риска в
+    ФИКСИРОВАННОМ HTML-скелете резюме, который LLM обязан
+    воспроизводить (см. template_base.py — классы .entry/.two-column/
+    .contact-info одинаковы для всех стилей, разное только CSS) — не
+    полноценный ATS-симулятор, а проверка того, что конкретно ломает
+    построчное извлечение текста из PDF: колонки внутри записи
+    опыта/образования, колонки в списке навыков, иконки-без-текста в
+    контактах. PDF — это плоский холст позиционированных глифов без
+    DOM, большинство экстракторов текста (в т.ч. pdfminer, которым
+    сам бот читает resume.pdf) сортируют по Y/X-позиции — колонка с
+    коротким текстом слева и колонка с длинным текстом справа
+    оказываются на разной высоте и перемешиваются построчно."""
+    risks = []
+    if _is_multi_column(_select_block(css_text, ".entry")):
+        risks.append(
+            "Опыт работы/образование выводятся в несколько колонок — "
+            "при извлечении текста из PDF строки могут перепутаться "
+            "местами."
+        )
+    if _is_multi_column(_select_block(css_text, ".two-column")):
+        risks.append(
+            "Навыки выводятся в несколько колонок — та же проблема "
+            "порядка текста при извлечении из PDF."
+        )
+    if ".contact-info" in css_text and not re.search(
+        r"\.contact-info[^{}]*\{[^{}]*content\s*:\s*[\"']", css_text
+    ):
+        risks.append(
+            "Контакты (адрес/телефон/почта) подписаны только иконками "
+            "без текстовой замены — если шрифт иконок не извлечётся "
+            "как текст, ATS не увидит эти поля вообще."
+        )
+    return risks
 
 
 class StyleManager:
@@ -109,3 +176,20 @@ class StyleManager:
         except Exception as e:
             logging.error(f"Error retrieving selected style: {e}")
             return None
+
+    def get_ats_report(self) -> Dict[str, List[str]]:
+        """Риски ATS (см. analyze_ats_risks) по каждому доступному
+        стилю — пустой список значит стиль не задевает ни одну из
+        трёх известных точек риска. Разовая статическая проверка CSS,
+        не привязана к конкретному сгенерированному резюме."""
+        report: Dict[str, List[str]] = {}
+        for style_name, (file_name, _) in self.get_styles().items():
+            try:
+                css_text = (self.styles_directory / file_name).read_text(
+                    encoding="utf-8"
+                )
+            except OSError as e:
+                logging.error(f"Error reading style {file_name}: {e}")
+                continue
+            report[style_name] = analyze_ats_risks(css_text)
+        return report
