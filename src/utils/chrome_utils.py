@@ -12,14 +12,22 @@ from webdriver_manager.chrome import ChromeDriverManager
 from src.logging import logger
 
 
-def clear_stale_chrome_lock(profile_dir: Path) -> None:
+def clear_stale_chrome_lock(profile_dir: Path, force: bool = False) -> None:
     """Chrome пишет SingletonLock/-Cookie/-Socket в папку профиля на
     время своей работы; если процесс убили/он упал (сеть моргнула,
     OOM, форс-килл), эти файлы остаются висеть и указывают на мёртвый
     PID. Следующий запуск с тем же --user-data-dir тогда молча не
     может достучаться до Chrome ("session not created: chrome not
     reachable") вместо того, чтобы просто стартовать — живой Chrome
-    создаёт эти файлы заново сам, удалять их для него не проблема."""
+    создаёт эти файлы заново сам, удалять их для него не проблема.
+
+    force=True убивает PID из лока, даже если он жив, вместо того
+    чтобы оставить лок нетронутым. Использовать только когда мы точно
+    знаем, что это не второй легитимный Chrome, а осиротевший процесс
+    от нашей же предыдущей неудачной попытки (см. init_browser): она
+    могла успеть запустить Chrome и создать лок до того, как упасть на
+    более позднем шаге, а 5-секундная пауза перед ретраем не всегда
+    достаточна, чтобы такой осиротевший процесс сам успел умереть."""
     lock = profile_dir / "SingletonLock"
     if not lock.is_symlink():
         return
@@ -27,7 +35,9 @@ def clear_stale_chrome_lock(profile_dir: Path) -> None:
         target = os.readlink(lock)
         pid = int(target.rsplit("-", 1)[-1])
         os.kill(pid, 0)
-        return  # PID жив — не наш случай, второй Chrome и правда работает
+        if not force:
+            return  # PID жив — не наш случай, второй Chrome и правда работает
+        os.kill(pid, 9)
     except (OSError, ValueError):
         pass
     for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
@@ -101,7 +111,7 @@ def init_browser(profile_dir: Optional[Path] = None) -> webdriver.Chrome:
     for attempt in (1, 2):
         try:
             if profile_dir is not None:
-                clear_stale_chrome_lock(profile_dir)
+                clear_stale_chrome_lock(profile_dir, force=attempt > 1)
             options = chrome_browser_options(profile_dir)
             # webdriver_manager сам скачивает и обновляет подходящий
             # ChromeDriver, не требуя ручного управления версиями

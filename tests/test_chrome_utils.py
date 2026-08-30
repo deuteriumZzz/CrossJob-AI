@@ -1,5 +1,7 @@
 import os
+import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from src.utils.chrome_utils import clear_stale_chrome_lock
@@ -32,3 +34,22 @@ def test_live_lock_is_kept():
         clear_stale_chrome_lock(profile_dir)
 
         assert (profile_dir / "SingletonLock").is_symlink()
+
+
+def test_force_kills_live_pid_and_removes_lock():
+    with tempfile.TemporaryDirectory() as tmp:
+        profile_dir = Path(tmp)
+        proc = subprocess.Popen(["sleep", "30"])
+        try:
+            (profile_dir / "SingletonLock").symlink_to(f"host-{proc.pid}")
+
+            clear_stale_chrome_lock(profile_dir, force=True)
+
+            for _ in range(50):
+                if proc.poll() is not None:
+                    break
+                time.sleep(0.1)
+            assert proc.poll() is not None, "process was not killed"
+            assert not (profile_dir / "SingletonLock").exists()
+        finally:
+            proc.wait(timeout=5)
