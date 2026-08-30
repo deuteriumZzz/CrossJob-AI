@@ -42,6 +42,15 @@ def init_linkedin_browser(profile_dir: Path) -> uc.Chrome:
         options = uc.ChromeOptions()
         options.add_argument(f"--user-data-dir={profile_dir}")
         options.add_argument("--start-maximized")
+        # ponytail: без этих двух флагов Chrome падает сразу на старте
+        # (EXC_BREAKPOINT/SIGTRAP в CrBrowserMain) именно в связке
+        # macOS + постоянный профиль + undetected-chromedriver —
+        # известный баг библиотеки (github.com/ultrafunkamsterdam/
+        # undetected-chromedriver discussions #1968), не наш профиль
+        # и не версия Chrome. chrome_utils.chrome_browser_options()
+        # уже ставит их для остальных источников — здесь их не было.
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
         try:
             return uc.Chrome(options=options, version_main=version_main)
         except Exception:

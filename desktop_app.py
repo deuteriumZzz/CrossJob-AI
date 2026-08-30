@@ -7,6 +7,7 @@ requirements-desktop.txt (fastapi/uvicorn/pywebview), которые не
 from __future__ import annotations
 
 import socket
+import subprocess
 import threading
 import time
 
@@ -15,6 +16,22 @@ import uvicorn
 import webview
 
 from src.utils import autostart
+
+
+def _kill_stale_browser_processes() -> None:
+    """Прошлый запуск приложения мог упасть/быть убит, не закрыв свой
+    Chrome — SingletonLock в профиле тогда указывает на формально живой
+    PID, и clear_stale_chrome_lock() в chrome_utils.py его не трогает
+    ("второй Chrome и правда работает", см. тот файл). При новом
+    запуске приложения это уже не так — любой Chrome с нашим
+    --user-data-dir гарантированно осиротел, так что просто прибиваем
+    его здесь, до старта сервера. Осиротевший chromedriver (без
+    привязанного Chrome) сюда не входит намеренно: он не держит
+    SingletonLock и не блокирует новый запуск, а ~/.wdm — общий кэш
+    webdriver_manager на всю систему, не только для этого проекта, так
+    что широкий pkill по нему рискует задеть чужой Selenium-процесс."""
+    for pattern in (".chrome_profile_", ".linkedin_profile"):
+        subprocess.run(["pkill", "-f", pattern], check=False)
 
 
 def _free_port() -> int:
@@ -45,6 +62,8 @@ def _wait_until_ready(
 
 
 def main() -> None:
+    _kill_stale_browser_processes()
+
     # Нет проверки data_folder здесь — если его ещё нет, дашборд сам
     # покажет экран первого запуска (GET /api/setup/status), как и в
     # обычном браузере. Раньше это место жёстко завершало процесс

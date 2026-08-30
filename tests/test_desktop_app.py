@@ -66,11 +66,32 @@ def test_wait_until_ready_raises_immediately_if_server_thread_died(monkeypatch):
     assert time.monotonic() - start < 1.0
 
 
+def test_kill_stale_browser_processes_targets_known_profile_markers(
+    monkeypatch,
+):
+    """Must pkill by our own profile/driver-cache path markers only —
+    never a bare 'chrome', which would also kill the user's regular
+    browser session."""
+    calls = []
+    monkeypatch.setattr(
+        desktop_app.subprocess,
+        "run",
+        lambda cmd, check=False: calls.append(cmd),
+    )
+    desktop_app._kill_stale_browser_processes()
+    patterns = [cmd[-1] for cmd in calls]
+    assert patterns == [".chrome_profile_", ".linkedin_profile"]
+    assert all(cmd[:2] == ["pkill", "-f"] for cmd in calls)
+
+
 def test_main_probes_setup_status_not_status(monkeypatch):
     """main() must never poll /api/status directly — it 428s until
     data_folder is set up, so readiness would never be confirmed."""
     probed_urls = []
 
+    monkeypatch.setattr(
+        desktop_app, "_kill_stale_browser_processes", lambda: None
+    )
     monkeypatch.setattr(desktop_app, "_free_port", lambda: 1)
 
     class _FakeServer:
