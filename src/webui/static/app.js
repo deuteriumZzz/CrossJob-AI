@@ -267,6 +267,7 @@ let lastHistoryEntries = [];
 let repliesLoaded = false;
 let lastRepliesSnapshot = null;
 let lastRepliesCount = 0;
+let lastRepliesEntries = [];
 let logsLoaded = false;
 let lastLogsSnapshot = null;
 let lastLogsLines = [];
@@ -741,23 +742,8 @@ const render = {
     const repliesSnapshot = JSON.stringify(entries);
     if (repliesSnapshot === lastRepliesSnapshot) return;
     lastRepliesSnapshot = repliesSnapshot;
-
-    if (!entries.length) {
-      tbody.innerHTML = `<tr><td colspan="4">${emptyStateHtml("Пока нет ответов.")}</td></tr>`;
-      return;
-    }
-    tbody.innerHTML = entries
-      .map(
-        (e, i) => `
-      <tr class="reveal" style="transition-delay:${staggerDelay(i, 25)}">
-        <td>${fmtTime(e.applied_at)}</td>
-        <td>${sourceLabel(e.source)}</td>
-        <td><a href="${escapeHtml(e.link)}" target="_blank" rel="noopener">${escapeHtml(e.company)} — ${escapeHtml(e.title)}</a></td>
-        <td>${escapeHtml(e.last_known_state)}</td>
-      </tr>`
-      )
-      .join("");
-    observeReveal(tbody);
+    lastRepliesEntries = entries;
+    renderRepliesRows();
   },
 
   async analytics() {
@@ -1236,6 +1222,48 @@ function renderLogLines() {
   pre.textContent =
     lines.join("\n") || (query ? "(совпадений нет)" : "(пусто)");
   pre.scrollTop = wasAtBottom ? pre.scrollHeight : prevScrollTop;
+}
+
+// Фильтр чисто на клиенте, тот же подход, что и у "Логов" — список
+// ответов работодателей не настолько большой, чтобы гонять фильтр на
+// сервер под каждую букву поиска.
+function renderRepliesRows() {
+  const tbody = document.getElementById("replies-rows");
+  const source = document.getElementById("replies-filter-source").value;
+  const query = document
+    .getElementById("replies-filter-query")
+    .value.trim()
+    .toLowerCase();
+  const entries = lastRepliesEntries.filter((e) => {
+    if (source && e.source !== source) return false;
+    if (!query) return true;
+    return (
+      e.company.toLowerCase().includes(query) ||
+      e.title.toLowerCase().includes(query) ||
+      (e.last_known_state || "").toLowerCase().includes(query)
+    );
+  });
+
+  if (!lastRepliesEntries.length) {
+    tbody.innerHTML = `<tr><td colspan="4">${emptyStateHtml("Пока нет ответов.")}</td></tr>`;
+    return;
+  }
+  if (!entries.length) {
+    tbody.innerHTML = `<tr><td colspan="4">${emptyStateHtml("Ничего не найдено.")}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = entries
+    .map(
+      (e, i) => `
+    <tr class="reveal" style="transition-delay:${staggerDelay(i, 25)}">
+      <td>${fmtTime(e.applied_at)}</td>
+      <td>${sourceLabel(e.source)}</td>
+      <td><a href="${escapeHtml(e.link)}" target="_blank" rel="noopener">${escapeHtml(e.company)} — ${escapeHtml(e.title)}</a></td>
+      <td>${escapeHtml(e.last_known_state)}</td>
+    </tr>`
+    )
+    .join("");
+  observeReveal(tbody);
 }
 
 async function openTelegramConversation(contact) {
@@ -2253,6 +2281,12 @@ function initDashboard() {
   document
     .getElementById("log-search")
     .addEventListener("input", () => renderLogLines());
+  document
+    .getElementById("replies-filter-source")
+    .addEventListener("change", () => renderRepliesRows());
+  document
+    .getElementById("replies-filter-query")
+    .addEventListener("input", () => renderRepliesRows());
 
   document
     .getElementById("blacklist-add")
@@ -2261,6 +2295,19 @@ function initDashboard() {
         document.querySelectorAll(".blacklist-check:checked")
       ).map((c) => c.value);
       if (!companies.length) return;
+      // Тот же showConfirm, что уже стоит перед серверной блокировкой
+      // на hh.ru ниже — локальный чёрный список отменить проще
+      // (просто убрать из списка в "Поиск"), но сама компания сразу
+      // перестаёт попадаться в поиске на всех площадках, отмена не
+      // мгновенная, стоит спросить перед массовым добавлением.
+      const list = companies.join(", ");
+      if (
+        !(await showConfirm(
+          `Добавить в чёрный список: ${list}? Эти компании перестанут попадаться в поиске на всех площадках.`
+        ))
+      ) {
+        return;
+      }
       await api("/api/blacklist", {
         method: "POST",
         body: JSON.stringify({ companies }),

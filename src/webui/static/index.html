@@ -176,6 +176,20 @@
           <p class="muted">Изменения статуса переговоров</p>
         </div>
       </div>
+      <div class="filters">
+        <select id="replies-filter-source">
+          <option value="">Все площадки</option>
+          <option value="headhunter">HeadHunter</option>
+          <option value="superjob">SuperJob</option>
+          <option value="geekjob">geekjob.ru</option>
+          <option value="rabota_ru">rabota.ru</option>
+          <option value="telegram">Telegram</option>
+          <option value="getmatch">GetMatch</option>
+          <option value="linkedin">LinkedIn</option>
+          <option value="habr_career">Habr Career</option>
+        </select>
+        <input id="replies-filter-query" type="text" placeholder="Поиск по компании/вакансии/статусу" aria-label="Поиск по компании/вакансии/статусу" />
+      </div>
       <div class="table-wrap">
         <table>
           <thead>
@@ -543,9 +557,9 @@
         <div class="filters">
           <button id="limits-save" class="btn btn-primary">Сохранить</button>
           <button id="limits-distribute" class="btn btn-secondary" title="Раскидывает общий дневной лимит по площадкам в расписании случайными долями (LinkedIn — меньше остальных)">🎲 Распределить по площадкам</button>
-          <button id="limits-preset-cautious" class="btn btn-ghost" title="HH/SuperJob — 8/день, LinkedIn — 4/день, 3 за заход, интервал 4ч. Также снимает «своё значение» со всех площадок в таблице ниже.">🐢 Осторожно</button>
-          <button id="limits-preset-standard" class="btn btn-ghost" title="HH/SuperJob — 15/день, LinkedIn — 8/день, 5 за заход, интервал 3ч. Также снимает «своё значение» со всех площадок в таблице ниже.">⚖️ Стандартно</button>
-          <button id="limits-preset-aggressive" class="btn btn-ghost" title="HH/SuperJob — 25/день, LinkedIn — 12/день, 8 за заход, интервал 2ч. Выше риск капчи/блокировки. Также снимает «своё значение» со всех площадок в таблице ниже.">🚀 Агрессивно</button>
+          <button id="limits-preset-cautious" class="btn btn-ghost" title="HH/SuperJob — 8/день, LinkedIn — 4/день, 3 за заход, интервал 4ч. Также снимает «своё значение» со всех площадок в таблице ниже. Расписание (какие площадки включены) не трогает — включённые останутся включены, выключенные не запустятся сами.">🐢 Осторожно</button>
+          <button id="limits-preset-standard" class="btn btn-ghost" title="HH/SuperJob — 15/день, LinkedIn — 8/день, 5 за заход, интервал 3ч. Также снимает «своё значение» со всех площадок в таблице ниже. Расписание (какие площадки включены) не трогает — включённые останутся включены, выключенные не запустятся сами.">⚖️ Стандартно</button>
+          <button id="limits-preset-aggressive" class="btn btn-ghost" title="HH/SuperJob — 25/день, LinkedIn — 12/день, 8 за заход, интервал 2ч. Выше риск капчи/блокировки. Также снимает «своё значение» со всех площадок в таблице ниже. Расписание (какие площадки включены) не трогает — включённые останутся включены, выключенные не запустятся сами.">🚀 Агрессивно</button>
           <span id="limits-status" class="muted small"></span>
         </div>
       </div>
