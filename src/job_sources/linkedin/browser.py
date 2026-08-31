@@ -6,7 +6,7 @@ from typing import Optional
 
 import undetected_chromedriver as uc
 
-from src.utils.chrome_utils import clear_stale_chrome_lock
+from src.utils.chrome_utils import clear_profile_cache, clear_stale_chrome_lock
 
 # ponytail: тот же фиксированный retry, что и chrome_utils.init_browser
 # — покрывает транзиентные сбои запуска Chrome без диагностики причины.
@@ -36,6 +36,7 @@ def init_linkedin_browser(profile_dir: Path) -> uc.Chrome:
     отпечатку браузера, в отличие от остальных площадок проекта.
     Постоянная папка профиля сохраняет сессию входа между запусками."""
     profile_dir.mkdir(parents=True, exist_ok=True)
+    clear_profile_cache(profile_dir)
     version_main = _installed_chrome_major_version()
     for attempt in (1, 2):
         clear_stale_chrome_lock(profile_dir)

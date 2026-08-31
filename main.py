@@ -1896,6 +1896,10 @@ def search_getmatch(parameters: dict, llm_api_key: str):
         return
 
     profile_dir = output_folder / ".chrome_profile_getmatch"
+    if auto_apply:
+        assert email is not None  # enforced above when auto_apply is set
+        GetMatchSession(profile_dir).ensure_logged_in(email)
+
     with GetMatchClient(profile_dir) as client:
         source: JobSource = GetMatchSource(client)
         try:
@@ -1910,10 +1914,6 @@ def search_getmatch(parameters: dict, llm_api_key: str):
             )
             return
         logger.info(f"Found {len(jobs)} matching GetMatch vacancies.")
-
-        if auto_apply:
-            assert email is not None  # enforced above when auto_apply is set
-            GetMatchSession(profile_dir).ensure_logged_in(email)
 
         sent_count = 0
         job_max_applications = _job_max_applications(parameters, "getmatch")

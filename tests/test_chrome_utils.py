@@ -4,7 +4,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from src.utils.chrome_utils import clear_stale_chrome_lock
+from src.utils.chrome_utils import clear_profile_cache, clear_stale_chrome_lock
 
 
 def test_no_lock_file_is_a_noop():
@@ -34,6 +34,29 @@ def test_live_lock_is_kept():
         clear_stale_chrome_lock(profile_dir)
 
         assert (profile_dir / "SingletonLock").is_symlink()
+
+
+def test_clear_profile_cache_removes_cache_dirs_but_keeps_session():
+    with tempfile.TemporaryDirectory() as tmp:
+        profile_dir = Path(tmp)
+        for rel in ("Default/Cache", "Default/Code Cache", "Default/GPUCache"):
+            d = profile_dir / rel
+            d.mkdir(parents=True)
+            (d / "data_0").write_bytes(b"x" * 1024)
+        (profile_dir / "Default").mkdir(exist_ok=True)
+        (profile_dir / "Default" / "Cookies").write_bytes(b"session-data")
+
+        clear_profile_cache(profile_dir)
+
+        for rel in ("Default/Cache", "Default/Code Cache", "Default/GPUCache"):
+            assert not (profile_dir / rel).exists()
+        cookies = profile_dir / "Default" / "Cookies"
+        assert cookies.read_bytes() == b"session-data"
+
+
+def test_clear_profile_cache_missing_dirs_is_a_noop():
+    with tempfile.TemporaryDirectory() as tmp:
+        clear_profile_cache(Path(tmp))  # must not raise
 
 
 def test_force_kills_live_pid_and_removes_lock():

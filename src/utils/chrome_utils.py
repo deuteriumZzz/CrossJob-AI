@@ -1,4 +1,5 @@
 import os
+import shutil
 import time
 import urllib
 from pathlib import Path
@@ -43,6 +44,23 @@ def clear_stale_chrome_lock(profile_dir: Path, force: bool = False) -> None:
     for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
         (profile_dir / name).unlink(missing_ok=True)
     logger.debug(f"Cleared stale Chrome singleton lock in {profile_dir}")
+
+
+# ponytail: Chrome сам пересоздаёт эти каталоги по требованию — это чистый
+# HTTP/JS-кэш, не сессия. Без очистки постоянный профиль растёт без
+# остановки на каждом плановом запуске (найдено: 516M у .linkedin_profile,
+# из них 336M — Cache и Code Cache). Cookies/Login Data/IndexedDB (сама
+# сессия входа) лежат в Default/ рядом и не трогаются — вход не сбрасывается.
+_STALE_CACHE_SUBDIRS = (
+    "Default/Cache",
+    "Default/Code Cache",
+    "Default/GPUCache",
+)
+
+
+def clear_profile_cache(profile_dir: Path) -> None:
+    for rel in _STALE_CACHE_SUBDIRS:
+        shutil.rmtree(profile_dir / rel, ignore_errors=True)
 
 
 def chrome_browser_options(profile_dir: Optional[Path] = None):
@@ -108,6 +126,8 @@ _BROWSER_INIT_RETRY_DELAY_SECONDS = 5
 
 
 def init_browser(profile_dir: Optional[Path] = None) -> webdriver.Chrome:
+    if profile_dir is not None:
+        clear_profile_cache(profile_dir)
     for attempt in (1, 2):
         try:
             if profile_dir is not None:
