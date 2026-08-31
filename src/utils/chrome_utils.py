@@ -72,6 +72,11 @@ def chrome_browser_options(profile_dir: Optional[Path] = None):
     src/job_sources/linkedin/browser.py::init_linkedin_browser."""
     logger.debug("Setting Chrome browser options")
     options = Options()
+    # ponytail: "normal" (Selenium default) ждёт события load, включая все
+    # рекламные/трекинговые скрипты страницы (TargetAds, Adfox, hybrid.ai на
+    # HH) — именно они подвешивали renderer до PAGE_LOAD_TIMEOUT_SECONDS.
+    # "eager" возвращает управление по DOMContentLoaded, не дожидаясь их.
+    options.page_load_strategy = "eager"
     options.add_argument("--start-maximized")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
