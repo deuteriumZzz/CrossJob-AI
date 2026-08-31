@@ -61,6 +61,40 @@ def test_headhunter_client_without_with_opens_and_closes_per_call():
         assert mock_init.call_count == 2
 
 
+def test_headhunter_client_reconnects_after_dead_session_mid_run():
+    """Chrome может упасть посреди прогона (invalid session id) — на
+    следующем вызове клиент должен тихо пересоздать driver тем же
+    профилем, а не продолжать отдавать мёртвую сессию всем остальным
+    вакансиям до конца прогона."""
+    with patch(
+        "src.job_sources.headhunter.browser_client.init_browser"
+    ) as mock_init, patch(
+        "src.job_sources.headhunter.browser_client.raise_if_blocked"
+    ), patch(
+        "src.job_sources.headhunter.browser_client.visible_text",
+        return_value="",
+    ), patch(
+        "src.job_sources.headhunter.browser_client.time.sleep"
+    ):
+        dead_driver = MagicMock()
+        type(dead_driver).current_url = property(
+            lambda self: (_ for _ in ()).throw(
+                Exception("invalid session id: session deleted")
+            )
+        )
+        fresh_driver = MagicMock()
+        fresh_driver.find_elements.return_value = []
+        mock_init.side_effect = [dead_driver, fresh_driver]
+
+        with HeadHunterBrowserClient("profile") as client:
+            assert client._driver is dead_driver
+            client.get_vacancy_html("123")
+
+        assert mock_init.call_count == 2
+        dead_driver.quit.assert_called_once()
+        fresh_driver.quit.assert_called_once()
+
+
 def test_getmatch_client_reuses_one_driver_inside_with_block():
     with patch(
         "src.job_sources.getmatch.client.init_browser"

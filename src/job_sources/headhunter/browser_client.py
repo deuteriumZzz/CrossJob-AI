@@ -80,8 +80,30 @@ class HeadHunterBrowserClient:
         """(driver, owns_it) — owns_it говорит вызывающему методу,
         нужно ли закрывать driver самому (True — обычный режим без
         `with`) или оставить открытым для следующего вызова (False —
-        driver управляется __enter__/__exit__)."""
+        driver управляется __enter__/__exit__).
+
+        ponytail: поиск на HH — это десятки driver.get() подряд
+        (позиции × страницы × карточки вакансий); если Chrome падает
+        где-то посреди этого (реальный случай — "invalid session id:
+        session deleted as the browser has closed the connection"),
+        старый код продолжал отдавать уже мёртвый self._driver, и
+        весь прогон разваливался одной ошибкой вместо потери
+        нескольких вакансий. Тут — единственное место, через которое
+        идут все методы клиента, поэтому проверка живости и
+        пересоздание здесь чинят и поиск, и отклики разом."""
         if self._driver is not None:
+            try:
+                _ = self._driver.current_url
+            except Exception:
+                logger.warning(
+                    "Chrome-сессия HH умерла посреди прогона — "
+                    "пересоздаю браузер тем же профилем."
+                )
+                try:
+                    self._driver.quit()
+                except Exception:
+                    pass
+                self._driver = init_browser(self.profile_dir)
             return self._driver, False
         return init_browser(self.profile_dir), True
 
