@@ -20,6 +20,11 @@ _fallback_keys: dict = {}
 _fallback_base_urls: dict = {}
 _fallback_mode: str = "auto"  # "auto" | "free" | "paid"
 _fallback_enabled: bool = True
+# Без явного таймаута зависший (не ответивший, но и не упавший с
+# ошибкой) провайдер блокирует поток навсегда: .with_fallbacks()
+# переключает на следующего провайдера только по исключению, а
+# бесконечное ожидание исключением не является.
+_LLM_REQUEST_TIMEOUT: float = 60
 
 # ponytail: free/paid + актуальность ID — сверено веб-поиском 2026-08-21
 # (свежие модели/цены/депрекейшены меняются быстрее, чем стоит
@@ -343,6 +348,7 @@ def _build_llm(
                 api_key=SecretStr(api_key),
                 temperature=temperature,
                 max_retries=0,
+                timeout=_LLM_REQUEST_TIMEOUT,
             ),
             resolved_model,
         )
@@ -356,6 +362,7 @@ def _build_llm(
                 google_api_key=SecretStr(api_key),
                 temperature=temperature,
                 max_retries=0,
+                timeout=_LLM_REQUEST_TIMEOUT,
             ),
             resolved_model,
         )
@@ -370,6 +377,7 @@ def _build_llm(
                 base_url=base_url or "https://api.deepseek.com",
                 temperature=temperature,
                 max_retries=0,
+                timeout=_LLM_REQUEST_TIMEOUT,
             ),
             resolved_model,
         )
@@ -384,6 +392,7 @@ def _build_llm(
                 base_url=base_url or "https://integrate.api.nvidia.com/v1",
                 temperature=temperature,
                 max_retries=0,
+                timeout=_LLM_REQUEST_TIMEOUT,
             ),
             resolved_model,
         )
@@ -398,6 +407,7 @@ def _build_llm(
                 base_url=base_url or "https://openrouter.ai/api/v1",
                 temperature=temperature,
                 max_retries=0,
+                timeout=_LLM_REQUEST_TIMEOUT,
             ),
             resolved_model,
         )
@@ -412,6 +422,7 @@ def _build_llm(
                 base_url=base_url or "https://api.mistral.ai/v1",
                 temperature=temperature,
                 max_retries=0,
+                timeout=_LLM_REQUEST_TIMEOUT,
             ),
             resolved_model,
         )
@@ -426,6 +437,7 @@ def _build_llm(
                 base_url=base_url or "https://api.cohere.ai/compatibility/v1",
                 temperature=temperature,
                 max_retries=0,
+                timeout=_LLM_REQUEST_TIMEOUT,
             ),
             resolved_model,
         )
@@ -440,6 +452,7 @@ def _build_llm(
                 base_url=base_url or "https://router.huggingface.co/v1",
                 temperature=temperature,
                 max_retries=0,
+                timeout=_LLM_REQUEST_TIMEOUT,
             ),
             resolved_model,
         )
@@ -454,6 +467,7 @@ def _build_llm(
                 base_url=base_url or "https://ollama.com/v1",
                 temperature=temperature,
                 max_retries=0,
+                timeout=_LLM_REQUEST_TIMEOUT,
             ),
             resolved_model,
         )
@@ -468,6 +482,7 @@ def _build_llm(
                 base_url=base_url or "https://api.llm7.io/v1",
                 temperature=temperature,
                 max_retries=0,
+                timeout=_LLM_REQUEST_TIMEOUT,
             ),
             resolved_model,
         )
@@ -490,6 +505,7 @@ def _build_llm(
                 base_url=base_url,
                 temperature=temperature,
                 max_retries=0,
+                timeout=_LLM_REQUEST_TIMEOUT,
             ),
             resolved_model,
         )
@@ -504,6 +520,7 @@ def _build_llm(
                 base_url=base_url or "https://ai-gateway.vercel.sh/v1",
                 temperature=temperature,
                 max_retries=0,
+                timeout=_LLM_REQUEST_TIMEOUT,
             ),
             resolved_model,
         )
@@ -516,6 +533,7 @@ def _build_llm(
                 model=resolved_model,
                 base_url=base_url,
                 temperature=temperature,
+                client_kwargs={"timeout": _LLM_REQUEST_TIMEOUT},
             ),
             resolved_model,
         )
@@ -528,6 +546,7 @@ def _build_llm(
             api_key=SecretStr(api_key),
             temperature=temperature,
             max_retries=0,
+            timeout=_LLM_REQUEST_TIMEOUT,
         ),
         resolved_model,
     )
