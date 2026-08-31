@@ -37,6 +37,7 @@ from src.job_sources.apply_pacing import (
 from src.job_sources.base import JobSource
 from src.job_sources.block_detection import (
     PlatformBlockedError,
+    clear_blocked,
     is_still_blocked,
     mark_blocked,
 )
@@ -1164,8 +1165,10 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
             mark_blocked(output_folder, "headhunter")
             notify(
                 parameters,
-                f"hh.ru: похоже на блокировку ({e}). "
-                "Площадка поставлена на паузу на 24ч.",
+                f"hh.ru: похоже на блокировку ({e}). Площадка "
+                "поставлена на паузу на 24ч. Решите капчу вручную в "
+                "открытом Chrome-профиле и пришлите /resume headhunter "
+                "— попробуем снова раньше.",
             )
             return
         logger.info(f"Found {len(jobs)} matching HeadHunter vacancies.")
@@ -1270,8 +1273,10 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
                     mark_blocked(output_folder, "headhunter")
                     notify(
                         parameters,
-                        f"hh.ru: похоже на блокировку ({e}). "
-                        "Площадка поставлена на паузу на 24ч.",
+                        f"hh.ru: похоже на блокировку ({e}). Площадка "
+                        "поставлена на паузу на 24ч. Решите капчу "
+                        "вручную в открытом Chrome-профиле и пришлите "
+                        "/resume headhunter — попробуем снова раньше.",
                     )
                     break
                 except Exception as e:
@@ -1494,8 +1499,10 @@ def search_geekjob(parameters: dict, llm_api_key: str):
         mark_blocked(output_folder, "geekjob")
         notify(
             parameters,
-            f"geekjob.ru: похоже на блокировку ({e}). "
-            "Площадка поставлена на паузу на 24ч.",
+            f"geekjob.ru: похоже на блокировку ({e}). Площадка "
+            "поставлена на паузу на 24ч. Решите капчу вручную в "
+            "открытом Chrome-профиле и пришлите /resume geekjob — "
+            "попробуем снова раньше.",
         )
         return
     logger.info(f"Found {len(jobs)} matching geekjob.ru vacancies.")
@@ -1616,8 +1623,10 @@ def search_rabota_ru(parameters: dict, llm_api_key: str):
         mark_blocked(output_folder, "rabota_ru")
         notify(
             parameters,
-            f"rabota.ru: похоже на блокировку ({e}). "
-            "Площадка поставлена на паузу на 24ч.",
+            f"rabota.ru: похоже на блокировку ({e}). Площадка "
+            "поставлена на паузу на 24ч. Решите капчу вручную в "
+            "открытом Chrome-профиле и пришлите /resume rabota_ru — "
+            "попробуем снова раньше.",
         )
         return
     logger.info(f"Found {len(jobs)} matching rabota.ru vacancies.")
@@ -1925,8 +1934,10 @@ def search_getmatch(parameters: dict, llm_api_key: str):
             mark_blocked(output_folder, "getmatch")
             notify(
                 parameters,
-                f"GetMatch: похоже на блокировку ({e}). "
-                "Площадка поставлена на паузу на 24ч.",
+                f"GetMatch: похоже на блокировку ({e}). Площадка "
+                "поставлена на паузу на 24ч. Решите капчу вручную в "
+                "открытом Chrome-профиле и пришлите /resume getmatch — "
+                "попробуем снова раньше.",
             )
             return
         logger.info(f"Found {len(jobs)} matching GetMatch vacancies.")
@@ -2237,8 +2248,10 @@ def search_and_apply_habr_career(parameters: dict, llm_api_key: str):
         mark_blocked(output_folder, "habr_career")
         notify(
             parameters,
-            f"career.habr.com: похоже на блокировку ({e}). "
-            "Площадка поставлена на паузу на 24ч.",
+            f"career.habr.com: похоже на блокировку ({e}). Площадка "
+            "поставлена на паузу на 24ч. Решите капчу вручную в "
+            "открытом Chrome-профиле и пришлите /resume habr_career — "
+            "попробуем снова раньше.",
         )
         return
     logger.info(f"Found {len(jobs)} matching career.habr.com vacancies.")
@@ -2917,6 +2930,20 @@ def check_telegram_commands(parameters: dict, llm_api_key: str) -> None:
                 "schedule_enabled",
                 action == "resume",
             )
+            if action == "resume":
+                # ponytail: /resume — это ещё и "я решил капчу вручную",
+                # не только "включи обратно после /pause". Снимаем
+                # 24ч-кулдаун block_detection и форсируем next_run на
+                # "сейчас", иначе площадка молча ждала бы истечения
+                # cooldown/interval_hours несмотря на schedule_enabled.
+                clear_blocked(output_folder, source)
+                record_run_result(
+                    output_folder,
+                    source,
+                    "ok",
+                    datetime.now(),
+                    datetime.now(),
+                )
             verb = (
                 "возобновлена" if action == "resume" else "поставлена на паузу"
             )

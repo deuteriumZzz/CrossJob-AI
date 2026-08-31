@@ -6,6 +6,7 @@ import pytest
 
 from src.job_sources.block_detection import (
     PlatformBlockedError,
+    clear_blocked,
     is_still_blocked,
     mark_blocked,
     raise_if_blocked,
@@ -59,10 +60,33 @@ def test_mark_blocked_then_is_still_blocked():
         assert is_still_blocked(output_folder, "rabota_ru") is False
 
 
+def test_clear_blocked_lifts_cooldown_early():
+    with tempfile.TemporaryDirectory() as tmp:
+        output_folder = Path(tmp)
+        mark_blocked(output_folder, "geekjob")
+        mark_blocked(output_folder, "rabota_ru")
+        assert is_still_blocked(output_folder, "geekjob") is True
+
+        clear_blocked(output_folder, "geekjob")
+
+        assert is_still_blocked(output_folder, "geekjob") is False
+        # соседний источник не задет
+        assert is_still_blocked(output_folder, "rabota_ru") is True
+
+
+def test_clear_blocked_on_never_blocked_source_is_a_noop():
+    with tempfile.TemporaryDirectory() as tmp:
+        output_folder = Path(tmp)
+        clear_blocked(output_folder, "geekjob")  # не должно падать
+        assert is_still_blocked(output_folder, "geekjob") is False
+
+
 if __name__ == "__main__":
     test_raise_if_blocked_raises_on_429()
     test_raise_if_blocked_raises_on_captcha_keyword()
     test_raise_if_blocked_passes_normal_response()
     test_raise_if_blocked_accepts_plain_string()
     test_mark_blocked_then_is_still_blocked()
+    test_clear_blocked_lifts_cooldown_early()
+    test_clear_blocked_on_never_blocked_source_is_a_noop()
     print("All tests passed.")

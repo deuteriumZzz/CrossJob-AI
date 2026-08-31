@@ -90,6 +90,21 @@ def mark_blocked(output_folder: Path, source: str) -> None:
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
+def clear_blocked(output_folder: Path, source: str) -> None:
+    """Снимает блокировку раньше 24ч-кулдауна — вызывается, когда
+    пользователь вручную решил капчу в персистентном Chrome-профиле и
+    прислал /resume <площадка> в Telegram (см. check_telegram_commands
+    в main.py). Без реальной блокировки (source не в .blocked_until.json)
+    просто ничего не делает."""
+    path = _blocked_until_path(output_folder)
+    with state_file_lock(path):
+        if not path.exists():
+            return
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.pop(source, None) is not None:
+            path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
 def is_still_blocked(output_folder: Path, source: str) -> bool:
     path = _blocked_until_path(output_folder)
     if not path.exists():
