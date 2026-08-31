@@ -46,7 +46,9 @@ def test_wait_until_ready_raises_after_timeout(monkeypatch):
         )
 
 
-def test_wait_until_ready_raises_immediately_if_server_thread_died(monkeypatch):
+def test_wait_until_ready_raises_immediately_if_server_thread_died(
+    monkeypatch,
+):
     """A dead server thread (e.g. app import blew up) must fail fast
     instead of silently burning the full timeout."""
 

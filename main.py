@@ -1417,11 +1417,11 @@ def search_and_apply_superjob(parameters: dict, llm_api_key: str):
             break
 
         fit = score_job_fit(
-                resume_pdf_path,
-                job,
-                llm_api_key,
-                salary_expectations=_job_salary_expectations(parameters),
-            )
+            resume_pdf_path,
+            job,
+            llm_api_key,
+            salary_expectations=_job_salary_expectations(parameters),
+        )
         tier = classify_fit(
             fit.score,
             _job_min_score(parameters),
@@ -1542,11 +1542,11 @@ def search_geekjob(parameters: dict, llm_api_key: str):
             continue
 
         fit = score_job_fit(
-                resume_pdf_path,
-                job,
-                llm_api_key,
-                salary_expectations=_job_salary_expectations(parameters),
-            )
+            resume_pdf_path,
+            job,
+            llm_api_key,
+            salary_expectations=_job_salary_expectations(parameters),
+        )
         tier = classify_fit(
             fit.score,
             _job_min_score(parameters),
@@ -1674,11 +1674,11 @@ def search_rabota_ru(parameters: dict, llm_api_key: str):
             continue
 
         fit = score_job_fit(
-                resume_pdf_path,
-                job,
-                llm_api_key,
-                salary_expectations=_job_salary_expectations(parameters),
-            )
+            resume_pdf_path,
+            job,
+            llm_api_key,
+            salary_expectations=_job_salary_expectations(parameters),
+        )
         tier = classify_fit(
             fit.score,
             _job_min_score(parameters),

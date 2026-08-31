@@ -49,6 +49,16 @@ a = Analysis(
         "uvicorn.protocols.websockets.auto",
         "uvicorn.lifespan",
         "uvicorn.lifespan.on",
+        # src/job_sources/llm_provider.py импортирует эти провайдеры
+        # лениво внутри функций (по выбору пользователя в
+        # work_preferences.yaml) — PyInstaller не видит такие импорты
+        # при статическом анализе и молча не бандлит их, из-за чего
+        # выбранный провайдер падает с ModuleNotFoundError в собранном
+        # .app/.exe.
+        "langchain_openai",
+        "langchain_groq",
+        "langchain_google_genai",
+        "langchain_ollama",
     ],
     hookspath=[],
     hooksconfig={},

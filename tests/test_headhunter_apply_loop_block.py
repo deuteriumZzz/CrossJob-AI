@@ -3,7 +3,10 @@ from pathlib import Path
 
 import main
 from src.job import Job
-from src.job_sources.block_detection import PlatformBlockedError, is_still_blocked
+from src.job_sources.block_detection import (
+    PlatformBlockedError,
+    is_still_blocked,
+)
 
 
 class _FakeFit:
@@ -53,9 +56,11 @@ def test_captcha_during_apply_stops_run_instead_of_hammering_next_jobs(
         ]
 
         monkeypatch.setattr(
-            main, "HeadHunterSession", lambda profile_dir: type(
+            main,
+            "HeadHunterSession",
+            lambda profile_dir: type(
                 "S", (), {"ensure_logged_in": lambda self: None}
-            )()
+            )(),
         )
         monkeypatch.setattr(
             main, "HeadHunterBrowserClient", lambda profile_dir: fake_client

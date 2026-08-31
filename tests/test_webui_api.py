@@ -346,7 +346,9 @@ def test_run_now_starts_selected_sources_and_reports_status(client):
     release = threading.Event()
     calls = []
 
-    def fake_run_selected_sources(sources, parameters, llm_api_key, dry_run=False):
+    def fake_run_selected_sources(
+        sources, parameters, llm_api_key, dry_run=False
+    ):
         calls.append(sources)
         release.wait(timeout=5)
 

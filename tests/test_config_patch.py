@@ -81,7 +81,9 @@ def test_unset_source_field_removes_existing_value():
             encoding="utf-8",
         )
 
-        unset_source_field(config_file, "headhunter", "daily_application_limit")
+        unset_source_field(
+            config_file, "headhunter", "daily_application_limit"
+        )
 
         text = config_file.read_text(encoding="utf-8")
         hh_block = text.split("superjob:")[0]
@@ -97,7 +99,9 @@ def test_unset_source_field_noop_when_field_missing():
         original = "headhunter:\n  auto_apply: false\n"
         config_file.write_text(original, encoding="utf-8")
 
-        unset_source_field(config_file, "headhunter", "daily_application_limit")
+        unset_source_field(
+            config_file, "headhunter", "daily_application_limit"
+        )
 
         assert config_file.read_text(encoding="utf-8") == original
 

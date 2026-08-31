@@ -41,7 +41,9 @@ def _free_port() -> int:
 
 
 def _wait_until_ready(
-    url: str, server_thread: threading.Thread | None = None, timeout: float = 15.0
+    url: str,
+    server_thread: threading.Thread | None = None,
+    timeout: float = 15.0,
 ) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

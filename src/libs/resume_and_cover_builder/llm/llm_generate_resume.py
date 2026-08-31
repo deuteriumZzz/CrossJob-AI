@@ -324,7 +324,10 @@ class LLMResumer:
             return ""
 
         def summary_fn():
-            if self.resume.personal_information or self.resume.experience_details:
+            if (
+                self.resume.personal_information
+                or self.resume.experience_details
+            ):
                 return self.generate_summary_section()
             return ""
 

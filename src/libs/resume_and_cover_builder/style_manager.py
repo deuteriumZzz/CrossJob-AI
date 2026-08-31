@@ -4,10 +4,12 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-# Настраиваем логирование
-logging.basicConfig(
-    level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+# Раньше здесь был logging.basicConfig(level=DEBUG) — он на импорте
+# перенастраивал root-логгер всего процесса на DEBUG, из-за чего
+# httpx начинал логировать полные URL запросов вместе с секретами в
+# пути (например токен Telegram-бота в /bot<TOKEN>/sendMessage) в
+# log/desktop_app.log. Уровень и обработчики root-логгера настраивает
+# src/logging.py — этот модуль не должен их переопределять.
 
 _CSS_RULE_RE = re.compile(r"([^{}]+)\{([^{}]*)\}")
 
@@ -35,9 +37,9 @@ def _is_multi_column(block: str) -> bool:
     grid_match = re.search(r"grid-template-columns\s*:\s*([^;]+);", block)
     if grid_match and len(grid_match.group(1).split()) >= 2:
         return True
-    return bool(
-        re.search(r"display\s*:\s*flex", block)
-    ) and not re.search(r"flex-direction\s*:\s*column", block)
+    return bool(re.search(r"display\s*:\s*flex", block)) and not re.search(
+        r"flex-direction\s*:\s*column", block
+    )
 
 
 def analyze_ats_risks(css_text: str) -> List[str]:
