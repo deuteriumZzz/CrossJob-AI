@@ -36,6 +36,15 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+// Причины пропуска (fit.gaps) — это полные предложения от LLM, а не
+// короткие лейблы, для которых была сделана .readiness-note (110px):
+// без обрезки один длинный gap растягивал строку истории на сотни
+// пикселей в высоту. Полный текст всё равно доступен через title=.
+function truncate(text, maxLength) {
+  const s = String(text || "");
+  return s.length > maxLength ? s.slice(0, maxLength - 1) + "…" : s;
+}
+
 // Тег-инпут поверх textarea со списком "один пункт на строку"
 // (должности/локации/чёрные списки, свои должности/локации
 // площадки) — textarea остаётся источником правды (просто скрыта),
@@ -533,16 +542,18 @@ const render = {
         skeletonSourceGrid();
     }
 
-    const [status, stats] = await Promise.all([
+    const [status, stats, llm, salary] = await Promise.all([
       api("/api/status"),
       api("/api/stats"),
+      api("/api/settings/llm"),
+      api("/api/settings/salary"),
     ]);
 
     // ponytail: без этой проверки весь блок ниже (счётчики со
     // start-anew анимацией, карточки площадок, чекбоксы) пересобирался
     // на каждый опрос раз в 7с даже когда ничего не изменилось — визуально
     // это и есть "мерцание", о котором сообщил пользователь.
-    const snapshot = JSON.stringify({ status, stats });
+    const snapshot = JSON.stringify({ status, stats, llm, salary });
     const unchanged = overviewLoaded && snapshot === lastOverviewSnapshot;
     lastOverviewSnapshot = snapshot;
 
@@ -573,6 +584,8 @@ const render = {
     }
 
     if (!unchanged) {
+      renderOnboardingChecklist(status, llm, salary);
+
       const statsRow = document.getElementById("stats-row");
       statsRow.classList.remove("content-fade-in");
       void statsRow.offsetWidth;
@@ -728,7 +741,14 @@ const render = {
         <td>${escapeHtml(e.company)}</td>
         <td><a href="${escapeHtml(e.link)}" target="_blank" rel="noopener">${escapeHtml(e.title)}</a></td>
         <td>${statusLabel(e.status)}</td>
-        <td>${e.score ?? ""}</td>
+        <td title="${e.gaps && e.gaps.length ? escapeHtml(e.gaps.join("; ")) : ""}">
+          ${e.score ?? ""}
+          ${
+            e.gaps && e.gaps.length
+              ? `<div class="readiness-note">${escapeHtml(truncate(e.gaps[0], 70))}${e.gaps.length > 1 ? ` (+${e.gaps.length - 1})` : ""}</div>`
+              : ""
+          }
+        </td>
       </tr>`
       )
       .join("");
@@ -1955,6 +1975,62 @@ function initOnboardingTour() {
   renderStep();
 }
 
+// Чеклист для нового пользователя — те же данные, что уже есть в
+// дашборде (readiness по площадкам из /api/status, /api/settings/llm,
+// /api/settings/salary), просто собранные в одном месте на "Обзоре", а
+// не разбросанные по вкладке "Настройки" из 8 табов. Прячется целиком,
+// когда все пункты выполнены — не мешает тем, кто уже всё настроил.
+function renderOnboardingChecklist(status, llm, salary) {
+  const el = document.getElementById("onboarding-checklist");
+  const resumeSources = status.sources.filter(
+    (s) => s.readiness && s.readiness.resume
+  );
+  const items = [
+    {
+      label: "Резюме загружено",
+      ok:
+        resumeSources.length === 0 ||
+        resumeSources.some((s) => s.readiness.resume.ready),
+      hint: "Настройки → Резюме и письмо, либо просто положите resume.pdf в data_folder.",
+    },
+    {
+      label: "Ключ LLM-провайдера указан",
+      ok: Boolean((llm.api_key_previews || {})[llm.provider]),
+      hint: "Настройки → Провайдер LLM.",
+    },
+    {
+      label: "Зарплатные ожидания указаны",
+      ok: Boolean(
+        salary.hh_salary_expectations || salary.linkedin_salary_range_usd
+      ),
+      hint: "Настройки → Площадки → колонка «Фильтры» — используется при подборе вакансий и в письмах.",
+    },
+    {
+      label: "Хотя бы одна площадка в расписании",
+      ok: status.sources.some((s) => s.schedule_enabled),
+      hint: "Галочка на карточке площадки ниже.",
+    },
+  ];
+  if (items.every((i) => i.ok)) {
+    el.style.display = "none";
+    return;
+  }
+  el.style.display = "";
+  el.innerHTML = `
+    <h3 style="margin-top:0">Чеклист настройки</h3>
+    <ul class="gaps-list">
+      ${items
+        .map(
+          (i) => `
+        <li>
+          ${i.ok ? "✅" : "⚠️"} ${escapeHtml(i.label)}
+          ${i.ok ? "" : `<div class="readiness-note">${escapeHtml(i.hint)}</div>`}
+        </li>`
+        )
+        .join("")}
+    </ul>`;
+}
+
 function renderHistoryTimeline(reversedEntries) {
   const el = document.getElementById("history-timeline");
   if (!reversedEntries.length) return;
@@ -1965,6 +2041,7 @@ function renderHistoryTimeline(reversedEntries) {
       <div class="timeline-date">${fmtTime(e.applied_at)}</div>
       <div class="timeline-title"><a href="${escapeHtml(e.link)}" target="_blank" rel="noopener">${escapeHtml(e.company)} — ${escapeHtml(e.title)}</a></div>
       <div class="timeline-meta">${sourceLabel(e.source)} · ${statusLabel(e.status)}${e.score != null ? ` · балл ${e.score}` : ""}</div>
+      ${e.gaps && e.gaps.length ? `<div class="readiness-note" title="${escapeHtml(e.gaps.join("; "))}">${escapeHtml(truncate(e.gaps[0], 90))}${e.gaps.length > 1 ? ` (+${e.gaps.length - 1})` : ""}</div>` : ""}
     </div>`
     )
     .join("");
@@ -2272,6 +2349,44 @@ function initDashboard() {
     render.overview();
   });
 
+  // Прогоняет площадки из расписания сейчас же, но с auto_apply/
+  // auto_message, форсированно выключенными на сервере (см. dry_run в
+  // run_selected_sources, main.py) — сам work_preferences.yaml не
+  // трогается, реальный отклик не уходит никуда.
+  document.getElementById("dry-run-button").addEventListener("click", async (ev) => {
+    const status = await api("/api/status");
+    const sources = status.sources
+      .filter((s) => s.schedule_enabled)
+      .map((s) => s.name);
+    if (!sources.length) {
+      showToast(
+        "Нет площадок в расписании — включите хотя бы одну галочкой на карточке ниже",
+        "info"
+      );
+      return;
+    }
+    try {
+      await withButtonLoading(ev.currentTarget, async () => {
+        await api("/api/run-now", {
+          method: "POST",
+          body: JSON.stringify({ sources, dry_run: true }),
+        });
+        for (;;) {
+          const runStatus = await api("/api/run-now/status");
+          if (!runStatus.running) break;
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+      });
+      showToast(
+        "Тестовый прогон завершён — результат в Истории (статус «Тестовый прогон»)",
+        "success"
+      );
+      render.overview();
+    } catch (e) {
+      showToast(`Не удалось запустить тестовый прогон: ${e.message}`, "error");
+    }
+  });
+
   document
     .getElementById("history-apply-filters")
     .addEventListener("click", () => render.history());
@@ -2534,6 +2649,25 @@ function initDashboard() {
   document
     .getElementById("limits-preset-aggressive")
     .addEventListener("click", () => applyRiskPreset(25, 12, 8, 2));
+
+  // Строгость подбора — просто подставляет значения в те же два
+  // числовых поля (min-score/suitability-score), которые и так уже
+  // выше в этой панели, ничего сама не сохраняет — жмут "Сохранить"
+  // как и при ручном вводе чисел. Не переиспользует applyRiskPreset:
+  // тот шлёт запрос и трогает лимиты откликов, а не балл фита.
+  const FIT_PRESETS = {
+    soft: [2, 5],
+    standard: [4, 7],
+    strict: [6, 8],
+  };
+  document
+    .getElementById("limit-fit-preset")
+    .addEventListener("change", (e) => {
+      const preset = FIT_PRESETS[e.target.value];
+      if (!preset) return;
+      document.getElementById("limit-min-score").value = preset[0];
+      document.getElementById("limit-suitability-score").value = preset[1];
+    });
 
   document.querySelectorAll("#provider-grid .provider-card").forEach((card) => {
     card.addEventListener("click", () => {

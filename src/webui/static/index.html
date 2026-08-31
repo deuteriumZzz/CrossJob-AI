@@ -114,9 +114,14 @@
           <p class="muted">Статус площадок и статистика откликов</p>
         </div>
         <div class="toolbar">
+          <button id="dry-run-button" class="btn btn-secondary" title="Прогоняет площадки из расписания прямо сейчас, но ничего реально не отправляет — как будто у всех выключен «Автоотклик»/«Автосообщения», результат смотрите в Истории со статусом «Тестовый прогон»">
+            <svg viewBox="0 0 20 20" fill="none"><path d="M10 3.5a6.5 6.5 0 1 0 6.5 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M10 3.5 7.8 5.7M10 3.5l2.2 2.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span class="btn-label">Тестовый прогон</span>
+          </button>
           <span class="muted small">Галочка на карточке площадки = она в расписании демона (кнопка «Запустить» слева)</span>
         </div>
       </div>
+      <div id="onboarding-checklist" class="panel" style="display:none"></div>
       <div id="stats-row" class="stats-row"></div>
       <div id="source-grid" class="source-grid"></div>
 
@@ -546,6 +551,15 @@
           <label class="limit-field">
             <span>Порог уверенного фита (0-10) — между этим и порогом отсева отклик уходит, но помечается как слабый</span>
             <input id="limit-suitability-score" type="number" min="0" max="10" step="0.5" />
+          </label>
+          <label class="limit-field">
+            <span>Строгость подбора — не понимаете, что значат баллы выше? Выберите вариант, числа проставятся сами</span>
+            <select id="limit-fit-preset">
+              <option value="">— выбрать —</option>
+              <option value="soft">🙂 Мягко — брать почти всё, даже слабое совпадение</option>
+              <option value="standard">⚖️ Сбалансированно — пропускать только явно не подходящее</option>
+              <option value="strict">🎯 Строго — только сильное совпадение по опыту/навыкам/зарплате</option>
+            </select>
           </label>
           <label class="limit-field">
             <span>Уведомить, если расходы на LLM за день превысят ($)</span>

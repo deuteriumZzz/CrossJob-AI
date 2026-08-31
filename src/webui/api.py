@@ -153,6 +153,7 @@ class AppContext:
         self.daemon_started_at: Optional[str] = None
         self.run_now_thread: Optional[threading.Thread] = None
         self.run_now_sources: list[str] = []
+        self.run_now_dry_run: bool = False
         self.generate_thread: Optional[threading.Thread] = None
         self.generate_result: dict = {}
         self.telegram_connect_thread: Optional[threading.Thread] = None
@@ -1565,6 +1566,11 @@ def stop_daemon(ctx: AppContext = Depends(get_ctx)) -> dict:
 
 class RunNowRequest(BaseModel):
     sources: list[str]
+    # Дашборд — кнопка "Тестовый прогон": форсирует dry-run для всех
+    # выбранных площадок независимо от их auto_apply/auto_message в
+    # work_preferences.yaml, ничего в самом файле не меняя (см.
+    # run_selected_sources в main.py).
+    dry_run: bool = False
 
 
 @app.post("/api/run-now")
@@ -1585,14 +1591,17 @@ def post_run_now(
 
     def _run() -> None:
         try:
-            run_selected_sources(body.sources, ctx.config, ctx.llm_api_key)
+            run_selected_sources(
+                body.sources, ctx.config, ctx.llm_api_key, dry_run=body.dry_run
+            )
         finally:
             ctx.run_now_sources = []
 
     ctx.run_now_sources = body.sources
+    ctx.run_now_dry_run = body.dry_run
     ctx.run_now_thread = threading.Thread(target=_run, daemon=True)
     ctx.run_now_thread.start()
-    return {"started": True, "sources": body.sources}
+    return {"started": True, "sources": body.sources, "dry_run": body.dry_run}
 
 
 @app.get("/api/run-now/status")
@@ -1601,6 +1610,7 @@ def get_run_now_status(ctx: AppContext = Depends(get_ctx)) -> dict:
     return {
         "running": running,
         "sources": ctx.run_now_sources if running else [],
+        "dry_run": ctx.run_now_dry_run if running else False,
     }
 
 

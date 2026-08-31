@@ -346,7 +346,7 @@ def test_run_now_starts_selected_sources_and_reports_status(client):
     release = threading.Event()
     calls = []
 
-    def fake_run_selected_sources(sources, parameters, llm_api_key):
+    def fake_run_selected_sources(sources, parameters, llm_api_key, dry_run=False):
         calls.append(sources)
         release.wait(timeout=5)
 
@@ -361,11 +361,13 @@ def test_run_now_starts_selected_sources_and_reports_status(client):
         assert response.json() == {
             "started": True,
             "sources": ["headhunter", "superjob"],
+            "dry_run": False,
         }
 
         status = client.get("/api/run-now/status").json()
         assert status["running"] is True
         assert set(status["sources"]) == {"headhunter", "superjob"}
+        assert status["dry_run"] is False
 
         # Второй запуск, пока первый ещё идёт — конфликт.
         conflict = client.post("/api/run-now", json={"sources": ["geekjob"]})

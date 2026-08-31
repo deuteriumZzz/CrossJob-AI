@@ -1046,6 +1046,16 @@ def _total_daily_limit_reached(
     return False
 
 
+def _job_salary_expectations(parameters: dict) -> str:
+    """Зарплатные ожидания для score_job_fit — то же top-level поле
+    salary_expectations из work_preferences.yaml, что уже используется
+    в reply_answerer.py для авто-ответов на RU-площадках (HH и т.п.).
+    LinkedIn использует отдельное поле в job_application_profile.yaml
+    (доллары/год, см. search_and_apply_linkedin) — туда этот хелпер не
+    подходит, там значение читается из уже загруженного profile."""
+    return str(parameters.get("salary_expectations") or "")
+
+
 def _job_max_applications(
     parameters: dict, source: Optional[str] = None
 ) -> int:
@@ -1214,7 +1224,12 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
                 )
                 break
 
-            fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+            fit = score_job_fit(
+                resume_pdf_path,
+                job,
+                llm_api_key,
+                salary_expectations=_job_salary_expectations(parameters),
+            )
             tier = classify_fit(
                 fit.score,
                 _job_min_score(parameters),
@@ -1401,7 +1416,12 @@ def search_and_apply_superjob(parameters: dict, llm_api_key: str):
             )
             break
 
-        fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+        fit = score_job_fit(
+                resume_pdf_path,
+                job,
+                llm_api_key,
+                salary_expectations=_job_salary_expectations(parameters),
+            )
         tier = classify_fit(
             fit.score,
             _job_min_score(parameters),
@@ -1521,7 +1541,12 @@ def search_geekjob(parameters: dict, llm_api_key: str):
         if applied_log.already_applied(job):
             continue
 
-        fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+        fit = score_job_fit(
+                resume_pdf_path,
+                job,
+                llm_api_key,
+                salary_expectations=_job_salary_expectations(parameters),
+            )
         tier = classify_fit(
             fit.score,
             _job_min_score(parameters),
@@ -1648,7 +1673,12 @@ def search_rabota_ru(parameters: dict, llm_api_key: str):
         if applied_log.already_applied(job):
             continue
 
-        fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+        fit = score_job_fit(
+                resume_pdf_path,
+                job,
+                llm_api_key,
+                salary_expectations=_job_salary_expectations(parameters),
+            )
         tier = classify_fit(
             fit.score,
             _job_min_score(parameters),
@@ -1801,7 +1831,12 @@ def search_telegram(parameters: dict, llm_api_key: str):
             if applied_log.already_applied(job):
                 continue
 
-            fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+            fit = score_job_fit(
+                resume_pdf_path,
+                job,
+                llm_api_key,
+                salary_expectations=_job_salary_expectations(parameters),
+            )
             tier = classify_fit(
                 fit.score,
                 _job_min_score(parameters),
@@ -1956,7 +1991,12 @@ def search_getmatch(parameters: dict, llm_api_key: str):
             if applied_log.already_applied(job):
                 continue
 
-            fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+            fit = score_job_fit(
+                resume_pdf_path,
+                job,
+                llm_api_key,
+                salary_expectations=_job_salary_expectations(parameters),
+            )
             tier = classify_fit(
                 fit.score,
                 _job_min_score(parameters),
@@ -2124,7 +2164,14 @@ def search_and_apply_linkedin(parameters: dict, llm_api_key: str):
                 )
                 break
 
-            fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+            fit = score_job_fit(
+                resume_pdf_path,
+                job,
+                llm_api_key,
+                salary_expectations=(
+                    profile.salary_expectations.salary_range_usd or ""
+                ),
+            )
             tier = classify_fit(
                 fit.score,
                 _job_min_score(parameters),
@@ -2290,7 +2337,12 @@ def search_and_apply_habr_career(parameters: dict, llm_api_key: str):
                 )
                 break
 
-            fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+            fit = score_job_fit(
+                resume_pdf_path,
+                job,
+                llm_api_key,
+                salary_expectations=_job_salary_expectations(parameters),
+            )
             tier = classify_fit(
                 fit.score,
                 _job_min_score(parameters),
@@ -2367,16 +2419,35 @@ ALL_SOURCES = [
 
 
 def run_selected_sources(
-    names: list[str], parameters: dict, llm_api_key: str
+    names: list[str],
+    parameters: dict,
+    llm_api_key: str,
+    dry_run: bool = False,
 ) -> None:
     """Прогоняет выбранные источники подряд, изолированно друг от
     друга (падение одного не останавливает остальные), с небольшой
     паузой между источниками — чтобы переключение между
-    площадками подряд не выглядело скриптованным."""
+    площадками подряд не выглядело скриптованным. dry_run=True
+    (дашборд — кнопка "Тестовый прогон") временно гасит auto_apply
+    каждого выбранного источника в переданном parameters, не трогая
+    сам файл work_preferences.yaml — каждый search_and_apply_* и так
+    уже умеет работать без реальной отправки (см. "status = dry_run"
+    в каждом из них), просто раньше это можно было включить только
+    вручную сняв галочку "Автоотклик" в настройках самой площадки."""
     source_map = dict(ALL_SOURCES)
     selected = [
         (name, source_map[name]) for name in names if name in source_map
     ]
+    if dry_run:
+        parameters = dict(parameters)
+        for name, _ in selected:
+            override = {**(parameters.get(name) or {}), "auto_apply": False}
+            if name == "telegram":
+                # telegram не читает auto_apply вообще — реальную
+                # отправку сообщений контактам гасит auto_message (см.
+                # search_telegram), это его аналог auto_apply.
+                override["auto_message"] = False
+            parameters[name] = override
     output_folder = parameters.get("outputFileDirectory")
     before = (
         AppliedLog(output_folder / "applied_log.json").count_in_period("day")

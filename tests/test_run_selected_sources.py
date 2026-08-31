@@ -89,6 +89,37 @@ def test_scheduler_sources_includes_check_sj_replies():
     assert calls == [("sj", {"x": 1})]
 
 
+def test_run_selected_sources_dry_run_forces_auto_apply_off():
+    """Дашборд — кнопка "Тестовый прогон": dry_run=True должен гасить
+    auto_apply (и auto_message у telegram) для выбранных площадок в
+    parameters, который видит source_fn, но не трогать оригинальный
+    словарь (никаких следов в work_preferences.yaml)."""
+    seen = {}
+
+    def fake_hh(parameters, llm_api_key):
+        seen["headhunter"] = parameters["headhunter"]["auto_apply"]
+
+    def fake_tg(parameters, llm_api_key):
+        seen["telegram"] = parameters["telegram"]["auto_message"]
+
+    original = {
+        "headhunter": {"auto_apply": True},
+        "telegram": {"auto_message": True},
+    }
+    with patch.object(
+        main, "ALL_SOURCES", [("headhunter", fake_hh), ("telegram", fake_tg)]
+    ), patch.object(main, "wait_between_sources"):
+        main.run_selected_sources(
+            ["headhunter", "telegram"], original, "key", dry_run=True
+        )
+
+    assert seen == {"headhunter": False, "telegram": False}
+    # Оригинальный dict не мутирован — work_preferences.yaml ни при
+    # чём, следующий обычный прогон снова увидит настоящие значения.
+    assert original["headhunter"]["auto_apply"] is True
+    assert original["telegram"]["auto_message"] is True
+
+
 def test_run_selected_sources_ignores_unknown_names():
     calls = []
 
@@ -149,6 +180,7 @@ if __name__ == "__main__":
     test_run_selected_sources_runs_only_named_sources_in_order()
     test_run_selected_sources_continues_after_one_source_fails()
     test_run_selected_sources_notifies_on_failure()
+    test_run_selected_sources_dry_run_forces_auto_apply_off()
     test_run_selected_sources_ignores_unknown_names()
     test_run_selected_sources_records_scheduler_state_on_success()
     test_run_selected_sources_records_scheduler_state_on_failure()
