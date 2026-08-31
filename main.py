@@ -1258,6 +1258,22 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
                     applied, cover_letter = client.apply(
                         job.link, _cover_letter_fn, _ai_answer_fn
                     )
+                except PlatformBlockedError as e:
+                    # ponytail: раньше это ловилось общим except ниже и
+                    # просто continue'ило на следующую вакансию — бот
+                    # долбил driver.get() по всем оставшимся вакансиям в
+                    # уже заблокированной сессии вместо остановки (см.
+                    # инцидент — капча на HH, бот продолжал обновлять
+                    # сайт). Как и в блоке search() выше — сразу
+                    # mark_blocked и стоп для этого прогона.
+                    logger.error(f"hh.ru appears to have blocked us: {e}")
+                    mark_blocked(output_folder, "headhunter")
+                    notify(
+                        parameters,
+                        f"hh.ru: похоже на блокировку ({e}). "
+                        "Площадка поставлена на паузу на 24ч.",
+                    )
+                    break
                 except Exception as e:
                     logger.exception(
                         "Failed to apply/generate cover letter for "
