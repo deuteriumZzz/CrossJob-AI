@@ -3,7 +3,7 @@ import shutil
 import time
 import urllib
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -63,6 +63,33 @@ def clear_profile_cache(profile_dir: Path) -> None:
         shutil.rmtree(profile_dir / rel, ignore_errors=True)
 
 
+def is_driver_dead(driver) -> bool:
+    """Общая проверка живости для клиентов, кеширующих один driver на
+    весь прогон площадки (десятки driver.get() подряд по страницам/
+    карточкам) — Chrome может умереть посреди прогона ("invalid
+    session id: session deleted as the browser has closed the
+    connection"). Раньше проверка была только в
+    HeadHunterBrowserClient; GetMatch/HabrCareer/Geekjob кешируют
+    driver тем же способом и были подвержены той же дыре — без неё
+    вызывающий код продолжает отдавать мёртвую сессию до конца
+    прогона. Не пересоздаёт сам — только гасит мёртвый driver;
+    вызывающий код зовёт свой уже импортированный init_browser тем же
+    profile_dir."""
+    try:
+        _ = driver.current_url
+        return False
+    except Exception:
+        logger.warning(
+            "Chrome-сессия умерла посреди прогона — пересоздаю "
+            "браузер тем же профилем."
+        )
+        try:
+            driver.quit()
+        except Exception:
+            pass
+        return True
+
+
 def chrome_browser_options(profile_dir: Optional[Path] = None):
     """`--incognito` раньше стоял всегда — но постоянно новый, пустой
     отпечаток браузера на каждый запуск выглядит подозрительнее для
@@ -103,6 +130,17 @@ def chrome_browser_options(profile_dir: Optional[Path] = None):
     options.add_argument(
         "--disable-web-security"
     )  # Отключает веб-безопасность
+    # ponytail: без этого navigator.webdriver в JS остаётся true — первое,
+    # что проверяет почти любой антибот-скрипт (вероятно, и SmartCaptcha на
+    # hh.ru) — и Chrome сам показывает баннер "управляется автоматизированным
+    # ПО тестирования". На поведение Selenium (клики/заполнение форм/
+    # навигация — это отдельный, более низкоуровневый протокол) не влияет,
+    # только на то, что браузер сообщает о себе странице. undetected_
+    # chromedriver (LinkedIn) уже патчит это сам — здесь для остальных 4
+    # источников на обычном Selenium этого не было вовсе.
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
     if profile_dir is not None:
         profile_dir.mkdir(parents=True, exist_ok=True)
         options.add_argument(f"--user-data-dir={profile_dir}")
@@ -130,34 +168,77 @@ SCRIPT_TIMEOUT_SECONDS = 30
 _BROWSER_INIT_RETRY_DELAY_SECONDS = 5
 
 
+def _log_chrome_crash_diagnostics(exc: Exception) -> None:
+    """"chrome not reachable" сам по себе не говорит, почему Chrome
+    упал при старте (SIGTRAP/EXC_BREAKPOINT из-за постоянного профиля,
+    OOM, что-то ещё) — macOS всё равно пишет отчёт о падении в
+    DiagnosticReports, просто лог селениума его не показывает.
+    Подсвечиваем самый свежий такой отчёт, если он появился в
+    последнюю минуту, чтобы в логе была причина, а не только сам факт
+    "chrome not reachable"."""
+    if "chrome not reachable" not in str(exc).lower():
+        return
+    reports_dir = Path.home() / "Library/Logs/DiagnosticReports"
+    try:
+        latest = max(
+            reports_dir.glob("Google Chrome*.ips"),
+            key=lambda p: p.stat().st_mtime,
+            default=None,
+        )
+    except OSError:
+        return
+    if latest is not None and time.time() - latest.stat().st_mtime < 60:
+        logger.warning(f"Похоже, Chrome упал при старте — см. отчёт macOS: {latest}")
+
+
+def launch_chrome_with_retry(
+    build_driver: Callable[[], webdriver.Chrome],
+    profile_dir: Optional[Path],
+    attempts: int = 2,
+) -> webdriver.Chrome:
+    """Общий retry для запуска Chrome — используется и обычным Selenium
+    (init_browser), и undetected-chromedriver (linkedin/browser.py).
+    Раньше оба места копировали один и тот же цикл по отдельности и
+    успели разойтись в деталях незамеченно (chrome_utils форсировал
+    чистку зависшего SingletonLock на повторной попытке, LinkedIn —
+    нет), вынесено сюда, чтобы такого дрейфа больше не было."""
+    last_exc: Optional[Exception] = None
+    for attempt in range(1, attempts + 1):
+        if profile_dir is not None:
+            clear_stale_chrome_lock(profile_dir, force=attempt > 1)
+        try:
+            return build_driver()
+        except Exception as e:
+            last_exc = e
+            _log_chrome_crash_diagnostics(e)
+            if attempt < attempts:
+                logger.warning(
+                    f"Chrome failed to start (attempt {attempt}/{attempts}), "
+                    f"retrying in {_BROWSER_INIT_RETRY_DELAY_SECONDS}s: {e}"
+                )
+                time.sleep(_BROWSER_INIT_RETRY_DELAY_SECONDS)
+    logger.error(f"Failed to initialize browser: {last_exc}")
+    raise RuntimeError(f"Failed to initialize browser: {last_exc}") from last_exc
+
+
 def init_browser(profile_dir: Optional[Path] = None) -> webdriver.Chrome:
     if profile_dir is not None:
         clear_profile_cache(profile_dir)
-    for attempt in (1, 2):
-        try:
-            if profile_dir is not None:
-                clear_stale_chrome_lock(profile_dir, force=attempt > 1)
-            options = chrome_browser_options(profile_dir)
-            # webdriver_manager сам скачивает и обновляет подходящий
-            # ChromeDriver, не требуя ручного управления версиями
-            driver = webdriver.Chrome(
-                service=ChromeService(ChromeDriverManager().install()),
-                options=options,
-            )
-            driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT_SECONDS)
-            driver.set_script_timeout(SCRIPT_TIMEOUT_SECONDS)
-            logger.debug("Chrome browser initialized successfully.")
-            return driver
-        except Exception as e:
-            if attempt == 1:
-                logger.warning(
-                    f"Chrome failed to start (attempt 1/2), retrying "
-                    f"in {_BROWSER_INIT_RETRY_DELAY_SECONDS}s: {e}"
-                )
-                time.sleep(_BROWSER_INIT_RETRY_DELAY_SECONDS)
-                continue
-            logger.error(f"Failed to initialize browser: {str(e)}")
-            raise RuntimeError(f"Failed to initialize browser: {str(e)}")
+
+    def _build() -> webdriver.Chrome:
+        options = chrome_browser_options(profile_dir)
+        # webdriver_manager сам скачивает и обновляет подходящий
+        # ChromeDriver, не требуя ручного управления версиями
+        driver = webdriver.Chrome(
+            service=ChromeService(ChromeDriverManager().install()),
+            options=options,
+        )
+        driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT_SECONDS)
+        driver.set_script_timeout(SCRIPT_TIMEOUT_SECONDS)
+        logger.debug("Chrome browser initialized successfully.")
+        return driver
+
+    return launch_chrome_with_retry(_build, profile_dir)
 
 
 def HTML_to_PDF(html_content, driver):
