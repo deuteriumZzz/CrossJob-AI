@@ -820,6 +820,48 @@ p.muted {
   margin-bottom: 12px;
 }
 
+/* Резюме под вакансию/письмо (генерирует документ) и Аудит (даёт
+   текстовую обратную связь) — разные по сути действия, которые раньше
+   были неотличимы в одном ряду кнопок. is-review красит левую грань в
+   --warn вместо --accent — тот же приём, что dot.error/.ok, только на
+   уровне карточки: обычные карточки "делают файл", жёлтая "проверяет". */
+.resume-action-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.resume-action-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--accent-dim);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.resume-action-card h4 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+.resume-action-card p {
+  margin: 0;
+  flex: 1;
+}
+
+.resume-action-card button {
+  align-self: flex-start;
+}
+
+.resume-action-card.is-review {
+  border-left-color: var(--warn);
+}
+
 .analytics-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -10,7 +10,7 @@
   href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&display=swap"
   rel="stylesheet"
 />
-<link rel="stylesheet" href="/style.css?v=13" />
+<link rel="stylesheet" href="/style.css?v=14" />
 </head>
 <body>
 <div id="setup-screen" class="setup-screen" style="display:none">
@@ -73,6 +73,10 @@
         <svg viewBox="0 0 20 20" fill="none"><path d="m2.5 10.3 14.6-6c.7-.3 1.4.3 1.1 1l-2.5 12.4c-.2.9-1.2 1.2-1.9.6l-3.4-2.7-2 1.9c-.3.3-.7.2-.8-.2l-.6-3.3 8.1-7.6c.3-.3-.1-.5-.4-.3L6 11.4l-3.3-1c-.7-.2-.7-1 -.2-1.1Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
         <span>Telegram</span>
         <span id="telegram-unread-badge" class="tab-badge" style="display:none"></span>
+      </button>
+      <button data-tab="resume" title="Резюме">
+        <svg viewBox="0 0 20 20" fill="none"><path d="M5.5 2.5h6l4 4v10.5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M7 9.2h6M7 12.2h6M7 15.2h3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>Резюме</span>
       </button>
       <button data-tab="analytics" title="Аналитика">
         <svg viewBox="0 0 20 20" fill="none"><path d="M3.5 16.5v-5M9 16.5V5.5M14.5 16.5v-8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -325,6 +329,64 @@
       </div>
     </section>
 
+    <section id="view-resume" class="view">
+      <div class="view-header">
+        <div>
+          <h2>Резюме и сопроводительное письмо</h2>
+          <p class="muted">Документы под вакансию и разбор, что в резюме стоит улучшить</p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Резюме без вакансии</h3>
+        <p class="muted small">Общий вариант, не подогнанный ни под одно объявление — на случай, если резюме нужно просто в PDF.</p>
+        <div class="filters">
+          <select id="gen-style"></select>
+          <button id="gen-resume" class="btn btn-secondary">📄 Сгенерировать</button>
+        </div>
+        <p id="gen-style-ats-note" class="muted small"></p>
+      </div>
+
+      <div class="panel">
+        <h3>Под конкретную вакансию</h3>
+        <p class="muted small">Рендерится через Selenium (то же, что в консольном меню) — может занять до минуты.</p>
+        <div class="filters">
+          <input id="gen-job-url" type="text" placeholder="Ссылка на вакансию" aria-label="Ссылка на вакансию" style="flex:1;min-width:260px" />
+        </div>
+
+        <div class="resume-action-grid">
+          <div class="resume-action-card">
+            <h4>📄 Резюме под вакансию</h4>
+            <p class="muted small">Переставляет акценты и формулировки резюме под требования этой вакансии.</p>
+            <button id="gen-resume-tailored" class="btn btn-secondary">Сгенерировать PDF</button>
+          </div>
+          <div class="resume-action-card">
+            <h4>📄 Сопроводительное письмо</h4>
+            <p class="muted small">Короткое письмо для поля отклика — под требования этой вакансии.</p>
+            <button id="gen-cover-letter" class="btn btn-secondary">Сгенерировать PDF</button>
+          </div>
+          <div class="resume-action-card is-review">
+            <h4>🔍 Аудит резюме</h4>
+            <p class="muted small">Оценка соответствия 0–100, отсутствующие ATS-ключевики, тревожные сигналы для рекрутера и переписанный раздел опыта — 3 шага LLM, только на реальных данных резюме.</p>
+            <button id="gen-resume-audit" class="btn btn-secondary">Проверить</button>
+          </div>
+        </div>
+
+        <div class="filters" style="margin-top:14px">
+          <span id="gen-status" class="muted small"></span>
+          <a id="gen-download" class="btn btn-accent" style="display:none" href="/api/generate/download" download>Скачать PDF</a>
+        </div>
+        <div class="gen-progress" id="gen-progress"><div class="gen-progress-bar"></div></div>
+      </div>
+
+      <div class="panel">
+        <div class="filters">
+          <button id="refresh-plain-text" class="btn btn-ghost">Обновить из PDF (если заменили resume.pdf)</button>
+          <span id="refresh-plain-text-status" class="muted small"></span>
+        </div>
+      </div>
+    </section>
+
     <section id="view-analytics" class="view">
       <div class="view-header">
         <div>
@@ -365,7 +427,6 @@
         <button type="button" data-settings-tab="settings-limits">Лимиты откликов</button>
         <button type="button" data-settings-tab="settings-notifications" title="Не путать с вкладкой «Telegram» слева — там поиск по каналам">Уведомления (Telegram-бот)</button>
         <button type="button" data-settings-tab="settings-autostart">Автозапуск</button>
-        <button type="button" data-settings-tab="settings-resume">Резюме и письмо</button>
         <button type="button" data-settings-tab="settings-usage">Расходы на LLM</button>
         <button type="button" data-settings-tab="settings-table">Площадки</button>
         <button type="button" data-settings-tab="settings-hh-resume">Резюме на hh.ru</button>
@@ -636,30 +697,6 @@
         <p class="muted small" id="autostart-status"></p>
       </div>
 
-      <div class="panel settings-pane" id="settings-resume">
-        <h3>Резюме и сопроводительное письмо</h3>
-        <p class="muted small">Рендерится через Selenium (то же, что в консольном меню) — может занять до минуты.</p>
-        <div class="filters">
-          <select id="gen-style"></select>
-          <input id="gen-job-url" type="text" placeholder="Ссылка на вакансию (для резюме/письма под вакансию)" aria-label="Ссылка на вакансию" />
-        </div>
-        <p id="gen-style-ats-note" class="muted small"></p>
-        <div class="filters">
-          <button id="gen-resume" class="btn btn-secondary">Резюме (общее)</button>
-          <button id="gen-resume-tailored" class="btn btn-secondary">Резюме под вакансию</button>
-          <button id="gen-cover-letter" class="btn btn-secondary">Сопроводительное письмо</button>
-          <button id="gen-resume-audit" class="btn btn-secondary">🔍 Аудит резюме под вакансию</button>
-        </div>
-        <div class="filters">
-          <span id="gen-status" class="muted small"></span>
-          <a id="gen-download" class="btn btn-accent" style="display:none" href="/api/generate/download" download>Скачать PDF</a>
-        </div>
-        <div class="gen-progress" id="gen-progress"><div class="gen-progress-bar"></div></div>
-        <div class="filters">
-          <button id="refresh-plain-text" class="btn btn-ghost">Обновить из PDF (если заменили resume.pdf)</button>
-          <span id="refresh-plain-text-status" class="muted small"></span>
-        </div>
-      </div>
       <div class="panel settings-pane" id="settings-usage">
         <h3>Расходы на LLM</h3>
         <div id="llm-exhausted-banner" class="risk-banner" style="display:none">
@@ -745,7 +782,7 @@
     <h3 style="margin:0 0 4px">Горячие клавиши</h3>
     <div class="shortcuts-list">
       <div class="shortcuts-row"><span>Командная палитра</span><kbd>Ctrl/⌘</kbd> + <kbd>K</kbd></div>
-      <div class="shortcuts-row"><span>Переключить раздел</span><kbd>1</kbd>–<kbd>7</kbd></div>
+      <div class="shortcuts-row"><span>Переключить раздел</span><kbd>1</kbd>–<kbd>8</kbd></div>
       <div class="shortcuts-row"><span>Свернуть/развернуть меню</span><kbd>Ctrl/⌘</kbd> + <kbd>B</kbd></div>
       <div class="shortcuts-row"><span>Эта подсказка</span><kbd>?</kbd></div>
       <div class="shortcuts-row"><span>Закрыть окно</span><kbd>Esc</kbd></div>
@@ -780,6 +817,6 @@
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=16"></script>
+<script src="/app.js?v=17"></script>
 </body>
 </html>

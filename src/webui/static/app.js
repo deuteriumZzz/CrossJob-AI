@@ -1633,7 +1633,7 @@ function repositionTabIndicators() {
 // Вкладки без понятия "сохранить" (генерация резюме через Selenium,
 // ручные best-effort клики на hh.ru) — не размечаем как "не сохранено",
 // там нет настройки, которая могла бы потеряться.
-const SETTINGS_PANES_WITHOUT_SAVE = new Set(["settings-resume", "settings-hh-resume"]);
+const SETTINGS_PANES_WITHOUT_SAVE = new Set(["settings-hh-resume"]);
 
 function markSettingsDirty(pane) {
   if (!pane || SETTINGS_PANES_WITHOUT_SAVE.has(pane.id)) return;
@@ -2013,7 +2013,7 @@ function initKeyboardShortcuts() {
       else closeShortcutsOverlay();
       return;
     }
-    if (/^[1-7]$/.test(e.key)) {
+    if (/^[1-8]$/.test(e.key)) {
       const buttons = document.querySelectorAll("nav.tabs button[data-tab]");
       const idx = parseInt(e.key, 10) - 1;
       if (buttons[idx]) switchTab(buttons[idx].dataset.tab);
