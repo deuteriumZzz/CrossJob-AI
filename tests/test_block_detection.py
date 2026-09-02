@@ -57,21 +57,21 @@ def test_mark_blocked_then_is_still_blocked():
         mark_blocked(output_folder, "geekjob")
 
         assert is_still_blocked(output_folder, "geekjob") is True
-        assert is_still_blocked(output_folder, "rabota_ru") is False
+        assert is_still_blocked(output_folder, "habr_career") is False
 
 
 def test_clear_blocked_lifts_cooldown_early():
     with tempfile.TemporaryDirectory() as tmp:
         output_folder = Path(tmp)
         mark_blocked(output_folder, "geekjob")
-        mark_blocked(output_folder, "rabota_ru")
+        mark_blocked(output_folder, "habr_career")
         assert is_still_blocked(output_folder, "geekjob") is True
 
         clear_blocked(output_folder, "geekjob")
 
         assert is_still_blocked(output_folder, "geekjob") is False
         # соседний источник не задет
-        assert is_still_blocked(output_folder, "rabota_ru") is True
+        assert is_still_blocked(output_folder, "habr_career") is True
 
 
 def test_clear_blocked_on_never_blocked_source_is_a_noop():

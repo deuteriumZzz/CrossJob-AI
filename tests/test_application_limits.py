@@ -48,7 +48,7 @@ def test_job_max_applications_per_source_override_wins_over_global():
     }
     assert main._job_max_applications(parameters, "headhunter") == 15
     # другая площадка без своего override — берёт общий дефолт
-    assert main._job_max_applications(parameters, "superjob") == 5
+    assert main._job_max_applications(parameters, "geekjob") == 5
 
 
 def test_job_max_applications_per_source_falls_back_without_override():
@@ -80,7 +80,7 @@ def test_daily_limit_per_source_override_wins_over_global():
         "headhunter": {"daily_application_limit": 40},
     }
     assert main._daily_limit(parameters, "headhunter") == 40
-    assert main._daily_limit(parameters, "superjob") == 15
+    assert main._daily_limit(parameters, "geekjob") == 15
 
 
 def test_daily_limit_per_source_falls_back_to_config_default():

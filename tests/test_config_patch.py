@@ -21,7 +21,7 @@ def test_set_source_field_updates_existing_value():
             "  auto_apply: false\n"
             '  resume_id: "abc"\n'
             "\n"
-            "superjob:\n"
+            "getmatch:\n"
             "  auto_apply: false\n",
             encoding="utf-8",
         )
@@ -34,7 +34,7 @@ def test_set_source_field_updates_existing_value():
         assert lines[hh_index + 1] == "  auto_apply: true"
         # соседний блок и остальные поля не тронуты
         assert '  resume_id: "abc"' in text
-        assert "superjob:\n  auto_apply: false" in text
+        assert "getmatch:\n  auto_apply: false" in text
 
 
 def test_set_source_field_adds_field_to_existing_block():
@@ -44,7 +44,7 @@ def test_set_source_field_adds_field_to_existing_block():
             "headhunter:\n"
             "  auto_apply: false\n"
             "\n"
-            "superjob:\n"
+            "getmatch:\n"
             "  auto_apply: false\n",
             encoding="utf-8",
         )
@@ -52,7 +52,7 @@ def test_set_source_field_adds_field_to_existing_block():
         set_source_field(config_file, "headhunter", "interval_hours", 3)
 
         text = config_file.read_text(encoding="utf-8")
-        hh_block = text.split("superjob:")[0]
+        hh_block = text.split("getmatch:")[0]
         assert "interval_hours: 3" in hh_block
 
 
@@ -76,7 +76,7 @@ def test_unset_source_field_removes_existing_value():
             "  auto_apply: false\n"
             "  daily_application_limit: 40\n"
             "\n"
-            "superjob:\n"
+            "getmatch:\n"
             "  daily_application_limit: 12\n",
             encoding="utf-8",
         )
@@ -86,11 +86,11 @@ def test_unset_source_field_removes_existing_value():
         )
 
         text = config_file.read_text(encoding="utf-8")
-        hh_block = text.split("superjob:")[0]
+        hh_block = text.split("getmatch:")[0]
         assert "daily_application_limit" not in hh_block
         assert "auto_apply: false" in hh_block
         # соседний блок не тронут
-        assert "superjob:\n  daily_application_limit: 12" in text
+        assert "getmatch:\n  daily_application_limit: 12" in text
 
 
 def test_unset_source_field_noop_when_field_missing():

@@ -23,11 +23,11 @@ def test_due_sources_skips_disabled_sources():
             tmp,
             parameters={
                 "headhunter": {"schedule_enabled": True},
-                "superjob": {"schedule_enabled": False},
+                "geekjob": {"schedule_enabled": False},
             },
             source_map={
                 "headhunter": lambda p, k: None,
-                "superjob": lambda p, k: None,
+                "geekjob": lambda p, k: None,
             },
         )
         assert scheduler.due_sources() == ["headhunter"]

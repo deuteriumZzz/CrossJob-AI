@@ -56,7 +56,7 @@ location_blacklist:
 # schedule_enabled/interval_hours (опционально, для `python main.py
 # --daemon` вместо внешнего cron) можно добавить в блок ЛЮБОГО
 # источника, включая те, у которых своего блока ниже ещё нет (geekjob,
-# rabota_ru, getmatch) — просто впишите блок с этими двумя полями.
+# getmatch) — просто впишите блок с этими двумя полями.
 # По умолчанию schedule_enabled: false — демон не трогает источник,
 # пока его явно не включили.
 
@@ -114,25 +114,6 @@ check_hh_replies:
   schedule_enabled: false
   interval_hours: 1
 
-# check_sj_replies — то же самое, что check_hh_replies, но для
-# SuperJob: проверяет новые ответы работодателя и шлёт уведомление в
-# Telegram (без AI-автоответа, в отличие от HH — поэтому нет
-# отдельного auto_reply-флага, единственный gate — schedule_enabled
-# здесь). Требует superjob.client_id/client_secret в secrets.yaml —
-# без них упадёт с ConfigError (демон это переживёт, залогирует ошибку
-# и пойдёт дальше, но проверка просто не будет работать).
-check_sj_replies:
-  schedule_enabled: false
-  interval_hours: 1
-
-# Optional: only needed for the "Search & Apply on SuperJob" action.
-superjob:
-  auto_apply: false
-  # An existing resume ID from your superjob.ru profile (used as-is, not regenerated).
-  resume_id: "your-superjob-ru-resume-id"
-  schedule_enabled: false
-  interval_hours: 3
-
 # Optional: only needed for the "Search & Apply on GetMatch" action.
 # Keep auto_apply: false until you've logged in once (first auto_apply
 # run opens a real browser window and waits for you to type the code
@@ -140,18 +121,14 @@ superjob:
 getmatch:
   auto_apply: false
 
-# Optional: only needed for the "Search & Apply on geekjob.ru" /
-# "Search & Apply on rabota.ru" actions. Both log in only via OAuth
-# (Google, VK, Mail.Ru, etc.) — no password is ever entered by code,
-# you complete login by hand in the browser window that opens on the
-# first auto_apply run. Best-effort: unlike HH/GetMatch, the actual
-# apply button was never confirmed against a live logged-in session
-# (see docs/GUIDE.md) — if the button isn't found, it just falls back
-# to dry-run.
+# Optional: only needed for the "Search & Apply on geekjob.ru" action.
+# Logs in only via OAuth (Google, VK, Mail.Ru, etc.) — no password is
+# ever entered by code, you complete login by hand in the browser
+# window that opens on the first auto_apply run. Best-effort: unlike
+# HH/GetMatch, the actual apply button was never confirmed against a
+# live logged-in session (see docs/GUIDE.md) — if the button isn't
+# found, it just falls back to dry-run.
 geekjob:
-  auto_apply: false
-
-rabota_ru:
   auto_apply: false
 
 # Optional: only needed for the "Search Telegram channels" action.

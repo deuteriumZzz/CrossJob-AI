@@ -49,24 +49,3 @@ def print_negotiation_replies(
         if n.get("vacancy")
     }
     _print_replies(source, state_by_vacancy_id, applied_log, on_new_reply)
-
-
-def print_superjob_replies(
-    messages: list,
-    applied_log: AppliedLog,
-    on_new_reply: Optional[OnNewReply] = None,
-) -> None:
-    """Названия полей /messages/ у SuperJob для "какая вакансия"/"какой
-    статус" не проверены боевым вызовом (см. докстринг
-    SuperJobClient.list_messages) — пробуем наиболее вероятные названия
-    полей, пропускаем сообщения без распознаваемого id вакансии, а не
-    угадываем."""
-    state_by_vacancy_id = {}
-    for message in messages:
-        vacancy_id = message.get("id_vacancy") or message.get("vacancy_id")
-        if vacancy_id is None:
-            continue
-        state_by_vacancy_id[str(vacancy_id)] = (
-            message.get("status_text") or message.get("status") or "неизвестно"
-        )
-    _print_replies("superjob", state_by_vacancy_id, applied_log, on_new_reply)

@@ -264,9 +264,7 @@ def post_setup_init(body: SetupInitRequest) -> dict:
 # см. HeadHunterSession).
 _CREDENTIAL_REQUIREMENTS: dict = {
     "headhunter": None,
-    "superjob": ("client_id", "client_secret"),
     "geekjob": None,
-    "rabota_ru": None,
     "telegram": ("api_id", "api_hash"),
     "getmatch": ("email",),
     "linkedin": None,
@@ -274,8 +272,8 @@ _CREDENTIAL_REQUIREMENTS: dict = {
 }
 
 
-# Площадки, где резюме уже есть прямо в личном кабинете (getmatch,
-# rabota_ru и т.д.) не требуют локального PDF для отклика — только
+# Площадки, где резюме уже есть прямо в личном кабинете (getmatch
+# и т.д.) не требуют локального PDF для отклика — только
 # HeadHunter и LinkedIn реально читают файл из data_folder перед
 # откликом (см. RESUME_PDF/RESUME_PDF_LINKEDIN в main.py). Заявлять
 # "резюме не найдено" для остальных площадок было бы ложной тревогой.
@@ -457,11 +455,6 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
             "name": "check_hh_replies",
             "label": "HeadHunter — ответы в чате",
             "note": "Работает только если включён headhunter.auto_reply.",
-        },
-        {
-            "name": "check_sj_replies",
-            "label": "SuperJob — статус откликов",
-            "note": "Только уведомление, без автоответа.",
         },
         {
             "name": "check_telegram_replies",

@@ -117,22 +117,15 @@ from src.job_sources.llm_usage import (
 from src.job_sources.llm_usage import (
     set_output_folder as set_llm_usage_output_folder,
 )
-from src.job_sources.rabota_ru.auth import RabotaRuSession
-from src.job_sources.rabota_ru.client import RabotaRuClient
-from src.job_sources.rabota_ru.source import RabotaRuSource
 from src.job_sources.reply_answerer import (
     build_preferences_summary,
     generate_reply,
     message_needs_reply,
 )
-from src.job_sources.reply_check import print_superjob_replies
 from src.job_sources.resume_profile import (
     extract_plain_text_resume,
     infer_positions_from_resume,
 )
-from src.job_sources.superjob.auth import SuperJobAuth
-from src.job_sources.superjob.client import SuperJobClient
-from src.job_sources.superjob.source import SuperJobSource
 from src.job_sources.telegram.client import TelegramSourceClient
 from src.job_sources.telegram.contact import extract_contact
 from src.job_sources.telegram.source import TelegramSource
@@ -977,7 +970,7 @@ def _job_suitability_score(parameters: dict) -> float:
 
 def _daily_limit(parameters: dict, source: Optional[str] = None) -> int:
     """Дневной лимит откликов. Приоритет: daily_application_limit
-    внутри блока конкретной площадки (headhunter:/superjob:/...,
+    внутри блока конкретной площадки (headhunter:/geekjob:/...,
     дашборд — колонка "Дневной лимит" в таблице настроек) >
     глобальный дефолт (для LinkedIn —
     limits.linkedin_daily_application_limit, для остальных —
@@ -1060,7 +1053,7 @@ def _job_max_applications(
     parameters: dict, source: Optional[str] = None
 ) -> int:
     """Лимит откликов за один прогон. Приоритет: job_max_applications
-    внутри блока конкретной площадки (headhunter:/superjob:/...,
+    внутри блока конкретной площадки (headhunter:/geekjob:/...,
     дашборд — колонка "Откликов за прогон" в таблице настроек) >
     limits.job_max_applications (общий дефолт, дашборд — панель
     "Лимиты откликов") > config.JOB_MAX_APPLICATIONS."""
@@ -1072,44 +1065,6 @@ def _job_max_applications(
         (parameters.get("limits") or {}).get(
             "job_max_applications", JOB_MAX_APPLICATIONS
         )
-    )
-
-
-def _resolve_resume_id(
-    client, configured_resume_id: Optional[str], platform_label: str
-) -> str:
-    """resume_id необязательно вписывать вручную — резюме уже лежит
-    на самой площадке (пользователь загрузил его туда сам через её
-    сайт), поэтому вместо немедленного отказа сначала смотрим список
-    резюме через API площадки (client.list_resumes()): одно найдено —
-    используем его, несколько — просим выбрать явно (со списком id,
-    чтобы не гадать по URL), ни одного — площадка правда пуста,
-    сначала нужно загрузить резюме на её сайте вручную. Локальный
-    resume.pdf тут не подставить — у официального API HH/SuperJob
-    нет метода "откликнуться файлом", только по id уже
-    существующего на площадке резюме."""
-    if configured_resume_id:
-        return configured_resume_id
-    resumes = client.list_resumes()
-    if len(resumes) == 1:
-        resume_id = resumes[0]["id"]
-        logger.info(
-            f"{platform_label}.resume_id не указан — использую "
-            f"единственное найденное резюме на площадке: {resume_id}"
-        )
-        return resume_id
-    if not resumes:
-        raise ConfigError(
-            f"{platform_label}.resume_id не задан, и на площадке не "
-            "найдено ни одного резюме — сначала загрузите резюме на "
-            "сайте площадки, потом впишите его id в "
-            "work_preferences.yaml."
-        )
-    ids = ", ".join(r["id"] for r in resumes)
-    raise ConfigError(
-        f"{platform_label}.resume_id не задан, а на площадке "
-        f"несколько резюме — впишите нужный id в work_preferences.yaml "
-        f"(один из: {ids})"
     )
 
 
@@ -1145,7 +1100,7 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
         logger.warning("hh.ru is cooling down after a block — skipping.")
         return
 
-    HeadHunterSession(profile_dir).ensure_logged_in()
+    HeadHunterSession(profile_dir).ensure_logged_in(parameters)
 
     with HeadHunterBrowserClient(profile_dir) as client:
 
@@ -1335,142 +1290,6 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
             sent_count += 1
 
 
-def search_and_apply_superjob(parameters: dict, llm_api_key: str):
-    """
-    Ищет на SuperJob вакансии по work_preferences.yaml, пишет
-    под каждую персональное сопроводительное письмо на основе
-    data_folder/resume.pdf и либо откликается (при
-    superjob.auto_apply: true), либо просто логирует и
-    записывает как dry-run.
-    """
-    data_folder: Path = parameters["dataFolder"]
-    resume_pdf_path = data_folder / RESUME_PDF
-    if not resume_pdf_path.exists():
-        raise FileNotFoundError(
-            f"Resume PDF not found: {resume_pdf_path}. Place your "
-            f"resume as '{RESUME_PDF}' in {data_folder}."
-        )
-
-    secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
-    sj_secrets = secrets.get("superjob") or {}
-    client_id = sj_secrets.get("client_id")
-    client_secret = sj_secrets.get("client_secret")
-    if not client_id or not client_secret:
-        raise ConfigError(
-            "Missing superjob.client_id/client_secret in secrets.yaml"
-        )
-
-    sj_preferences = parameters.get("superjob") or {}
-    auto_apply = bool(sj_preferences.get("auto_apply", False))
-    resume_id = sj_preferences.get("resume_id")
-
-    output_folder: Path = parameters["outputFileDirectory"]
-    auth = SuperJobAuth(
-        client_id, client_secret, output_folder / ".superjob_token.json"
-    )
-    client = SuperJobClient(auth.get_access_token(), client_secret)
-    if auto_apply:
-        resume_id = _resolve_resume_id(client, resume_id, "superjob")
-    applied_log = AppliedLog(output_folder / "applied_log.json")
-
-    source: JobSource = SuperJobSource(client)
-    jobs = source.search(parameters)
-    logger.info(f"Found {len(jobs)} matching SuperJob vacancies.")
-
-    daily_limit = randomized_daily_limit(_daily_limit(parameters, "superjob"))
-    sent_count = 0
-    job_max_applications = _job_max_applications(parameters, "superjob")
-    for job in jobs:
-        if sent_count >= job_max_applications:
-            logger.info(
-                f"Reached JOB_MAX_APPLICATIONS "
-                f"({job_max_applications}) for this run."
-            )
-            break
-        if _total_daily_limit_reached(parameters, applied_log):
-            break
-        if applied_log.already_applied(job):
-            continue
-        if (
-            auto_apply
-            and parameters.get("apply_once_at_company")
-            and applied_log.already_applied_to_company(job)
-        ):
-            logger.info(
-                f"Skipping {job.company} - already applied there "
-                f"(apply_once_at_company)."
-            )
-            continue
-        if (
-            auto_apply
-            and applied_log.applied_today_count(job.source) >= daily_limit
-        ):
-            logger.info(
-                f"Reached daily application limit "
-                f"({daily_limit}) for {job.source} today."
-            )
-            notify(
-                parameters,
-                f"Дневной лимит откликов ({daily_limit}) достигнут "
-                f"для {job.source}.",
-            )
-            break
-
-        fit = score_job_fit(
-            resume_pdf_path,
-            job,
-            llm_api_key,
-            salary_expectations=_job_salary_expectations(parameters),
-        )
-        tier = classify_fit(
-            fit.score,
-            _job_min_score(parameters),
-            _job_suitability_score(parameters),
-        )
-        if tier == "skip":
-            logger.info(
-                f"Skipping {job.role} at {job.company}: fit score "
-                f"{fit.score}/10 below minimum."
-            )
-            applied_log.record(
-                job, "", "", "skipped_low_fit", fit.score, fit.gaps
-            )
-            continue
-        if tier == "weak":
-            logger.info(
-                f"{job.role} at {job.company}: weak fit "
-                f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
-            )
-
-        try:
-            cover_letter = generate_cover_letter_for_job(
-                resume_pdf_path, job, llm_api_key
-            )
-        except Exception as e:
-            logger.exception(
-                f"Failed to generate cover letter for {job.role} at "
-                f"{job.company}, skipping this vacancy: {e}"
-            )
-            continue
-
-        if auto_apply:
-            wait_before_apply()
-            client.apply(resume_id or "", job.external_id, cover_letter)
-            status: Literal["applied", "dry_run"] = "applied"
-            logger.info(f"Applied to {job.role} at {job.company} ({job.link})")
-        else:
-            status = "dry_run"
-            logger.info(
-                f"[dry run] Would apply to {job.role} at {job.company} "
-                f"({job.link})"
-            )
-
-        applied_log.record(
-            job, cover_letter, resume_id or "", status, fit.score, fit.gaps
-        )
-        sent_count += 1
-
-
 def search_geekjob(parameters: dict, llm_api_key: str):
     """
     Ищет на geekjob.ru вакансии по work_preferences.yaml. Если
@@ -1507,7 +1326,7 @@ def search_geekjob(parameters: dict, llm_api_key: str):
     # вход (быстро), чем заставлять ждать несколько минут поиска ради
     # окна логина в конце.
     if auto_apply:
-        GeekjobSession(profile_dir).ensure_logged_in()
+        GeekjobSession(profile_dir).ensure_logged_in(parameters)
 
     client = GeekjobClient(profile_dir)
     source: JobSource = GeekjobSource(client)
@@ -1529,138 +1348,6 @@ def search_geekjob(parameters: dict, llm_api_key: str):
 
     sent_count = 0
     job_max_applications = _job_max_applications(parameters, "geekjob")
-    for job in jobs:
-        if sent_count >= job_max_applications:
-            logger.info(
-                f"Reached JOB_MAX_APPLICATIONS "
-                f"({job_max_applications}) for this run."
-            )
-            break
-        if _total_daily_limit_reached(parameters, applied_log):
-            break
-        if applied_log.already_applied(job):
-            continue
-
-        fit = score_job_fit(
-            resume_pdf_path,
-            job,
-            llm_api_key,
-            salary_expectations=_job_salary_expectations(parameters),
-        )
-        tier = classify_fit(
-            fit.score,
-            _job_min_score(parameters),
-            _job_suitability_score(parameters),
-        )
-        if tier == "skip":
-            logger.info(
-                f"Skipping {job.role} at {job.company}: fit score "
-                f"{fit.score}/10 below minimum."
-            )
-            applied_log.record(
-                job, "", "", "skipped_low_fit", fit.score, fit.gaps
-            )
-            continue
-        if tier == "weak":
-            logger.info(
-                f"{job.role} at {job.company}: weak fit "
-                f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
-            )
-
-        try:
-            cover_letter = generate_cover_letter_for_job(
-                resume_pdf_path, job, llm_api_key
-            )
-        except Exception as e:
-            logger.exception(
-                f"Failed to generate cover letter for {job.role} at "
-                f"{job.company}, skipping this vacancy: {e}"
-            )
-            continue
-
-        if auto_apply:
-            applied = client.apply(job.link, profile_dir)
-            if applied:
-                status: Literal["applied", "dry_run"] = "applied"
-                logger.info(
-                    f"Applied to {job.role} at {job.company} ({job.link})"
-                )
-            else:
-                status = "dry_run"
-                logger.warning(
-                    "Кнопка 'Откликнуться' не найдена на "
-                    f"{job.link} — записано как dry-run."
-                )
-        else:
-            status = "dry_run"
-            logger.info(
-                f"[manual apply needed] {job.role} at {job.company} "
-                f"({job.link})"
-            )
-
-        applied_log.record(
-            job,
-            cover_letter,
-            resume_id="",
-            status=status,
-            score=fit.score,
-            gaps=fit.gaps,
-        )
-        sent_count += 1
-
-
-def search_rabota_ru(parameters: dict, llm_api_key: str):
-    """
-    Ищет на rabota.ru вакансии по work_preferences.yaml. Если
-    rabota_ru.auto_apply — true, откликается кликом на кнопку
-    "Откликнуться" на странице вакансии — best-effort, НЕ проверено
-    на живом залогиненном аккаунте (вход у rabota.ru только через
-    OAuth/код, пароль пользователя здесь никогда не вводится, см.
-    RabotaRuSession), в отличие от HH/GetMatch. Если кнопка не
-    найдётся — тихо считается dry-run, ничего не падает. Иначе — как
-    раньше, каждое совпадение просто пишется как dry-run.
-    """
-    data_folder: Path = parameters["dataFolder"]
-    resume_pdf_path = data_folder / RESUME_PDF
-    if not resume_pdf_path.exists():
-        raise FileNotFoundError(
-            f"Resume PDF not found: {resume_pdf_path}. Place your "
-            f"resume as '{RESUME_PDF}' in {data_folder}."
-        )
-
-    rr_preferences = parameters.get("rabota_ru") or {}
-    auto_apply = bool(rr_preferences.get("auto_apply", False))
-
-    output_folder: Path = parameters["outputFileDirectory"]
-    applied_log = AppliedLog(output_folder / "applied_log.json")
-
-    if is_still_blocked(output_folder, "rabota_ru"):
-        logger.warning("rabota.ru is cooling down after a block — skipping.")
-        return
-
-    profile_dir = output_folder / ".chrome_profile_rabota_ru"
-    client = RabotaRuClient()
-    source: JobSource = RabotaRuSource(client)
-    try:
-        jobs = source.search(parameters)
-    except PlatformBlockedError as e:
-        logger.error(f"rabota.ru appears to have blocked us: {e}")
-        mark_blocked(output_folder, "rabota_ru")
-        notify(
-            parameters,
-            f"rabota.ru: похоже на блокировку ({e}). Площадка "
-            "поставлена на паузу на 24ч. Решите капчу вручную в "
-            "открытом Chrome-профиле и пришлите /resume rabota_ru — "
-            "попробуем снова раньше.",
-        )
-        return
-    logger.info(f"Found {len(jobs)} matching rabota.ru vacancies.")
-
-    if auto_apply:
-        RabotaRuSession(profile_dir).ensure_logged_in()
-
-    sent_count = 0
-    job_max_applications = _job_max_applications(parameters, "rabota_ru")
     for job in jobs:
         if sent_count >= job_max_applications:
             logger.info(
@@ -1958,7 +1645,7 @@ def search_getmatch(parameters: dict, llm_api_key: str):
     profile_dir = output_folder / ".chrome_profile_getmatch"
     if auto_apply:
         assert email is not None  # enforced above when auto_apply is set
-        GetMatchSession(profile_dir).ensure_logged_in(email)
+        GetMatchSession(profile_dir).ensure_logged_in(email, parameters)
 
     with GetMatchClient(profile_dir) as client:
         source: JobSource = GetMatchSource(client)
@@ -2118,7 +1805,7 @@ def search_and_apply_linkedin(parameters: dict, llm_api_key: str):
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
     try:
-        session.ensure_logged_in()
+        session.ensure_logged_in(parameters)
         source: JobSource = LinkedInSource(session.driver)
         jobs = source.search(parameters)
         logger.info(f"Found {len(jobs)} matching LinkedIn Easy Apply jobs.")
@@ -2304,7 +1991,7 @@ def search_and_apply_habr_career(parameters: dict, llm_api_key: str):
     logger.info(f"Found {len(jobs)} matching career.habr.com vacancies.")
 
     if auto_apply:
-        HabrCareerSession(profile_dir).ensure_logged_in()
+        HabrCareerSession(profile_dir).ensure_logged_in(parameters)
 
     sent_count = 0
     job_max_applications = _job_max_applications(parameters, "habr_career")
@@ -2408,9 +2095,7 @@ def search_and_apply_habr_career(parameters: dict, llm_api_key: str):
 
 ALL_SOURCES = [
     ("headhunter", search_and_apply_headhunter),
-    ("superjob", search_and_apply_superjob),
     ("geekjob", search_geekjob),
-    ("rabota_ru", search_rabota_ru),
     ("telegram", search_telegram),
     ("getmatch", search_getmatch),
     ("linkedin", search_and_apply_linkedin),
@@ -3157,50 +2842,10 @@ def create_headhunter_resume_draft(parameters: dict) -> Optional[str]:
     return draft_url
 
 
-def check_superjob_replies(parameters: dict):
-    """То же самое, что check_headhunter_replies, только для
-    SuperJob. Использует /messages/ вместо /negotiations — про
-    оговорку "названия полей не до конца проверены" см.
-    SuperJobClient.list_messages и
-    reply_check.print_superjob_replies."""
-    secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
-    sj_secrets = secrets.get("superjob") or {}
-    client_id = sj_secrets.get("client_id")
-    client_secret = sj_secrets.get("client_secret")
-    if not client_id or not client_secret:
-        raise ConfigError(
-            "Missing superjob.client_id/client_secret in secrets.yaml"
-        )
-
-    output_folder: Path = parameters["outputFileDirectory"]
-    auth = SuperJobAuth(
-        client_id, client_secret, output_folder / ".superjob_token.json"
-    )
-    client = SuperJobClient(auth.get_access_token(), client_secret)
-    applied_log = AppliedLog(output_folder / "applied_log.json")
-
-    print_superjob_replies(
-        client.list_messages(),
-        applied_log,
-        on_new_reply=lambda entry, state: notify(
-            parameters,
-            f"Новый ответ: {entry['company']} — {entry['title']}: {state}",
-        ),
-    )
-
-
-def _check_sj_replies_scheduled(parameters: dict, llm_api_key: str) -> None:
-    """Обёртка под сигнатуру Scheduler (parameters, llm_api_key) —
-    check_superjob_replies не использует LLM (только уведомление о
-    новых ответах, без AI-автоответа, в отличие от HH), поэтому
-    llm_api_key здесь не нужен, просто игнорируется."""
-    check_superjob_replies(parameters)
-
-
 def check_telegram_replies(parameters: dict, llm_api_key: str) -> None:
     """Проверяет личные диалоги, заведённые search_telegram
-    (telegram.auto_message), на новые ответы контактов — то же самое,
-    что check_superjob_replies: только
+    (telegram.auto_message), на новые ответы контактов — так же, как
+    check_headhunter_replies проверяет отклики на HH: только
     уведомление в Telegram-бот, без AI-автоответа (в отличие от HH,
     где есть чат с явной кнопкой "ответить" на площадке — здесь это
     личный диалог самого пользователя, автоматически отвечать в него
@@ -3248,15 +2893,14 @@ def check_telegram_replies(parameters: dict, llm_api_key: str) -> None:
 # ponytail: check_*_replies не входят в ALL_SOURCES (это не
 # "поиск+отклик", а отдельные проверки чата/переговоров) — но
 # демону/веб-планировщику нужно их видеть, иначе headhunter.auto_reply
-# (и сама возможность увидеть новые ответы SJ/Telegram) никогда не
+# (и сама возможность увидеть новые ответы Telegram) никогда не
 # срабатывает сам по себе, только вручную через --auto check_*_replies.
 # У каждого свой schedule_enabled/interval_hours блок в
-# work_preferences.yaml (toplevel, не внутри headhunter:/superjob:/
-# telegram:), т.к. Scheduler матчит по имени ключа словаря.
+# work_preferences.yaml (toplevel, не внутри headhunter:/telegram:),
+# т.к. Scheduler матчит по имени ключа словаря.
 SCHEDULER_SOURCES = {
     **dict(ALL_SOURCES),
     "check_hh_replies": check_headhunter_replies,
-    "check_sj_replies": _check_sj_replies_scheduled,
     "check_telegram_replies": check_telegram_replies,
     "check_telegram_commands": check_telegram_commands,
 }
@@ -3441,17 +3085,9 @@ def handle_inquiries(
                 )
                 search_and_apply_headhunter(parameters, llm_api_key)
 
-            if "Search & Apply on SuperJob" == selected_actions:
-                logger.info("Searching SuperJob and preparing applications...")
-                search_and_apply_superjob(parameters, llm_api_key)
-
             if "Search & Apply on geekjob.ru" == selected_actions:
                 logger.info("Searching geekjob.ru...")
                 search_geekjob(parameters, llm_api_key)
-
-            if "Search & Apply on rabota.ru" == selected_actions:
-                logger.info("Searching rabota.ru...")
-                search_rabota_ru(parameters, llm_api_key)
 
             if "Search Telegram channels (manual reply)" == selected_actions:
                 logger.info("Searching Telegram channels...")
@@ -3482,9 +3118,6 @@ def handle_inquiries(
             if "Clean up stale HeadHunter negotiations" == selected_actions:
                 cleanup_headhunter_negotiations(parameters)
 
-            if "Check SuperJob replies" == selected_actions:
-                check_superjob_replies(parameters)
-
             if "Show sent applications" == selected_actions:
                 show_application_history(parameters)
 
@@ -3514,9 +3147,7 @@ def prompt_user_action() -> str:
                     "Generate Resume Tailored for Job Description",
                     "Generate Tailored Cover Letter for Job Description",
                     "Search & Apply on HeadHunter",
-                    "Search & Apply on SuperJob",
                     "Search & Apply on geekjob.ru",
-                    "Search & Apply on rabota.ru",
                     "Search Telegram channels (manual reply)",
                     "Search & Apply on GetMatch",
                     "Search & Apply on LinkedIn",
@@ -3524,7 +3155,6 @@ def prompt_user_action() -> str:
                     "Search selected sources",
                     "Check HeadHunter replies",
                     "Clean up stale HeadHunter negotiations",
-                    "Check SuperJob replies",
                     "Show sent applications",
                     "Export application history (TXT/PDF)",
                 ],
@@ -3552,9 +3182,7 @@ def prompt_selected_sources() -> list[str]:
             ),
             choices=[
                 ("HeadHunter", "headhunter"),
-                ("SuperJob", "superjob"),
                 ("geekjob.ru (manual apply)", "geekjob"),
-                ("rabota.ru (manual apply)", "rabota_ru"),
                 ("Telegram channels (manual reply)", "telegram"),
                 ("GetMatch (manual apply)", "getmatch"),
                 (
@@ -3579,13 +3207,12 @@ def prompt_selected_sources() -> list[str]:
     default=None,
     help=(
         "Run non-interactively (for cron) instead of showing the menu: "
-        "one of headhunter/superjob/geekjob/rabota_ru/telegram/"
+        "one of headhunter/geekjob/telegram/"
         "getmatch/linkedin/habr_career/all/"
         "check_hh_replies/"
-        "check_sj_replies/"
         "check_telegram_replies/"
         "cleanup_hh_negotiations, or "
-        "'selected:hh,superjob' for a comma-separated subset of sources."
+        "'selected:hh,geekjob' for a comma-separated subset of sources."
     ),
 )
 @click.option(
@@ -3671,9 +3298,8 @@ def main(auto: Optional[str], daemon: bool):
         )
 
         # Позиции не заданы — один раз выводим их из resume.pdf,
-        # чтобы каждый источник (HH/SuperJob/geekjob/
-        # rabota.ru/Telegram) искал роли, которые реально подходят
-        # этому резюме.
+        # чтобы каждый источник (HH/geekjob/Telegram) искал роли,
+        # которые реально подходят этому резюме.
         resume_pdf_path = data_folder / RESUME_PDF
         if not config.get("positions") and resume_pdf_path.exists():
             config["positions"] = infer_positions_from_resume(
@@ -3688,16 +3314,8 @@ def main(auto: Optional[str], daemon: bool):
             search_and_apply_headhunter(config, llm_api_key)
             return
 
-        if auto == "superjob":
-            search_and_apply_superjob(config, llm_api_key)
-            return
-
         if auto == "geekjob":
             search_geekjob(config, llm_api_key)
-            return
-
-        if auto == "rabota_ru":
-            search_rabota_ru(config, llm_api_key)
             return
 
         if auto == "telegram":
@@ -3735,10 +3353,6 @@ def main(auto: Optional[str], daemon: bool):
 
         if auto == "cleanup_hh_negotiations":
             cleanup_headhunter_negotiations(config)
-            return
-
-        if auto == "check_sj_replies":
-            check_superjob_replies(config)
             return
 
         if auto == "check_telegram_replies":

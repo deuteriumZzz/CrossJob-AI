@@ -34,7 +34,7 @@ def test_record_run_result_stores_error_and_keeps_other_sources():
         record_run_result(output_folder, "headhunter", "ok", next_run, run_at)
         record_run_result(
             output_folder,
-            "superjob",
+            "geekjob",
             "error",
             next_run,
             run_at,
@@ -43,8 +43,8 @@ def test_record_run_result_stores_error_and_keeps_other_sources():
 
         state = load_state(output_folder)
         assert state["headhunter"]["status"] == "ok"
-        assert state["superjob"]["status"] == "error"
-        assert state["superjob"]["last_error"] == "boom"
+        assert state["geekjob"]["status"] == "error"
+        assert state["geekjob"]["last_error"] == "boom"
 
 
 if __name__ == "__main__":

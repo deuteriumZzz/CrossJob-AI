@@ -76,20 +76,15 @@ def test_status_reports_readiness_per_source(client):
     response = client.get("/api/status")
     sources = {s["name"]: s for s in response.json()["sources"]}
     # фикстура secrets.yaml не задаёт ни одного client_id/api_id/email
-    superjob = sources["superjob"]
-    assert superjob["readiness"]["ready"] is False
-    assert set(superjob["readiness"]["missing"]) == {
-        "client_id",
-        "client_secret",
+    telegram = sources["telegram"]
+    assert telegram["readiness"]["ready"] is False
+    assert set(telegram["readiness"]["missing"]) == {
+        "api_id",
+        "api_hash",
     }
-    # geekjob/rabota_ru не требуют ни секретов, ни локального резюме —
-    # площадка сама показывает то, что уже загружено в профиль.
+    # geekjob не требует ни секретов, ни локального резюме — площадка
+    # сама показывает то, что уже загружено в профиль.
     assert sources["geekjob"]["readiness"] == {
-        "ready": True,
-        "missing": [],
-        "resume": None,
-    }
-    assert sources["rabota_ru"]["readiness"] == {
         "ready": True,
         "missing": [],
         "resume": None,
@@ -169,7 +164,7 @@ def test_settings_update_persists_resume_id(client):
 
     status = client.get("/api/status").json()
     hh = next(s for s in status["sources"] if s["name"] == "headhunter")
-    sj = next(s for s in status["sources"] if s["name"] == "superjob")
+    sj = next(s for s in status["sources"] if s["name"] == "geekjob")
     assert hh["resume_id"] == "abc123"
     # другая площадка не затронута
     assert sj["resume_id"] == ""
@@ -270,7 +265,7 @@ def test_settings_update_persists_auto_reply_and_bump_resume(client):
     # generic паттерн, что и у resume_id) — фронтенд просто не рисует
     # эти столбцы для остальных источников. Другая площадка не должна
     # быть затронута тем, что мы включили флаги для HH.
-    sj = next(s for s in status["sources"] if s["name"] == "superjob")
+    sj = next(s for s in status["sources"] if s["name"] == "geekjob")
     assert sj["auto_reply"] is False
     assert sj["auto_bump_resume"] is False
 
@@ -287,7 +282,7 @@ def test_settings_update_per_source_job_max_applications(client):
 
     unset = client.get("/api/status").json()
     hh = next(s for s in unset["sources"] if s["name"] == "headhunter")
-    sj = next(s for s in unset["sources"] if s["name"] == "superjob")
+    sj = next(s for s in unset["sources"] if s["name"] == "geekjob")
     assert hh["job_max_applications"] == JOB_MAX_APPLICATIONS
     assert sj["job_max_applications"] == JOB_MAX_APPLICATIONS
 
@@ -299,7 +294,7 @@ def test_settings_update_per_source_job_max_applications(client):
 
     status = client.get("/api/status").json()
     hh = next(s for s in status["sources"] if s["name"] == "headhunter")
-    sj = next(s for s in status["sources"] if s["name"] == "superjob")
+    sj = next(s for s in status["sources"] if s["name"] == "geekjob")
     assert hh["job_max_applications"] == 20
     # другая площадка не затронута
     assert sj["job_max_applications"] == JOB_MAX_APPLICATIONS
@@ -357,18 +352,18 @@ def test_run_now_starts_selected_sources_and_reports_status(client):
         side_effect=fake_run_selected_sources,
     ):
         response = client.post(
-            "/api/run-now", json={"sources": ["headhunter", "superjob"]}
+            "/api/run-now", json={"sources": ["headhunter", "geekjob"]}
         )
         assert response.status_code == 200
         assert response.json() == {
             "started": True,
-            "sources": ["headhunter", "superjob"],
+            "sources": ["headhunter", "geekjob"],
             "dry_run": False,
         }
 
         status = client.get("/api/run-now/status").json()
         assert status["running"] is True
-        assert set(status["sources"]) == {"headhunter", "superjob"}
+        assert set(status["sources"]) == {"headhunter", "geekjob"}
         assert status["dry_run"] is False
 
         # Второй запуск, пока первый ещё идёт — конфликт.
@@ -381,7 +376,7 @@ def test_run_now_starts_selected_sources_and_reports_status(client):
         if not client.get("/api/run-now/status").json()["running"]:
             break
         time.sleep(0.05)
-    assert calls == [["headhunter", "superjob"]]
+    assert calls == [["headhunter", "geekjob"]]
 
 
 def test_run_now_rejects_empty_and_unknown_sources(client):
