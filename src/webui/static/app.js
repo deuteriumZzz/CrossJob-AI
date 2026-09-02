@@ -590,17 +590,26 @@ const render = {
     }</span>`;
     badge.classList.toggle("on", status.daemon_running);
     badge.classList.toggle("off", !status.daemon_running);
-    document.getElementById("daemon-start").disabled = status.daemon_running;
     document.getElementById("daemon-stop").disabled = !status.daemon_running;
-    const pauseBtn = document.getElementById("daemon-pause");
-    pauseBtn.disabled = !status.daemon_running;
-    pauseBtn.classList.toggle("is-paused", !!status.daemon_paused);
-    pauseBtn.querySelector(".btn-label").textContent = status.daemon_paused
-      ? "Возобновить"
-      : "Пауза";
-    pauseBtn.title = status.daemon_paused
-      ? "Возобновить плановые запуски по расписанию"
-      : "Не запускать новые задачи по расписанию, текущие не трогать";
+    // Одна кнопка вместо двух (Старт/Пауза): демон не запущен — это
+    // "Запустить"; запущен и активен — "Пауза"; запущен и на паузе —
+    // "Возобновить". is-pause-action переключает play/pause-иконку
+    // (см. style.css), is-paused — только цвет в состоянии "на паузе"
+    // (тот же класс/приём, что был у отдельной кнопки-паузы).
+    const toggleBtn = document.getElementById("daemon-toggle");
+    const isPauseAction = status.daemon_running && !status.daemon_paused;
+    toggleBtn.classList.toggle("is-pause-action", isPauseAction);
+    toggleBtn.classList.toggle("is-paused", !!status.daemon_paused);
+    toggleBtn.querySelector(".btn-label").textContent = !status.daemon_running
+      ? "Запустить"
+      : status.daemon_paused
+        ? "Возобновить"
+        : "Пауза";
+    toggleBtn.title = !status.daemon_running
+      ? "Запустить демона"
+      : status.daemon_paused
+        ? "Возобновить плановые запуски по расписанию"
+        : "Пауза — не запускать новые задачи по расписанию, текущие не трогать";
 
     // Проблемные площадки видно только зайдя на "Обзор" — бейдж на
     // самой вкладке (как непрочитанные в Telegram) сигналит о них,
@@ -2587,22 +2596,28 @@ function initDashboard() {
     }
   });
 
-  document.getElementById("daemon-start").addEventListener("click", async (ev) => {
-    await withButtonLoading(ev.currentTarget, () => api("/api/daemon/start", { method: "POST" }));
-    showToast("Демон запущен", "success");
+  document.getElementById("daemon-toggle").addEventListener("click", async (ev) => {
+    const btn = ev.currentTarget;
+    // Три исхода зависят от текущего состояния кнопки (см. render.overview):
+    // не запущен -> start; запущен и активен (is-pause-action) -> pause;
+    // запущен и на паузе -> resume.
+    const endpoint = !btn.classList.contains("is-pause-action") && !btn.classList.contains("is-paused")
+      ? "start"
+      : btn.classList.contains("is-paused")
+        ? "resume"
+        : "pause";
+    const messages = {
+      start: ["Демон запущен", "success"],
+      pause: ["Демон на паузе", "info"],
+      resume: ["Демон возобновлён", "info"],
+    };
+    await withButtonLoading(btn, () => api(`/api/daemon/${endpoint}`, { method: "POST" }));
+    showToast(...messages[endpoint]);
     render.overview();
   });
   document.getElementById("daemon-stop").addEventListener("click", async (ev) => {
     await withButtonLoading(ev.currentTarget, () => api("/api/daemon/stop", { method: "POST" }));
     showToast("Демон остановлен", "info");
-    render.overview();
-  });
-  document.getElementById("daemon-pause").addEventListener("click", async (ev) => {
-    const paused = ev.currentTarget.classList.contains("is-paused");
-    await withButtonLoading(ev.currentTarget, () =>
-      api(`/api/daemon/${paused ? "resume" : "pause"}`, { method: "POST" })
-    );
-    showToast(paused ? "Демон возобновлён" : "Демон на паузе", "info");
     render.overview();
   });
 

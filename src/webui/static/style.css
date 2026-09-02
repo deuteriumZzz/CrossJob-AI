@@ -241,6 +241,21 @@ nav.tabs button.active {
   border-color: var(--warn);
 }
 
+/* #daemon-toggle делает 3 вещи одной кнопкой (Старт/Пауза/Возобновить) —
+   тот же приём иконки-по-состоянию, что у .theme-toggle (sun/moon), но
+   переключается через JS-класс is-pause-action, не тему. */
+#daemon-toggle .icon-pause {
+  display: none;
+}
+
+#daemon-toggle.is-pause-action .icon-play {
+  display: none;
+}
+
+#daemon-toggle.is-pause-action .icon-pause {
+  display: block;
+}
+
 /* ---------- Badges ---------- */
 
 .badge {

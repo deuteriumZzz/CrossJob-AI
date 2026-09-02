@@ -10,7 +10,7 @@
   href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&display=swap"
   rel="stylesheet"
 />
-<link rel="stylesheet" href="/style.css?v=14" />
+<link rel="stylesheet" href="/style.css?v=15" />
 </head>
 <body>
 <div id="setup-screen" class="setup-screen" style="display:none">
@@ -95,17 +95,14 @@
     <div class="daemon-controls">
       <span id="daemon-badge" class="badge off"><span class="badge-dot"></span><span class="btn-label">демон остановлен</span></span>
       <div class="daemon-buttons">
-        <button id="daemon-start" class="btn btn-primary">
-          <svg viewBox="0 0 20 20" fill="none"><path d="M6.5 4.7v10.6a1 1 0 0 0 1.53.85l8.4-5.3a1 1 0 0 0 0-1.7l-8.4-5.3a1 1 0 0 0-1.53.85Z" fill="currentColor"/></svg>
+        <button id="daemon-toggle" class="btn btn-primary" title="Запустить демона">
+          <svg class="icon-play" viewBox="0 0 20 20" fill="none"><path d="M6.5 4.7v10.6a1 1 0 0 0 1.53.85l8.4-5.3a1 1 0 0 0 0-1.7l-8.4-5.3a1 1 0 0 0-1.53.85Z" fill="currentColor"/></svg>
+          <svg class="icon-pause" viewBox="0 0 20 20" fill="none"><rect x="5.5" y="4.5" width="3" height="11" rx="1" fill="currentColor"/><rect x="11.5" y="4.5" width="3" height="11" rx="1" fill="currentColor"/></svg>
           <span class="btn-label">Запустить</span>
         </button>
         <button id="daemon-stop" class="btn btn-ghost" disabled>
           <svg viewBox="0 0 20 20" fill="none"><rect x="5" y="5" width="10" height="10" rx="1.5" fill="currentColor"/></svg>
           <span class="btn-label">Стоп</span>
-        </button>
-        <button id="daemon-pause" class="btn btn-ghost" disabled title="Не запускать новые задачи по расписанию, текущие не трогать">
-          <svg viewBox="0 0 20 20" fill="none"><rect x="5.5" y="4.5" width="3" height="11" rx="1" fill="currentColor"/><rect x="11.5" y="4.5" width="3" height="11" rx="1" fill="currentColor"/></svg>
-          <span class="btn-label">Пауза</span>
         </button>
       </div>
     </div>
@@ -817,6 +814,6 @@
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=17"></script>
+<script src="/app.js?v=18"></script>
 </body>
 </html>
