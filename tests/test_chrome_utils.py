@@ -59,6 +59,30 @@ def test_clear_profile_cache_missing_dirs_is_a_noop():
         clear_profile_cache(Path(tmp))  # must not raise
 
 
+def test_clear_profile_cache_resets_bloated_preferences():
+    with tempfile.TemporaryDirectory() as tmp:
+        profile_dir = Path(tmp)
+        default_dir = profile_dir / "Default"
+        default_dir.mkdir()
+        (default_dir / "Preferences").write_bytes(b"x" * (21 * 1024 * 1024))
+
+        clear_profile_cache(profile_dir)
+
+        assert not (default_dir / "Preferences").exists()
+
+
+def test_clear_profile_cache_keeps_normal_sized_preferences():
+    with tempfile.TemporaryDirectory() as tmp:
+        profile_dir = Path(tmp)
+        default_dir = profile_dir / "Default"
+        default_dir.mkdir()
+        (default_dir / "Preferences").write_bytes(b'{"profile": {"name": "x"}}')
+
+        clear_profile_cache(profile_dir)
+
+        assert (default_dir / "Preferences").exists()
+
+
 def test_force_kills_live_pid_and_removes_lock():
     with tempfile.TemporaryDirectory() as tmp:
         profile_dir = Path(tmp)

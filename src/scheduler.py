@@ -38,8 +38,11 @@ class Scheduler:
         self.output_folder = output_folder
         self.now_fn = now_fn
         self.stop_event = stop_event or threading.Event()
+        self.paused = False
 
     def due_sources(self) -> list[str]:
+        if self.paused:
+            return []
         due = []
         for name in self.source_map:
             source_config = self.parameters.get(name) or {}

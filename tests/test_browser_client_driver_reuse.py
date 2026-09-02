@@ -116,18 +116,55 @@ def test_getmatch_client_reuses_one_driver_inside_with_block():
     ) as mock_init, patch(
         "src.job_sources.getmatch.client.raise_if_blocked"
     ), patch(
-        "src.job_sources.getmatch.client.visible_text", return_value=""
+        "src.job_sources.getmatch.client.visible_text",
+        return_value="Найдено 5 вакансий",
     ), patch(
         "src.job_sources.getmatch.client.time.sleep"
     ):
-        mock_init.return_value.find_elements.return_value = []
+        # ponytail: непустой, чтобы все _wait_until внутри apply()
+        # находили что-то сразу и не выжидали свой полный таймаут —
+        # тест проверяет переиспользование driver'а, а не то, что
+        # именно находится на странице.
+        mock_init.return_value.find_elements.return_value = [MagicMock()]
 
         with GetMatchClient("profile") as client:
-            client.search_vacancies_html("python")
+            client.search_vacancies_html()
             client.apply("https://getmatch.ru/vacancies/1", "letter")
 
         assert mock_init.call_count == 1
         assert mock_init.return_value.quit.call_count == 1
+
+
+def test_getmatch_apply_returns_false_when_site_shows_new_wizard():
+    """GetMatch редизайнил "Откликнуться" в мастер анкеты из
+    нескольких шагов ("Шаг 1 из 5") без textarea/кнопки отправки —
+    apply() не должен притворяться, что отклик ушёл."""
+    with patch(
+        "src.job_sources.getmatch.client.init_browser"
+    ) as mock_init, patch(
+        "src.job_sources.getmatch.client.raise_if_blocked"
+    ), patch(
+        "src.job_sources.getmatch.client.visible_text",
+        side_effect=["", "Шаг 1 из 5. Выберите форматы работы:"],
+    ), patch(
+        "src.job_sources.getmatch.client.time.sleep"
+    ):
+        driver = mock_init.return_value
+        respond_button = MagicMock()
+        close_button = MagicMock()
+        driver.find_elements.side_effect = [
+            [respond_button],  # "Откликнуться"
+            [close_button],  # "Закрыть"
+        ]
+
+        with GetMatchClient("profile") as client:
+            applied = client.apply(
+                "https://getmatch.ru/vacancies/1", "letter"
+            )
+
+        assert applied is False
+        respond_button.click.assert_called_once()
+        close_button.click.assert_called_once()
 
 
 def test_getmatch_client_reconnects_after_dead_session_mid_run():
@@ -146,7 +183,7 @@ def test_getmatch_client_reconnects_after_dead_session_mid_run():
 
         with GetMatchClient("profile") as client:
             assert client._driver is dead_driver
-            client.search_vacancies_html("python")
+            client.search_vacancies_html()
 
         assert mock_init.call_count == 2
         dead_driver.quit.assert_called_once()

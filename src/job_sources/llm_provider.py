@@ -58,11 +58,16 @@ PROVIDER_MODELS: dict = {
     # живым вызовом 2026-08-22: 404 "no longer available to new
     # users", Google предлагает 3.6-flash) — обновлено на актуальную
     # линейку. 3.6-flash доступен на бесплатном тарифе (~15 RPM/1500
-    # RPD, проверено вручную живым ключом).
+    # RPD, проверено вручную живым ключом). gemini-2.5-flash-lite
+    # получил тот же 404 позже (подтверждено живым вызовом
+    # 2026-09-02, Google теперь предлагает 3.5-flash-lite) — это и
+    # была причина, почему карточка gemini на дашборде вечно красная:
+    # эта модель — fallback-кандидат, который пробуется на каждом
+    # запросе и гарантированно падает.
     "gemini": [
         {"id": "gemini-3.6-flash", "free": True, "recommended": True},
         {"id": "gemini-3.7-flash", "free": False, "recommended": False},
-        {"id": "gemini-2.5-flash-lite", "free": True, "recommended": False},
+        {"id": "gemini-3.5-flash-lite", "free": True, "recommended": False},
     ],
     "deepseek": [
         {"id": "deepseek-reasoner", "free": False, "recommended": False},

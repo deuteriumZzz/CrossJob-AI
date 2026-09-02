@@ -15,6 +15,8 @@ const SOURCE_LABELS = {
   getmatch: "GetMatch",
   linkedin: "LinkedIn",
   habr_career: "Habr Career",
+  wellfound: "Wellfound",
+  himalayas: "Himalayas",
 };
 
 // ponytail: настоящие логотипы площадок — товарные знаки, тащить их к себе
@@ -27,7 +29,12 @@ const SOURCE_ICON = {
   getmatch: { text: "GM", color: "#8a6fd1" },
   linkedin: { text: "in", color: "#2f6fed" },
   habr_career: { text: "HC", color: "#e0954a" },
+  wellfound: { text: "WF", color: "#c23b6b" },
+  himalayas: { text: "HM", color: "#5b7fd6" },
 };
+
+// Площадки, нацеленные на зарубежный рынок — остальные площадки RU.
+const INTL_SOURCES = new Set(["linkedin", "wellfound", "himalayas"]);
 
 const STATUS_DOT = {
   ok: "ok",
@@ -532,9 +539,9 @@ function skeletonStats() {
   ).join("");
 }
 
-function skeletonSourceGrid() {
+function skeletonSourceGrid(count = 8) {
   return Array.from(
-    { length: 8 },
+    { length: count },
     () => `<div class="source-card skeleton-card"><div class="skeleton" style="height:100%"></div></div>`
   ).join("");
 }
@@ -554,22 +561,23 @@ const render = {
   async overview() {
     if (!overviewLoaded) {
       document.getElementById("stats-row").innerHTML = skeletonStats();
-      document.getElementById("source-grid").innerHTML =
-        skeletonSourceGrid();
+      document.getElementById("source-grid-ru").innerHTML = skeletonSourceGrid(5);
+      document.getElementById("source-grid-intl").innerHTML = skeletonSourceGrid(3);
     }
 
-    const [status, stats, llm, salary] = await Promise.all([
+    const [status, stats, llm, salary, runNow] = await Promise.all([
       api("/api/status"),
       api("/api/stats"),
       api("/api/settings/llm"),
       api("/api/settings/salary"),
+      api("/api/run-now/status"),
     ]);
 
     // ponytail: без этой проверки весь блок ниже (счётчики со
     // start-anew анимацией, карточки площадок, чекбоксы) пересобирался
     // на каждый опрос раз в 7с даже когда ничего не изменилось — визуально
     // это и есть "мерцание", о котором сообщил пользователь.
-    const snapshot = JSON.stringify({ status, stats, llm, salary });
+    const snapshot = JSON.stringify({ status, stats, llm, salary, runNow });
     const unchanged = overviewLoaded && snapshot === lastOverviewSnapshot;
     lastOverviewSnapshot = snapshot;
 
@@ -584,6 +592,15 @@ const render = {
     badge.classList.toggle("off", !status.daemon_running);
     document.getElementById("daemon-start").disabled = status.daemon_running;
     document.getElementById("daemon-stop").disabled = !status.daemon_running;
+    const pauseBtn = document.getElementById("daemon-pause");
+    pauseBtn.disabled = !status.daemon_running;
+    pauseBtn.classList.toggle("is-paused", !!status.daemon_paused);
+    pauseBtn.querySelector(".btn-label").textContent = status.daemon_paused
+      ? "Возобновить"
+      : "Пауза";
+    pauseBtn.title = status.daemon_paused
+      ? "Возобновить плановые запуски по расписанию"
+      : "Не запускать новые задачи по расписанию, текущие не трогать";
 
     // Проблемные площадки видно только зайдя на "Обзор" — бейдж на
     // самой вкладке (как непрочитанные в Telegram) сигналит о них,
@@ -622,8 +639,9 @@ const render = {
       // (s.schedule_enabled), а не сохраняется вручную между опросами —
       // рендер и так пропускается, пока status не изменится (см. unchanged
       // выше), так что раньше поставленная галочка не мигает.
-      document.getElementById("source-grid").innerHTML = applySourceOrder(status.sources, "name")
-        .map((s, i) => {
+      const ruSources = status.sources.filter((s) => !INTL_SOURCES.has(s.name));
+      const intlSources = status.sources.filter((s) => INTL_SOURCES.has(s.name));
+      const renderSourceCard = (s, i) => {
           const dot = STATUS_DOT[s.status] || "never_run";
           const ratio = s.daily_limit
             ? Math.min(1, s.applied_today / s.daily_limit)
@@ -639,6 +657,7 @@ const render = {
           // класть найденное в Историю, ничего не отправляя.
           const isSearchOnly =
             s.name === "telegram" ? !s.auto_message : !s.auto_apply;
+          const isRunning = runNow.running && runNow.current_source === s.name;
           const responseRow = isSearchOnly
             ? `<div class="row"><span>Режим</span><span>🔍 только поиск</span></div>`
             : `<div class="row"><span>Откликов сегодня</span>
@@ -650,10 +669,12 @@ const render = {
                 ${s.applied_today}/${s.daily_limit}
               </span></div>`;
           return `
-          <div class="source-card stagger-item" data-source="${s.name}" draggable="true" style="animation-delay:${staggerDelay(i)}">
+          <div class="source-card stagger-item${isRunning ? " is-running" : ""}" data-source="${s.name}" draggable="true" style="animation-delay:${staggerDelay(i)}">
             <div class="source-card-actions">
-              <button type="button" class="src-run-now" data-source="${s.name}" title="Запустить эту площадку прямо сейчас, не дожидаясь расписания" aria-label="Запустить сейчас ${sourceLabel(s.name)}">
-                <svg viewBox="0 0 20 20" fill="none"><path d="M7 5.2v9.6l8-4.8-8-4.8Z" fill="currentColor"/></svg>
+              <button type="button" class="src-run-now${isRunning ? " is-stop" : ""}" data-source="${s.name}" data-running="${isRunning ? "1" : "0"}" title="${isRunning ? "Остановить (текущая заявка досылается, следующая не начнётся)" : "Запустить эту площадку прямо сейчас, не дожидаясь расписания"}" aria-label="${isRunning ? "Остановить" : "Запустить сейчас"} ${sourceLabel(s.name)}">
+                ${isRunning
+                  ? `<svg viewBox="0 0 20 20" fill="none"><rect x="5.5" y="5.5" width="9" height="9" rx="1.5" fill="currentColor"/></svg>`
+                  : `<svg viewBox="0 0 20 20" fill="none"><path d="M7 5.2v9.6l8-4.8-8-4.8Z" fill="currentColor"/></svg>`}
               </button>
               <button type="button" class="src-goto-history" data-source="${s.name}" title="История откликов этой площадки" aria-label="История откликов ${sourceLabel(s.name)}">
                 <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.6"/><path d="M10 5.8V10l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -664,7 +685,7 @@ const render = {
             </div>
             <h3>
               <input type="checkbox" class="schedule-toggle switch" data-source="${s.name}" title="В расписании демона" ${s.schedule_enabled ? "checked" : ""} />
-              <span class="dot ${dot}"></span> ${sourceIconHtml(s.name)}${sourceLabel(s.name)}
+              <span class="dot ${isRunning ? "running" : dot}"></span> ${sourceIconHtml(s.name)}${sourceLabel(s.name)}
             </h3>
             <div class="row"><span>Расписание</span><span>${s.schedule_enabled ? `каждые ${s.interval_hours}ч` : "выключено"}</span></div>
             <div class="row"><span>Последний запуск</span><span>${fmtTime(s.last_run)}</span></div>
@@ -672,9 +693,14 @@ const render = {
             ${responseRow}
             ${errorRowHtml(s.last_error)}
           </div>`;
-        })
+      };
+      document.getElementById("source-grid-ru").innerHTML = applySourceOrder(ruSources, "name", "cj-source-order-ru")
+        .map(renderSourceCard)
         .join("");
-      document.getElementById("chat-checks-grid").innerHTML = applySourceOrder(status.chat_checks, "name")
+      document.getElementById("source-grid-intl").innerHTML = applySourceOrder(intlSources, "name", "cj-source-order-intl")
+        .map(renderSourceCard)
+        .join("");
+      document.getElementById("chat-checks-grid").innerHTML = applySourceOrder(status.chat_checks, "name", "cj-source-order")
         .map((c, i) => {
           const dot = STATUS_DOT[c.status] || "never_run";
           return `
@@ -1426,6 +1452,78 @@ async function startGenerate(kind) {
   pollGenerateStatus();
 }
 
+async function pollResumeAuditStatus() {
+  const statusEl = document.getElementById("gen-status");
+  const progressEl = document.getElementById("gen-progress");
+  for (;;) {
+    const result = await api("/api/generate/status");
+    if (!result.running) {
+      progressEl.classList.remove("active");
+      if (result.error) {
+        statusEl.textContent = `Ошибка: ${result.error}`;
+        showToast("Не удалось выполнить аудит резюме", "error");
+      } else if (result.ready && result.result) {
+        statusEl.textContent = "Готово.";
+        showToast("Аудит резюме готов", "success");
+        openResumeAuditModal(result.result);
+      }
+      return;
+    }
+    statusEl.textContent = "Аудит резюме (3 шага, может занять до минуты)…";
+    progressEl.classList.add("active");
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+
+async function startResumeAudit() {
+  const statusEl = document.getElementById("gen-status");
+  const downloadEl = document.getElementById("gen-download");
+  const progressEl = document.getElementById("gen-progress");
+  const jobUrl = document.getElementById("gen-job-url").value.trim() || null;
+  if (!jobUrl) {
+    showToast("Укажите ссылку на вакансию.", "error");
+    return;
+  }
+  downloadEl.style.display = "none";
+  statusEl.textContent = "Запуск…";
+  progressEl.classList.add("active");
+  try {
+    await api("/api/generate/resume-audit", {
+      method: "POST",
+      body: JSON.stringify({ job_url: jobUrl }),
+    });
+  } catch (e) {
+    statusEl.textContent = `Ошибка: ${e.message}`;
+    progressEl.classList.remove("active");
+    return;
+  }
+  pollResumeAuditStatus();
+}
+
+function openResumeAuditModal(result) {
+  document.getElementById("resume-audit-meta").textContent =
+    document.getElementById("gen-job-url").value.trim();
+  document.getElementById("resume-audit-body").textContent = result.audit || "";
+  document.getElementById("resume-audit-ats-hm-body").textContent =
+    result.ats_hiring_manager || "";
+  document.getElementById("resume-audit-rewrite-body").textContent =
+    result.rewritten_experience || "";
+  const overlay = document.getElementById("resume-audit-overlay");
+  overlay.style.display = "flex";
+  trapFocus(overlay);
+}
+
+function closeResumeAuditModal() {
+  const overlay = document.getElementById("resume-audit-overlay");
+  if (overlay.style.display === "none") return;
+  overlay.style.display = "none";
+  releaseFocusTrap(overlay);
+}
+
+function isResumeAuditModalOpen() {
+  return document.getElementById("resume-audit-overlay").style.display !== "none";
+}
+
 function switchSettingsTab(paneId) {
   document
     .querySelectorAll("#settings-jump button")
@@ -1831,6 +1929,14 @@ function initCommandPalette() {
   document
     .getElementById("cover-letter-close")
     .addEventListener("click", closeCoverLetterModal);
+
+  const resumeAuditOverlay = document.getElementById("resume-audit-overlay");
+  resumeAuditOverlay.addEventListener("click", (e) => {
+    if (e.target === resumeAuditOverlay) closeResumeAuditModal();
+  });
+  document
+    .getElementById("resume-audit-close")
+    .addEventListener("click", closeResumeAuditModal);
 }
 
 function openCoverLetterModal(entry) {
@@ -1888,6 +1994,10 @@ function initKeyboardShortcuts() {
 
     if (isCoverLetterModalOpen()) {
       if (e.key === "Escape") closeCoverLetterModal();
+      return;
+    }
+    if (isResumeAuditModalOpen()) {
+      if (e.key === "Escape") closeResumeAuditModal();
       return;
     }
 
@@ -2179,20 +2289,20 @@ const COPY_ICON_SVG = `<svg viewBox="0 0 20 20" fill="none"><rect x="7" y="7" wi
 
 // ---------- Drag-to-reorder карточек площадок ----------
 
-function loadSourceOrder() {
+function loadSourceOrder(storageKey) {
   try {
-    return JSON.parse(localStorage.getItem("cj-source-order") || "[]");
+    return JSON.parse(localStorage.getItem(storageKey) || "[]");
   } catch {
     return [];
   }
 }
 
-function saveSourceOrder(order) {
-  localStorage.setItem("cj-source-order", JSON.stringify(order));
+function saveSourceOrder(storageKey, order) {
+  localStorage.setItem(storageKey, JSON.stringify(order));
 }
 
-function applySourceOrder(items, key) {
-  const order = loadSourceOrder();
+function applySourceOrder(items, key, storageKey) {
+  const order = loadSourceOrder(storageKey);
   if (!order.length) return items;
   const rank = new Map(order.map((name, i) => [name, i]));
   return items
@@ -2200,7 +2310,7 @@ function applySourceOrder(items, key) {
     .sort((a, b) => (rank.get(a[key]) ?? 999) - (rank.get(b[key]) ?? 999));
 }
 
-function initDragReorder(gridId) {
+function initDragReorder(gridId, storageKey) {
   const grid = document.getElementById(gridId);
   let dragged = null;
   grid.addEventListener("dragstart", (e) => {
@@ -2222,7 +2332,7 @@ function initDragReorder(gridId) {
     if (!dragged) return;
     dragged = null;
     const order = [...grid.querySelectorAll(".source-card")].map((c) => c.dataset.source);
-    saveSourceOrder(order);
+    saveSourceOrder(storageKey, order);
   });
 }
 
@@ -2291,8 +2401,9 @@ function initDashboard() {
     const input = document.getElementById("llm-key-input");
     input.type = input.type === "password" ? "text" : "password";
   });
-  initDragReorder("source-grid");
-  initDragReorder("chat-checks-grid");
+  initDragReorder("source-grid-ru", "cj-source-order-ru");
+  initDragReorder("source-grid-intl", "cj-source-order-intl");
+  initDragReorder("chat-checks-grid", "cj-source-order");
   initChangelogPopover();
   initPointerEffects();
   initOnboardingTour();
@@ -2302,7 +2413,11 @@ function initDashboard() {
     const historyBtn = e.target.closest(".src-goto-history");
     const logsBtn = e.target.closest(".src-goto-logs");
     if (runBtn) {
-      runSourceNow(runBtn);
+      if (runBtn.dataset.running === "1") {
+        stopSourceNow(runBtn);
+      } else {
+        runSourceNow(runBtn);
+      }
     } else if (historyBtn) {
       document.getElementById("filter-source").value = historyBtn.dataset.source;
       switchTab("history");
@@ -2317,28 +2432,65 @@ function initDashboard() {
   // кнопки "Тестовый прогон") — чтобы не ждать next_run при отладке/
   // ручной проверке. Переиспользует тот же /api/run-now, что и общая
   // кнопка, просто с одним источником в списке.
+  //
+  // ponytail: раньше withButtonLoading держал is-loading на кнопке на
+  // ВСЁ время прогона (иногда минуты), пока рядом отдельный опрос
+  // overview (render.overview, раз в 7с) параллельно перерисовывал ту
+  // же карточку по server-side isRunning — два независимых источника
+  // правды дрались за один DOM-узел, и после пересборки innerHTML
+  // ссылка btn протухала, а visible-состояние "зависало". Теперь
+  // is-loading висит только на быстром POST-запуске, а "идёт/не идёт"
+  // всегда только из уже существующего опроса overview (пульс точки +
+  // свечение карточки) — второго индикатора больше нет.
   async function runSourceNow(btn) {
-    if (btn.classList.contains("is-loading")) return;
     const name = btn.dataset.source;
+    if (
+      !(await showConfirm(
+        `Запустить ${sourceLabel(name)} прямо сейчас? Это реальный прогон, ` +
+          `не тест — если у площадки включён автоотклик, заявки уйдут по-настоящему.`
+      ))
+    ) {
+      return;
+    }
     try {
-      await withButtonLoading(btn, async () => {
-        await api("/api/run-now", {
+      await withButtonLoading(btn, () =>
+        api("/api/run-now", {
           method: "POST",
           body: JSON.stringify({ sources: [name] }),
-        });
-        for (;;) {
-          const runStatus = await api("/api/run-now/status");
-          if (!runStatus.running) break;
-          await new Promise((r) => setTimeout(r, 3000));
-        }
-      });
-      showToast(`${sourceLabel(name)}: прогон завершён — см. Историю`, "success");
-      render.overview();
+        })
+      );
     } catch (e) {
       showToast(`Не удалось запустить ${sourceLabel(name)}: ${e.message}`, "error");
+      return;
+    }
+    render.overview();
+    watchSourceRunCompletion(name);
+  }
+
+  async function watchSourceRunCompletion(name) {
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const runStatus = await api("/api/run-now/status");
+      if (!runStatus.running || runStatus.current_source !== name) break;
+    }
+    showToast(`${sourceLabel(name)}: прогон завершён — см. Историю`, "success");
+    render.overview();
+  }
+
+  // Мягкий стоп: текущая уже начатая заявка досылается (см. main.py —
+  // stop_event проверяется между вакансиями, не посреди клика
+  // "Откликнуться"), следующая не начинается.
+  async function stopSourceNow(btn) {
+    const name = btn.dataset.source;
+    try {
+      await withButtonLoading(btn, () => api("/api/run-now/stop", { method: "POST" }));
+      showToast(`${sourceLabel(name)}: остановка запрошена`, "success");
+    } catch (e) {
+      showToast(`Не удалось остановить ${sourceLabel(name)}: ${e.message}`, "error");
     }
   }
-  document.getElementById("source-grid").addEventListener("click", handleSourceCardActionClick);
+  document.getElementById("source-grid-ru").addEventListener("click", handleSourceCardActionClick);
+  document.getElementById("source-grid-intl").addEventListener("click", handleSourceCardActionClick);
   document.getElementById("chat-checks-grid").addEventListener("click", handleSourceCardActionClick);
   requestAnimationFrame(repositionTabIndicators);
   window.addEventListener("resize", repositionTabIndicators);
@@ -2443,6 +2595,14 @@ function initDashboard() {
   document.getElementById("daemon-stop").addEventListener("click", async (ev) => {
     await withButtonLoading(ev.currentTarget, () => api("/api/daemon/stop", { method: "POST" }));
     showToast("Демон остановлен", "info");
+    render.overview();
+  });
+  document.getElementById("daemon-pause").addEventListener("click", async (ev) => {
+    const paused = ev.currentTarget.classList.contains("is-paused");
+    await withButtonLoading(ev.currentTarget, () =>
+      api(`/api/daemon/${paused ? "resume" : "pause"}`, { method: "POST" })
+    );
+    showToast(paused ? "Демон возобновлён" : "Демон на паузе", "info");
     render.overview();
   });
 
@@ -2617,6 +2777,9 @@ function initDashboard() {
   document
     .getElementById("gen-cover-letter")
     .addEventListener("click", () => startGenerate("cover-letter"));
+  document
+    .getElementById("gen-resume-audit")
+    .addEventListener("click", startResumeAudit);
 
   document
     .getElementById("refresh-plain-text")

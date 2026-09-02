@@ -11,18 +11,80 @@ from src.job_sources.preferences import effective_list
 # сайт нигде его не показывает.
 
 
+# ponytail: полнофразовое совпадение ("python разработчик" целиком)
+# вживую нашло 0 вакансий — реальные заголовки пишут "Python-
+# разработчик" (дефис, не пробел) или вовсе по-английски "Python
+# Developer". Родовые слова роли ни о чём не говорят и есть почти
+# везде — отбрасываем их и матчим по оставшимся словам через "или".
+_GENERIC_ROLE_WORDS = frozenset(
+    {
+        "разработчик",
+        "программист",
+        "специалист",
+        "инженер",
+        "developer",
+        "engineer",
+    }
+)
+
+
+def _significant_words(position: str) -> list:
+    words = [w.lower() for w in position.split() if len(w) >= 3]
+    significant = [w for w in words if w not in _GENERIC_ROLE_WORDS]
+    return significant or words
+
+
+def _matches_any_position(job: Job, positions: list) -> bool:
+    text = f"{job.role} {job.description}".lower()
+    return any(
+        word in text
+        for position in positions
+        for word in _significant_words(position)
+    )
+
+
+# ponytail: без ?q= листаем по пустой странице как стоп-сигналу (как
+# GeekjobSource — see PAGES_PER_POSITION), подтверждено вживую: p=10
+# за концом списка отдаёт 0 карточек, не ошибку. Потолок — на случай,
+# если сайт когда-нибудь перестанет отдавать пустую страницу и
+# зациклит листание.
+MAX_PAGES = 10
+
+
 class GetMatchSource:
     def __init__(self, client: GetMatchClient):
         self.client = client
 
     def search(self, preferences: dict) -> list[Job]:
+        gm_preferences = preferences.get("getmatch") or {}
+        specializations = gm_preferences.get("specializations") or []
+        # ponytail: с specializations сайт уже фильтрует сам через
+        # sp= (чекбоксы "Сфера" на живой странице) — точнее и дешевле,
+        # чем тащить весь общий список и грепать по словам (см.
+        # _matches_any_position ниже). Без specializations — старое
+        # поведение: общий список постранично + фильтр по positions
+        # на нашей стороне, как у TelegramSource._matches_any для той
+        # же ситуации (источник без серверного keyword-поиска).
+        positions = effective_list(preferences, "getmatch", "positions")
+
         seen_ids: set = set()
         jobs: list[Job] = []
+        for page in range(1, MAX_PAGES + 1):
+            html = self.client.search_vacancies_html(
+                page=page, specializations=specializations
+            )
+            items = parse_search_results(html)
+            if not items:
+                break
 
-        for position in effective_list(preferences, "getmatch", "positions"):
-            html = self.client.search_vacancies_html(position)
-            for job in parse_search_results(html):
+            for job in items:
                 if job.external_id in seen_ids:
+                    continue
+                if (
+                    not specializations
+                    and positions
+                    and not _matches_any_position(job, positions)
+                ):
                     continue
                 seen_ids.add(job.external_id)
                 if passes_blacklists(job, preferences):

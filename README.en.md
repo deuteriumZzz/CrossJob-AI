@@ -55,6 +55,7 @@ you can check what the bot is about to send before it sends anything.
 - HeadHunter: handles one more application-questionnaire variant — a separate `/applicant/vacancy_response` page (previously only the same-page modal was recognized).
 - A notification fires if not a single LLM call succeeded during a whole run (a sign of an exhausted free-tier limit) — vacancies still get scored via a fallback in that case, without a real LLM check.
 - Dashboard: a "🎲 Distribute across platforms" button splits the total daily application limit across every platform with scheduling enabled, in random shares (LinkedIn gets half the weight of the rest); a new "Salary expectations" panel keeps HH (RUB/month) and LinkedIn (USD/year) as separate fields for their separate markets.
+- Dashboard: a "🔍 Audit resume against job posting" button — a 3-step LLM chain (0-100 fit score + missing ATS keywords + red flags → a separate ATS-filter and "hiring manager" check → a rewritten experience section using the Google XYZ formula, grounded only in the real resume data, never invented years/roles). Cover letters (the plain-text version for HH/GetMatch/Wellfound/Himalayas and the extended PDF version) were rewritten around a more concrete structure: the biggest gap against the job posting is named outright instead of glossed over, and the closing gives one specific reason for wanting this particular company.
 
 ## Platforms
 
@@ -68,9 +69,10 @@ you can check what the bot is about to send before it sends anything.
 | GetMatch       | ✅ search + auto-apply (Next.js SPA — rendered via a real Selenium browser; login via a Telegram code, not a password) |
 | Telegram channels | ✅ search + optional cold outreach to contacts found in posts (personal account via the official Telegram API; no auto-reply to incoming messages, see [GUIDE.md](docs/GUIDE.md) (RU)) |
 | LinkedIn       | ✅ search (worldwide/by-country, remote only) + Easy Apply auto-apply (`undetected-chromedriver`, LLM answers screening questions in English) — verified on a live account 2026-08-23, see [GUIDE.md](docs/GUIDE.md) (RU) |
+| Wellfound      | ✅ search (JSON-LD schema.org, verified against a live request 2026-09-02) + best-effort auto-apply through the Apply Now modal — NOT verified on a live logged-in account, see [GUIDE.md](docs/GUIDE.md) (RU) |
+| Himalayas      | 🟡 experimental — search and auto-apply are implemented (`undetected-chromedriver`, same as LinkedIn), but NOT verified on a live account: anonymous access to /jobs and /companies/... is blocked by the site's anti-bot interstitial, see [GUIDE.md](docs/GUIDE.md) (RU) |
 | careerspace.app| planned, low priority (confirmed: `/jobs` is a small personalized feed — no keyword search, no pagination; "Ссылка на отклик" requires login and where it leads is unconfirmed) |
 | hirify.me      | planned (job aggregator, including Telegram channels) |
-| himalayas.app  | planned (search only — apply redirects to the company's external ATS, no auto-apply) |
 
 ## Chances of landing a job, by platform (based on 2026 data)
 
@@ -85,6 +87,8 @@ The table above is about what the bot can technically do. This one is about the 
 | GetMatch | 🟡 Medium-high (IT) | Open salaries, honest rules of the game, but an expensive platform for employers and high competition — averages ~92 applications per listing ([vc.ru](https://vc.ru/id5887884/2870166-saity-dlya-poiska-raboty-v-it)) |
 | rabota.ru | 🟡 Medium | Reliable listings from stable companies, but there are complaints about stale postings and fewer interview invitations than on hh.ru ([otzovik.com](https://otzovik.com/reviews/rabota_ru-internet-servis_po_poisku_raboti_i_podboru_personala/)) |
 | LinkedIn | 🟡 Medium | 87% of recruiters call LinkedIn the best tool for vetting candidates, but the response rate on direct applications is only 3-13% — 85% of actual hires close through networking/referrals, not job-posting applications ([Zippia](https://www.zippia.com/advice/linkedin-statistics/), [LinkedCraft](https://linkedcraft.io/blog/linkedin-networking-statistics-2026)) |
+| Wellfound | 🟡 Medium (startups, English-speaking market) | Niche — early/growth-stage startups (YC and similar), not large corporate hiring; strong fit if the candidate specifically targets the startup scene ([Wellfound About](https://wellfound.com/about)) |
+| Himalayas | 🟡 Medium (remote, English-speaking market) | Dedicated remote-only board, 200k+ job seekers claimed by the platform itself — less competition than LinkedIn, but also fewer listings |
 | geekjob.ru | 🟡 Medium-low (IT) | A niche platform (averages 15-20 listings/month across classic IT tracks), HR experts are more skeptical of it than of hh.ru/Habr Career — useful as a secondary channel, not a primary one ([hrtime.ru](https://hrtime.ru/material/geekjob-ploshchadka-rabotaet-ili-net-59698/)) |
 
 ## Quick start
@@ -113,7 +117,7 @@ in [docs/GUIDE.md](docs/GUIDE.md) (Russian only).
 Non-interactive run (for cron):
 
 ```bash
-python main.py --auto headhunter   # or superjob / geekjob / rabota_ru / telegram / getmatch / linkedin / habr_career
+python main.py --auto headhunter   # or superjob / geekjob / rabota_ru / telegram / getmatch / linkedin / habr_career / wellfound / himalayas
 python main.py --auto all          # all platforms in sequence, with pauses
 ```
 
@@ -165,6 +169,8 @@ The values below are defaults from `config.py`, changed on the fly in the dashbo
 | GetMatch | No daily limit of its own — `job_max_applications` per run | 5 | No official API — same cooldown |
 | Telegram channels | `telegram.daily_message_limit` = 15 cold messages/day | `messages_per_channel` = 100 messages per channel per run | Personal account, not an API integration — no platform limit |
 | LinkedIn | `LINKEDIN_DAILY_APPLICATION_LIMIT` = 8 (±70-100%) | 5 | No official API — automation is against ToS, see the caveat in [GUIDE.md](docs/GUIDE.md) (RU) |
+| Wellfound | Shared `DAILY_APPLICATION_LIMIT` (unless overridden in the `wellfound:` block) | 5 | No official API — 24h cooldown on captcha/ban signals |
+| Himalayas | Shared `DAILY_APPLICATION_LIMIT` (unless overridden in the `himalayas:` block) | 5 | No official API — same cooldown; the site also shows an anti-bot interstitial on suspicious traffic |
 
 Plus an optional `apply_once_at_company` (never apply to the same company twice) and an optional `limits.total_daily_application_limit` — a hard ceiling across all platforms at once. More on anti-ban pacing in [GUIDE.md](docs/GUIDE.md) (RU).
 

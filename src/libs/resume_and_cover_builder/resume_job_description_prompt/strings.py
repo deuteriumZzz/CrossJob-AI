@@ -127,8 +127,24 @@ location.
 2. **Job Title**: Clearly state your job title.
 3. **Dates of Employment**: Include the start and end dates of your employment.
 4. **Responsibilities and Achievements**: Describe your key responsibilities
-and notable achievements, emphasizing measurable results and specific
-contributions.
+and notable achievements as individual bullet points, following ALL of these
+rules:
+   - Naturally work in keywords/phrases an ATS would search for based on the
+     job description — but never force them in; they must read as an
+     ordinary part of the bullet, not a keyword dump.
+   - Use the Google XYZ formula for each bullet: "Achieved [X], as measured
+     by [Y], by doing [Z]".
+   - Start every bullet with a strong action verb. Never use "Responsible
+     for" or "Helped with".
+   - Add specific numbers wherever the source data supports it (scale,
+     percentage, team size, time saved, revenue, etc).
+   - Each bullet is at most 1-2 lines — hiring managers skim, dense
+     paragraphs get skipped.
+   - Order bullets within each job by the strength of the result, not by
+     chronology — the single most impressive result comes first.
+   - Every bullet must be grounded in the work experience details actually
+     provided below — never invent responsibilities, achievements, numbers,
+     or years of experience that aren't supported by that data.
 
 Ensure that the descriptions highlight relevant experience and align with the
 job description.

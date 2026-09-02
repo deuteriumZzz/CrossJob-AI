@@ -61,6 +61,38 @@ _STALE_CACHE_SUBDIRS = (
 def clear_profile_cache(profile_dir: Path) -> None:
     for rel in _STALE_CACHE_SUBDIRS:
         shutil.rmtree(profile_dir / rel, ignore_errors=True)
+    _reset_bloated_preferences(profile_dir)
+
+
+# ponytail: found live — LinkedIn's persistent profile hit 2.3GB in
+# "Default/Preferences" alone (whole profile 2.5GB) and Chrome could no
+# longer start at all ("session not created: cannot connect to chrome").
+# The file's "name" field was a multi-gigabyte string that looked like
+# repeated UTF-8-as-Latin-1 mojibake (Ã... repeating) — each
+# rewrite of an already-mangled value roughly doubles it, so a per-launch
+# encoding bug compounds into gigabytes within days. Preferences holds only
+# browser-level settings, not the site login session (that's Cookies/
+# IndexedDB/Local Storage, untouched here), so it's safe to drop outright —
+# Chrome regenerates a fresh default one and the site stays logged in.
+# 20MB is a generous ceiling: every healthy profile observed in this project
+# stays under 25KB. Upgrade path if a legitimate profile ever needs more:
+# reset just the oversized key instead of the whole file.
+_MAX_PREFERENCES_BYTES = 20 * 1024 * 1024
+
+
+def _reset_bloated_preferences(profile_dir: Path) -> None:
+    prefs = profile_dir / "Default" / "Preferences"
+    try:
+        size = prefs.stat().st_size
+    except FileNotFoundError:
+        return
+    if size > _MAX_PREFERENCES_BYTES:
+        logger.warning(
+            f"{prefs} is {size / 1_048_576:.0f}MB "
+            f"(>{_MAX_PREFERENCES_BYTES // 1_048_576}MB) — looks corrupted, "
+            "resetting to defaults."
+        )
+        prefs.unlink(missing_ok=True)
 
 
 def is_driver_dead(driver) -> bool:

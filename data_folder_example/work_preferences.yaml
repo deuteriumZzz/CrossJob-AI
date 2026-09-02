@@ -121,6 +121,16 @@ check_hh_replies:
 getmatch:
   auto_apply: false
 
+  # GetMatch dropped free-text search from /vacancies (confirmed live
+  # 2026-09-02) — the only server-side filter left is its "Сфера"
+  # checkboxes. List their slugs here (open getmatch.ru/vacancies,
+  # click "Изменить" under "Сфера", inspect a checkbox's `name`
+  # attribute — e.g. python, golang, data_science, dev_ops,
+  # blockchain_crypto). Leave empty/unset to fall back to scanning the
+  # unfiltered list and matching it against `positions` instead.
+  # specializations:
+  #   - python
+
 # Optional: only needed for the "Search & Apply on geekjob.ru" action.
 # Logs in only via OAuth (Google, VK, Mail.Ru, etc.) — no password is
 # ever entered by code, you complete login by hand in the browser
@@ -191,5 +201,21 @@ linkedin:
 # Keep auto_apply: false until you've reviewed a dry run — this flow is
 # unverified against a live career.habr.com account, see docs/GUIDE.md.
 habr_career:
+  auto_apply: false
+
+# Optional: only needed for the "Search & Apply on Wellfound" action.
+# Keep auto_apply: false until you've reviewed a dry run — this flow is
+# unverified against a live wellfound.com account, see docs/GUIDE.md.
+# positions above are matched against wellfound's own role taxonomy
+# (e.g. "python developer", "product manager") — not every position
+# will find a match there.
+wellfound:
+  auto_apply: false
+
+# Optional: only needed for the "Search & Apply on Himalayas" action.
+# Keep auto_apply: false until you've reviewed a dry run — this flow is
+# unverified against a live himalayas.app account (the site shows an
+# anti-bot check page for anonymous browsing, see docs/GUIDE.md).
+himalayas:
   auto_apply: false
 

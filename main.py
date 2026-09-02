@@ -3,12 +3,13 @@ import binascii
 import re
 import shutil
 import sys
+import threading
 import time
 import traceback
 from contextlib import nullcontext
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal, Optional, Tuple
+from typing import Callable, Literal, Optional, Tuple
 
 import click
 import inquirer
@@ -87,6 +88,9 @@ from src.job_sources.headhunter.telegram_approval import (
     save_pending_form,
     update_pending_form_answers,
 )
+from src.job_sources.himalayas.apply import apply_to_job as apply_to_himalayas_job
+from src.job_sources.himalayas.auth import HimalayasSession
+from src.job_sources.himalayas.source import HimalayasSource
 from src.job_sources.job_fit import classify_fit, score_job_fit
 from src.job_sources.linkedin.answerer import EasyApplyAnswerer
 from src.job_sources.linkedin.auth import LinkedInSession
@@ -122,6 +126,7 @@ from src.job_sources.reply_answerer import (
     generate_reply,
     message_needs_reply,
 )
+from src.job_sources.resume_audit import run_full_resume_audit
 from src.job_sources.resume_profile import (
     extract_plain_text_resume,
     infer_positions_from_resume,
@@ -136,6 +141,9 @@ from src.job_sources.telegram_notify import (
     notify_from_secrets,
     send_notification,
 )
+from src.job_sources.wellfound.auth import WellfoundSession
+from src.job_sources.wellfound.client import WellfoundClient
+from src.job_sources.wellfound.source import WellfoundSource
 from src.libs.resume_and_cover_builder import (
     ResumeFacade,
     ResumeGenerator,
@@ -712,6 +720,51 @@ def create_cover_letter(
         raise
 
 
+def create_resume_audit(
+    parameters: dict,
+    llm_api_key: str,
+    job_url: str,
+) -> dict:
+    """
+    Аудит резюме под конкретную вакансию (дашборд — тот же блок
+    "Резюме под вакансию"/"Сопроводительное письмо"). Вакансия
+    скрейпится тем же путём, что и в create_cover_letter выше
+    (ResumeFacade.link_to_job — Selenium + LLMParser), резюме читается
+    как обычный текст (как в job_fit.py/cover_letter.py). PDF/стиль
+    здесь не нужны — результат 3-шаговой LLM-цепочки из
+    resume_audit.py возвращается как текст, не как файл.
+    """
+    logger.info("Running resume audit against job posting: %s", job_url)
+
+    plain_text_resume_file = ensure_plain_text_resume(
+        parameters, llm_api_key
+    )
+    with open(plain_text_resume_file, "r", encoding="utf-8") as file:
+        plain_text_resume = file.read()
+
+    style_manager = StyleManager()
+    resume_generator = ResumeGenerator()
+    resume_object = Resume(plain_text_resume)
+    resume_generator.set_resume_object(resume_object)
+    driver = init_browser()
+    resume_facade = ResumeFacade(
+        api_key=llm_api_key,
+        style_manager=style_manager,
+        resume_generator=resume_generator,
+        resume_object=resume_object,
+        output_path=Path(parameters["outputFileDirectory"]),
+    )
+    resume_facade.set_driver(driver)
+    resume_facade.link_to_job(job_url)
+    job = resume_facade.job
+    driver.quit()
+
+    job_description_text = f"{job.role} — {job.company}\n\n{job.description}"
+    return run_full_resume_audit(
+        plain_text_resume, job_description_text, llm_api_key
+    )
+
+
 def create_resume_pdf_job_tailored(
     parameters: dict,
     llm_api_key: str,
@@ -1068,7 +1121,11 @@ def _job_max_applications(
     )
 
 
-def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
+def search_and_apply_headhunter(
+    parameters: dict,
+    llm_api_key: str,
+    stop_event: Optional[threading.Event] = None,
+):
     """
     Ищет на HeadHunter вакансии по work_preferences.yaml через
     настоящую браузерную сессию hh.ru (вход по номеру телефона + SMS —
@@ -1144,6 +1201,9 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
         sent_count = 0
         job_max_applications = _job_max_applications(parameters, "headhunter")
         for job in jobs:
+            if stop_event is not None and stop_event.is_set():
+                logger.info("Stop requested — прерываю перед следующей вакансией.")
+                break
             if sent_count >= job_max_applications:
                 logger.info(
                     f"Reached JOB_MAX_APPLICATIONS "
@@ -1290,7 +1350,11 @@ def search_and_apply_headhunter(parameters: dict, llm_api_key: str):
             sent_count += 1
 
 
-def search_geekjob(parameters: dict, llm_api_key: str):
+def search_geekjob(
+    parameters: dict,
+    llm_api_key: str,
+    stop_event: Optional[threading.Event] = None,
+):
     """
     Ищет на geekjob.ru вакансии по work_preferences.yaml. Если
     geekjob.auto_apply — true, откликается кликом на кнопку
@@ -1349,6 +1413,9 @@ def search_geekjob(parameters: dict, llm_api_key: str):
     sent_count = 0
     job_max_applications = _job_max_applications(parameters, "geekjob")
     for job in jobs:
+        if stop_event is not None and stop_event.is_set():
+            logger.info("Stop requested — прерываю перед следующей вакансией.")
+            break
         if sent_count >= job_max_applications:
             logger.info(
                 f"Reached JOB_MAX_APPLICATIONS "
@@ -1436,7 +1503,11 @@ TELEGRAM_INTRO_TEMPLATE_DEFAULT = (
 )
 
 
-def search_telegram(parameters: dict, llm_api_key: str):
+def search_telegram(
+    parameters: dict,
+    llm_api_key: str,
+    stop_event: Optional[threading.Event] = None,
+):
     """
     Ищет в настроенных Telegram-каналах свежие посты по
     ключевым словам из positions в work_preferences.yaml и пишет
@@ -1507,6 +1578,9 @@ def search_telegram(parameters: dict, llm_api_key: str):
         sent_count = 0
         job_max_applications = _job_max_applications(parameters, "telegram")
         for job in jobs:
+            if stop_event is not None and stop_event.is_set():
+                logger.info("Stop requested — прерываю перед следующей вакансией.")
+                break
             if sent_count >= job_max_applications:
                 logger.info(
                     f"Reached JOB_MAX_APPLICATIONS "
@@ -1604,7 +1678,11 @@ def search_telegram(parameters: dict, llm_api_key: str):
             sent_count += 1
 
 
-def search_getmatch(parameters: dict, llm_api_key: str):
+def search_getmatch(
+    parameters: dict,
+    llm_api_key: str,
+    stop_event: Optional[threading.Event] = None,
+):
     """
     Ищет на GetMatch вакансии по work_preferences.yaml. Если
     getmatch.auto_apply — true, откликается кликом на "Откликнуться"
@@ -1667,6 +1745,9 @@ def search_getmatch(parameters: dict, llm_api_key: str):
         sent_count = 0
         job_max_applications = _job_max_applications(parameters, "getmatch")
         for job in jobs:
+            if stop_event is not None and stop_event.is_set():
+                logger.info("Stop requested — прерываю перед следующей вакансией.")
+                break
             if sent_count >= job_max_applications:
                 logger.info(
                     f"Reached JOB_MAX_APPLICATIONS "
@@ -1725,8 +1806,10 @@ def search_getmatch(parameters: dict, llm_api_key: str):
                 else:
                     status = "dry_run"
                     logger.warning(
-                        "Кнопка 'Откликнуться' не найдена на "
-                        f"{job.link} — записано как dry-run."
+                        "Не удалось откликнуться на "
+                        f"{job.link} (кнопка не найдена или GetMatch "
+                        "показал анкету вместо формы отклика) — "
+                        "записано как dry-run."
                     )
             else:
                 status = "dry_run"
@@ -1746,7 +1829,11 @@ def search_getmatch(parameters: dict, llm_api_key: str):
             sent_count += 1
 
 
-def search_and_apply_linkedin(parameters: dict, llm_api_key: str):
+def search_and_apply_linkedin(
+    parameters: dict,
+    llm_api_key: str,
+    stop_event: Optional[threading.Event] = None,
+):
     """
     Ищет вакансии LinkedIn Easy Apply и, если linkedin.auto_apply
     выставлен в true, откликается через многошаговую модалку —
@@ -1816,6 +1903,9 @@ def search_and_apply_linkedin(parameters: dict, llm_api_key: str):
         job_max_applications = _job_max_applications(parameters, "linkedin")
 
         for job in jobs:
+            if stop_event is not None and stop_event.is_set():
+                logger.info("Stop requested — прерываю перед следующей вакансией.")
+                break
             if sent_count >= job_max_applications:
                 logger.info(
                     f"Reached JOB_MAX_APPLICATIONS "
@@ -1896,17 +1986,19 @@ def search_and_apply_linkedin(parameters: dict, llm_api_key: str):
                 continue
 
             try:
-                # force_russian=False: LinkedIn ждёт оформленный PDF
-                # (см. docstring этой функции) и обычно
-                # публикует вакансии на английском — язык здесь
+                # template="auto_plain": Easy Apply не прикладывает
+                # письмо как PDF (см. докстринг этой функции выше) —
+                # оно только пишется в applied_log/дашборд, поэтому
+                # letterhead-шаблон (template="html") тут не нужен и
+                # раньше оставлял в дашборде буквальные HTML-теги и
+                # незаполненные "[Your Name]"/"[Company Name]". Язык
                 # по-прежнему определяется по тексту вакансии, а не
-                # закреплён за русским, в отличие от остальных
-                # площадок.
+                # закреплён, в отличие от остальных площадок.
                 cover_letter = generate_cover_letter_for_job(
                     resume_pdf_path,
                     job,
                     llm_api_key,
-                    force_russian=False,
+                    template="auto_plain",
                 )
             except Exception as e:
                 logger.exception(
@@ -1930,7 +2022,11 @@ def search_and_apply_linkedin(parameters: dict, llm_api_key: str):
         session.quit()
 
 
-def search_and_apply_habr_career(parameters: dict, llm_api_key: str):
+def search_and_apply_habr_career(
+    parameters: dict,
+    llm_api_key: str,
+    stop_event: Optional[threading.Event] = None,
+):
     """
     Ищет вакансии на career.habr.com (positions из work_preferences.yaml
     ищутся через ?q= — свободный текстовый поиск) и, если
@@ -2003,6 +2099,9 @@ def search_and_apply_habr_career(parameters: dict, llm_api_key: str):
     # ниже просто переходит на следующую страницу тем же окном.
     with client if auto_apply else nullcontext():
         for job in jobs:
+            if stop_event is not None and stop_event.is_set():
+                logger.info("Stop requested — прерываю перед следующей вакансией.")
+                break
             if sent_count >= job_max_applications:
                 logger.info(
                     f"Reached JOB_MAX_APPLICATIONS "
@@ -2093,6 +2192,392 @@ def search_and_apply_habr_career(parameters: dict, llm_api_key: str):
             sent_count += 1
 
 
+def search_and_apply_wellfound(
+    parameters: dict,
+    llm_api_key: str,
+    stop_event: Optional[threading.Event] = None,
+):
+    """
+    Ищет вакансии на wellfound.com (роли из positions в
+    work_preferences.yaml сопоставляются с таксономией ролей
+    wellfound — совпадение не гарантировано на каждую позицию, см.
+    src/job_sources/wellfound/client.py) и, если wellfound.auto_apply
+    выставлен в true, пробует откликнуться через модалку "Apply Now"
+    (?autoOpenApplication=true, подтверждено вживую 2026-09-02).
+
+    Вход/регистрация — вручную в открывшемся браузере
+    (WellfoundSession), как и у остальных площадок проекта: бот
+    никогда не создаёт аккаунт и не подставляет пароль сам. Реальный
+    apply НЕ подтверждён на живом залогиненном аккаунте (см. docstring
+    WellfoundClient.apply) — если после перехода модалка всё ещё
+    просит пароль (сессия не аутентифицирована), вакансия тихо
+    считается dry-run, ничего не отправляется.
+
+    auto_apply: false по умолчанию независимо от того, что в итоге
+    стоит в work_preferences.yaml — первый запуск всегда dry-run.
+    """
+    data_folder: Path = parameters["dataFolder"]
+    resume_pdf_path = data_folder / RESUME_PDF_LINKEDIN
+    if resume_pdf_path.exists():
+        logger.info(f"Using {RESUME_PDF_LINKEDIN} for wellfound.com.")
+    else:
+        resume_pdf_path = data_folder / RESUME_PDF
+        logger.info(
+            f"{RESUME_PDF_LINKEDIN} not found — falling back to "
+            f"{RESUME_PDF} for wellfound.com (English-language "
+            f"startup market — add {RESUME_PDF_LINKEDIN} to use a "
+            "separate resume here)."
+        )
+    if not resume_pdf_path.exists():
+        raise FileNotFoundError(
+            f"Resume PDF not found: {resume_pdf_path}. Place your "
+            f"resume as '{RESUME_PDF}' (or '{RESUME_PDF_LINKEDIN}') "
+            f"in {data_folder}."
+        )
+
+    profile_path = data_folder / "job_application_profile.yaml"
+    if not profile_path.exists():
+        raise FileNotFoundError(
+            f"job_application_profile.yaml not found: {profile_path}. "
+            "Required for wellfound's application questions "
+            "(see data_folder_example/)."
+        )
+    profile = JobApplicationProfile(profile_path.read_text(encoding="utf-8"))
+
+    wf_preferences = parameters.get("wellfound") or {}
+    auto_apply = bool(wf_preferences.get("auto_apply", False))
+
+    output_folder: Path = parameters["outputFileDirectory"]
+    applied_log = AppliedLog(output_folder / "applied_log.json")
+
+    if is_still_blocked(output_folder, "wellfound"):
+        logger.warning("wellfound.com is cooling down after a block — skipping.")
+        return
+
+    profile_dir = output_folder / ".chrome_profile_wellfound"
+    client = WellfoundClient()
+    source: JobSource = WellfoundSource(client)
+    try:
+        jobs = source.search(parameters)
+    except PlatformBlockedError as e:
+        logger.error(f"wellfound.com appears to have blocked us: {e}")
+        mark_blocked(output_folder, "wellfound")
+        notify(
+            parameters,
+            f"wellfound.com: похоже на блокировку ({e}). "
+            "Площадка поставлена на паузу на 24ч.",
+        )
+        return
+    logger.info(f"Found {len(jobs)} matching wellfound.com vacancies.")
+
+    if auto_apply:
+        WellfoundSession(profile_dir).ensure_logged_in(parameters)
+
+    resume_text = extract_pdf_text(str(resume_pdf_path))
+    sent_count = 0
+    job_max_applications = _job_max_applications(parameters, "wellfound")
+    daily_limit = randomized_daily_limit(_daily_limit(parameters, "wellfound"))
+    for job in jobs:
+        if stop_event is not None and stop_event.is_set():
+            logger.info("Stop requested — прерываю перед следующей вакансией.")
+            break
+        if sent_count >= job_max_applications:
+            logger.info(
+                f"Reached JOB_MAX_APPLICATIONS "
+                f"({job_max_applications}) for this run."
+            )
+            break
+        if _total_daily_limit_reached(parameters, applied_log):
+            break
+        if applied_log.already_applied(job):
+            continue
+        if (
+            auto_apply
+            and applied_log.applied_today_count("wellfound") >= daily_limit
+        ):
+            logger.info(
+                f"Reached daily application limit ({daily_limit}) "
+                "for wellfound.com today."
+            )
+            break
+
+        fit = score_job_fit(
+            resume_pdf_path,
+            job,
+            llm_api_key,
+            salary_expectations=(
+                profile.salary_expectations.salary_range_usd or ""
+            ),
+        )
+        tier = classify_fit(
+            fit.score,
+            _job_min_score(parameters),
+            _job_suitability_score(parameters),
+        )
+        if tier == "skip":
+            logger.info(
+                f"Skipping {job.role} at {job.company}: fit score "
+                f"{fit.score}/10 below minimum."
+            )
+            applied_log.record(
+                job, "", "", "skipped_low_fit", fit.score, fit.gaps
+            )
+            continue
+        if tier == "weak":
+            logger.info(
+                f"{job.role} at {job.company}: weak fit "
+                f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
+            )
+
+        try:
+            # template="en_plain" — английский plain-текстовый шаблон
+            # (см. cover_letter.py): у wellfound нет поля для загрузки
+            # PDF, письмо тут только для applied_log/дашборда, который
+            # ждёт обычный текст, а не HTML-бланк LinkedIn.
+            cover_letter = generate_cover_letter_for_job(
+                resume_pdf_path, job, llm_api_key, template="en_plain"
+            )
+        except Exception as e:
+            logger.exception(
+                f"Failed to generate cover letter for {job.role} at "
+                f"{job.company}, skipping this vacancy: {e}"
+            )
+            continue
+
+        if auto_apply:
+            answerer = EasyApplyAnswerer(
+                resume_text, profile, job, llm_api_key
+            )
+            applied = client.apply(job.link, profile_dir, answerer.answer)
+            if applied:
+                status: Literal["applied", "dry_run"] = "applied"
+                logger.info(
+                    f"Applied to {job.role} at {job.company} ({job.link})"
+                )
+            else:
+                status = "dry_run"
+                logger.warning(
+                    "Не удалось подтверждённо отправить отклик на "
+                    f"{job.link} — записано как dry-run."
+                )
+        else:
+            status = "dry_run"
+            logger.info(
+                f"[manual apply needed] {job.role} at {job.company} "
+                f"({job.link})"
+            )
+
+        applied_log.record(
+            job,
+            cover_letter,
+            resume_id="",
+            status=status,
+            score=fit.score,
+            gaps=fit.gaps,
+        )
+        sent_count += 1
+
+
+def search_and_apply_himalayas(
+    parameters: dict,
+    llm_api_key: str,
+    stop_event: Optional[threading.Event] = None,
+):
+    """
+    Ищет вакансии на himalayas.app (роли из positions в
+    work_preferences.yaml ищутся через /jobs/{slug}) и, если
+    himalayas.auto_apply выставлен в true, пробует откликнуться через
+    apply_to_himalayas_job — best-effort, НЕ проверено на живом
+    залогиненном аккаунте (см. docstring src/job_sources/himalayas/
+    apply.py и search.py: /jobs и /companies/... отдают анти-бот
+    интерстишл в анонимном режиме, поэтому реальную разметку карточек/
+    формы отклика подтвердить вживую не удалось — тот же класс риска,
+    что был у wellfound.com при первом добавлении).
+
+    Вход — вручную в открывшемся браузере (HimalayasSession,
+    undetected-chromedriver — как и у LinkedIn, см. docstring
+    init_himalayas_browser), бот никогда не создаёт аккаунт и не
+    подставляет пароль сам. Один Chrome-процесс переиспользуется на
+    весь прогон (поиск + все отклики), как и у LinkedIn/HabrCareer —
+    не открывается заново на каждую вакансию.
+
+    auto_apply: false по умолчанию независимо от того, что в итоге
+    стоит в work_preferences.yaml — первый запуск всегда dry-run,
+    смотрите лог "Found N matching himalayas.app vacancies" и при 0
+    результатах пришлите разработчику разметку страницы для правки
+    селекторов, прежде чем включать auto_apply.
+    """
+    data_folder: Path = parameters["dataFolder"]
+    resume_pdf_path = data_folder / RESUME_PDF_LINKEDIN
+    if resume_pdf_path.exists():
+        logger.info(f"Using {RESUME_PDF_LINKEDIN} for himalayas.app.")
+    else:
+        resume_pdf_path = data_folder / RESUME_PDF
+        logger.info(
+            f"{RESUME_PDF_LINKEDIN} not found — falling back to "
+            f"{RESUME_PDF} for himalayas.app (English-language "
+            f"remote-work market — add {RESUME_PDF_LINKEDIN} to use "
+            "a separate resume here)."
+        )
+    if not resume_pdf_path.exists():
+        raise FileNotFoundError(
+            f"Resume PDF not found: {resume_pdf_path}. Place your "
+            f"resume as '{RESUME_PDF}' (or '{RESUME_PDF_LINKEDIN}') "
+            f"in {data_folder}."
+        )
+
+    profile_path = data_folder / "job_application_profile.yaml"
+    if not profile_path.exists():
+        raise FileNotFoundError(
+            f"job_application_profile.yaml not found: {profile_path}. "
+            "Required for himalayas's application questions "
+            "(see data_folder_example/)."
+        )
+    profile = JobApplicationProfile(profile_path.read_text(encoding="utf-8"))
+
+    hi_preferences = parameters.get("himalayas") or {}
+    auto_apply = bool(hi_preferences.get("auto_apply", False))
+
+    output_folder: Path = parameters["outputFileDirectory"]
+    applied_log = AppliedLog(output_folder / "applied_log.json")
+
+    if is_still_blocked(output_folder, "himalayas"):
+        logger.warning("himalayas.app is cooling down after a block — skipping.")
+        return
+
+    session = HimalayasSession(output_folder / ".chrome_profile_himalayas")
+    try:
+        session.ensure_logged_in(parameters)
+        source: JobSource = HimalayasSource(session.driver)
+        try:
+            jobs = source.search(parameters)
+        except PlatformBlockedError as e:
+            logger.error(f"himalayas.app appears to have blocked us: {e}")
+            mark_blocked(output_folder, "himalayas")
+            notify(
+                parameters,
+                f"himalayas.app: похоже на блокировку ({e}). "
+                "Площадка поставлена на паузу на 24ч.",
+            )
+            return
+        logger.info(f"Found {len(jobs)} matching himalayas.app vacancies.")
+
+        resume_text = extract_pdf_text(str(resume_pdf_path))
+        sent_count = 0
+        job_max_applications = _job_max_applications(parameters, "himalayas")
+        daily_limit = randomized_daily_limit(
+            _daily_limit(parameters, "himalayas")
+        )
+        for job in jobs:
+            if stop_event is not None and stop_event.is_set():
+                logger.info("Stop requested — прерываю перед следующей вакансией.")
+                break
+            if sent_count >= job_max_applications:
+                logger.info(
+                    f"Reached JOB_MAX_APPLICATIONS "
+                    f"({job_max_applications}) for this run."
+                )
+                break
+            if _total_daily_limit_reached(parameters, applied_log):
+                break
+            if applied_log.already_applied(job):
+                continue
+            if (
+                auto_apply
+                and applied_log.applied_today_count("himalayas")
+                >= daily_limit
+            ):
+                logger.info(
+                    f"Reached daily application limit ({daily_limit}) "
+                    "for himalayas.app today."
+                )
+                break
+
+            fit = score_job_fit(
+                resume_pdf_path,
+                job,
+                llm_api_key,
+                salary_expectations=(
+                    profile.salary_expectations.salary_range_usd or ""
+                ),
+            )
+            tier = classify_fit(
+                fit.score,
+                _job_min_score(parameters),
+                _job_suitability_score(parameters),
+            )
+            if tier == "skip":
+                logger.info(
+                    f"Skipping {job.role} at {job.company}: fit score "
+                    f"{fit.score}/10 below minimum."
+                )
+                applied_log.record(
+                    job, "", "", "skipped_low_fit", fit.score, fit.gaps
+                )
+                continue
+            if tier == "weak":
+                logger.info(
+                    f"{job.role} at {job.company}: weak fit "
+                    f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
+                )
+
+            try:
+                # Тот же случай, что и у wellfound выше:
+                # template="en_plain" — himalayas.app письмо не
+                # отправляет, оно оседает только в applied_log/
+                # дашборде как обычный текст, без HTML-бланка LinkedIn.
+                cover_letter = generate_cover_letter_for_job(
+                    resume_pdf_path,
+                    job,
+                    llm_api_key,
+                    template="en_plain",
+                )
+            except Exception as e:
+                logger.exception(
+                    f"Failed to generate cover letter for {job.role} at "
+                    f"{job.company}, skipping this vacancy: {e}"
+                )
+                continue
+
+            if auto_apply:
+                answerer = EasyApplyAnswerer(
+                    resume_text, profile, job, llm_api_key
+                )
+                applied = apply_to_himalayas_job(
+                    session.driver, job.link, answerer.answer
+                )
+                if applied:
+                    status: Literal["applied", "dry_run"] = "applied"
+                    logger.info(
+                        f"Applied to {job.role} at {job.company} "
+                        f"({job.link})"
+                    )
+                else:
+                    status = "dry_run"
+                    logger.warning(
+                        "Не удалось подтверждённо отправить отклик на "
+                        f"{job.link} — записано как dry-run."
+                    )
+            else:
+                status = "dry_run"
+                logger.info(
+                    f"[manual apply needed] {job.role} at {job.company} "
+                    f"({job.link})"
+                )
+
+            applied_log.record(
+                job,
+                cover_letter,
+                resume_id="",
+                status=status,
+                score=fit.score,
+                gaps=fit.gaps,
+            )
+            sent_count += 1
+    finally:
+        session.quit()
+
+
 ALL_SOURCES = [
     ("headhunter", search_and_apply_headhunter),
     ("geekjob", search_geekjob),
@@ -2100,6 +2585,8 @@ ALL_SOURCES = [
     ("getmatch", search_getmatch),
     ("linkedin", search_and_apply_linkedin),
     ("habr_career", search_and_apply_habr_career),
+    ("wellfound", search_and_apply_wellfound),
+    ("himalayas", search_and_apply_himalayas),
 ]
 
 
@@ -2108,6 +2595,8 @@ def run_selected_sources(
     parameters: dict,
     llm_api_key: str,
     dry_run: bool = False,
+    on_source_start: Optional[Callable[[str], None]] = None,
+    stop_event: Optional[threading.Event] = None,
 ) -> None:
     """Прогоняет выбранные источники подряд, изолированно друг от
     друга (падение одного не останавливает остальные), с небольшой
@@ -2141,14 +2630,19 @@ def run_selected_sources(
     )
 
     for index, (name, search_fn) in enumerate(selected):
+        if stop_event is not None and stop_event.is_set():
+            logger.info(f"Stop requested — прерываю перед {name}.")
+            break
         logger.info(f"=== {name} ===")
+        if on_source_start:
+            on_source_start(name)
         run_at = datetime.now()
         interval_hours = (parameters.get(name) or {}).get(
             "interval_hours", DEFAULT_INTERVAL_HOURS
         )
         next_run = run_at + timedelta(hours=interval_hours)
         try:
-            search_fn(parameters, llm_api_key)
+            search_fn(parameters, llm_api_key, stop_event=stop_event)
         except Exception as e:
             logger.exception(f"{name} failed, continuing with the rest: {e}")
             notify(parameters, f"CrossJob-AI: {name} упал — {e}")
@@ -3105,6 +3599,14 @@ def handle_inquiries(
                 logger.info("Searching career.habr.com...")
                 search_and_apply_habr_career(parameters, llm_api_key)
 
+            if "Search & Apply on Wellfound" == selected_actions:
+                logger.info("Searching wellfound.com...")
+                search_and_apply_wellfound(parameters, llm_api_key)
+
+            if "Search & Apply on Himalayas" == selected_actions:
+                logger.info("Searching himalayas.app...")
+                search_and_apply_himalayas(parameters, llm_api_key)
+
             if "Search selected sources" == selected_actions:
                 names = prompt_selected_sources()
                 if names:
@@ -3152,6 +3654,8 @@ def prompt_user_action() -> str:
                     "Search & Apply on GetMatch",
                     "Search & Apply on LinkedIn",
                     "Search & Apply on Habr Career",
+                    "Search & Apply on Wellfound",
+                    "Search & Apply on Himalayas",
                     "Search selected sources",
                     "Check HeadHunter replies",
                     "Clean up stale HeadHunter negotiations",
@@ -3193,6 +3697,14 @@ def prompt_selected_sources() -> list[str]:
                     "Habr Career (experimental, not verified live)",
                     "habr_career",
                 ),
+                (
+                    "Wellfound (experimental, not verified live)",
+                    "wellfound",
+                ),
+                (
+                    "Himalayas (experimental, not verified live)",
+                    "himalayas",
+                ),
             ],
         ),
     ]
@@ -3208,7 +3720,7 @@ def prompt_selected_sources() -> list[str]:
     help=(
         "Run non-interactively (for cron) instead of showing the menu: "
         "one of headhunter/geekjob/telegram/"
-        "getmatch/linkedin/habr_career/all/"
+        "getmatch/linkedin/habr_career/wellfound/himalayas/all/"
         "check_hh_replies/"
         "check_telegram_replies/"
         "cleanup_hh_negotiations, or "
@@ -3332,6 +3844,14 @@ def main(auto: Optional[str], daemon: bool):
 
         if auto == "habr_career":
             search_and_apply_habr_career(config, llm_api_key)
+            return
+
+        if auto == "wellfound":
+            search_and_apply_wellfound(config, llm_api_key)
+            return
+
+        if auto == "himalayas":
+            search_and_apply_himalayas(config, llm_api_key)
             return
 
         if auto == "all":

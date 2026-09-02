@@ -47,6 +47,7 @@ from main import create_cover_letter as _create_cover_letter
 from main import (
     create_headhunter_resume_draft,
 )
+from main import create_resume_audit as _create_resume_audit
 from main import create_resume_pdf as _create_resume_pdf
 from main import create_resume_pdf_job_tailored as _create_resume_tailored
 from main import force_refresh_plain_text_resume as _refresh_plain_text
@@ -154,6 +155,8 @@ class AppContext:
         self.run_now_thread: Optional[threading.Thread] = None
         self.run_now_sources: list[str] = []
         self.run_now_dry_run: bool = False
+        self.run_now_current_source: Optional[str] = None
+        self.run_now_stop_event: Optional[threading.Event] = None
         self.generate_thread: Optional[threading.Thread] = None
         self.generate_result: dict = {}
         self.telegram_connect_thread: Optional[threading.Thread] = None
@@ -269,6 +272,8 @@ _CREDENTIAL_REQUIREMENTS: dict = {
     "getmatch": ("email",),
     "linkedin": None,
     "habr_career": None,
+    "wellfound": None,
+    "himalayas": None,
 }
 
 
@@ -280,6 +285,8 @@ _CREDENTIAL_REQUIREMENTS: dict = {
 _RESUME_FILENAME_BY_SOURCE = {
     "headhunter": RESUME_PDF,
     "linkedin": RESUME_PDF_LINKEDIN,
+    "wellfound": RESUME_PDF_LINKEDIN,
+    "himalayas": RESUME_PDF_LINKEDIN,
 }
 
 
@@ -289,10 +296,13 @@ def _resume_readiness(data_folder: Path, source: str) -> Optional[dict]:
         return None
     if (data_folder / filename).exists():
         return {"ready": True, "filename": filename}
-    # LinkedIn молча падает назад на resume.pdf (см.
-    # search_and_apply_linkedin в main.py) — не ложная тревога, если
-    # общий файл всё же есть, просто предупреждаем про язык/локацию.
-    if source == "linkedin" and (data_folder / RESUME_PDF).exists():
+    # LinkedIn/wellfound/himalayas молча падают назад на resume.pdf
+    # (см. соответствующие search_and_apply_* в main.py) — не ложная
+    # тревога, если общий файл всё же есть, просто предупреждаем про
+    # язык/локацию.
+    if source in ("linkedin", "wellfound", "himalayas") and (
+        data_folder / RESUME_PDF
+    ).exists():
         return {
             "ready": True,
             "filename": RESUME_PDF,
@@ -483,6 +493,9 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
     return {
         "daemon_running": daemon_running,
         "daemon_started_at": ctx.daemon_started_at if daemon_running else None,
+        "daemon_paused": bool(
+            daemon_running and ctx.scheduler is not None and ctx.scheduler.paused
+        ),
         "sources": sources,
         "chat_checks": chat_checks,
         "total_applied_today": ctx.applied_log.applied_today_count_all(),
@@ -836,13 +849,16 @@ def post_limits_settings(
 
 
 def _distribute_total_limit(total: int, sources: list[str]) -> dict[str, int]:
-    """Раскидывает total между sources случайными долями (LinkedIn —
-    вдвое меньший вес по умолчанию, см. risk-banner в дашборде: банит
-    автоматизацию агрессивнее остальных площадок). Сумма долей после
-    округления вниз почти всегда меньше total — остаток раздаётся по
-    одной штуке в случайном порядке, чтобы сумма сошлась ровно."""
+    """Раскидывает total между sources случайными долями (LinkedIn и
+    Himalayas — вдвое меньший вес по умолчанию, см. risk-banner в
+    дашборде: банят автоматизацию агрессивнее остальных площадок,
+    подтверждено вживую анти-бот интерстишлом на himalayas.app). Сумма
+    долей после округления вниз почти всегда меньше total — остаток
+    раздаётся по одной штуке в случайном порядке, чтобы сумма сошлась
+    ровно."""
     weights = {
-        s: (0.5 if s == "linkedin" else 1.0) * random.uniform(0.6, 1.4)
+        s: (0.5 if s in ("linkedin", "himalayas") else 1.0)
+        * random.uniform(0.6, 1.4)
         for s in sources
     }
     weight_sum = sum(weights.values())
@@ -1557,6 +1573,25 @@ def stop_daemon(ctx: AppContext = Depends(get_ctx)) -> dict:
     return {"running": False}
 
 
+@app.post("/api/daemon/pause")
+def pause_daemon(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Пауза = планировщик продолжает тикать (run_forever жив), но
+    due_sources() перестаёт отдавать источники — уже идущий ручной
+    запуск (run-now) это не трогает, только новые плановые запуски."""
+    if ctx.scheduler is None:
+        raise HTTPException(409, "Daemon is not running.")
+    ctx.scheduler.paused = True
+    return {"paused": True}
+
+
+@app.post("/api/daemon/resume")
+def resume_daemon(ctx: AppContext = Depends(get_ctx)) -> dict:
+    if ctx.scheduler is None:
+        raise HTTPException(409, "Daemon is not running.")
+    ctx.scheduler.paused = False
+    return {"paused": False}
+
+
 class RunNowRequest(BaseModel):
     sources: list[str]
     # Дашборд — кнопка "Тестовый прогон": форсирует dry-run для всех
@@ -1582,28 +1617,58 @@ def post_run_now(
     if unknown:
         raise HTTPException(400, f"Unknown source(s): {', '.join(unknown)}")
 
+    stop_event = threading.Event()
+
     def _run() -> None:
         try:
             run_selected_sources(
-                body.sources, ctx.config, ctx.llm_api_key, dry_run=body.dry_run
+                body.sources,
+                ctx.config,
+                ctx.llm_api_key,
+                dry_run=body.dry_run,
+                on_source_start=lambda name: setattr(
+                    ctx, "run_now_current_source", name
+                ),
+                stop_event=stop_event,
             )
         finally:
             ctx.run_now_sources = []
+            ctx.run_now_current_source = None
+            ctx.run_now_stop_event = None
 
     ctx.run_now_sources = body.sources
     ctx.run_now_dry_run = body.dry_run
+    ctx.run_now_stop_event = stop_event
     ctx.run_now_thread = threading.Thread(target=_run, daemon=True)
     ctx.run_now_thread.start()
     return {"started": True, "sources": body.sources, "dry_run": body.dry_run}
 
 
+@app.post("/api/run-now/stop")
+def post_run_now_stop(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Мягкий стоп: помечает stop_event, который search_and_apply_*
+    проверяет между вакансиями (main.py), а run_selected_sources — между
+    источниками. Текущая уже начатая заявка досылается, следующая не
+    начинается — жёсткого прерывания посреди клика "Откликнуться" нет,
+    чтобы не оставлять форму в неопределённом состоянии на площадке."""
+    running = ctx.run_now_thread is not None and ctx.run_now_thread.is_alive()
+    if running and ctx.run_now_stop_event is not None:
+        ctx.run_now_stop_event.set()
+    return {"stopping": running}
+
+
 @app.get("/api/run-now/status")
 def get_run_now_status(ctx: AppContext = Depends(get_ctx)) -> dict:
     running = ctx.run_now_thread is not None and ctx.run_now_thread.is_alive()
+    stopping = running and bool(
+        ctx.run_now_stop_event is not None and ctx.run_now_stop_event.is_set()
+    )
     return {
         "running": running,
         "sources": ctx.run_now_sources if running else [],
         "dry_run": ctx.run_now_dry_run if running else False,
+        "current_source": ctx.run_now_current_source if running else None,
+        "stopping": stopping,
     }
 
 
@@ -1776,7 +1841,17 @@ _GENERATORS = {
         style_name=body.style_name,
         job_url=body.job_url,
     ),
+    "resume-audit": lambda ctx, body: _create_resume_audit(
+        ctx.config,
+        ctx.llm_api_key,
+        job_url=body.job_url,
+    ),
 }
+# resume-audit возвращает dict (текст 3 шагов аудита), а не путь к PDF —
+# единственный генератор, для которого /api/generate/download не имеет
+# смысла; сам /api/generate/{kind}+status ниже это отличие не знает,
+# просто кладёт "result" вместо "path" в ctx.generate_result.
+_TEXT_RESULT_GENERATORS = {"resume-audit"}
 
 
 @app.post("/api/generate/{kind}")
@@ -1791,15 +1866,21 @@ def post_generate(
     через Selenium небыстрый — гоняем в фоновом потоке, как run-now."""
     if kind not in _GENERATORS:
         raise HTTPException(404, f"Unknown generator: {kind}")
-    if kind in ("resume-tailored", "cover-letter") and not body.job_url:
+    if (
+        kind in ("resume-tailored", "cover-letter", "resume-audit")
+        and not body.job_url
+    ):
         raise HTTPException(400, "job_url is required for this generator.")
     if ctx.generate_thread is not None and ctx.generate_thread.is_alive():
         raise HTTPException(409, "A generation is already in progress.")
 
     def _run() -> None:
         try:
-            path = _GENERATORS[kind](ctx, body)
-            ctx.generate_result = {"ready": True, "path": str(path)}
+            output = _GENERATORS[kind](ctx, body)
+            if kind in _TEXT_RESULT_GENERATORS:
+                ctx.generate_result = {"ready": True, "result": output}
+            else:
+                ctx.generate_result = {"ready": True, "path": str(output)}
         except Exception as e:
             ctx.generate_result = {"ready": True, "error": str(e)}
 

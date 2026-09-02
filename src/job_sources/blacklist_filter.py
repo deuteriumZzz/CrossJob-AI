@@ -24,8 +24,11 @@ def passes_blacklists(job: Job, preferences: dict) -> bool:
     # против списка русских городов и отбрасывает вообще ВСЕ
     # вакансии до единой (подтверждено живьём: "Found 0 matching" на
     # реальном прогоне, при том что напрямую тот же поиск находил
-    # вакансии).
-    if job.source != "linkedin":
+    # вакансии). himalayas — та же ловушка на всякий случай: карточки
+    # поиска не подтверждены вживую (анти-бот интерстишл, см. docstring
+    # search_jobs), job.location там тоже не заполняется — не рискуем
+    # тем же "Found 0" багом, если пользователь настроит locations.
+    if job.source not in ("linkedin", "himalayas"):
         locations = effective_list(preferences, job.source, "locations")
         if locations and not matches_any(job.location, locations):
             return False

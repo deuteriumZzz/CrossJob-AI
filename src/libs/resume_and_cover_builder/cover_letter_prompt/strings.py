@@ -4,30 +4,22 @@ from src.libs.resume_and_cover_builder.template_base import (
 
 cover_letter_template = (
     """
-Compose a brief and impactful cover letter based on the provided job
-description and resume. The letter should be no longer than three paragraphs
-and should be written in a professional, yet conversational tone. Avoid using
-any placeholders, and ensure that the letter flows naturally and is tailored to
-the job.
+Write a cover letter for this role. Rules:
+1. First paragraph: name the company and the role. Mention one specific
+   thing about the company that made me want to apply — a recent product
+   launch, a news item, or a company value I genuinely connect with. Do
+   NOT write generic phrases.
+2. Second paragraph: pick 2-3 requirements from the job description that
+   my experience matches best. For each, give one concrete result from my
+   resume — with numbers.
+3. Third paragraph: directly name the single biggest gap between my
+   resume and the job description. Explain how my transferable skills or
+   adjacent experience close it. Do not pretend the gap doesn't exist.
+4. Closing: one sentence. Ask for an interview. No filler. Do not use the
+   phrase "I would welcome the opportunity to discuss".
 
-Analyze the job description to identify key qualifications and requirements.
-Open with a specific, concrete achievement or result from the resume that
-maps directly onto the role's top requirement — not a generic "I am writing
-to express my interest" line, since a recruiter skims dozens of these and a
-strong opener is what gets a letter actually read instead of skipped.
-Highlight relevant skills and experiences from the resume that directly
-match the job’s demands, using specific examples (numbers, scale, outcomes)
-to illustrate these qualifications rather than restating skills as a list.
-Reference notable aspects of the company, such as its mission or values,
-that resonate with the candidate’s professional goals. Conclude with a
-short, direct call to action inviting the employer to schedule an interview
-or a call — state the request plainly rather than a vague "looking forward
-to discussing further."
-
-Please write the cover letter in a way that directly addresses the job role and
-the company’s characteristics, ensuring it remains concise and engaging without
-unnecessary embellishments. The letter should be formatted into paragraphs and
-should not include a greeting or signature.
+Total length: under 250 words.
+Tone: confident, specific, human.
 
 ## Rules:
 - Do not include any introductions, explanations, or additional information.

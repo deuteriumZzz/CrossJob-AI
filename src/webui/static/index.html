@@ -99,6 +99,10 @@
           <svg viewBox="0 0 20 20" fill="none"><rect x="5" y="5" width="10" height="10" rx="1.5" fill="currentColor"/></svg>
           <span class="btn-label">Стоп</span>
         </button>
+        <button id="daemon-pause" class="btn btn-ghost" disabled title="Не запускать новые задачи по расписанию, текущие не трогать">
+          <svg viewBox="0 0 20 20" fill="none"><rect x="5.5" y="4.5" width="3" height="11" rx="1" fill="currentColor"/><rect x="11.5" y="4.5" width="3" height="11" rx="1" fill="currentColor"/></svg>
+          <span class="btn-label">Пауза</span>
+        </button>
       </div>
     </div>
     <button id="sidebar-collapse-toggle" class="sidebar-collapse-toggle" title="Свернуть меню" aria-label="Свернуть меню">
@@ -123,7 +127,12 @@
       </div>
       <div id="onboarding-checklist" class="panel" style="display:none"></div>
       <div id="stats-row" class="stats-row"></div>
-      <div id="source-grid" class="source-grid"></div>
+
+      <h3 class="section-subheading">🇷🇺 Русские площадки</h3>
+      <div id="source-grid-ru" class="source-grid"></div>
+
+      <h3 class="section-subheading">🌍 Зарубежные площадки</h3>
+      <div id="source-grid-intl" class="source-grid"></div>
 
       <h3 class="section-subheading">Проверки ответов</h3>
       <p class="muted small">Отдельное от поиска/отклика расписание — заходит и проверяет чат/ответы, ничего не ищет. Без своей галочки здесь эти проверки не запускаются сами по себе, даже если площадка выше уже в расписании.</p>
@@ -151,6 +160,8 @@
           <option value="getmatch">GetMatch</option>
           <option value="linkedin">LinkedIn</option>
           <option value="habr_career">Habr Career</option>
+          <option value="wellfound">Wellfound</option>
+          <option value="himalayas">Himalayas</option>
         </select>
         <select id="filter-status">
           <option value="">Любой статус</option>
@@ -188,6 +199,8 @@
           <option value="getmatch">GetMatch</option>
           <option value="linkedin">LinkedIn</option>
           <option value="habr_career">Habr Career</option>
+          <option value="wellfound">Wellfound</option>
+          <option value="himalayas">Himalayas</option>
         </select>
         <input id="replies-filter-query" type="text" placeholder="Поиск по компании/вакансии/статусу" aria-label="Поиск по компании/вакансии/статусу" />
       </div>
@@ -635,6 +648,7 @@
           <button id="gen-resume" class="btn btn-secondary">Резюме (общее)</button>
           <button id="gen-resume-tailored" class="btn btn-secondary">Резюме под вакансию</button>
           <button id="gen-cover-letter" class="btn btn-secondary">Сопроводительное письмо</button>
+          <button id="gen-resume-audit" class="btn btn-secondary">🔍 Аудит резюме под вакансию</button>
         </div>
         <div class="filters">
           <span id="gen-status" class="muted small"></span>
@@ -696,6 +710,8 @@
             <option value="getmatch">GetMatch</option>
             <option value="linkedin">LinkedIn</option>
             <option value="habr_career">Habr Career</option>
+            <option value="wellfound">Wellfound</option>
+            <option value="himalayas">Himalayas</option>
           </select>
           <input id="log-search" type="text" placeholder="Поиск по тексту…" aria-label="Поиск по тексту лога" />
         </div>
@@ -747,7 +763,23 @@
   </div>
 </div>
 
+<div id="resume-audit-overlay" class="command-overlay" style="display:none">
+  <div class="command-palette" style="padding:18px 20px;max-width:720px;width:92vw">
+    <h3 style="margin:0 0 2px">Аудит резюме под вакансию</h3>
+    <p id="resume-audit-meta" class="muted small" style="margin:0 0 14px"></p>
+    <div style="max-height:65vh;overflow-y:auto;padding-right:4px">
+      <h4 style="margin:0 0 6px">1. Аудит резюме</h4>
+      <div id="resume-audit-body" style="white-space:pre-wrap;word-break:break-word;line-height:1.55;font-size:13.5px;margin-bottom:18px"></div>
+      <h4 style="margin:0 0 6px">2. Проверка ATS и менеджером по найму</h4>
+      <div id="resume-audit-ats-hm-body" style="white-space:pre-wrap;word-break:break-word;line-height:1.55;font-size:13.5px;margin-bottom:18px"></div>
+      <h4 style="margin:0 0 6px">3. Переписанный раздел опыта</h4>
+      <div id="resume-audit-rewrite-body" style="white-space:pre-wrap;word-break:break-word;line-height:1.55;font-size:13.5px"></div>
+    </div>
+    <button type="button" class="btn btn-secondary" id="resume-audit-close" style="width:100%;justify-content:center;margin-top:16px">Закрыть</button>
+  </div>
+</div>
+
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=15"></script>
+<script src="/app.js?v=16"></script>
 </body>
 </html>

@@ -342,9 +342,11 @@ def test_run_now_starts_selected_sources_and_reports_status(client):
     calls = []
 
     def fake_run_selected_sources(
-        sources, parameters, llm_api_key, dry_run=False
+        sources, parameters, llm_api_key, dry_run=False, on_source_start=None, stop_event=None
     ):
         calls.append(sources)
+        if on_source_start:
+            on_source_start(sources[0])
         release.wait(timeout=5)
 
     with patch(
@@ -365,6 +367,7 @@ def test_run_now_starts_selected_sources_and_reports_status(client):
         assert status["running"] is True
         assert set(status["sources"]) == {"headhunter", "geekjob"}
         assert status["dry_run"] is False
+        assert status["current_source"] == "headhunter"
 
         # Второй запуск, пока первый ещё идёт — конфликт.
         conflict = client.post("/api/run-now", json={"sources": ["geekjob"]})
@@ -534,6 +537,42 @@ def test_generate_reports_error_from_generator(client):
 def test_generate_download_without_result_is_404(client):
     response = client.get("/api/generate/download")
     assert response.status_code == 404
+
+
+def test_generate_resume_audit_requires_job_url(client):
+    response = client.post("/api/generate/resume-audit", json={})
+    assert response.status_code == 400
+
+
+def test_generate_resume_audit_runs_and_reports_result(client):
+    audit_result = {
+        "audit": "audit text",
+        "ats_hiring_manager": "ats/hm text",
+        "rewritten_experience": "rewritten text",
+    }
+
+    def fake_create_resume_audit(config, llm_api_key, job_url=None):
+        return audit_result
+
+    with patch(
+        "src.webui.api._create_resume_audit",
+        side_effect=fake_create_resume_audit,
+    ):
+        response = client.post(
+            "/api/generate/resume-audit",
+            json={"job_url": "https://example.com/job/1"},
+        )
+        assert response.status_code == 200
+
+        for _ in range(50):
+            if not client.get("/api/generate/status").json()["running"]:
+                break
+            time.sleep(0.05)
+
+    final = client.get("/api/generate/status").json()
+    assert final["ready"] is True
+    assert final["result"] == audit_result
+    assert "path" not in final
 
 
 def test_usage_endpoint_reports_zero_when_no_calls_made(client):

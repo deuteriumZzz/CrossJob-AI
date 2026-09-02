@@ -57,6 +57,17 @@ def init_linkedin_browser(profile_dir: Path) -> uc.Chrome:
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
         options.add_argument("--no-sandbox")
+        # ponytail: this profile's own First Run flow was the one thing
+        # missing that every other source's chrome_browser_options() already
+        # sets — and First Run is what (re)derives the profile's "name" pref
+        # from the OS account. Without --no-first-run it re-ran on every
+        # launch here, and something in that derivation mis-encodes an
+        # already-mangled name each time, roughly doubling it — observed
+        # blowing Preferences up to 2.3GB in days. chrome_utils.
+        # clear_profile_cache() now also resets Preferences outright if it
+        # ever balloons again, as a backstop regardless of root cause.
+        options.add_argument("--no-first-run")
+        options.add_argument("--no-default-browser-check")
         return uc.Chrome(options=options, version_main=version_main)
 
     return launch_chrome_with_retry(_build, profile_dir)

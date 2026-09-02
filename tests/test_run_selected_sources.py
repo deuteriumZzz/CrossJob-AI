@@ -9,10 +9,10 @@ from src.scheduler_state import load_state
 def test_run_selected_sources_runs_only_named_sources_in_order():
     calls = []
 
-    def fake_a(parameters, llm_api_key):
+    def fake_a(parameters, llm_api_key, stop_event=None):
         calls.append("a")
 
-    def fake_b(parameters, llm_api_key):
+    def fake_b(parameters, llm_api_key, stop_event=None):
         calls.append("b")
 
     with patch.object(
@@ -24,13 +24,32 @@ def test_run_selected_sources_runs_only_named_sources_in_order():
     assert mock_wait.call_count == 1
 
 
+def test_run_selected_sources_calls_on_source_start_in_order():
+    started = []
+
+    def fake_a(parameters, llm_api_key, stop_event=None):
+        pass
+
+    def fake_b(parameters, llm_api_key, stop_event=None):
+        pass
+
+    with patch.object(
+        main, "ALL_SOURCES", [("a", fake_a), ("b", fake_b)]
+    ), patch.object(main, "wait_between_sources"):
+        main.run_selected_sources(
+            ["b", "a"], {}, "key", on_source_start=started.append
+        )
+
+    assert started == ["b", "a"]
+
+
 def test_run_selected_sources_continues_after_one_source_fails():
     calls = []
 
-    def fake_ok(parameters, llm_api_key):
+    def fake_ok(parameters, llm_api_key, stop_event=None):
         calls.append("ok")
 
-    def fake_fail(parameters, llm_api_key):
+    def fake_fail(parameters, llm_api_key, stop_event=None):
         raise RuntimeError("boom")
 
     with patch.object(
@@ -42,7 +61,7 @@ def test_run_selected_sources_continues_after_one_source_fails():
 
 
 def test_run_selected_sources_notifies_on_failure():
-    def fake_fail(parameters, llm_api_key):
+    def fake_fail(parameters, llm_api_key, stop_event=None):
         raise RuntimeError("boom")
 
     with patch.object(
@@ -76,10 +95,10 @@ def test_run_selected_sources_dry_run_forces_auto_apply_off():
     словарь (никаких следов в work_preferences.yaml)."""
     seen = {}
 
-    def fake_hh(parameters, llm_api_key):
+    def fake_hh(parameters, llm_api_key, stop_event=None):
         seen["headhunter"] = parameters["headhunter"]["auto_apply"]
 
-    def fake_tg(parameters, llm_api_key):
+    def fake_tg(parameters, llm_api_key, stop_event=None):
         seen["telegram"] = parameters["telegram"]["auto_message"]
 
     original = {
@@ -103,7 +122,7 @@ def test_run_selected_sources_dry_run_forces_auto_apply_off():
 def test_run_selected_sources_ignores_unknown_names():
     calls = []
 
-    def fake(parameters, llm_api_key):
+    def fake(parameters, llm_api_key, stop_event=None):
         calls.append("x")
 
     with patch.object(main, "ALL_SOURCES", [("x", fake)]), patch.object(
@@ -120,7 +139,7 @@ def test_run_selected_sources_records_scheduler_state_on_success():
     иначе карточка площадки на "Обзоре" показывает устаревший статус
     последнего ПЛАНОВОГО тика демона, даже когда ручные прогоны идут."""
 
-    def fake_ok(parameters, llm_api_key):
+    def fake_ok(parameters, llm_api_key, stop_event=None):
         pass
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -139,7 +158,7 @@ def test_run_selected_sources_records_scheduler_state_on_success():
 
 
 def test_run_selected_sources_records_scheduler_state_on_failure():
-    def fake_fail(parameters, llm_api_key):
+    def fake_fail(parameters, llm_api_key, stop_event=None):
         raise RuntimeError("boom")
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -158,6 +177,7 @@ def test_run_selected_sources_records_scheduler_state_on_failure():
 
 if __name__ == "__main__":
     test_run_selected_sources_runs_only_named_sources_in_order()
+    test_run_selected_sources_calls_on_source_start_in_order()
     test_run_selected_sources_continues_after_one_source_fails()
     test_run_selected_sources_notifies_on_failure()
     test_run_selected_sources_dry_run_forces_auto_apply_off()

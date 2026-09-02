@@ -236,6 +236,11 @@ nav.tabs button.active {
   justify-content: center;
 }
 
+.daemon-buttons .btn.is-paused {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
 /* ---------- Badges ---------- */
 
 .badge {
@@ -698,6 +703,11 @@ p.muted {
 
 .dot.never_run {
   background: var(--muted-2);
+}
+
+.dot.running {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(122, 184, 255, 0.2);
 }
 
 .source-card .row {
@@ -1768,8 +1778,12 @@ nav.tabs button.active,
   border-left-color: #d6001c;
 }
 
-.source-card[data-source="superjob"] {
-  border-left-color: #48b220;
+.source-card[data-source="wellfound"] {
+  border-left-color: #c23b6b;
+}
+
+.source-card[data-source="himalayas"] {
+  border-left-color: #5b7fd6;
 }
 
 .source-card[data-source="linkedin"] {
@@ -1790,10 +1804,6 @@ nav.tabs button.active,
 
 .source-card[data-source="geekjob"] {
   border-left-color: #ff7a45;
-}
-
-.source-card[data-source="rabota_ru"] {
-  border-left-color: #ee3f24;
 }
 
 /* ---------- Sidebar collapse ---------- */
@@ -2062,9 +2072,29 @@ kbd {
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
-.source-card:hover .source-card-actions {
+.source-card:hover .source-card-actions,
+.source-card.is-running .source-card-actions {
   opacity: 1;
   transform: none;
+}
+
+.source-card.is-running {
+  border-color: var(--accent-dim);
+  animation: card-glow-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes card-glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 1px var(--accent-dim), 0 0 6px rgba(122, 184, 255, 0.12);
+  }
+  50% {
+    box-shadow: 0 0 0 1px var(--accent), 0 0 14px rgba(122, 184, 255, 0.28);
+  }
+}
+
+.src-run-now.is-stop {
+  color: var(--err);
+  border-color: var(--err);
 }
 
 .source-card-actions button {

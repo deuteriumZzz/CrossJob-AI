@@ -1,3 +1,4 @@
+import re
 import time
 from pathlib import Path
 from typing import Optional
@@ -9,12 +10,56 @@ from src.job_sources.block_detection import raise_if_blocked, visible_text
 from src.job_sources.html_text import html_letter_to_plain_text
 from src.utils.chrome_utils import init_browser, is_driver_dead
 
+# ponytail: GetMatch поменял "Откликнуться" с одиночной модалки
+# (сопроводительное письмо + "Отправить отклик") на мастер анкеты в
+# несколько шагов ("Шаг 1 из 5" — форматы работы, "Шаг 2 из 5" —
+# специальности, ...) — подтверждено вживую 2026-09-02. Заполнять эти
+# шаги вслепую рискованно (реальные профильные данные пользователя),
+# поэтому просто детектим новый мастер и не притворяемся, что отклик
+# отправлен.
+_WIZARD_STEP_RE = re.compile(r"Шаг \d+ из \d+")
+
 GM_BASE = "https://getmatch.ru"
-# ponytail: фиксированный sleep вместо явного ожидания элемента,
-# подтверждено, что 4с достаточно для рендера карточек вакансий на живом
-# прогоне; увеличить, если на медленном соединении результаты приходят
-# пустыми.
-PAGE_LOAD_WAIT_SECONDS = 4
+# ponytail: раньше здесь был фиксированный sleep вместо явного ожидания
+# элемента — не успевал за первой загрузкой
+# /vacancies на свежезапущенном Chrome (холодный старт — JS-бандл ещё не
+# скомпилирован/не закэширован) — вживую поймано дважды: search()
+# получал 0 карточек на странице 1 и молча считал список пустым
+# (see MAX_PAGES stop-on-empty в source.py), хотя вакансии были и
+# та же страница рендерилась нормально на уже прогретом браузере.
+# Bounded-poll вместо sleep — тот же приём, что у HeadHunterBrowserClient.
+# _wait_for_any (см. его докстринг: та же гонка чинилась там для клика
+# "Откликнуться").
+VACANCIES_PAGE_TIMEOUT_SECONDS = 10.0
+VACANCIES_PAGE_POLL_INTERVAL_SECONDS = 0.5
+
+
+def _wait_for_vacancies_page(driver) -> None:
+    deadline = time.monotonic() + VACANCIES_PAGE_TIMEOUT_SECONDS
+    while True:
+        if driver.find_elements(By.CSS_SELECTOR, "div.b-vacancy-card"):
+            return
+        # "Найдено N вакансий" остаётся в DOM даже на пустой странице
+        # за концом списка (see MAX_PAGES) — по нему тоже можно
+        # понять, что рендер уже закончился, а не просто карточек нет.
+        if "Найден" in visible_text(driver):
+            return
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(VACANCIES_PAGE_POLL_INTERVAL_SECONDS)
+
+
+def _wait_until(predicate, timeout=10.0, interval=0.5) -> bool:
+    """Общий bounded-poll — тот же приём, что у _wait_for_vacancies_page
+    и HeadHunterBrowserClient._wait_for_any, но без завязки на конкретный
+    селектор: predicate сам решает, что считать готовностью."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if predicate():
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(interval)
 
 
 class GetMatchClient:
@@ -56,7 +101,22 @@ class GetMatchClient:
             return self._driver, False
         return init_browser(self.profile_dir), True
 
-    def search_vacancies_html(self, query: str) -> str:
+    def search_vacancies_html(
+        self, page: int = 1, specializations: Optional[list] = None
+    ) -> str:
+        """Без текстового запроса — GetMatch убрал его со страницы
+        /vacancies (подтверждено вживую 2026-09-02: `?q=...` в URL
+        молча отбрасывается, отдаёт тот же общий список независимо от
+        значения). Вместо этого — `sp=` (специализация, чекбоксы
+        "Сфера" на живой странице, например `sp=python`) — этих
+        параметров можно передать несколько, площадка складывает их
+        через "или" (подтверждено вживую: `sp=python&sp=dev_ops`
+        отдаёт объединение, не пересечение). Без specializations —
+        общий список, фильтрация по GetMatchSource.positions на
+        нашей стороне (см. GetMatchSource.search()). Пагинация — тем
+        же `page`, что и раньше (подтверждено вживую: `p=10` за
+        концом списка отдаёт 0 карточек, не ошибку — чистый
+        стоп-сигнал, как у GeekjobClient)."""
         driver, owns_it = self._acquire_driver()
         try:
             # l=remote, se=junior/middle — подтверждено кликом по
@@ -64,11 +124,11 @@ class GetMatchClient:
             # "Уровень вакансии" на живой странице и чтением итогового
             # URL, а не угадано; кандидат ищет только удалённую работу
             # уровня junior/middle.
-            driver.get(
-                f"{GM_BASE}/vacancies?q={query}"
-                "&l=remote&se=junior&se=middle"
-            )
-            time.sleep(PAGE_LOAD_WAIT_SECONDS)
+            url = f"{GM_BASE}/vacancies?p={page}&l=remote&se=junior&se=middle"
+            for slug in specializations or []:
+                url += f"&sp={slug}"
+            driver.get(url)
+            _wait_for_vacancies_page(driver)
             raise_if_blocked(visible_text(driver))
             return driver.page_source
         finally:
@@ -76,29 +136,81 @@ class GetMatchClient:
                 driver.quit()
 
     def apply(self, vacancy_url: str, cover_letter: str = "") -> bool:
-        """Клик на "Откликнуться" почти всегда открывает модалку с
-        зарплатой/локацией (обе уже подставлены из профиля — ничего
-        не трогаем) и полем "Сопроводительное письмо" — подтверждено
-        скриншотом реального аккаунта; вписываем письмо и жмём
-        "Отправить отклик". На случай редкого прямого one-click без
-        модалки (старое поведение) — если textarea/кнопка отправки не
-        нашлись, всё равно возвращаем True: сам клик на "Откликнуться"
-        уже засчитан площадкой. Требует, чтобы
+        """Клик на "Откликнуться" открывает модалку. Раньше (до
+        2026-09) это была форма из одного шага — зарплата/локация
+        (уже подставлены из профиля) и поле "Сопроводительное
+        письмо" — вписываем письмо и жмём "Отправить отклик". Теперь
+        GetMatch иногда вместо этого открывает мастер анкеты в
+        несколько шагов ("Шаг 1 из 5", ...) без textarea/кнопки
+        отправки на первом шаге — заполнять его вслепую небезопасно
+        (реальные профильные данные), поэтому в этом случае просто
+        закрываем модалку и возвращаем False, а не притворяемся, что
+        отклик ушёл (см. _WIZARD_STEP_RE). Требует, чтобы
         GetMatchSession.ensure_logged_in() уже был пройден для этого
         profile_dir — иначе кнопки "Откликнуться" не будет (форма
-        входа), и apply() вернёт False."""
+        входа), и apply() вернёт False.
+
+        ponytail: те же два fixed sleep, что были у
+        search_vacancies_html (и с той же гонкой на холодном
+        браузере), — заменены на bounded-poll (_wait_until). Второй
+        (после клика) даже опаснее первого: если модалка не успевала
+        отрендериться за 1.5с, textarea/"Отправить отклик" не
+        находились, и код молча падал в `return True`, ничего на
+        самом деле не заполнив и не отправив — то самое "не жмёт
+        дальше 'Откликнуться'"."""
         driver, owns_it = self._acquire_driver()
         try:
             driver.get(vacancy_url)
-            time.sleep(PAGE_LOAD_WAIT_SECONDS)
+            # ponytail: predicate сохраняет найденное в buttons вместо
+            # того, чтобы просто вернуть bool — иначе пришлось бы
+            # запрашивать те же кнопки у driver'а второй раз сразу
+            # после опроса (лишний Selenium round-trip и рассинхрон с
+            # моками в тестах).
+            buttons: list = []
+
+            def _respond_button_ready() -> bool:
+                nonlocal buttons
+                buttons = driver.find_elements(
+                    By.XPATH, '//button[normalize-space()="Откликнуться"]'
+                )
+                return bool(buttons)
+
+            _wait_until(_respond_button_ready)
             raise_if_blocked(visible_text(driver))
-            buttons = driver.find_elements(
-                By.XPATH, '//button[normalize-space()="Откликнуться"]'
-            )
             if not buttons:
                 return False
             buttons[0].click()
-            time.sleep(1.5)
+
+            modal_text = ""
+
+            def _modal_ready() -> bool:
+                nonlocal modal_text
+                modal_text = visible_text(driver)
+                return (
+                    bool(_WIZARD_STEP_RE.search(modal_text))
+                    or bool(driver.find_elements(By.TAG_NAME, "textarea"))
+                    or bool(
+                        driver.find_elements(
+                            By.XPATH,
+                            '//button[normalize-space()="Отправить отклик"]',
+                        )
+                    )
+                    or bool(
+                        driver.find_elements(
+                            By.XPATH, '//button[@aria-label="Закрыть"]'
+                        )
+                    )
+                )
+
+            _wait_until(_modal_ready)
+
+            if _WIZARD_STEP_RE.search(modal_text):
+                close_buttons = driver.find_elements(
+                    By.XPATH, '//button[@aria-label="Закрыть"]'
+                )
+                if close_buttons:
+                    close_buttons[0].click()
+                return False
 
             if cover_letter:
                 textareas = driver.find_elements(By.TAG_NAME, "textarea")
