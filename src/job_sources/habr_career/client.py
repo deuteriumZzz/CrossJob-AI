@@ -10,7 +10,7 @@ from selenium.webdriver.common.by import By
 
 from src.job_sources.block_detection import raise_if_blocked, visible_text
 from src.job_sources.user_agents import random_user_agent
-from src.utils.chrome_utils import init_browser
+from src.utils.chrome_utils import init_browser, is_driver_dead
 
 HC_BASE = "https://career.habr.com"
 PAGE_LOAD_WAIT_SECONDS = 3
@@ -56,7 +56,11 @@ class HabrCareerClient:
             self._driver = None
 
     def _acquire_driver(self):
+        # ponytail: та же проверка живости driver'а, что у
+        # HeadHunterBrowserClient — общая chrome_utils.is_driver_dead.
         if self._driver is not None:
+            if is_driver_dead(self._driver):
+                self._driver = init_browser(self.profile_dir)
             return self._driver, False
         if self.profile_dir is None:
             raise RuntimeError(

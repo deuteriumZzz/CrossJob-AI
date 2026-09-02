@@ -7,7 +7,7 @@ from selenium.webdriver.common.by import By
 
 from src.job_sources.block_detection import raise_if_blocked, visible_text
 from src.job_sources.html_text import html_letter_to_plain_text
-from src.utils.chrome_utils import init_browser
+from src.utils.chrome_utils import init_browser, is_driver_dead
 
 GM_BASE = "https://getmatch.ru"
 # ponytail: фиксированный sleep вместо явного ожидания элемента,
@@ -47,7 +47,12 @@ class GetMatchClient:
             self._driver = None
 
     def _acquire_driver(self):
+        # ponytail: та же проверка живости driver'а, что у
+        # HeadHunterBrowserClient — общая chrome_utils.is_driver_dead,
+        # см. её докстринг.
         if self._driver is not None:
+            if is_driver_dead(self._driver):
+                self._driver = init_browser(self.profile_dir)
             return self._driver, False
         return init_browser(self.profile_dir), True
 
