@@ -7,14 +7,18 @@ from typing import Callable, Optional
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 
-from src.job_sources.block_detection import raise_if_blocked, visible_text
+from src.job_sources.block_detection import (
+    PlatformBlockedError,
+    raise_if_blocked,
+    visible_text,
+)
 from src.job_sources.headhunter.browser_test_answer import (
     answer_full_page_questionnaire,
     answer_vacancy_test_if_present,
 )
 from src.job_sources.html_text import html_letter_to_plain_text
 from src.logging import logger
-from src.utils.chrome_utils import init_browser
+from src.utils.chrome_utils import init_browser, is_driver_dead
 
 HH_BASE = "https://hh.ru"
 # Российский регион целиком — переопределяет сохранённый в аккаунте
@@ -90,22 +94,39 @@ class HeadHunterBrowserClient:
         весь прогон разваливался одной ошибкой вместо потери
         нескольких вакансий. Тут — единственное место, через которое
         идут все методы клиента, поэтому проверка живости и
-        пересоздание здесь чинят и поиск, и отклики разом."""
+        пересоздание здесь чинят и поиск, и отклики разом (проверка
+        сама — chrome_utils.is_driver_dead, общая с GetMatch/
+        HabrCareer/Geekjob)."""
         if self._driver is not None:
-            try:
-                _ = self._driver.current_url
-            except Exception:
-                logger.warning(
-                    "Chrome-сессия HH умерла посреди прогона — "
-                    "пересоздаю браузер тем же профилем."
-                )
-                try:
-                    self._driver.quit()
-                except Exception:
-                    pass
+            if is_driver_dead(self._driver):
                 self._driver = init_browser(self.profile_dir)
             return self._driver, False
         return init_browser(self.profile_dir), True
+
+    def _raise_if_captcha_redirect(self, driver) -> None:
+        """Живой инцидент (лог): hh.ru редиректнул на
+        /account/captcha?backurl=..., но текст той страницы не совпал
+        ни с одним словом из block_detection._BLOCK_KEYWORDS —
+        raise_if_blocked(visible_text(driver)) промолчал, и код упал
+        в общий путь "кнопка не найдена" → тихий dry-run, без
+        mark_blocked и без кулдауна: демон продолжал долбить капчу.
+        URL редиректа стабилен и не зависит от текста конкретной
+        капчи — проверяем его отдельно. Скриншот сохраняется поверх
+        предыдущего рядом с профилем — не для истории, а чтобы
+        посмотреть, что это за капча (простая OCR-картинка или
+        поведенческий виджет), прежде чем решать про Vision-OCR
+        fallback."""
+        if "/account/captcha" not in driver.current_url:
+            return
+        try:
+            driver.save_screenshot(
+                str(self.profile_dir / "hh_captcha_screenshot.png")
+            )
+        except Exception:
+            pass
+        raise PlatformBlockedError(
+            f"hh.ru redirected to captcha page ({driver.current_url})"
+        )
 
     def search_vacancies_html(
         self, query: str, remote_only: bool, page: int = 0
@@ -118,6 +139,7 @@ class HeadHunterBrowserClient:
             driver.get(f"{HH_BASE}/search/vacancy?{params}")
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
             raise_if_blocked(visible_text(driver))
+            self._raise_if_captcha_redirect(driver)
             return driver.page_source
         finally:
             if owns_it:
@@ -129,6 +151,7 @@ class HeadHunterBrowserClient:
             driver.get(f"{HH_BASE}/vacancy/{vacancy_id}")
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
             raise_if_blocked(visible_text(driver))
+            self._raise_if_captcha_redirect(driver)
             return driver.page_source
         finally:
             if owns_it:
@@ -159,6 +182,7 @@ class HeadHunterBrowserClient:
             driver.get(vacancy_url)
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
             raise_if_blocked(visible_text(driver))
+            self._raise_if_captcha_redirect(driver)
 
             buttons = driver.find_elements(
                 By.CSS_SELECTOR, '[data-qa="vacancy-response-link-top"]'
@@ -235,6 +259,7 @@ class HeadHunterBrowserClient:
             driver.get(f"{HH_BASE}/resume/{resume_id}")
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
             raise_if_blocked(visible_text(driver))
+            self._raise_if_captcha_redirect(driver)
 
             buttons = driver.find_elements(
                 By.CSS_SELECTOR, '[data-qa="resume-update-button"]'

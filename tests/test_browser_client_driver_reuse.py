@@ -3,14 +3,29 @@
 контекстный менеджер — вместо открытия/закрытия браузера на каждый
 вызов, как было раньше (см. HeadHunterBrowserClient/GetMatchClient)."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from src.job_sources.block_detection import PlatformBlockedError
 from src.job_sources.geekjob.client import GeekjobClient
 from src.job_sources.getmatch.client import GetMatchClient
+from src.job_sources.habr_career.client import HabrCareerClient
 from src.job_sources.headhunter.browser_client import (
     HeadHunterBrowserClient,
     _wait_for_any,
 )
+
+
+def _dead_driver() -> MagicMock:
+    driver = MagicMock()
+    type(driver).current_url = property(
+        lambda self: (_ for _ in ()).throw(
+            Exception("invalid session id: session deleted")
+        )
+    )
+    return driver
 
 
 def test_headhunter_client_reuses_one_driver_inside_with_block():
@@ -115,6 +130,53 @@ def test_getmatch_client_reuses_one_driver_inside_with_block():
         assert mock_init.return_value.quit.call_count == 1
 
 
+def test_getmatch_client_reconnects_after_dead_session_mid_run():
+    with patch(
+        "src.job_sources.getmatch.client.init_browser"
+    ) as mock_init, patch(
+        "src.job_sources.getmatch.client.raise_if_blocked"
+    ), patch(
+        "src.job_sources.getmatch.client.visible_text", return_value=""
+    ), patch(
+        "src.job_sources.getmatch.client.time.sleep"
+    ):
+        dead_driver = _dead_driver()
+        fresh_driver = MagicMock()
+        mock_init.side_effect = [dead_driver, fresh_driver]
+
+        with GetMatchClient("profile") as client:
+            assert client._driver is dead_driver
+            client.search_vacancies_html("python")
+
+        assert mock_init.call_count == 2
+        dead_driver.quit.assert_called_once()
+        fresh_driver.quit.assert_called_once()
+
+
+def test_habr_career_client_reconnects_after_dead_session_mid_run():
+    with patch(
+        "src.job_sources.habr_career.client.init_browser"
+    ) as mock_init, patch(
+        "src.job_sources.habr_career.client.raise_if_blocked"
+    ), patch(
+        "src.job_sources.habr_career.client.visible_text", return_value=""
+    ), patch(
+        "src.job_sources.habr_career.client.time.sleep"
+    ):
+        dead_driver = _dead_driver()
+        fresh_driver = MagicMock()
+        fresh_driver.find_elements.return_value = []
+        mock_init.side_effect = [dead_driver, fresh_driver]
+
+        with HabrCareerClient("profile") as client:
+            assert client._driver is dead_driver
+            client.apply("https://career.habr.com/vacancies/1")
+
+        assert mock_init.call_count == 2
+        dead_driver.quit.assert_called_once()
+        fresh_driver.quit.assert_called_once()
+
+
 def test_geekjob_client_reuses_one_driver_inside_with_block():
     with patch(
         "src.job_sources.geekjob.client.init_browser"
@@ -131,6 +193,29 @@ def test_geekjob_client_reuses_one_driver_inside_with_block():
 
         assert mock_init.call_count == 1
         assert mock_init.return_value.quit.call_count == 1
+
+
+def test_geekjob_client_reconnects_after_dead_session_mid_run():
+    with patch(
+        "src.job_sources.geekjob.client.init_browser"
+    ) as mock_init, patch(
+        "src.job_sources.geekjob.client.raise_if_blocked"
+    ), patch(
+        "src.job_sources.geekjob.client.visible_text", return_value=""
+    ), patch(
+        "src.job_sources.geekjob.client.time.sleep"
+    ):
+        dead_driver = _dead_driver()
+        fresh_driver = MagicMock()
+        mock_init.side_effect = [dead_driver, fresh_driver]
+
+        with GeekjobClient("profile") as client:
+            assert client._driver is dead_driver
+            client.get_vacancy_html("123")
+
+        assert mock_init.call_count == 2
+        dead_driver.quit.assert_called_once()
+        fresh_driver.quit.assert_called_once()
 
 
 def test_geekjob_client_without_with_opens_and_closes_per_call():
@@ -173,6 +258,39 @@ def test_geekjob_search_uses_qs_query_param_not_q():
         assert "q=python" not in called_url
 
 
+def test_headhunter_client_raises_on_captcha_redirect_and_saves_screenshot(
+    tmp_path,
+):
+    """Живой инцидент: hh.ru редиректнул на /account/captcha, но текст
+    той страницы не совпал ни с одним словом в
+    block_detection._BLOCK_KEYWORDS — raise_if_blocked промолчал, и
+    код упал в общий путь "кнопка не найдена" → тихий dry-run, без
+    mark_blocked. Проверка URL редиректа — независимый от текста
+    сигнал, должна сработать даже когда raise_if_blocked не сработал."""
+    with patch(
+        "src.job_sources.headhunter.browser_client.init_browser"
+    ) as mock_init, patch(
+        "src.job_sources.headhunter.browser_client.raise_if_blocked"
+    ), patch(
+        "src.job_sources.headhunter.browser_client.visible_text",
+        return_value="совершенно обычная страница, без ключевых слов",
+    ), patch(
+        "src.job_sources.headhunter.browser_client.time.sleep"
+    ):
+        driver = mock_init.return_value
+        driver.current_url = (
+            "https://hh.ru/account/captcha?backurl=%2Fvacancy%2F1"
+        )
+
+        client = HeadHunterBrowserClient(tmp_path)
+        with pytest.raises(PlatformBlockedError):
+            client.get_vacancy_html("1")
+
+        driver.save_screenshot.assert_called_once_with(
+            str(tmp_path / "hh_captcha_screenshot.png")
+        )
+
+
 def test_wait_for_any_returns_true_when_selector_appears():
     driver = MagicMock()
     driver.find_elements.return_value = [MagicMock(is_displayed=lambda: True)]
@@ -198,6 +316,9 @@ def test_wait_for_any_returns_false_on_timeout_without_hanging():
 if __name__ == "__main__":
     test_headhunter_client_reuses_one_driver_inside_with_block()
     test_headhunter_client_without_with_opens_and_closes_per_call()
+    test_headhunter_client_raises_on_captcha_redirect_and_saves_screenshot(
+        Path("/tmp/hh_captcha_test")
+    )
     test_getmatch_client_reuses_one_driver_inside_with_block()
     test_wait_for_any_returns_true_when_selector_appears()
     test_wait_for_any_returns_false_on_timeout_without_hanging()
