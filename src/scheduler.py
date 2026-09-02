@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
+from config import COVER_LETTER_RETENTION_DAYS
+from src.job_sources.applied_log import AppliedLog
 from src.job_sources.llm_usage import check_and_mark_alert
 from src.job_sources.telegram_notify import notify_from_secrets
 from src.logging import logger
@@ -76,6 +78,21 @@ class Scheduler:
             record_run_result(self.output_folder, name, "ok", next_run, run_at)
 
         self._check_llm_cost_alert()
+        self._purge_old_cover_letters()
+
+    def _purge_old_cover_letters(self) -> None:
+        retention_days = int(
+            (self.parameters.get("limits") or {}).get(
+                "cover_letter_retention_days", COVER_LETTER_RETENTION_DAYS
+            )
+        )
+        applied_log = AppliedLog(self.output_folder / "applied_log.json")
+        purged = applied_log.purge_old_cover_letters(retention_days)
+        if purged:
+            logger.info(
+                f"Cover letter cleanup: cleared {purged} letter(s) older "
+                f"than {retention_days}d."
+            )
 
     def _check_llm_cost_alert(self) -> None:
         threshold = (self.parameters.get("limits") or {}).get(

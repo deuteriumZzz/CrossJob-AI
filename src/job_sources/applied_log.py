@@ -260,3 +260,32 @@ class AppliedLog:
             for company, count in attempts.items()
             if count >= min_attempts and company not in replied
         )
+
+    def purge_old_cover_letters(self, retention_days: int) -> int:
+        """Письмо нужно только на время — свериться, не пишет ли LLM
+        чушь (см. config.COVER_LETTER_RETENTION_DAYS) — хранить его
+        бессрочно вместе с остальной записью (нужной для дедупликации/
+        статистики значительно дольше) незачем. Чистит только сам
+        текст cover_letter у старых записей, остальные поля не трогает.
+        Возвращает число очищенных записей."""
+        cutoff = datetime.now().astimezone() - timedelta(days=retention_days)
+
+        def _is_stale(entry: dict) -> bool:
+            return bool(entry.get("cover_letter")) and datetime.fromisoformat(
+                entry["applied_at"]
+            ) < cutoff
+
+        if not any(_is_stale(e) for e in self._data["applications"]):
+            return 0
+
+        purged = 0
+
+        def _mutate(data: dict) -> None:
+            nonlocal purged
+            for entry in data["applications"]:
+                if _is_stale(entry):
+                    entry["cover_letter"] = ""
+                    purged += 1
+
+        self._write_locked(_mutate)
+        return purged
