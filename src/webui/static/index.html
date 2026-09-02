@@ -10,7 +10,7 @@
   href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&display=swap"
   rel="stylesheet"
 />
-<link rel="stylesheet" href="/style.css?v=12" />
+<link rel="stylesheet" href="/style.css?v=13" />
 </head>
 <body>
 <div id="setup-screen" class="setup-screen" style="display:none">
@@ -146,9 +146,7 @@
         <select id="filter-source">
           <option value="">Все площадки</option>
           <option value="headhunter">HeadHunter</option>
-          <option value="superjob">SuperJob</option>
           <option value="geekjob">geekjob.ru</option>
-          <option value="rabota_ru">rabota.ru</option>
           <option value="telegram">Telegram</option>
           <option value="getmatch">GetMatch</option>
           <option value="linkedin">LinkedIn</option>
@@ -166,7 +164,7 @@
       <div class="table-wrap" id="history-table-wrap">
         <table>
           <thead>
-            <tr><th>Дата</th><th>Площадка</th><th>Компания</th><th>Вакансия</th><th>Статус</th><th>Балл</th></tr>
+            <tr><th>Дата</th><th>Площадка</th><th>Компания</th><th>Вакансия</th><th>Статус</th><th>Балл</th><th>Письмо</th></tr>
           </thead>
           <tbody id="history-rows"></tbody>
         </table>
@@ -185,9 +183,7 @@
         <select id="replies-filter-source">
           <option value="">Все площадки</option>
           <option value="headhunter">HeadHunter</option>
-          <option value="superjob">SuperJob</option>
           <option value="geekjob">geekjob.ru</option>
-          <option value="rabota_ru">rabota.ru</option>
           <option value="telegram">Telegram</option>
           <option value="getmatch">GetMatch</option>
           <option value="linkedin">LinkedIn</option>
@@ -525,7 +521,7 @@
         <div class="risk-banner">
           ⚠️ Официальных цифр лимитов не публикует ни одна площадка — заданные здесь значения только уменьшают риск, но не гарантируют, что бота не заметят. Чем выше лимиты и чем ближе они к количеству найденных вакансий, тем больше активность похожа на бота. Повышайте постепенно, начните с малого. LinkedIn блокирует автоматизацию агрессивнее остальных — держите его лимит ниже.
           <br /><br />
-          <strong>Ориентир для старта</strong>: HH / SuperJob — 15/день, LinkedIn — 8/день, не больше 5 откликов за один прогон, интервал между прогонами — от 3ч. Поднимайте эти числа только если несколько дней подряд не видите капчи/блокировок.
+          <strong>Ориентир для старта</strong>: HH и остальные — 15/день, LinkedIn — 8/день, не больше 5 откликов за один прогон, интервал между прогонами — от 3ч. Поднимайте эти числа только если несколько дней подряд не видите капчи/блокировок.
         </div>
         <div class="limits-grid">
           <label class="limit-field">
@@ -533,7 +529,7 @@
             <input id="limit-total" type="number" min="1" placeholder="напр. 20" />
           </label>
           <label class="limit-field">
-            <span>Дневной лимит по умолчанию — HH / SuperJob / остальные</span>
+            <span>Дневной лимит по умолчанию — HH и остальные</span>
             <input id="limit-daily" type="number" min="1" />
           </label>
           <label class="limit-field">
@@ -571,9 +567,9 @@
         <div class="filters">
           <button id="limits-save" class="btn btn-primary">Сохранить</button>
           <button id="limits-distribute" class="btn btn-secondary" title="Раскидывает общий дневной лимит по площадкам в расписании случайными долями (LinkedIn — меньше остальных)">🎲 Распределить по площадкам</button>
-          <button id="limits-preset-cautious" class="btn btn-ghost" title="HH/SuperJob — 8/день, LinkedIn — 4/день, 3 за заход, интервал 4ч. Также снимает «своё значение» со всех площадок в таблице ниже. Расписание (какие площадки включены) не трогает — включённые останутся включены, выключенные не запустятся сами.">🐢 Осторожно</button>
-          <button id="limits-preset-standard" class="btn btn-ghost" title="HH/SuperJob — 15/день, LinkedIn — 8/день, 5 за заход, интервал 3ч. Также снимает «своё значение» со всех площадок в таблице ниже. Расписание (какие площадки включены) не трогает — включённые останутся включены, выключенные не запустятся сами.">⚖️ Стандартно</button>
-          <button id="limits-preset-aggressive" class="btn btn-ghost" title="HH/SuperJob — 25/день, LinkedIn — 12/день, 8 за заход, интервал 2ч. Выше риск капчи/блокировки. Также снимает «своё значение» со всех площадок в таблице ниже. Расписание (какие площадки включены) не трогает — включённые останутся включены, выключенные не запустятся сами.">🚀 Агрессивно</button>
+          <button id="limits-preset-cautious" class="btn btn-ghost" title="HH и остальные — 8/день, LinkedIn — 4/день, 3 за заход, интервал 4ч. Также снимает «своё значение» со всех площадок в таблице ниже. Расписание (какие площадки включены) не трогает — включённые останутся включены, выключенные не запустятся сами.">🐢 Осторожно</button>
+          <button id="limits-preset-standard" class="btn btn-ghost" title="HH и остальные — 15/день, LinkedIn — 8/день, 5 за заход, интервал 3ч. Также снимает «своё значение» со всех площадок в таблице ниже. Расписание (какие площадки включены) не трогает — включённые останутся включены, выключенные не запустятся сами.">⚖️ Стандартно</button>
+          <button id="limits-preset-aggressive" class="btn btn-ghost" title="HH и остальные — 25/день, LinkedIn — 12/день, 8 за заход, интервал 2ч. Выше риск капчи/блокировки. Также снимает «своё значение» со всех площадок в таблице ниже. Расписание (какие площадки включены) не трогает — включённые останутся включены, выключенные не запустятся сами.">🚀 Агрессивно</button>
           <span id="limits-status" class="muted small"></span>
         </div>
       </div>
@@ -695,9 +691,7 @@
           <select id="log-source">
             <option value="">Все источники</option>
             <option value="headhunter">HeadHunter</option>
-            <option value="superjob">SuperJob</option>
             <option value="geekjob">geekjob.ru</option>
-            <option value="rabota_ru">rabota.ru</option>
             <option value="telegram">Telegram</option>
             <option value="getmatch">GetMatch</option>
             <option value="linkedin">LinkedIn</option>
@@ -744,7 +738,16 @@
   </div>
 </div>
 
+<div id="cover-letter-overlay" class="command-overlay" style="display:none">
+  <div class="command-palette" style="padding:18px 20px;max-width:640px;width:90vw">
+    <h3 id="cover-letter-title" style="margin:0 0 2px"></h3>
+    <p id="cover-letter-meta" class="muted small" style="margin:0 0 14px"></p>
+    <div id="cover-letter-body" style="white-space:pre-wrap;word-break:break-word;line-height:1.55;font-size:13.5px;max-height:55vh;overflow-y:auto;padding-right:4px"></div>
+    <button type="button" class="btn btn-secondary" id="cover-letter-close" style="width:100%;justify-content:center;margin-top:16px">Закрыть</button>
+  </div>
+</div>
+
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=13"></script>
+<script src="/app.js?v=15"></script>
 </body>
 </html>

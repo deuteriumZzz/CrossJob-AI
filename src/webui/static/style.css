@@ -2091,6 +2091,25 @@ kbd {
   height: 12px;
 }
 
+/* ---------- Source icon (monogram badge, не логотип площадки) ---------- */
+
+.source-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #fff;
+  text-transform: none;
+  vertical-align: middle;
+  margin-right: 6px;
+  flex: 0 0 auto;
+}
+
 /* ---------- Copy button ---------- */
 
 .copy-btn {

@@ -10,13 +10,23 @@
 
 const SOURCE_LABELS = {
   headhunter: "HeadHunter",
-  superjob: "SuperJob",
   geekjob: "geekjob.ru",
-  rabota_ru: "rabota.ru",
   telegram: "Telegram",
   getmatch: "GetMatch",
   linkedin: "LinkedIn",
   habr_career: "Habr Career",
+};
+
+// ponytail: настоящие логотипы площадок — товарные знаки, тащить их к себе
+// рискованно. Вместо этого — монограмма (1-2 буквы) на цветном бейдже,
+// свой цвет на площадку для быстрого узнавания глазами в таблицах/карточках.
+const SOURCE_ICON = {
+  headhunter: { text: "hh", color: "#d64545" },
+  geekjob: { text: "GJ", color: "#3fb37f" },
+  telegram: { text: "TG", color: "#35a8e0" },
+  getmatch: { text: "GM", color: "#8a6fd1" },
+  linkedin: { text: "in", color: "#2f6fed" },
+  habr_career: { text: "HC", color: "#e0954a" },
 };
 
 const STATUS_DOT = {
@@ -28,6 +38,12 @@ const STATUS_DOT = {
 
 function sourceLabel(name) {
   return SOURCE_LABELS[name] || name;
+}
+
+function sourceIconHtml(name) {
+  const icon = SOURCE_ICON[name];
+  if (!icon) return "";
+  return `<span class="source-icon" style="background:${icon.color}">${icon.text}</span>`;
 }
 
 function escapeHtml(text) {
@@ -636,6 +652,9 @@ const render = {
           return `
           <div class="source-card stagger-item" data-source="${s.name}" draggable="true" style="animation-delay:${staggerDelay(i)}">
             <div class="source-card-actions">
+              <button type="button" class="src-run-now" data-source="${s.name}" title="Запустить эту площадку прямо сейчас, не дожидаясь расписания" aria-label="Запустить сейчас ${sourceLabel(s.name)}">
+                <svg viewBox="0 0 20 20" fill="none"><path d="M7 5.2v9.6l8-4.8-8-4.8Z" fill="currentColor"/></svg>
+              </button>
               <button type="button" class="src-goto-history" data-source="${s.name}" title="История откликов этой площадки" aria-label="История откликов ${sourceLabel(s.name)}">
                 <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.6"/><path d="M10 5.8V10l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
               </button>
@@ -645,7 +664,7 @@ const render = {
             </div>
             <h3>
               <input type="checkbox" class="schedule-toggle switch" data-source="${s.name}" title="В расписании демона" ${s.schedule_enabled ? "checked" : ""} />
-              <span class="dot ${dot}"></span> ${sourceLabel(s.name)}
+              <span class="dot ${dot}"></span> ${sourceIconHtml(s.name)}${sourceLabel(s.name)}
             </h3>
             <div class="row"><span>Расписание</span><span>${s.schedule_enabled ? `каждые ${s.interval_hours}ч` : "выключено"}</span></div>
             <div class="row"><span>Последний запуск</span><span>${fmtTime(s.last_run)}</span></div>
@@ -712,7 +731,7 @@ const render = {
     if (q) params.set("q", q);
 
     const tbody = document.getElementById("history-rows");
-    if (!historyLoaded) tbody.innerHTML = skeletonRows(6, 6);
+    if (!historyLoaded) tbody.innerHTML = skeletonRows(6, 7);
 
     const entries = await api(`/api/applications?${params}`);
     historyLoaded = true;
@@ -727,7 +746,7 @@ const render = {
 
     lastHistoryEntries = entries;
     if (!entries.length) {
-      tbody.innerHTML = `<tr><td colspan="6">${emptyStateHtml("Ничего не найдено.")}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7">${emptyStateHtml("Ничего не найдено.")}</td></tr>`;
       document.getElementById("history-timeline").innerHTML = emptyStateHtml("Ничего не найдено.");
       return;
     }
@@ -737,7 +756,7 @@ const render = {
         (e, i) => `
       <tr class="reveal" style="transition-delay:${staggerDelay(i, 25)}">
         <td>${fmtTime(e.applied_at)}</td>
-        <td>${sourceLabel(e.source)}</td>
+        <td>${sourceIconHtml(e.source)}${sourceLabel(e.source)}</td>
         <td>${escapeHtml(e.company)}</td>
         <td><a href="${escapeHtml(e.link)}" target="_blank" rel="noopener">${escapeHtml(e.title)}</a></td>
         <td>${statusLabel(e.status)}</td>
@@ -749,9 +768,21 @@ const render = {
               : ""
           }
         </td>
+        <td>
+          ${
+            e.cover_letter
+              ? `<button type="button" class="btn btn-secondary btn-small" data-cover-letter-btn data-row-index="${i}">📄 Читать письмо</button>`
+              : `<span class="muted small">—</span>`
+          }
+        </td>
       </tr>`
       )
       .join("");
+    tbody.querySelectorAll("[data-cover-letter-btn]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        openCoverLetterModal(reversed[parseInt(btn.dataset.rowIndex, 10)]);
+      });
+    });
     observeReveal(tbody);
     renderHistoryTimeline(reversed);
   },
@@ -905,7 +936,7 @@ const render = {
       .map(
         (s, i) => `
       <tr data-source="${s.name}" class="reveal" style="transition-delay:${staggerDelay(i, 25)}">
-        <td>${sourceLabel(s.name)}</td>
+        <td>${sourceIconHtml(s.name)}${sourceLabel(s.name)}</td>
         <td title="${
           s.readiness && s.readiness.missing.length
             ? "Не хватает: " + s.readiness.missing.join(", ")
@@ -1289,7 +1320,7 @@ function renderRepliesRows() {
       (e, i) => `
     <tr class="reveal" style="transition-delay:${staggerDelay(i, 25)}">
       <td>${fmtTime(e.applied_at)}</td>
-      <td>${sourceLabel(e.source)}</td>
+      <td>${sourceIconHtml(e.source)}${sourceLabel(e.source)}</td>
       <td><a href="${escapeHtml(e.link)}" target="_blank" rel="noopener">${escapeHtml(e.company)} — ${escapeHtml(e.title)}</a></td>
       <td>${escapeHtml(e.last_known_state)}</td>
     </tr>`
@@ -1792,6 +1823,37 @@ function initCommandPalette() {
     if (e.target === shortcutsOverlay) closeShortcutsOverlay();
   });
   document.getElementById("shortcuts-close").addEventListener("click", closeShortcutsOverlay);
+
+  const coverLetterOverlay = document.getElementById("cover-letter-overlay");
+  coverLetterOverlay.addEventListener("click", (e) => {
+    if (e.target === coverLetterOverlay) closeCoverLetterModal();
+  });
+  document
+    .getElementById("cover-letter-close")
+    .addEventListener("click", closeCoverLetterModal);
+}
+
+function openCoverLetterModal(entry) {
+  document.getElementById("cover-letter-title").textContent =
+    `${entry.company} — ${entry.title}`;
+  document.getElementById("cover-letter-meta").textContent =
+    `${sourceLabel(entry.source)} · ${fmtTime(entry.applied_at)}`;
+  document.getElementById("cover-letter-body").textContent =
+    entry.cover_letter || "Письмо не сохранено (могло истечь по сроку хранения).";
+  const overlay = document.getElementById("cover-letter-overlay");
+  overlay.style.display = "flex";
+  trapFocus(overlay);
+}
+
+function closeCoverLetterModal() {
+  const overlay = document.getElementById("cover-letter-overlay");
+  if (overlay.style.display === "none") return;
+  overlay.style.display = "none";
+  releaseFocusTrap(overlay);
+}
+
+function isCoverLetterModalOpen() {
+  return document.getElementById("cover-letter-overlay").style.display !== "none";
 }
 
 function openShortcutsOverlay() {
@@ -1823,6 +1885,11 @@ function initKeyboardShortcuts() {
       return;
     }
     if (isCommandPaletteOpen()) return;
+
+    if (isCoverLetterModalOpen()) {
+      if (e.key === "Escape") closeCoverLetterModal();
+      return;
+    }
 
     if (e.key === "Escape") {
       closeShortcutsOverlay();
@@ -2040,7 +2107,7 @@ function renderHistoryTimeline(reversedEntries) {
     <div class="timeline-item reveal" style="transition-delay:${staggerDelay(i, 20)}">
       <div class="timeline-date">${fmtTime(e.applied_at)}</div>
       <div class="timeline-title"><a href="${escapeHtml(e.link)}" target="_blank" rel="noopener">${escapeHtml(e.company)} — ${escapeHtml(e.title)}</a></div>
-      <div class="timeline-meta">${sourceLabel(e.source)} · ${statusLabel(e.status)}${e.score != null ? ` · балл ${e.score}` : ""}</div>
+      <div class="timeline-meta">${sourceIconHtml(e.source)}${sourceLabel(e.source)} · ${statusLabel(e.status)}${e.score != null ? ` · балл ${e.score}` : ""}</div>
       ${e.gaps && e.gaps.length ? `<div class="readiness-note" title="${escapeHtml(e.gaps.join("; "))}">${escapeHtml(truncate(e.gaps[0], 90))}${e.gaps.length > 1 ? ` (+${e.gaps.length - 1})` : ""}</div>` : ""}
     </div>`
     )
@@ -2231,14 +2298,44 @@ function initDashboard() {
   initOnboardingTour();
 
   function handleSourceCardActionClick(e) {
+    const runBtn = e.target.closest(".src-run-now");
     const historyBtn = e.target.closest(".src-goto-history");
     const logsBtn = e.target.closest(".src-goto-logs");
-    if (historyBtn) {
+    if (runBtn) {
+      runSourceNow(runBtn);
+    } else if (historyBtn) {
       document.getElementById("filter-source").value = historyBtn.dataset.source;
       switchTab("history");
     } else if (logsBtn) {
       document.getElementById("log-source").value = logsBtn.dataset.source;
       switchTab("logs");
+    }
+  }
+
+  // Запускает одну конкретную площадку прямо сейчас (реальный прогон, с
+  // её собственным auto_apply — не форсированный dry-run, как у общей
+  // кнопки "Тестовый прогон") — чтобы не ждать next_run при отладке/
+  // ручной проверке. Переиспользует тот же /api/run-now, что и общая
+  // кнопка, просто с одним источником в списке.
+  async function runSourceNow(btn) {
+    if (btn.classList.contains("is-loading")) return;
+    const name = btn.dataset.source;
+    try {
+      await withButtonLoading(btn, async () => {
+        await api("/api/run-now", {
+          method: "POST",
+          body: JSON.stringify({ sources: [name] }),
+        });
+        for (;;) {
+          const runStatus = await api("/api/run-now/status");
+          if (!runStatus.running) break;
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+      });
+      showToast(`${sourceLabel(name)}: прогон завершён — см. Историю`, "success");
+      render.overview();
+    } catch (e) {
+      showToast(`Не удалось запустить ${sourceLabel(name)}: ${e.message}`, "error");
     }
   }
   document.getElementById("source-grid").addEventListener("click", handleSourceCardActionClick);
