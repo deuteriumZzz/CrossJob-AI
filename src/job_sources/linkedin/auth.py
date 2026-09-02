@@ -2,6 +2,7 @@ import time
 from pathlib import Path
 
 from src.job_sources.linkedin.browser import init_linkedin_browser
+from src.job_sources.telegram_notify import notify_manual_login_required
 from src.logging import logger
 
 LOGIN_URL = "https://www.linkedin.com/login"
@@ -24,7 +25,7 @@ class LinkedInSession:
     def __init__(self, profile_dir: Path):
         self.driver = init_linkedin_browser(profile_dir)
 
-    def ensure_logged_in(self) -> None:
+    def ensure_logged_in(self, parameters: dict) -> None:
         self.driver.get("https://www.linkedin.com/feed/")
         time.sleep(3)
         if "/feed" in self.driver.current_url:
@@ -35,6 +36,9 @@ class LinkedInSession:
             "Открылось окно входа LinkedIn — войдите вручную (email, "
             "пароль, любая 2FA-проверка) в открывшемся браузере "
             f"(до {LOGIN_TIMEOUT_SECONDS}с)."
+        )
+        notify_manual_login_required(
+            parameters, "LinkedIn", LOGIN_TIMEOUT_SECONDS
         )
         deadline = time.monotonic() + LOGIN_TIMEOUT_SECONDS
         while "/feed" not in self.driver.current_url:

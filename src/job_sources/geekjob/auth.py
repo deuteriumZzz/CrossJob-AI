@@ -3,6 +3,7 @@ from pathlib import Path
 
 from selenium.webdriver.common.by import By
 
+from src.job_sources.telegram_notify import notify_manual_login_required
 from src.logging import logger
 from src.utils.chrome_utils import init_browser
 
@@ -28,7 +29,7 @@ class GeekjobSession:
             By.XPATH, '//a[normalize-space()="Войти / Регистрация"]'
         )
 
-    def ensure_logged_in(self) -> None:
+    def ensure_logged_in(self, parameters: dict) -> None:
         driver = init_browser(self.profile_dir)
         try:
             driver.get(GJ_BASE)
@@ -40,6 +41,9 @@ class GeekjobSession:
                 "Открылось окно входа geekjob.ru — войдите вручную "
                 "(например через Google) в открывшемся браузере "
                 f"(до {LOGIN_TIMEOUT_SECONDS}с)."
+            )
+            notify_manual_login_required(
+                parameters, "geekjob.ru", LOGIN_TIMEOUT_SECONDS
             )
             deadline = time.monotonic() + LOGIN_TIMEOUT_SECONDS
             while not self._is_logged_in(driver):

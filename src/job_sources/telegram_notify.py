@@ -8,6 +8,19 @@ from src.logging import logger
 TELEGRAM_API_BASE = "https://api.telegram.org"
 
 
+def notify_manual_login_required(
+    parameters: dict, source_name: str, timeout_seconds: int
+) -> None:
+    """Шлём сразу, как только открылось окно ручного входа — иначе
+    уведомление о сбое приходит только после timeout_seconds, когда
+    окно логина уже закрыто (driver.quit()) и реагировать поздно."""
+    notify_from_secrets(
+        parameters,
+        f"CrossJob-AI: {source_name} требует ручного входа — "
+        f"откройте Chrome в течение {timeout_seconds}с, иначе прогон сорвётся.",
+    )
+
+
 def notify_from_secrets(parameters: dict, text: str) -> None:
     """Best-effort уведомление в Telegram из parameters["secretsFile"]
     — общая реализация main.notify()/Scheduler, живёт здесь (а не в

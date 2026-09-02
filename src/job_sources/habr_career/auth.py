@@ -3,6 +3,7 @@ from pathlib import Path
 
 from selenium.webdriver.common.by import By
 
+from src.job_sources.telegram_notify import notify_manual_login_required
 from src.logging import logger
 from src.utils.chrome_utils import init_browser
 
@@ -37,7 +38,7 @@ class HabrCareerSession:
             )
         )
 
-    def ensure_logged_in(self) -> None:
+    def ensure_logged_in(self, parameters: dict) -> None:
         driver = init_browser(self.profile_dir)
         try:
             driver.get(HC_BASE)
@@ -49,6 +50,9 @@ class HabrCareerSession:
                 "Открылось окно career.habr.com — войдите вручную "
                 '(кнопка "Войти" → "Войти через Хабр Аккаунт") в '
                 f"открывшемся браузере (до {LOGIN_TIMEOUT_SECONDS}с)."
+            )
+            notify_manual_login_required(
+                parameters, "career.habr.com", LOGIN_TIMEOUT_SECONDS
             )
             deadline = time.monotonic() + LOGIN_TIMEOUT_SECONDS
             while not self._is_logged_in(driver):

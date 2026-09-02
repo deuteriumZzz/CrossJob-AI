@@ -3,6 +3,7 @@ from pathlib import Path
 
 from selenium.webdriver.common.by import By
 
+from src.job_sources.telegram_notify import notify_manual_login_required
 from src.logging import logger
 from src.utils.chrome_utils import init_browser
 
@@ -29,7 +30,7 @@ class HeadHunterSession:
     def _is_logged_in(self, driver) -> bool:
         return bool(driver.find_elements(By.CSS_SELECTOR, _LOGGED_IN_MARKER))
 
-    def ensure_logged_in(self) -> None:
+    def ensure_logged_in(self, parameters: dict) -> None:
         driver = init_browser(self.profile_dir)
         try:
             driver.get(HH_BASE)
@@ -41,6 +42,9 @@ class HeadHunterSession:
                 "Открылось окно входа hh.ru — войдите вручную по номеру "
                 "телефона (придёт SMS-код) в открывшемся браузере "
                 f"(до {LOGIN_TIMEOUT_SECONDS}с)."
+            )
+            notify_manual_login_required(
+                parameters, "hh.ru", LOGIN_TIMEOUT_SECONDS
             )
             deadline = time.monotonic() + LOGIN_TIMEOUT_SECONDS
             while not self._is_logged_in(driver):

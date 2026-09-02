@@ -1,6 +1,23 @@
 from unittest.mock import MagicMock, patch
 
-from src.job_sources.telegram_notify import send_notification
+from src.job_sources.telegram_notify import (
+    notify_manual_login_required,
+    send_notification,
+)
+
+
+def test_notify_manual_login_required_mentions_source_and_timeout():
+    parameters = {"secretsFile": "unused"}
+    with patch(
+        "src.job_sources.telegram_notify.notify_from_secrets"
+    ) as mock_notify:
+        notify_manual_login_required(parameters, "hh.ru", 300)
+
+    mock_notify.assert_called_once()
+    called_parameters, called_text = mock_notify.call_args[0]
+    assert called_parameters is parameters
+    assert "hh.ru" in called_text
+    assert "300" in called_text
 
 
 def test_send_notification_posts_to_telegram_api():

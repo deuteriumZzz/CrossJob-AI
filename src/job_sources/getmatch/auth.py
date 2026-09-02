@@ -3,6 +3,7 @@ from pathlib import Path
 
 from selenium.webdriver.common.by import By
 
+from src.job_sources.telegram_notify import notify_manual_login_required
 from src.logging import logger
 from src.utils.chrome_utils import init_browser
 
@@ -27,7 +28,7 @@ class GetMatchSession:
             By.XPATH, '//button[normalize-space()="Войти"]'
         )
 
-    def ensure_logged_in(self, email: str) -> None:
+    def ensure_logged_in(self, email: str, parameters: dict) -> None:
         driver = init_browser(self.profile_dir)
         try:
             driver.get(f"{GM_BASE}/profile")
@@ -52,6 +53,9 @@ class GetMatchSession:
                 "Открылось окно входа GetMatch — введите код, "
                 "присланный в Telegram, вручную в открывшемся браузере "
                 f"(до {LOGIN_TIMEOUT_SECONDS}с)."
+            )
+            notify_manual_login_required(
+                parameters, "GetMatch", LOGIN_TIMEOUT_SECONDS
             )
             deadline = time.monotonic() + LOGIN_TIMEOUT_SECONDS
             while not self._is_logged_in(driver):

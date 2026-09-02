@@ -59,7 +59,7 @@ def test_captcha_during_apply_stops_run_instead_of_hammering_next_jobs(
             main,
             "HeadHunterSession",
             lambda profile_dir: type(
-                "S", (), {"ensure_logged_in": lambda self: None}
+                "S", (), {"ensure_logged_in": lambda self, parameters: None}
             )(),
         )
         monkeypatch.setattr(
