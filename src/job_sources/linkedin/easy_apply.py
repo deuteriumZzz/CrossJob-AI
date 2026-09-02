@@ -1,4 +1,5 @@
 import time
+from typing import Optional
 
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
@@ -240,12 +241,27 @@ def _answer_visible_questions(driver, answerer) -> bool:
         if text_inputs:
             field = text_inputs[0]
             if not field.get_attribute("value"):
-                field.send_keys(answerer.answer(question))
+                field.send_keys(
+                    answerer.answer(
+                        question, max_length=_field_max_length(field)
+                    )
+                )
             continue
 
         return False
 
     return True
+
+
+def _field_max_length(field) -> Optional[int]:
+    """HTML `maxlength` поля, если он есть и валиден (подтверждено
+    живьём — короткие поля на LinkedIn вроде "hours per week"/
+    "compensation" ограничены 20-200 символами, счётчик "0/20" виден
+    прямо в форме)."""
+    raw = field.get_attribute("maxlength")
+    if raw and raw.isdigit():
+        return int(raw)
+    return None
 
 
 def _closest_option(answer: str, options: list) -> str:

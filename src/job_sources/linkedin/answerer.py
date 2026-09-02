@@ -34,6 +34,23 @@ _ANSWER_PROMPT = ChatPromptTemplate.from_template(
 )
 
 
+def _options_hint(
+    options: Optional[list], max_length: Optional[int]
+) -> str:
+    if options:
+        return (
+            f"Pick exactly one option, written exactly as shown: "
+            f"{', '.join(options)}"
+        )
+    if max_length:
+        return (
+            f"Keep the answer to at most {max_length} characters — "
+            "be extremely brief (e.g. just a number or 1-3 words, "
+            "no full sentence)."
+        )
+    return ""
+
+
 class EasyApplyAnswerer:
     def __init__(
         self,
@@ -51,13 +68,20 @@ class EasyApplyAnswerer:
         )
         self.chain = _ANSWER_PROMPT | llm | StrOutputParser()
 
-    def answer(self, question: str, options: Optional[list] = None) -> str:
-        options_hint = (
-            f"Pick exactly one option, written exactly as shown: "
-            f"{', '.join(options)}"
-            if options
-            else ""
-        )
+    def answer(
+        self,
+        question: str,
+        options: Optional[list] = None,
+        max_length: Optional[int] = None,
+    ) -> str:
+        """max_length — значение HTML `maxlength` текстового поля, если
+        оно есть (подтверждено живьём — короткие поля вроде "hours per
+        week"/"compensation" на LinkedIn часто ограничены 20-200
+        символами). Без подсказки об этом LLM пишет обычное предложение,
+        браузер обрезает его на границе maxlength, и LinkedIn помечает
+        обрубленный на полуслове ответ как Invalid — форма не проходит
+        дальше."""
+        options_hint = _options_hint(options, max_length)
         result = self.chain.invoke(
             {
                 "resume_text": self.resume_text,
