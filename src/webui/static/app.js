@@ -660,16 +660,20 @@ const render = {
           const ringC = 2 * Math.PI * 13;
           const ringOffset = ringC * (1 - ratio);
           // telegram отправляет (пишет контакту) только при
-          // auto_message; остальные площадки — при auto_apply. Без
-          // этого "Откликов сегодня 0/N" выглядит как площадка не
-          // работает, хотя она специально настроена только искать и
-          // класть найденное в Историю, ничего не отправляя.
+          // auto_message; остальные площадки — при auto_apply. Раньше
+          // в режиме "только поиск" счётчик "Откликов сегодня" вообще
+          // пропадал с карточки (заменялся строкой "Режим") — снаружи
+          // это выглядело как будто лимит нигде не виден. Теперь
+          // счётчик остаётся всегда (он и так 0/N, пока автоотклик
+          // выключен, — не вводит в заблуждение), а "только поиск"
+          // идёт отдельной строкой поверх него как пояснение.
           const isSearchOnly =
             s.name === "telegram" ? !s.auto_message : !s.auto_apply;
           const isRunning = runNow.running && runNow.current_source === s.name;
-          const responseRow = isSearchOnly
+          const searchOnlyRow = isSearchOnly
             ? `<div class="row"><span>Режим</span><span>🔍 только поиск</span></div>`
-            : `<div class="row"><span>Откликов сегодня</span>
+            : "";
+          const responseRow = `<div class="row"><span>Откликов сегодня</span>
               <span class="limit-ring-wrap">
                 <svg width="18" height="18" viewBox="0 0 32 32">
                   <circle class="limit-ring-bg" cx="16" cy="16" r="13"></circle>
@@ -699,6 +703,7 @@ const render = {
             <div class="row"><span>Расписание</span><span>${s.schedule_enabled ? `каждые ${s.interval_hours}ч` : "выключено"}</span></div>
             <div class="row"><span>Последний запуск</span><span>${fmtTime(s.last_run)}</span></div>
             <div class="row"><span>Следующий запуск</span><span>${fmtTime(s.next_run)}</span></div>
+            ${searchOnlyRow}
             ${responseRow}
             ${errorRowHtml(s.last_error)}
           </div>`;
