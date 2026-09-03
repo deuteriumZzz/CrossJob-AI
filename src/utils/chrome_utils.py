@@ -55,11 +55,31 @@ _STALE_CACHE_SUBDIRS = (
     "Default/Cache",
     "Default/Code Cache",
     "Default/GPUCache",
+    "Default/Service Worker",
+)
+
+# ponytail: найдено вживую — .chrome_profile_himalayas распух до 746MB,
+# из них 505MB — Default/Extensions (сами компоненты Chrome вроде
+# Widevine/SafeBrowsing, не наши расширения — --disable-extensions их
+# не останавливает, это отдельный от обычных расширений механизм) и
+# ещё ~120MB component_crx_cache/optimization_guide_model_store/
+# WasmTtsEngine/OnDeviceHeadSuggestModel — Chrome сам фоном докачивает
+# это на каждый постоянный профиль и никогда не чистит. Раздутый
+# постоянный профиль — задокументированная здесь же причина крашей
+# (см. _reset_bloated_preferences ниже, тот же класс проблемы). Ничего
+# из этого не сессия входа (та в Cookies/IndexedDB/Local Storage —
+# не трогается), поэтому безопасно удалять целиком.
+_STALE_ROOT_SUBDIRS = (
+    "component_crx_cache",
+    "optimization_guide_model_store",
+    "WasmTtsEngine",
+    "OnDeviceHeadSuggestModel",
+    "Default/Extensions",
 )
 
 
 def clear_profile_cache(profile_dir: Path) -> None:
-    for rel in _STALE_CACHE_SUBDIRS:
+    for rel in (*_STALE_CACHE_SUBDIRS, *_STALE_ROOT_SUBDIRS):
         shutil.rmtree(profile_dir / rel, ignore_errors=True)
     _reset_bloated_preferences(profile_dir)
 
@@ -141,6 +161,14 @@ def chrome_browser_options(profile_dir: Optional[Path] = None):
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--ignore-certificate-errors")
     options.add_argument("--disable-extensions")
+    # ponytail: Chrome сам фоном докачивает "компоненты" (Widevine,
+    # SafeBrowsing, optimization_guide model store и т.п.) в
+    # component_crx_cache/Default/Extensions на каждый постоянный
+    # профиль независимо от --disable-extensions — это и раздувало
+    # профили до сотен МБ (см. _STALE_ROOT_SUBDIRS в clear_profile_
+    # cache). Флаг останавливает саму докачку, а не только чистит
+    # то, что уже накопилось.
+    options.add_argument("--disable-component-update")
     options.add_argument(
         "--disable-gpu"
     )  # Опционально, полезно в некоторых окружениях
