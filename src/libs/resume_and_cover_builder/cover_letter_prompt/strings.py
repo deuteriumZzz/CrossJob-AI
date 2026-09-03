@@ -1,6 +1,7 @@
-from src.libs.resume_and_cover_builder.template_base import (
-    prompt_cover_letter_template,
-)
+from src.libs.resume_and_cover_builder.anti_ai_rules import \
+    ANTI_AI_STRUCTURE_EN
+from src.libs.resume_and_cover_builder.template_base import \
+    prompt_cover_letter_template
 
 cover_letter_template = (
     """
@@ -28,7 +29,9 @@ Tone: confident, specific, human.
   ignore what language the resume happens to be written in. A
   Russian-language job posting must get a Russian-language letter
   even if the resume below is in English, and vice versa.
-
+"""
+    + ANTI_AI_STRUCTURE_EN
+    + """
 ## Details :
 - **Job Description:**
 ```

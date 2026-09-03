@@ -1,3 +1,6 @@
+from src.libs.resume_and_cover_builder.anti_ai_rules import \
+    ANTI_AI_STRUCTURE_RU
+
 # Не наследуем summarize_prompt_template из cover_letter_prompt — там
 # явно "Write your entire analysis in the SAME language as the job
 # description" (нужно для auto_plain/html, где язык определяется по
@@ -75,7 +78,8 @@ process, ensuring the identification of the most qualified candidates.
 # отсутствие HTML-тегов и подписи сохранены из прежней версии — тот же
 # баг с протекающей разметкой актуален для любого текста в этом шаблоне,
 # не только для прежнего.
-cover_letter_template = """
+cover_letter_template = (
+    """
 Напиши сопроводительное письмо к этой вакансии, используя моё резюме и
 описание вакансии ниже — так, как реальный кандидат печатает его прямо в
 текстовое поле отклика на площадке, а не оформленное деловое письмо.
@@ -125,7 +129,9 @@ cover_letter_template = """
 - Письмо должно быть достаточно сильным само по себе, чтобы у HR сразу
   возник интерес именно к этому кандидату — конкретное, немного
   неожиданное, не просто компетентное и легко забываемое.
-
+"""
+    + ANTI_AI_STRUCTURE_RU
+    + """
 ## Детали:
 - **Описание вакансии:**
 ```
@@ -136,3 +142,4 @@ cover_letter_template = """
 {resume}
 ```
 """
+)

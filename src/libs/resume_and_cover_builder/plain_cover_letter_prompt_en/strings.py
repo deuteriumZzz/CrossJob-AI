@@ -1,3 +1,6 @@
+from src.libs.resume_and_cover_builder.anti_ai_rules import \
+    ANTI_AI_STRUCTURE_EN
+
 # Не наследуем summarize_prompt_template из cover_letter_prompt — там
 # явно "Write your entire analysis in the SAME language as the job
 # description" (нужно для auto_plain/html, где язык определяется по
@@ -65,7 +68,8 @@ process, ensuring the identification of the most qualified candidates.
 # so the LLM never writes the HTML letterhead in the first place — the
 # plain-text/no-markup rule below is what prevents that leak, keep it
 # whenever this template's content changes.
-cover_letter_template = """
+cover_letter_template = (
+    """
 Write a cover letter for this job posting, using my resume and the job
 description below — the way a real candidate would type it directly into
 a job board's application text box, not a formatted business letter.
@@ -114,7 +118,9 @@ Length: under 250 words, no more than three short paragraphs.
 - The letter must be strong enough on its own that an HR person reading
   it immediately gets curious about this specific candidate — sharp,
   concrete, a little unexpected, not just competent and forgettable.
-
+"""
+    + ANTI_AI_STRUCTURE_EN
+    + """
 ## Details:
 - **Job Description:**
 ```
@@ -125,3 +131,4 @@ Length: under 250 words, no more than three short paragraphs.
 {resume}
 ```
 """
+)

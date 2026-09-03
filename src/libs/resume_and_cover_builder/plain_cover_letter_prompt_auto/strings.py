@@ -1,6 +1,7 @@
-from src.libs.resume_and_cover_builder.cover_letter_prompt import (
-    strings as _base_strings,
-)
+from src.libs.resume_and_cover_builder.anti_ai_rules import \
+    ANTI_AI_STRUCTURE_EN
+from src.libs.resume_and_cover_builder.cover_letter_prompt import \
+    strings as _base_strings
 
 summarize_prompt_template = _base_strings.summarize_prompt_template
 
@@ -14,7 +15,8 @@ summarize_prompt_template = _base_strings.summarize_prompt_template
 # dashboard. Unlike plain_cover_letter_prompt(_en), language here is
 # still auto-detected from the job description rather than forced,
 # since LinkedIn postings aren't reliably in one language.
-cover_letter_template = """
+cover_letter_template = (
+    """
 Write a cover letter for this job posting, using my resume and the job
 description below — the way a real candidate would type it directly into
 a job board's application text box, not a formatted business letter.
@@ -62,7 +64,9 @@ Length: under 250 words, no more than three short paragraphs.
 - The letter must be strong enough on its own that an HR person reading
   it immediately gets curious about this specific candidate — sharp,
   concrete, a little unexpected, not just competent and forgettable.
-
+"""
+    + ANTI_AI_STRUCTURE_EN
+    + """
 ## Details :
 - **Job Description:**
 ```
@@ -73,3 +77,4 @@ Length: under 250 words, no more than three short paragraphs.
 {resume}
 ```
 """
+)

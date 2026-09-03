@@ -10,6 +10,8 @@ from pdfminer.high_level import extract_text
 from pydantic import BaseModel, Field
 
 from src.job_sources.llm_provider import get_chat_llm
+from src.libs.resume_and_cover_builder.anti_ai_rules import \
+    ANTI_AI_STRUCTURE_RU
 
 _NEEDS_REPLY_PROMPT = ChatPromptTemplate.from_template(
     """
@@ -40,6 +42,16 @@ _REPLY_PROMPT = ChatPromptTemplate.from_template(
     резюме и данных ниже. Если ответа на конкретный вопрос там нет —
     ответь честно и обобщённо, не выдумывай цифры и факты (особенно
     зарплату и опыт).
+
+    Пиши как живой человек в чате, а не как ИИ:
+    """
+    + ANTI_AI_STRUCTURE_RU
+    + """
+    - Не начинай с "Отличный вопрос!", "Спасибо за интерес!" и
+      подобных фраз-реакций — отвечай сразу по делу.
+    - Не заканчивай фразами вроде "Надеюсь, это было полезно!" или
+      извинениями за неуверенность — если факта нет, просто скажи
+      это прямо, одним предложением.
 
     Резюме (PDF):
     {resume_text}
@@ -148,8 +160,6 @@ def message_needs_reply(message_text: str, llm_api_key: str) -> bool:
     structured = llm.with_structured_output(_NeedsReply)
     result = cast(
         _NeedsReply,
-        structured.invoke(
-            _NEEDS_REPLY_PROMPT.format(message_text=message_text)
-        ),
+        structured.invoke(_NEEDS_REPLY_PROMPT.format(message_text=message_text)),
     )
     return result.needs_reply
