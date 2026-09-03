@@ -1,11 +1,13 @@
 from src.job import Job
 from src.job_sources.blacklist_filter import passes_blacklists
+from src.job_sources.block_detection import PlatformBlockedError
 from src.job_sources.headhunter.browser_client import HeadHunterBrowserClient
 from src.job_sources.headhunter.browser_mapping import (
     hh_html_vacancy_to_job,
     parse_search_results,
 )
 from src.job_sources.preferences import effective_list
+from src.logging import logger
 
 # ponytail: фиксированная неглубокая пагинация (2 страницы на должность)
 # вместо обхода всех страниц, увеличить, если это перестанет давать
@@ -41,9 +43,24 @@ class HeadHunterBrowserSource:
                         continue
                     seen_ids.add(item.external_id)
 
-                    detail_html = self.client.get_vacancy_html(
-                        item.external_id
-                    )
+                    try:
+                        detail_html = self.client.get_vacancy_html(
+                            item.external_id
+                        )
+                    except PlatformBlockedError:
+                        raise
+                    except Exception as e:
+                        # ponytail: та же защита, что уже стоит у
+                        # GeekjobSource/HabrCareerSource — вакансия из
+                        # выдачи поиска могла успеть исчезнуть (сняли/
+                        # протухла) до того, как дошли до её страницы.
+                        # Раньше это улетало наружу и хоронило весь
+                        # прогон площадки вместо одной вакансии.
+                        logger.exception(
+                            f"hh.ru вакансия {item.external_id} упала — "
+                            f"пропускаю, продолжаю: {e}"
+                        )
+                        continue
                     job = hh_html_vacancy_to_job(detail_html, item.external_id)
                     if not job.role:
                         job = item
