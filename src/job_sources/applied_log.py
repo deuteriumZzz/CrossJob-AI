@@ -93,6 +93,17 @@ class AppliedLog:
             and datetime.fromisoformat(e["applied_at"]).date() == today
         )
 
+    def entries_since(self, source: str, since: datetime) -> list[dict]:
+        """Записи по площадке с applied_at >= since — используется для
+        сводки воронки отбора за один прогон (main._log_funnel_summary),
+        чтобы отличить "записано в этом прогоне" от всей истории."""
+        return [
+            e
+            for e in self._data["applications"]
+            if e["source"] == source
+            and datetime.fromisoformat(e["applied_at"]) >= since
+        ]
+
     def entries_by_source_and_status(
         self, source: str, status: Status
     ) -> list[dict]:

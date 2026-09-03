@@ -1121,6 +1121,29 @@ def _job_max_applications(
     )
 
 
+def _log_funnel_summary(
+    source: str,
+    applied_log: AppliedLog,
+    found: int,
+    already_seen: int,
+    run_start: datetime,
+) -> None:
+    """Сводка воронки отбора за прогон: сколько вакансий вообще нашли,
+    сколько из них уже видели раньше (в LLM не пошли), сколько отсеял
+    fit score, и сколько дошло до отклика/dry-run — чтобы по логам
+    было видно настоящее узкое место (нехватка новых вакансий,
+    слишком строгий порог score и т.д.), а не гадать по глубине
+    пагинации."""
+    new_entries = applied_log.entries_since(source, run_start)
+    low_fit = sum(1 for e in new_entries if e["status"] == "skipped_low_fit")
+    applied = sum(1 for e in new_entries if e["status"] == "applied")
+    dry_run = sum(1 for e in new_entries if e["status"] == "dry_run")
+    logger.info(
+        f"[{source}] funnel: found={found} already_seen={already_seen} "
+        f"low_fit={low_fit} applied={applied} dry_run={dry_run}"
+    )
+
+
 def search_and_apply_headhunter(
     parameters: dict,
     llm_api_key: str,
@@ -1194,6 +1217,8 @@ def search_and_apply_headhunter(
             )
             return
         logger.info(f"Found {len(jobs)} matching HeadHunter vacancies.")
+        already_seen = sum(1 for job in jobs if applied_log.already_applied(job))
+        run_start = datetime.now().astimezone()
 
         daily_limit = randomized_daily_limit(
             _daily_limit(parameters, "headhunter")
@@ -1351,6 +1376,10 @@ def search_and_apply_headhunter(
             )
             sent_count += 1
 
+        _log_funnel_summary(
+            "headhunter", applied_log, len(jobs), already_seen, run_start
+        )
+
 
 def search_geekjob(
     parameters: dict,
@@ -1411,6 +1440,8 @@ def search_geekjob(
         )
         return
     logger.info(f"Found {len(jobs)} matching geekjob.ru vacancies.")
+    already_seen = sum(1 for job in jobs if applied_log.already_applied(job))
+    run_start = datetime.now().astimezone()
 
     sent_count = 0
     job_max_applications = _job_max_applications(parameters, "geekjob")
@@ -1504,6 +1535,10 @@ def search_geekjob(
         )
         sent_count += 1
 
+    _log_funnel_summary(
+        "geekjob", applied_log, len(jobs), already_seen, run_start
+    )
+
 
 # {role}/{link} подставляются per-вакансия. Короткое и человеческое —
 # см. комментарий в search_telegram про то, почему не всё письмо целиком.
@@ -1584,6 +1619,8 @@ def search_telegram(
         jobs = source.search(parameters)
 
         logger.info(f"Found {len(jobs)} matching Telegram posts.")
+        already_seen = sum(1 for job in jobs if applied_log.already_applied(job))
+        run_start = datetime.now().astimezone()
 
         sent_count = 0
         job_max_applications = _job_max_applications(parameters, "telegram")
@@ -1689,6 +1726,10 @@ def search_telegram(
             )
             sent_count += 1
 
+        _log_funnel_summary(
+            "telegram", applied_log, len(jobs), already_seen, run_start
+        )
+
 
 def search_getmatch(
     parameters: dict,
@@ -1753,6 +1794,8 @@ def search_getmatch(
             )
             return
         logger.info(f"Found {len(jobs)} matching GetMatch vacancies.")
+        already_seen = sum(1 for job in jobs if applied_log.already_applied(job))
+        run_start = datetime.now().astimezone()
 
         sent_count = 0
         job_max_applications = _job_max_applications(parameters, "getmatch")
@@ -1850,6 +1893,10 @@ def search_getmatch(
             )
             sent_count += 1
 
+        _log_funnel_summary(
+            "getmatch", applied_log, len(jobs), already_seen, run_start
+        )
+
 
 def search_and_apply_linkedin(
     parameters: dict,
@@ -1918,6 +1965,8 @@ def search_and_apply_linkedin(
         source: JobSource = LinkedInSource(session.driver)
         jobs = source.search(parameters)
         logger.info(f"Found {len(jobs)} matching LinkedIn Easy Apply jobs.")
+        already_seen = sum(1 for job in jobs if applied_log.already_applied(job))
+        run_start = datetime.now().astimezone()
 
         resume_text = extract_pdf_text(str(resume_pdf_path))
         daily_limit = randomized_daily_limit(_linkedin_daily_limit(parameters))
@@ -2042,6 +2091,10 @@ def search_and_apply_linkedin(
                 gaps=fit.gaps,
             )
             sent_count += 1
+
+        _log_funnel_summary(
+            "linkedin", applied_log, len(jobs), already_seen, run_start
+        )
     finally:
         session.quit()
 
@@ -2109,6 +2162,8 @@ def search_and_apply_habr_career(
         )
         return
     logger.info(f"Found {len(jobs)} matching career.habr.com vacancies.")
+    already_seen = sum(1 for job in jobs if applied_log.already_applied(job))
+    run_start = datetime.now().astimezone()
 
     if auto_apply:
         HabrCareerSession(profile_dir).ensure_logged_in(parameters)
@@ -2225,6 +2280,10 @@ def search_and_apply_habr_career(
             )
             sent_count += 1
 
+    _log_funnel_summary(
+        "habr_career", applied_log, len(jobs), already_seen, run_start
+    )
+
 
 def search_and_apply_wellfound(
     parameters: dict,
@@ -2305,6 +2364,8 @@ def search_and_apply_wellfound(
         )
         return
     logger.info(f"Found {len(jobs)} matching wellfound.com vacancies.")
+    already_seen = sum(1 for job in jobs if applied_log.already_applied(job))
+    run_start = datetime.now().astimezone()
 
     if auto_apply:
         WellfoundSession(profile_dir).ensure_logged_in(parameters)
@@ -2421,6 +2482,10 @@ def search_and_apply_wellfound(
         )
         sent_count += 1
 
+    _log_funnel_summary(
+        "wellfound", applied_log, len(jobs), already_seen, run_start
+    )
+
 
 def search_and_apply_himalayas(
     parameters: dict,
@@ -2507,6 +2572,8 @@ def search_and_apply_himalayas(
             )
             return
         logger.info(f"Found {len(jobs)} matching himalayas.app vacancies.")
+        already_seen = sum(1 for job in jobs if applied_log.already_applied(job))
+        run_start = datetime.now().astimezone()
 
         resume_text = extract_pdf_text(str(resume_pdf_path))
         sent_count = 0
@@ -2621,6 +2688,10 @@ def search_and_apply_himalayas(
                 gaps=fit.gaps,
             )
             sent_count += 1
+
+        _log_funnel_summary(
+            "himalayas", applied_log, len(jobs), already_seen, run_start
+        )
     finally:
         session.quit()
 
