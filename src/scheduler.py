@@ -25,14 +25,14 @@ class Scheduler:
 
     def __init__(
         self,
-        source_map: Mapping[str, Callable[[dict, str], Any]],
+        source_map: Mapping[str, Callable[..., Any]],
         parameters: dict,
         llm_api_key: str,
         output_folder: Path,
         now_fn: Callable[[], datetime] = datetime.now,
         stop_event: Optional[threading.Event] = None,
     ):
-        self.source_map: Mapping[str, Callable[[dict, str], Any]] = source_map
+        self.source_map: Mapping[str, Callable[..., Any]] = source_map
         self.parameters = parameters
         self.llm_api_key = llm_api_key
         self.output_folder = output_folder

@@ -41,7 +41,9 @@ class HimalayasSession:
         deadline = time.monotonic() + LOGIN_TIMEOUT_SECONDS
         while "/login" in self.driver.current_url:
             if time.monotonic() > deadline:
-                raise RuntimeError("Timed out waiting for himalayas.app login.")
+                raise RuntimeError(
+                    "Timed out waiting for himalayas.app login."
+                )
             time.sleep(2)
 
     def quit(self) -> None:

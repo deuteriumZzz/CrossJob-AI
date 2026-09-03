@@ -132,9 +132,7 @@ def run_resume_audit(
     resume_text: str, job_description: str, llm_api_key: str
 ) -> str:
     """Шаг 1 — общая оценка резюме под вакансию."""
-    llm = cast(
-        BaseChatModel, get_chat_llm(llm_api_key, temperature=0.3)
-    )
+    llm = cast(BaseChatModel, get_chat_llm(llm_api_key, temperature=0.3))
     chain = _AUDIT_PROMPT | llm | StrOutputParser()
     return chain.invoke(
         {"resume": resume_text, "job_description": job_description}
@@ -148,9 +146,7 @@ def run_ats_hiring_manager_check(
     llm_api_key: str,
 ) -> str:
     """Шаг 2 — ATS-фильтр + менеджер по найму, с учётом шага 1."""
-    llm = cast(
-        BaseChatModel, get_chat_llm(llm_api_key, temperature=0.3)
-    )
+    llm = cast(BaseChatModel, get_chat_llm(llm_api_key, temperature=0.3))
     chain = _ATS_HIRING_MANAGER_PROMPT | llm | StrOutputParser()
     return chain.invoke(
         {
@@ -168,9 +164,7 @@ def run_rewrite_experience(
     llm_api_key: str,
 ) -> str:
     """Шаг 3 — переписанный раздел опыта, с учётом шагов 1 и 2."""
-    llm = cast(
-        BaseChatModel, get_chat_llm(llm_api_key, temperature=0.3)
-    )
+    llm = cast(BaseChatModel, get_chat_llm(llm_api_key, temperature=0.3))
     chain = _REWRITE_EXPERIENCE_PROMPT | llm | StrOutputParser()
     return chain.invoke(
         {

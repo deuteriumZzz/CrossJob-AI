@@ -17,7 +17,8 @@ def notify_manual_login_required(
     notify_from_secrets(
         parameters,
         f"CrossJob-AI: {source_name} требует ручного входа — "
-        f"откройте Chrome в течение {timeout_seconds}с, иначе прогон сорвётся.",
+        f"откройте Chrome в течение {timeout_seconds}с, "
+        "иначе прогон сорвётся.",
     )
 
 

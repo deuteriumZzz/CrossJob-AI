@@ -70,9 +70,7 @@ def test_source_search_filters_by_position_keyword():
     jobs = source.search({"getmatch": {"positions": ["backend"]}})
 
     assert [j.role for j in jobs] == ["Backend Engineer"]
-    client.search_vacancies_html.assert_called_with(
-        page=2, specializations=[]
-    )
+    client.search_vacancies_html.assert_called_with(page=2, specializations=[])
 
 
 def test_source_search_ignores_generic_role_word_and_separator():
@@ -93,9 +91,7 @@ def test_source_search_ignores_generic_role_word_and_separator():
     )
     source = GetMatchSource(client)
 
-    jobs = source.search(
-        {"getmatch": {"positions": ["Python разработчик"]}}
-    )
+    jobs = source.search({"getmatch": {"positions": ["Python разработчик"]}})
 
     assert [j.role for j in jobs] == ["Python-разработчик"]
 

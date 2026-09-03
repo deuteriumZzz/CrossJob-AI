@@ -334,7 +334,9 @@ def test_suggest_blacklist_candidates_needs_min_attempts_and_no_reply():
         assert applied_log.suggest_blacklist_candidates() == ["Ghosted Inc"]
 
 
-def _backdate_cover_letter(log_path: Path, external_id: str, days_ago: int) -> None:
+def _backdate_cover_letter(
+    log_path: Path, external_id: str, days_ago: int
+) -> None:
     data = json.loads(log_path.read_text(encoding="utf-8"))
     for entry in data["applications"]:
         if entry["external_id"] == external_id:

@@ -95,9 +95,7 @@ class WellfoundClient:
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
             raise_if_blocked(visible_text(driver))
 
-            if driver.find_elements(
-                By.CSS_SELECTOR, 'input[type="password"]'
-            ):
+            if driver.find_elements(By.CSS_SELECTOR, 'input[type="password"]'):
                 return False
 
             for field in driver.find_elements(
@@ -119,9 +117,7 @@ class WellfoundClient:
                 if radio.is_displayed() and not radio.is_selected():
                     driver.execute_script("arguments[0].click();", radio)
 
-            submit = _find_button_by_visible_text(
-                driver, _SUBMIT_TEXT_MARKERS
-            )
+            submit = _find_button_by_visible_text(driver, _SUBMIT_TEXT_MARKERS)
             if submit is None:
                 return False
             driver.execute_script("arguments[0].click();", submit)
@@ -145,8 +141,9 @@ def _select_first_reasonable_option(select_el) -> None:
 
     options = Select(select_el).options
     for option in options:
-        if option.get_attribute("value"):
-            Select(select_el).select_by_value(option.get_attribute("value"))
+        value = option.get_attribute("value")
+        if value:
+            Select(select_el).select_by_value(value)
             return
 
 
@@ -175,7 +172,9 @@ def _label_text_for(driver, field) -> str:
 
 
 def _find_button_by_visible_text(driver, needles: tuple[str, ...]):
-    for el in driver.find_elements(By.CSS_SELECTOR, 'button, a[role="button"]'):
+    for el in driver.find_elements(
+        By.CSS_SELECTOR, 'button, a[role="button"]'
+    ):
         if not el.is_displayed():
             continue
         text = (el.text or "").strip().lower()

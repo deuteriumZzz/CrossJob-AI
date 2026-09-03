@@ -273,9 +273,10 @@ class AppliedLog:
         cutoff = datetime.now().astimezone() - timedelta(days=retention_days)
 
         def _is_stale(entry: dict) -> bool:
-            return bool(entry.get("cover_letter")) and datetime.fromisoformat(
-                entry["applied_at"]
-            ) < cutoff
+            return (
+                bool(entry.get("cover_letter"))
+                and datetime.fromisoformat(entry["applied_at"]) < cutoff
+            )
 
         if not any(_is_stale(e) for e in self._data["applications"]):
             return 0

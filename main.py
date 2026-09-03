@@ -9,7 +9,7 @@ import traceback
 from contextlib import nullcontext
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Callable, Literal, Optional, Tuple
+from typing import Any, Callable, Literal, Optional, Tuple
 
 import click
 import inquirer
@@ -88,7 +88,9 @@ from src.job_sources.headhunter.telegram_approval import (
     save_pending_form,
     update_pending_form_answers,
 )
-from src.job_sources.himalayas.apply import apply_to_job as apply_to_himalayas_job
+from src.job_sources.himalayas.apply import (
+    apply_to_job as apply_to_himalayas_job,
+)
 from src.job_sources.himalayas.auth import HimalayasSession
 from src.job_sources.himalayas.source import HimalayasSource
 from src.job_sources.job_fit import classify_fit, score_job_fit
@@ -736,9 +738,7 @@ def create_resume_audit(
     """
     logger.info("Running resume audit against job posting: %s", job_url)
 
-    plain_text_resume_file = ensure_plain_text_resume(
-        parameters, llm_api_key
-    )
+    plain_text_resume_file = ensure_plain_text_resume(parameters, llm_api_key)
     with open(plain_text_resume_file, "r", encoding="utf-8") as file:
         plain_text_resume = file.read()
 
@@ -1202,7 +1202,9 @@ def search_and_apply_headhunter(
         job_max_applications = _job_max_applications(parameters, "headhunter")
         for job in jobs:
             if stop_event is not None and stop_event.is_set():
-                logger.info("Stop requested — прерываю перед следующей вакансией.")
+                logger.info(
+                    "Stop requested — прерываю перед следующей вакансией."
+                )
                 break
             if sent_count >= job_max_applications:
                 logger.info(
@@ -1587,7 +1589,9 @@ def search_telegram(
         job_max_applications = _job_max_applications(parameters, "telegram")
         for job in jobs:
             if stop_event is not None and stop_event.is_set():
-                logger.info("Stop requested — прерываю перед следующей вакансией.")
+                logger.info(
+                    "Stop requested — прерываю перед следующей вакансией."
+                )
                 break
             if sent_count >= job_max_applications:
                 logger.info(
@@ -1754,7 +1758,9 @@ def search_getmatch(
         job_max_applications = _job_max_applications(parameters, "getmatch")
         for job in jobs:
             if stop_event is not None and stop_event.is_set():
-                logger.info("Stop requested — прерываю перед следующей вакансией.")
+                logger.info(
+                    "Stop requested — прерываю перед следующей вакансией."
+                )
                 break
             if sent_count >= job_max_applications:
                 logger.info(
@@ -1920,7 +1926,9 @@ def search_and_apply_linkedin(
 
         for job in jobs:
             if stop_event is not None and stop_event.is_set():
-                logger.info("Stop requested — прерываю перед следующей вакансией.")
+                logger.info(
+                    "Stop requested — прерываю перед следующей вакансией."
+                )
                 break
             if sent_count >= job_max_applications:
                 logger.info(
@@ -2116,7 +2124,9 @@ def search_and_apply_habr_career(
     with client if auto_apply else nullcontext():
         for job in jobs:
             if stop_event is not None and stop_event.is_set():
-                logger.info("Stop requested — прерываю перед следующей вакансией.")
+                logger.info(
+                    "Stop requested — прерываю перед следующей вакансией."
+                )
                 break
             if sent_count >= job_max_applications:
                 logger.info(
@@ -2275,7 +2285,9 @@ def search_and_apply_wellfound(
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
     if is_still_blocked(output_folder, "wellfound"):
-        logger.warning("wellfound.com is cooling down after a block — skipping.")
+        logger.warning(
+            "wellfound.com is cooling down after a block — skipping."
+        )
         return
 
     profile_dir = output_folder / ".chrome_profile_wellfound"
@@ -2373,9 +2385,7 @@ def search_and_apply_wellfound(
                 resume_text, profile, job, llm_api_key
             )
             try:
-                applied = client.apply(
-                    job.link, profile_dir, answerer.answer
-                )
+                applied = client.apply(job.link, profile_dir, answerer.answer)
             except Exception as e:
                 logger.exception(
                     f"Wellfound apply form crashed for {job.role} at "
@@ -2476,7 +2486,9 @@ def search_and_apply_himalayas(
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
     if is_still_blocked(output_folder, "himalayas"):
-        logger.warning("himalayas.app is cooling down after a block — skipping.")
+        logger.warning(
+            "himalayas.app is cooling down after a block — skipping."
+        )
         return
 
     session = HimalayasSession(output_folder / ".chrome_profile_himalayas")
@@ -2504,7 +2516,9 @@ def search_and_apply_himalayas(
         )
         for job in jobs:
             if stop_event is not None and stop_event.is_set():
-                logger.info("Stop requested — прерываю перед следующей вакансией.")
+                logger.info(
+                    "Stop requested — прерываю перед следующей вакансией."
+                )
                 break
             if sent_count >= job_max_applications:
                 logger.info(
@@ -2518,8 +2532,7 @@ def search_and_apply_himalayas(
                 continue
             if (
                 auto_apply
-                and applied_log.applied_today_count("himalayas")
-                >= daily_limit
+                and applied_log.applied_today_count("himalayas") >= daily_limit
             ):
                 logger.info(
                     f"Reached daily application limit ({daily_limit}) "
@@ -2612,7 +2625,7 @@ def search_and_apply_himalayas(
         session.quit()
 
 
-ALL_SOURCES = [
+ALL_SOURCES: list[Tuple[str, Callable[..., Any]]] = [
     ("headhunter", search_and_apply_headhunter),
     ("geekjob", search_geekjob),
     ("telegram", search_telegram),
@@ -3426,7 +3439,7 @@ def check_telegram_replies(parameters: dict, llm_api_key: str) -> None:
 # У каждого свой schedule_enabled/interval_hours блок в
 # work_preferences.yaml (toplevel, не внутри headhunter:/telegram:),
 # т.к. Scheduler матчит по имени ключа словаря.
-SCHEDULER_SOURCES = {
+SCHEDULER_SOURCES: dict[str, Callable[..., Any]] = {
     **dict(ALL_SOURCES),
     "check_hh_replies": check_headhunter_replies,
     "check_telegram_replies": check_telegram_replies,

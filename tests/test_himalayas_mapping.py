@@ -27,10 +27,16 @@ def _card(company_slug, job_slug, title, company_name, location=None):
 
 
 SEARCH_HTML = _card(
-    "acme", "senior-python-developer", "Senior Python Developer",
-    "Acme Inc", "United States only",
+    "acme",
+    "senior-python-developer",
+    "Senior Python Developer",
+    "Acme Inc",
+    "United States only",
 ) + _card(
-    "beta-corp", "backend-engineer", "Backend Engineer", "Beta Corp",
+    "beta-corp",
+    "backend-engineer",
+    "Backend Engineer",
+    "Beta Corp",
 )
 
 
@@ -64,7 +70,9 @@ def test_parse_search_html_dedupes_repeated_cards():
 
 
 def test_parse_search_html_ignores_articles_without_job_links():
-    jobs = parse_search_html("<article><a href=\"/companies/acme\">Acme</a></article>")
+    jobs = parse_search_html(
+        '<article><a href="/companies/acme">Acme</a></article>'
+    )
     assert jobs == []
 
 

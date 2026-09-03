@@ -43,7 +43,9 @@ class GeekjobSource:
                 # просто переходим к следующей позиции — тем же
                 # паттерном, что уже чинил Wellfound apply.
                 try:
-                    html = self.client.search_vacancies_html(position, page=page)
+                    html = self.client.search_vacancies_html(
+                        position, page=page
+                    )
                 except PlatformBlockedError:
                     raise
                 except Exception as e:

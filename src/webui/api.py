@@ -331,9 +331,10 @@ def _resume_readiness(data_folder: Path, source: str) -> Optional[dict]:
     # (см. соответствующие search_and_apply_* в main.py) — не ложная
     # тревога, если общий файл всё же есть, просто предупреждаем про
     # язык/локацию.
-    if source in ("linkedin", "wellfound", "himalayas") and (
-        data_folder / RESUME_PDF
-    ).exists():
+    if (
+        source in ("linkedin", "wellfound", "himalayas")
+        and (data_folder / RESUME_PDF).exists()
+    ):
         return {
             "ready": True,
             "filename": RESUME_PDF,
@@ -525,7 +526,9 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
         "daemon_running": daemon_running,
         "daemon_started_at": ctx.daemon_started_at if daemon_running else None,
         "daemon_paused": bool(
-            daemon_running and ctx.scheduler is not None and ctx.scheduler.paused
+            daemon_running
+            and ctx.scheduler is not None
+            and ctx.scheduler.paused
         ),
         "sources": sources,
         "chat_checks": chat_checks,

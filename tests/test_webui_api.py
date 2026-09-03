@@ -342,7 +342,12 @@ def test_run_now_starts_selected_sources_and_reports_status(client):
     calls = []
 
     def fake_run_selected_sources(
-        sources, parameters, llm_api_key, dry_run=False, on_source_start=None, stop_event=None
+        sources,
+        parameters,
+        llm_api_key,
+        dry_run=False,
+        on_source_start=None,
+        stop_event=None,
     ):
         calls.append(sources)
         if on_source_start:

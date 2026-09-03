@@ -1,8 +1,8 @@
 from unittest.mock import patch
 
 from src.job_sources.resume_audit import (
-    _AUDIT_PROMPT,
     _ATS_HIRING_MANAGER_PROMPT,
+    _AUDIT_PROMPT,
     _REWRITE_EXPERIENCE_PROMPT,
     run_full_resume_audit,
 )

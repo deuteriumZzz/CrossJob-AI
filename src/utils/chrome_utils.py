@@ -229,7 +229,7 @@ _BROWSER_INIT_RETRY_DELAY_SECONDS = 5
 
 
 def _log_chrome_crash_diagnostics(exc: Exception) -> None:
-    """"chrome not reachable" сам по себе не говорит, почему Chrome
+    """ "chrome not reachable" сам по себе не говорит, почему Chrome
     упал при старте (SIGTRAP/EXC_BREAKPOINT из-за постоянного профиля,
     OOM, что-то ещё) — macOS всё равно пишет отчёт о падении в
     DiagnosticReports, просто лог селениума его не показывает.
@@ -248,7 +248,9 @@ def _log_chrome_crash_diagnostics(exc: Exception) -> None:
     except OSError:
         return
     if latest is not None and time.time() - latest.stat().st_mtime < 60:
-        logger.warning(f"Похоже, Chrome упал при старте — см. отчёт macOS: {latest}")
+        logger.warning(
+            f"Похоже, Chrome упал при старте — см. отчёт macOS: {latest}"
+        )
 
 
 def launch_chrome_with_retry(
@@ -278,7 +280,9 @@ def launch_chrome_with_retry(
                 )
                 time.sleep(_BROWSER_INIT_RETRY_DELAY_SECONDS)
     logger.error(f"Failed to initialize browser: {last_exc}")
-    raise RuntimeError(f"Failed to initialize browser: {last_exc}") from last_exc
+    raise RuntimeError(
+        f"Failed to initialize browser: {last_exc}"
+    ) from last_exc
 
 
 def init_browser(profile_dir: Optional[Path] = None) -> webdriver.Chrome:

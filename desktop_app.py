@@ -53,7 +53,8 @@ def _wait_until_ready(
         # "did not become ready".
         if server_thread is not None and not server_thread.is_alive():
             raise RuntimeError(
-                "Server thread exited before becoming ready — see traceback above."
+                "Server thread exited before becoming ready — "
+                "see traceback above."
             )
         try:
             httpx.get(url, timeout=1).raise_for_status()

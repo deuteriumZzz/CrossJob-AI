@@ -76,7 +76,9 @@ def test_clear_profile_cache_keeps_normal_sized_preferences():
         profile_dir = Path(tmp)
         default_dir = profile_dir / "Default"
         default_dir.mkdir()
-        (default_dir / "Preferences").write_bytes(b'{"profile": {"name": "x"}}')
+        (default_dir / "Preferences").write_bytes(
+            b'{"profile": {"name": "x"}}'
+        )
 
         clear_profile_cache(profile_dir)
 

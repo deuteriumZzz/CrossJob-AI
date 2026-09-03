@@ -5,7 +5,10 @@ from typing import Optional
 
 import undetected_chromedriver as uc
 
-from src.utils.chrome_utils import clear_profile_cache, launch_chrome_with_retry
+from src.utils.chrome_utils import (
+    clear_profile_cache,
+    launch_chrome_with_retry,
+)
 
 
 def _installed_chrome_major_version() -> Optional[int]:

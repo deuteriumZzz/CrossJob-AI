@@ -8,7 +8,12 @@ from selenium.webdriver.support.ui import Select
 from src.job_sources.block_detection import raise_if_blocked, visible_text
 
 PAGE_LOAD_WAIT_SECONDS = 3
-_SUBMIT_TEXT_MARKERS = ("submit application", "submit", "send application", "apply")
+_SUBMIT_TEXT_MARKERS = (
+    "submit application",
+    "submit",
+    "send application",
+    "apply",
+)
 _APPLY_TEXT_MARKERS = ("apply now", "apply")
 _READY_TEXT_MARKERS = ("i'm ready to apply", "ready to apply")
 
@@ -54,7 +59,8 @@ def apply_to_job(
         driver.execute_script("arguments[0].click();", ready_button)
         time.sleep(2)
         if not driver.find_elements(
-            By.CSS_SELECTOR, 'textarea, input[type="text"], input[type="number"]'
+            By.CSS_SELECTOR,
+            'textarea, input[type="text"], input[type="number"]',
         ):
             return True
 
@@ -69,8 +75,9 @@ def apply_to_job(
         if not select_el.is_displayed():
             continue
         for option in Select(select_el).options:
-            if option.get_attribute("value"):
-                Select(select_el).select_by_value(option.get_attribute("value"))
+            value = option.get_attribute("value")
+            if value:
+                Select(select_el).select_by_value(value)
                 break
 
     for radio in driver.find_elements(By.CSS_SELECTOR, 'input[type="radio"]'):
@@ -97,14 +104,18 @@ def _answer(question: str, answer_fn: Optional[Callable[[str], str]]) -> str:
 def _label_text_for(driver, field) -> str:
     field_id = field.get_attribute("id")
     if field_id:
-        labels = driver.find_elements(By.CSS_SELECTOR, f'label[for="{field_id}"]')
+        labels = driver.find_elements(
+            By.CSS_SELECTOR, f'label[for="{field_id}"]'
+        )
         if labels:
             return labels[0].text.strip()
     return ""
 
 
 def _find_button_by_visible_text(driver, needles: tuple[str, ...]):
-    for el in driver.find_elements(By.CSS_SELECTOR, 'button, a[role="button"]'):
+    for el in driver.find_elements(
+        By.CSS_SELECTOR, 'button, a[role="button"]'
+    ):
         if not el.is_displayed():
             continue
         text = (el.text or "").strip().lower()

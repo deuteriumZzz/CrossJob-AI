@@ -21,8 +21,9 @@ def load_state(output_folder: Path) -> dict:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        # ponytail: unlocked reads can race a concurrent write (write_text isn't atomic);
-        # treat a torn read as "no state yet" rather than crashing the caller.
+        # ponytail: unlocked reads can race a concurrent write
+        # (write_text isn't atomic); treat a torn read as "no state
+        # yet" rather than crashing the caller.
         return {}
 
 

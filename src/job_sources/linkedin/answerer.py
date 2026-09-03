@@ -34,9 +34,7 @@ _ANSWER_PROMPT = ChatPromptTemplate.from_template(
 )
 
 
-def _options_hint(
-    options: Optional[list], max_length: Optional[int]
-) -> str:
+def _options_hint(options: Optional[list], max_length: Optional[int]) -> str:
     if options:
         return (
             f"Pick exactly one option, written exactly as shown: "

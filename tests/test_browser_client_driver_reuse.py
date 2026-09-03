@@ -158,9 +158,7 @@ def test_getmatch_apply_returns_false_when_site_shows_new_wizard():
         ]
 
         with GetMatchClient("profile") as client:
-            applied = client.apply(
-                "https://getmatch.ru/vacancies/1", "letter"
-            )
+            applied = client.apply("https://getmatch.ru/vacancies/1", "letter")
 
         assert applied is False
         respond_button.click.assert_called_once()

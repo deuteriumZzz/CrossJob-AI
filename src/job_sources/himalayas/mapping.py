@@ -27,7 +27,10 @@ def _parse_article(article) -> Job | None:
 
     if not job_href or not title:
         return None
-    company_slug, job_slug = _JOB_LINK_RE.match(job_href).groups()
+    job_match = _JOB_LINK_RE.match(job_href)
+    if job_match is None:
+        return None
+    company_slug, job_slug = job_match.groups()
 
     company = company_slug.replace("-", " ").title()
     for anchor in article.find_all("a", href=True):
