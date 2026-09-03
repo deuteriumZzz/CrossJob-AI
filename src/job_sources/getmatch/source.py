@@ -1,8 +1,10 @@
 from src.job import Job
 from src.job_sources.blacklist_filter import passes_blacklists
+from src.job_sources.block_detection import PlatformBlockedError
 from src.job_sources.getmatch.client import GetMatchClient
 from src.job_sources.getmatch.mapping import parse_search_results
 from src.job_sources.preferences import effective_list
+from src.logging import logger
 
 # Сам поиск живёт здесь; реальный клик "Откликнуться" — в
 # GetMatchClient.apply() (main.py вызывает его при auto_apply: true),
@@ -70,9 +72,24 @@ class GetMatchSource:
         seen_ids: set = set()
         jobs: list[Job] = []
         for page in range(1, MAX_PAGES + 1):
-            html = self.client.search_vacancies_html(
-                page=page, specializations=specializations
-            )
+            # ponytail: тот же краш посреди прогона, что чинили у
+            # GeekjobSource — Chrome может умереть между driver.get()
+            # (и _acquire_driver его не ловит, т.к. проверяет
+            # живость драйвера ДО этого вызова, а не во время него).
+            # Раньше исключение улетало наружу и хоронило весь
+            # getmatch.search() целиком.
+            try:
+                html = self.client.search_vacancies_html(
+                    page=page, specializations=specializations
+                )
+            except PlatformBlockedError:
+                raise
+            except Exception as e:
+                logger.exception(
+                    f"getmatch.ru поиск упал на стр.{page} — "
+                    f"останавливаю пагинацию, отдаю что уже нашли: {e}"
+                )
+                break
             items = parse_search_results(html)
             if not items:
                 break

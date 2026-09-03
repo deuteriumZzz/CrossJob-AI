@@ -1465,7 +1465,15 @@ def search_geekjob(
             continue
 
         if auto_apply:
-            applied = client.apply(job.link, profile_dir)
+            try:
+                applied = client.apply(job.link, profile_dir)
+            except Exception as e:
+                logger.exception(
+                    f"geekjob apply form crashed for {job.role} at "
+                    f"{job.company} ({job.link}) — recorded as "
+                    f"dry-run, moving on to the next vacancy: {e}"
+                )
+                applied = False
             if applied:
                 status: Literal["applied", "dry_run"] = "applied"
                 logger.info(
@@ -1797,7 +1805,15 @@ def search_getmatch(
                 continue
 
             if auto_apply:
-                applied = client.apply(job.link, cover_letter)
+                try:
+                    applied = client.apply(job.link, cover_letter)
+                except Exception as e:
+                    logger.exception(
+                        f"GetMatch apply form crashed for {job.role} at "
+                        f"{job.company} ({job.link}) — recorded as "
+                        f"dry-run, moving on to the next vacancy: {e}"
+                    )
+                    applied = False
                 if applied:
                     status: Literal["applied", "dry_run"] = "applied"
                     logger.info(
@@ -2161,7 +2177,15 @@ def search_and_apply_habr_career(
                 continue
 
             if auto_apply:
-                applied = client.apply(job.link)
+                try:
+                    applied = client.apply(job.link)
+                except Exception as e:
+                    logger.exception(
+                        f"habr.career apply form crashed for {job.role} at "
+                        f"{job.company} ({job.link}) — recorded as "
+                        f"dry-run, moving on to the next vacancy: {e}"
+                    )
+                    applied = False
                 if applied:
                     status: Literal["applied", "dry_run"] = "applied"
                     logger.info(
