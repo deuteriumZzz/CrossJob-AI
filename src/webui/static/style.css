@@ -1012,12 +1012,11 @@ select:focus {
 
 /* Нативная стрелка select'а не подстраивается под тему и на разных
    ОС выглядит по-разному — рисуем свою, а системную прячем.
-   Явно перечисляем все контексты: .limit-field/.filters/.settings-table
+   Явно перечисляем все контексты: .limit-field/.filters
    select уже задают background/padding через shorthand, который иначе
    тихо стирает background-image ниже по каскаду. */
 select,
 .filters select,
-.settings-table select,
 .limit-field select {
   appearance: none;
   -webkit-appearance: none;
@@ -1034,38 +1033,10 @@ select,
   background-size: 14px !important;
 }
 
-.settings-table input[type="number"] {
-  width: 64px;
-  background: var(--bg-elevated);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 7px;
-  font-family: var(--font-mono);
-  font-size: 13px;
-}
-
-.settings-table input[type="text"] {
-  width: 130px;
-  background: var(--bg-elevated);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 7px;
-  font-family: var(--font-mono);
-  font-size: 13px;
-}
-
-.settings-table input[type="checkbox"],
 .candidate-row input[type="checkbox"] {
   width: 15px;
   height: 15px;
   accent-color: var(--accent);
-}
-
-.settings-table .s-save {
-  padding: 5px 11px;
-  font-size: 12.5px;
 }
 
 /* Инпут дневного лимита/лимита за прогон задизейблен и показывает
@@ -1076,15 +1047,6 @@ select,
   display: flex;
   flex-direction: column;
   gap: 3px;
-}
-
-.readiness-note {
-  font-size: 10.5px;
-  color: var(--muted-2);
-  max-width: 110px;
-  white-space: normal;
-  line-height: 1.3;
-  margin-top: 2px;
 }
 
 .override-field input[type="number"]:disabled {
@@ -1994,6 +1956,93 @@ nav.tabs button.active,
   text-align: center;
   color: var(--muted);
   font-size: 13px;
+}
+
+/* ---------- Platform settings drawer ---------- */
+
+.platform-card-quick {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 12.5px;
+}
+
+.platform-card-quick label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 6, 9, 0.55);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 2000;
+}
+
+.drawer-panel {
+  width: min(460px, 100vw);
+  height: 100%;
+  background: var(--bg-elevated);
+  border-left: 1px solid var(--border-soft);
+  box-shadow: -24px 0 60px -20px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  animation: drawer-slide-in 0.25s var(--ease-out);
+}
+
+@keyframes drawer-slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+
+.drawer-header h3 {
+  margin: 0;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.drawer-body {
+  padding: 16px 18px 22px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.drawer-section {
+  margin-bottom: 18px;
+}
+
+.drawer-section h4 {
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-weight: 650;
 }
 
 /* ---------- Shortcuts cheatsheet ---------- */

@@ -971,182 +971,49 @@ const render = {
         : "none";
     });
 
-    const tbody = document.getElementById("settings-rows");
-    tbody.innerHTML = status.sources
-      .map(
-        (s, i) => `
-      <tr data-source="${s.name}" class="reveal" style="transition-delay:${staggerDelay(i, 25)}">
-        <td>${sourceIconHtml(s.name)}${sourceLabel(s.name)}</td>
-        <td title="${
-          s.readiness && s.readiness.missing.length
-            ? "Не хватает: " + s.readiness.missing.join(", ")
-            : s.readiness && s.readiness.resume && s.readiness.resume.warning
-              ? s.readiness.resume.warning
-              : "Данных для подключения достаточно"
-        }">
-          ${s.readiness && s.readiness.ready ? "✅" : "⚠️"}
-          ${
-            // Не только title="..." (недоступен без наведения мышью
-            // — тач-экран, узкое окно) — если чего-то не хватает,
-            // причина видна и так, текстом под иконкой.
-            s.readiness && s.readiness.missing.length
-              ? `<div class="readiness-note">${s.readiness.missing.join(", ")}</div>`
-              : ""
-          }
-        </td>
-        <td><input type="checkbox" class="s-schedule switch" ${s.schedule_enabled ? "checked" : ""} /></td>
-        <td><input type="number" class="s-interval" min="1" value="${s.interval_hours ?? 3}" /></td>
-        <td><input type="checkbox" class="s-auto switch" ${s.auto_apply ? "checked" : ""} /></td>
-        <td><input type="text" class="s-resume-id" value="${s.resume_id || ""}" placeholder="id резюме на площадке" /></td>
-        <td>
-          <div class="override-field">
-            <input type="number" class="s-max-applications" min="1"
-              value="${s.job_max_applications_override ? s.job_max_applications : ""}"
-              placeholder="${limits.job_max_applications}"
-              ${s.job_max_applications_override ? "" : "disabled"} />
-            <label class="override-toggle" title="Своё значение только для этой площадки — иначе используется дефолт из панели «Лимиты откликов»">
-              <input type="checkbox" class="s-max-applications-override" ${s.job_max_applications_override ? "checked" : ""} /> своё
-            </label>
-          </div>
-        </td>
-        <td>
-          <div class="override-field">
-            <input type="number" class="s-daily-limit" min="1"
-              value="${s.daily_limit_override ? s.daily_limit : ""}"
-              placeholder="${s.name === "linkedin" ? limits.linkedin_daily_application_limit : limits.daily_application_limit}"
-              ${s.daily_limit_override ? "" : "disabled"} />
-            <label class="override-toggle" title="Своё значение только для этой площадки — иначе используется дефолт из панели «Лимиты откликов»">
-              <input type="checkbox" class="s-daily-limit-override" ${s.daily_limit_override ? "checked" : ""} /> своё
-            </label>
-          </div>
-        </td>
-        <td><button class="btn btn-secondary s-save">Сохранить</button></td>
-        <td><button class="btn btn-ghost btn-small s-filters-toggle" title="Свои должности/локации/зарплата для этой площадки${s.name === "headhunter" ? ", автоответ в чате и бамп резюме" : ""}">⚙ Фильтры</button></td>
-      </tr>
-      <tr class="filters-detail" data-source="${s.name}" style="display:none">
-        <td colspan="10">
-          <div class="limits-grid" style="margin:10px 0">
-            <label class="limit-field">
-              <span>Свои должности для ${sourceLabel(s.name)} (пусто — общие из "Поиск")</span>
-              <textarea class="f-positions" rows="2" placeholder="оставить пустым — использовать общие">${(s.positions_override || []).join("\n")}</textarea>
-            </label>
-            <label class="limit-field">
-              <span>Свои локации для ${sourceLabel(s.name)} (пусто — общие из "Поиск")</span>
-              <textarea class="f-locations" rows="2" placeholder="оставить пустым — использовать общие">${(s.locations_override || []).join("\n")}</textarea>
-            </label>
-            ${
-              s.name === "headhunter"
-                ? `<label class="limit-field" style="justify-content:flex-end">
-                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="f-auto-reply switch" ${s.auto_reply ? "checked" : ""} />Автоответ в чате HH</span>
-              </label>
-              <label class="limit-field" style="justify-content:flex-end">
-                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="f-auto-bump switch" ${s.auto_bump_resume ? "checked" : ""} />Бамп резюме на HH</span>
-              </label>
-              <label class="limit-field">
-                <span>Зарплата для автоответа в чате HH</span>
-                <input type="text" class="f-hh-salary" value="${salary.hh_salary_expectations || ""}" placeholder="250000-300000 RUR" />
-              </label>`
-                : ""
-            }
-            ${
-              s.name === "linkedin"
-                ? `<label class="limit-field">
-                <span>Зарплата для скрининга LinkedIn (USD/год)</span>
-                <input type="text" class="f-linkedin-salary" value="${salary.linkedin_salary_range_usd || ""}" placeholder="60000-80000" />
-              </label>`
-                : ""
-            }
-          </div>
-          <p class="muted small">Сейчас реально ищет по: «${(s.effective_positions || []).join("», «") || "—"}»${
-          s.name === "linkedin"
-            ? " · локации LinkedIn настраиваются отдельно (linkedin.locations)"
-            : `, локации: «${(s.effective_locations || []).join("», «") || "любые"}»`
-        }.</p>
-          <div class="filters">
-            <button class="btn btn-secondary f-save">Сохранить фильтры</button>
-            <span class="f-status muted small"></span>
-          </div>
-        </td>
-      </tr>`
-      )
+    // Карточка на площадку (тот же язык, что у "Обзора") + клик на
+    // "Настроить" открывает боковую панель со всеми полями — вместо
+    // одной широкой таблицы на 9 колонок, которая на узком окне не
+    // читалась (см. Stripe/Linear/Vercel: список карточек со статусом
+    // и быстрым тумблером снаружи, drawer с деталями по клику).
+    const platformCards = document.getElementById("platform-cards");
+    platformCards.innerHTML = status.sources
+      .map((s, i) => {
+        const missing = (s.readiness && s.readiness.missing) || [];
+        const ready = s.readiness && s.readiness.ready;
+        const readinessTitle = missing.length
+          ? "Не хватает: " + missing.join(", ")
+          : s.readiness && s.readiness.resume && s.readiness.resume.warning
+            ? s.readiness.resume.warning
+            : "Данных для подключения достаточно";
+        return `
+      <div class="source-card stagger-item" data-source="${s.name}" style="animation-delay:${staggerDelay(i, 25)}">
+        <h3 title="${readinessTitle}">${ready ? "✅" : "⚠️"} ${sourceIconHtml(s.name)}${sourceLabel(s.name)}</h3>
+        ${missing.length ? `<p class="muted small" style="margin:-6px 0 8px">${missing.join(", ")}</p>` : ""}
+        <div class="row"><span>Расписание</span><span>${s.schedule_enabled ? `каждые ${s.interval_hours}ч` : "выключено"}</span></div>
+        <div class="row"><span>Автоотклик</span><span>${s.auto_apply ? "включён" : "выключен"}</span></div>
+        <div class="platform-card-quick">
+          <label title="В расписании демона"><input type="checkbox" class="p-schedule-quick switch" data-source="${s.name}" ${s.schedule_enabled ? "checked" : ""} /> в расписании</label>
+          <button type="button" class="btn btn-secondary btn-small p-open-drawer" data-source="${s.name}">⚙ Настроить</button>
+        </div>
+      </div>`;
+      })
       .join("");
-    observeReveal(tbody);
-    tbody
-      .querySelectorAll(".f-positions, .f-locations")
-      .forEach(initTagInput);
 
-    // Чекбокс "своё" выключен → инпут задизейблен и показывает
-    // дефолт как placeholder, не как значение (см. render шапки
-    // ряда выше) — тот же паттерн inherited/override, что в
-    // Stripe/AWS для лимитов бюджета.
-    tbody
-      .querySelectorAll(
-        ".s-max-applications-override, .s-daily-limit-override"
-      )
-      .forEach((cb) => {
-        cb.addEventListener("change", () => {
-          const input = cb
-            .closest(".override-field")
-            .querySelector("input[type=number]");
-          input.disabled = !cb.checked;
-          if (cb.checked) input.focus();
-        });
-      });
-
-    tbody.querySelectorAll(".s-save").forEach((btn) => {
-      btn.addEventListener("click", async (ev) => {
-        const row = ev.target.closest("tr");
-        const source = row.dataset.source;
-        const jobMaxOverride = row.querySelector(
-          ".s-max-applications-override"
-        ).checked;
-        const dailyOverride = row.querySelector(
-          ".s-daily-limit-override"
-        ).checked;
-        const body = {
-          source,
-          schedule_enabled: row.querySelector(".s-schedule").checked,
-          interval_hours: parseInt(row.querySelector(".s-interval").value, 10),
-          auto_apply: row.querySelector(".s-auto").checked,
-          resume_id: row.querySelector(".s-resume-id").value.trim(),
-          // "своё" выключено → clear_* удаляет override в YAML,
-          // площадка возвращается к общему дефолту (см.
-          // unset_source_field на бэкенде); включено → пишем
-          // введённое число как явное значение этой площадки.
-          clear_job_max_applications: !jobMaxOverride,
-          clear_daily_application_limit: !dailyOverride,
-          ...(jobMaxOverride
-            ? {
-                job_max_applications: parseInt(
-                  row.querySelector(".s-max-applications").value,
-                  10
-                ),
-              }
-            : {}),
-          ...(dailyOverride
-            ? {
-                daily_application_limit: parseInt(
-                  row.querySelector(".s-daily-limit").value,
-                  10
-                ),
-              }
-            : {}),
-        };
-        await api("/api/settings", {
-          method: "POST",
-          body: JSON.stringify(body),
-        });
-        btn.textContent = "Сохранено";
-        setTimeout(() => (btn.textContent = "Сохранить"), 1500);
-      });
-    });
-
-    tbody.querySelectorAll(".s-filters-toggle").forEach((btn) => {
-      btn.addEventListener("click", (ev) => {
-        const detail = ev.target.closest("tr").nextElementSibling;
-        if (detail && detail.classList.contains("filters-detail")) {
-          detail.style.display =
-            detail.style.display === "none" ? "" : "none";
+    platformCards.querySelectorAll(".p-schedule-quick").forEach((box) => {
+      box.addEventListener("change", async () => {
+        box.disabled = true;
+        try {
+          await api("/api/settings", {
+            method: "POST",
+            body: JSON.stringify({
+              source: box.dataset.source,
+              schedule_enabled: box.checked,
+            }),
+          });
+          flashSaved(document.getElementById("settings-table"), null);
+        } finally {
+          box.disabled = false;
         }
       });
     });
@@ -1157,41 +1024,204 @@ const render = {
         .map((s) => s.trim())
         .filter(Boolean);
 
-    tbody.querySelectorAll(".f-save").forEach((btn) => {
-      btn.addEventListener("click", async (ev) => {
-        const row = ev.target.closest("tr.filters-detail");
-        const source = row.dataset.source;
-        const statusEl = row.querySelector(".f-status");
-        const autoReplyEl = row.querySelector(".f-auto-reply");
-        const autoBumpEl = row.querySelector(".f-auto-bump");
-        await api("/api/settings", {
-          method: "POST",
-          body: JSON.stringify({
-            source,
-            positions: linesOfEl(row.querySelector(".f-positions")),
-            locations: linesOfEl(row.querySelector(".f-locations")),
-            ...(autoReplyEl ? { auto_reply: autoReplyEl.checked } : {}),
-            ...(autoBumpEl ? { auto_bump_resume: autoBumpEl.checked } : {}),
-          }),
+    function renderDrawerBody(s) {
+      return `
+        <div class="drawer-section">
+          <h4>Расписание и отклик</h4>
+          <div class="limits-grid">
+            <label class="limit-field" style="justify-content:flex-end">
+              <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-schedule switch" ${s.schedule_enabled ? "checked" : ""} />В расписании</span>
+            </label>
+            <label class="limit-field">
+              <span>Интервал, ч</span>
+              <input type="number" class="d-interval" min="1" value="${s.interval_hours ?? 3}" />
+            </label>
+            <label class="limit-field" style="justify-content:flex-end">
+              <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto switch" ${s.auto_apply ? "checked" : ""} />Автоотклик</span>
+            </label>
+            <label class="limit-field">
+              <span>Resume ID</span>
+              <input type="text" class="d-resume-id" value="${s.resume_id || ""}" placeholder="id резюме на площадке" />
+            </label>
+          </div>
+        </div>
+
+        <div class="drawer-section">
+          <h4>Лимиты — своё значение для этой площадки</h4>
+          <div class="limits-grid">
+            <div class="override-field">
+              <input type="number" class="d-max-applications" min="1"
+                value="${s.job_max_applications_override ? s.job_max_applications : ""}"
+                placeholder="${limits.job_max_applications}"
+                ${s.job_max_applications_override ? "" : "disabled"} />
+              <label class="override-toggle" title="Своё значение только для этой площадки — иначе используется дефолт из панели «Лимиты откликов»">
+                <input type="checkbox" class="d-max-applications-override" ${s.job_max_applications_override ? "checked" : ""} /> за один заход
+              </label>
+            </div>
+            <div class="override-field">
+              <input type="number" class="d-daily-limit" min="1"
+                value="${s.daily_limit_override ? s.daily_limit : ""}"
+                placeholder="${s.name === "linkedin" ? limits.linkedin_daily_application_limit : limits.daily_application_limit}"
+                ${s.daily_limit_override ? "" : "disabled"} />
+              <label class="override-toggle" title="Своё значение только для этой площадки — иначе используется дефолт из панели «Лимиты откликов»">
+                <input type="checkbox" class="d-daily-limit-override" ${s.daily_limit_override ? "checked" : ""} /> дневной лимит
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="drawer-section">
+          <h4>Фильтры</h4>
+          <div class="limits-grid">
+            <label class="limit-field">
+              <span>Свои должности (пусто — общие из "Поиск")</span>
+              <textarea class="d-positions" rows="2" placeholder="оставить пустым — использовать общие">${(s.positions_override || []).join("\n")}</textarea>
+            </label>
+            <label class="limit-field">
+              <span>Свои локации (пусто — общие из "Поиск")</span>
+              <textarea class="d-locations" rows="2" placeholder="оставить пустым — использовать общие">${(s.locations_override || []).join("\n")}</textarea>
+            </label>
+            ${
+              s.name === "headhunter"
+                ? `<label class="limit-field" style="justify-content:flex-end">
+                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto-reply switch" ${s.auto_reply ? "checked" : ""} />Автоответ в чате HH</span>
+              </label>
+              <label class="limit-field" style="justify-content:flex-end">
+                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto-bump switch" ${s.auto_bump_resume ? "checked" : ""} />Бамп резюме на HH</span>
+              </label>
+              <label class="limit-field">
+                <span>Зарплата для автоответа в чате HH</span>
+                <input type="text" class="d-hh-salary" value="${salary.hh_salary_expectations || ""}" placeholder="250000-300000 RUR" />
+              </label>`
+                : ""
+            }
+            ${
+              s.name === "linkedin"
+                ? `<label class="limit-field">
+                <span>Зарплата для скрининга LinkedIn (USD/год)</span>
+                <input type="text" class="d-linkedin-salary" value="${salary.linkedin_salary_range_usd || ""}" placeholder="60000-80000" />
+              </label>`
+                : ""
+            }
+          </div>
+          <p class="muted small">Сейчас реально ищет по: «${(s.effective_positions || []).join("», «") || "—"}»${
+        s.name === "linkedin"
+          ? " · локации LinkedIn настраиваются отдельно (linkedin.locations)"
+          : `, локации: «${(s.effective_locations || []).join("», «") || "любые"}»`
+      }.</p>
+        </div>
+
+        <div class="filters">
+          <button class="btn btn-primary" id="platform-drawer-save">Сохранить</button>
+          <span id="platform-drawer-status" class="muted small"></span>
+        </div>`;
+    }
+
+    function openPlatformDrawer(sourceName) {
+      const s = status.sources.find((x) => x.name === sourceName);
+      if (!s) return;
+      document.getElementById("platform-drawer-title").innerHTML =
+        `${sourceIconHtml(s.name)}${sourceLabel(s.name)}`;
+      const drawerBody = document.getElementById("platform-drawer-body");
+      drawerBody.innerHTML = renderDrawerBody(s);
+      drawerBody
+        .querySelectorAll(".d-positions, .d-locations")
+        .forEach(initTagInput);
+      // Тот же паттерн inherited/override, что в Stripe/AWS для
+      // лимитов бюджета: чекбокс "своё" выключен → инпут задизейблен
+      // и показывает дефолт как placeholder, не как значение.
+      drawerBody
+        .querySelectorAll(
+          ".d-max-applications-override, .d-daily-limit-override"
+        )
+        .forEach((cb) => {
+          cb.addEventListener("change", () => {
+            const input = cb
+              .closest(".override-field")
+              .querySelector("input[type=number]");
+            input.disabled = !cb.checked;
+            if (cb.checked) input.focus();
+          });
         });
-        const hhSalaryEl = row.querySelector(".f-hh-salary");
-        const liSalaryEl = row.querySelector(".f-linkedin-salary");
-        if (hhSalaryEl || liSalaryEl) {
-          await api("/api/settings/salary", {
+      drawerBody
+        .querySelector("#platform-drawer-save")
+        .addEventListener("click", async () => {
+          const jobMaxOverride = drawerBody.querySelector(
+            ".d-max-applications-override"
+          ).checked;
+          const dailyOverride = drawerBody.querySelector(
+            ".d-daily-limit-override"
+          ).checked;
+          const statusEl = drawerBody.querySelector("#platform-drawer-status");
+          const autoReplyEl = drawerBody.querySelector(".d-auto-reply");
+          const autoBumpEl = drawerBody.querySelector(".d-auto-bump");
+          await api("/api/settings", {
             method: "POST",
             body: JSON.stringify({
-              ...(hhSalaryEl
-                ? { hh_salary_expectations: hhSalaryEl.value.trim() }
+              source: sourceName,
+              schedule_enabled: drawerBody.querySelector(".d-schedule").checked,
+              interval_hours: parseInt(
+                drawerBody.querySelector(".d-interval").value,
+                10
+              ),
+              auto_apply: drawerBody.querySelector(".d-auto").checked,
+              resume_id: drawerBody.querySelector(".d-resume-id").value.trim(),
+              // "своё" выключено → clear_* удаляет override в YAML,
+              // площадка возвращается к общему дефолту (см.
+              // unset_source_field на бэкенде); включено → пишем
+              // введённое число как явное значение этой площадки.
+              clear_job_max_applications: !jobMaxOverride,
+              clear_daily_application_limit: !dailyOverride,
+              positions: linesOfEl(drawerBody.querySelector(".d-positions")),
+              locations: linesOfEl(drawerBody.querySelector(".d-locations")),
+              ...(autoReplyEl ? { auto_reply: autoReplyEl.checked } : {}),
+              ...(autoBumpEl ? { auto_bump_resume: autoBumpEl.checked } : {}),
+              ...(jobMaxOverride
+                ? {
+                    job_max_applications: parseInt(
+                      drawerBody.querySelector(".d-max-applications").value,
+                      10
+                    ),
+                  }
                 : {}),
-              ...(liSalaryEl
-                ? { linkedin_salary_range_usd: liSalaryEl.value.trim() }
+              ...(dailyOverride
+                ? {
+                    daily_application_limit: parseInt(
+                      drawerBody.querySelector(".d-daily-limit").value,
+                      10
+                    ),
+                  }
                 : {}),
             }),
           });
-        }
-        statusEl.textContent = "Сохранено";
-        await render.settings();
-      });
+          const hhSalaryEl = drawerBody.querySelector(".d-hh-salary");
+          const liSalaryEl = drawerBody.querySelector(".d-linkedin-salary");
+          if (hhSalaryEl || liSalaryEl) {
+            await api("/api/settings/salary", {
+              method: "POST",
+              body: JSON.stringify({
+                ...(hhSalaryEl
+                  ? { hh_salary_expectations: hhSalaryEl.value.trim() }
+                  : {}),
+                ...(liSalaryEl
+                  ? { linkedin_salary_range_usd: liSalaryEl.value.trim() }
+                  : {}),
+              }),
+            });
+          }
+          statusEl.textContent = "Сохранено";
+          setTimeout(() => {
+            closePlatformDrawer();
+            render.settings();
+          }, 500);
+        });
+      const overlay = document.getElementById("platform-drawer-overlay");
+      overlay.style.display = "flex";
+      trapFocus(document.getElementById("platform-drawer"));
+    }
+
+    platformCards.querySelectorAll(".p-open-drawer").forEach((btn) => {
+      btn.addEventListener("click", () => openPlatformDrawer(btn.dataset.source));
     });
   },
 
@@ -1644,10 +1674,12 @@ function repositionTabIndicators() {
   );
 }
 
-// Вкладки без понятия "сохранить" (генерация резюме через Selenium,
-// ручные best-effort клики на hh.ru) — не размечаем как "не сохранено",
-// там нет настройки, которая могла бы потеряться.
-const SETTINGS_PANES_WITHOUT_SAVE = new Set(["settings-hh-resume"]);
+// Вкладки без понятия "сохранить" — не размечаем как "не сохранено",
+// там нет настройки, которая могла бы потеряться. Сейчас пусто:
+// «Резюме на hh.ru» переехало в раздел «Резюме» (вне #view-settings,
+// эта система его не касается), а «Площадки» теперь редактируются
+// через drawer, который сам управляет своим статусом сохранения.
+const SETTINGS_PANES_WITHOUT_SAVE = new Set();
 
 function markSettingsDirty(pane) {
   if (!pane || SETTINGS_PANES_WITHOUT_SAVE.has(pane.id)) return;
@@ -1951,6 +1983,25 @@ function initCommandPalette() {
   document
     .getElementById("resume-audit-close")
     .addEventListener("click", closeResumeAuditModal);
+
+  const platformDrawerOverlay = document.getElementById("platform-drawer-overlay");
+  platformDrawerOverlay.addEventListener("click", (e) => {
+    if (e.target === platformDrawerOverlay) closePlatformDrawer();
+  });
+  document
+    .getElementById("platform-drawer-close")
+    .addEventListener("click", closePlatformDrawer);
+}
+
+function closePlatformDrawer() {
+  const overlay = document.getElementById("platform-drawer-overlay");
+  if (overlay.style.display === "none") return;
+  overlay.style.display = "none";
+  releaseFocusTrap(document.getElementById("platform-drawer"));
+}
+
+function isPlatformDrawerOpen() {
+  return document.getElementById("platform-drawer-overlay").style.display !== "none";
 }
 
 function openCoverLetterModal(entry) {
@@ -2012,6 +2063,10 @@ function initKeyboardShortcuts() {
     }
     if (isResumeAuditModalOpen()) {
       if (e.key === "Escape") closeResumeAuditModal();
+      return;
+    }
+    if (isPlatformDrawerOpen()) {
+      if (e.key === "Escape") closePlatformDrawer();
       return;
     }
 

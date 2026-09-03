@@ -382,6 +382,21 @@
           <span id="refresh-plain-text-status" class="muted small"></span>
         </div>
       </div>
+
+      <div class="panel">
+        <h3>🧪 Резюме на hh.ru <span class="muted small">— экспериментально</span></h3>
+        <p class="muted small">
+          Ручные действия (открывают реальный браузер) — не часть
+          автоматического цикла. Клонирование и создание — best-effort
+          клики, разметка не подтверждена на живом аккаунте.
+        </p>
+        <div class="filters">
+          <input type="text" id="hh-resume-clone-id" placeholder="id резюме для клонирования" aria-label="ID резюме для клонирования" />
+          <button id="hh-resume-clone" class="btn btn-secondary">Клонировать</button>
+          <button id="hh-resume-create-draft" class="btn btn-secondary">Начать новое резюме (черновик)</button>
+        </div>
+        <span id="hh-resume-status" class="muted small"></span>
+      </div>
     </section>
 
     <section id="view-analytics" class="view">
@@ -426,7 +441,6 @@
         <button type="button" data-settings-tab="settings-autostart">Автозапуск</button>
         <button type="button" data-settings-tab="settings-usage">Расходы на LLM</button>
         <button type="button" data-settings-tab="settings-table">Площадки</button>
-        <button type="button" data-settings-tab="settings-hh-resume">Резюме на hh.ru</button>
       </nav>
 
       <div class="panel settings-pane active" id="settings-search">
@@ -704,28 +718,9 @@
         <p class="muted small">Лимит расходов задаётся на вкладке «Лимиты откликов» — рядом с остальными лимитами.</p>
       </div>
 
-      <div class="table-wrap settings-pane" id="settings-table">
-        <table class="settings-table">
-          <thead>
-            <tr><th>Площадка</th><th>Готовность</th><th>В расписании</th><th>Интервал, ч</th><th title="auto_apply — реально откликаться, не только показывать">Автоотклик</th><th>Resume ID</th><th title="Максимум откликов за один заход — площадка запускается по расписанию каждые N часов (колонка «Интервал, ч»), и дневной лимит набирается за несколько таких заходов, а не за один. Это защита от всплеска: чтобы бот не отправил всю дневную квоту разом за пару минут.">За один заход</th><th>Дневной лимит</th><th></th><th title="Свои должности/локации/зарплата для этой площадки">Фильтры</th></tr>
-          </thead>
-          <tbody id="settings-rows"></tbody>
-        </table>
-      </div>
-
-      <div class="panel settings-pane" id="settings-hh-resume">
-        <h3>Резюме на hh.ru</h3>
-        <p class="muted small">
-          Ручные действия (открывают реальный браузер) — не часть
-          автоматического цикла. Клонирование и создание — best-effort
-          клики, разметка не подтверждена на живом аккаунте.
-        </p>
-        <div class="filters">
-          <input type="text" id="hh-resume-clone-id" placeholder="id резюме для клонирования" aria-label="ID резюме для клонирования" />
-          <button id="hh-resume-clone" class="btn btn-secondary">Клонировать</button>
-          <button id="hh-resume-create-draft" class="btn btn-secondary">Начать новое резюме (черновик)</button>
-        </div>
-        <span id="hh-resume-status" class="muted small"></span>
+      <div class="settings-pane" id="settings-table">
+        <p class="muted small">Клик по «⚙ Настроить» открывает расписание, лимиты и фильтры для площадки.</p>
+        <div class="source-grid" id="platform-cards"></div>
       </div>
     </section>
 
@@ -813,7 +808,17 @@
   </div>
 </div>
 
+<div id="platform-drawer-overlay" class="drawer-overlay" style="display:none">
+  <div class="drawer-panel" id="platform-drawer" tabindex="-1">
+    <div class="drawer-header">
+      <h3 id="platform-drawer-title"></h3>
+      <button type="button" class="btn btn-ghost btn-small" id="platform-drawer-close" aria-label="Закрыть">✕</button>
+    </div>
+    <div class="drawer-body" id="platform-drawer-body"></div>
+  </div>
+</div>
+
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=19"></script>
+<script src="/app.js?v=20"></script>
 </body>
 </html>
