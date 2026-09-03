@@ -450,9 +450,18 @@ LinkedIn (ответ на screening-вопросы Easy Apply, `salary_range_usd
 ### Сборка в exe (macOS и Windows)
 
 ```bash
-pip install -r requirements-desktop.txt
+pip install -r requirements-desktop.txt "setuptools<81"
 pyinstaller desktop_app.spec
 ```
+
+`setuptools<81` — не опционально: начиная с setuptools 81 из
+`pkg_resources` убрали `NullProvider`, а собственный runtime-hook
+PyInstaller (`pyi_rth_pkgres`) на него рассчитывает — без более старой
+версии собранный `.app`/`.exe` падает сразу при старте с
+`AttributeError: module 'pkg_resources' has no attribute
+'NullProvider'`, до открытия окна. Проверено вживую 2026-09-03 —
+лучше собирать в отдельном venv, чтобы не понижать setuptools во всём
+остальном окружении.
 
 PyInstaller не кросс-компилирует — команду нужно запускать НА каждой
 целевой ОС отдельно (собрать Windows-exe с Mac нельзя, и наоборот).
