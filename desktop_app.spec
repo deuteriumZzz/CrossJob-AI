@@ -9,6 +9,8 @@
 
 import sys
 
+from PyInstaller.utils.hooks import copy_metadata
+
 a = Analysis(
     ["desktop_app.py"],
     pathex=[],
@@ -16,6 +18,13 @@ a = Analysis(
     datas=[
         ("src/webui/static", "src/webui/static"),
         ("data_folder_example", "data_folder_example"),
+        # ponytail: readchar (зависимость inquirer, зависимости
+        # main.py, который грузит src/webui/api.py) читает свою
+        # версию через importlib.metadata.version(__package__) при
+        # импорте — PyInstaller по умолчанию не бандлит .dist-info
+        # пакетов, только код, поэтому без этого падает
+        # PackageNotFoundError прямо на импорте.
+        *copy_metadata("readchar"),
         # Всё, что ResumeFacade/StyleManager грузят по прямому пути
         # (importlib.util.spec_from_file_location для strings.py,
         # обычное чтение файлов для CSS) — PyInstaller не видит такую
@@ -39,6 +48,15 @@ a = Analysis(
         ),
     ],
     hiddenimports=[
+        # ponytail: desktop_app.py передаёт это строкой в
+        # uvicorn.Config("src.webui.api:app", ...) — PyInstaller видит
+        # только настоящие import-выражения при статическом анализе,
+        # строку не видит вообще. Без явного hiddenimport весь
+        # src/webui/api.py (и всё, что он тянет — все площадки,
+        # LLM-провайдеры) не попадал в сборку, и собранное приложение
+        # падало при старте с "Could not import module 'src.webui.api'"
+        # ещё до того, как окно вообще открывалось.
+        "src.webui.api",
         "uvicorn.logging",
         "uvicorn.loops",
         "uvicorn.loops.auto",

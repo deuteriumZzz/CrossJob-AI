@@ -192,7 +192,38 @@ class AppContext:
             return ""
 
 
-_data_folder = Path("data_folder")
+def _default_data_folder() -> Path:
+    """Обычный `python main.py`/`uvicorn src.webui.api:app` всегда
+    запускают из корня проекта (см. README) — там CWD-относительный
+    "data_folder" предсказуем. У собранного PyInstaller `.app`/`.exe`
+    (desktop_app.spec) это не так: Finder/двойной клик запускает
+    процесс с произвольным CWD (обычно "/" — обычный пользователь
+    туда даже не может писать), поэтому "data_folder" там уходил в
+    случайное место при каждом запуске вместо стабильного —
+    настройки/резюме/история откликов буквально терялись между
+    запусками. Для собранной версии на macOS/Windows якорим на
+    стандартную для ОС постоянную папку пользователя вместо CWD;
+    для остального (в т.ч. Linux-сборки, которую сегодня не собирали)
+    поведение не меняется — тот же Path("data_folder"), что и раньше."""
+    if getattr(sys, "frozen", False):
+        if sys.platform == "darwin":
+            return (
+                Path.home()
+                / "Library"
+                / "Application Support"
+                / "CrossJob-AI"
+                / "data_folder"
+            )
+        if sys.platform == "win32":
+            import os
+
+            appdata = os.environ.get("APPDATA")
+            if appdata:
+                return Path(appdata) / "CrossJob-AI" / "data_folder"
+    return Path("data_folder")
+
+
+_data_folder = _default_data_folder()
 _ctx: Optional[AppContext] = None
 
 
