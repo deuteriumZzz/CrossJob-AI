@@ -6,6 +6,10 @@ __pycache__/
 .claude/
 venv/
 
+# PyInstaller build output (desktop_app.spec) — 1GB+ per build, never commit.
+build/
+dist/
+
 # Real user data — secrets, resume, generated output. Never commit this;
 # only data_folder_example/ is meant to be shared.
 data_folder/
