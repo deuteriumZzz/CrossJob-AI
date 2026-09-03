@@ -2348,7 +2348,17 @@ def search_and_apply_wellfound(
             answerer = EasyApplyAnswerer(
                 resume_text, profile, job, llm_api_key
             )
-            applied = client.apply(job.link, profile_dir, answerer.answer)
+            try:
+                applied = client.apply(
+                    job.link, profile_dir, answerer.answer
+                )
+            except Exception as e:
+                logger.exception(
+                    f"Wellfound apply form crashed for {job.role} at "
+                    f"{job.company} ({job.link}) — recorded as "
+                    f"dry-run, moving on to the next vacancy: {e}"
+                )
+                applied = False
             if applied:
                 status: Literal["applied", "dry_run"] = "applied"
                 logger.info(

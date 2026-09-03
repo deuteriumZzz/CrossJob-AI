@@ -97,6 +97,8 @@ def score_job_fit(
                 "salary_expectations": salary_expectations or "не указаны",
             }
         )
+        if result is None:
+            return FitAssessment(score=10, gaps=[])
         return cast(FitAssessment, result)
     except Exception:
         return FitAssessment(score=10, gaps=[])
