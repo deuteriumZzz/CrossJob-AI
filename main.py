@@ -1472,10 +1472,10 @@ def search_geekjob(
             except Exception as e:
                 logger.exception(
                     f"geekjob apply form crashed for {job.role} at "
-                    f"{job.company} ({job.link}) — recorded as "
-                    f"dry-run, moving on to the next vacancy: {e}"
+                    f"{job.company} ({job.link}) — skipping without "
+                    f"recording so a future run retries it: {e}"
                 )
-                applied = False
+                continue
             if applied:
                 status: Literal["applied", "dry_run"] = "applied"
                 logger.info(
@@ -1816,10 +1816,10 @@ def search_getmatch(
                 except Exception as e:
                     logger.exception(
                         f"GetMatch apply form crashed for {job.role} at "
-                        f"{job.company} ({job.link}) — recorded as "
-                        f"dry-run, moving on to the next vacancy: {e}"
+                        f"{job.company} ({job.link}) — skipping without "
+                        f"recording so a future run retries it: {e}"
                     )
-                    applied = False
+                    continue
                 if applied:
                     status: Literal["applied", "dry_run"] = "applied"
                     logger.info(
@@ -2192,10 +2192,10 @@ def search_and_apply_habr_career(
                 except Exception as e:
                     logger.exception(
                         f"habr.career apply form crashed for {job.role} at "
-                        f"{job.company} ({job.link}) — recorded as "
-                        f"dry-run, moving on to the next vacancy: {e}"
+                        f"{job.company} ({job.link}) — skipping without "
+                        f"recording so a future run retries it: {e}"
                     )
-                    applied = False
+                    continue
                 if applied:
                     status: Literal["applied", "dry_run"] = "applied"
                     logger.info(
@@ -2389,10 +2389,10 @@ def search_and_apply_wellfound(
             except Exception as e:
                 logger.exception(
                     f"Wellfound apply form crashed for {job.role} at "
-                    f"{job.company} ({job.link}) — recorded as "
-                    f"dry-run, moving on to the next vacancy: {e}"
+                    f"{job.company} ({job.link}) — skipping without "
+                    f"recording so a future run retries it: {e}"
                 )
-                applied = False
+                continue
             if applied:
                 status: Literal["applied", "dry_run"] = "applied"
                 logger.info(
