@@ -18,7 +18,12 @@ def load_state(output_folder: Path) -> dict:
     path = _state_path(output_folder)
     if not path.exists():
         return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        # ponytail: unlocked reads can race a concurrent write (write_text isn't atomic);
+        # treat a torn read as "no state yet" rather than crashing the caller.
+        return {}
 
 
 def _save_state(output_folder: Path, state: dict) -> None:

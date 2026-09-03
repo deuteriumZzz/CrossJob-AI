@@ -20,22 +20,25 @@ class AppliedLog:
 
     def __init__(self, path: Path):
         self.path = path
+
+    @property
+    def _data(self) -> dict:
+        # ponytail: re-read on every access instead of caching in __init__ —
+        # other AppliedLog instances (scheduler thread, other main.py calls)
+        # write the same file, so a cached copy goes stale until process
+        # restart. The file is small; re-reading it is cheap.
         if self.path.exists():
-            self._data = json.loads(self.path.read_text(encoding="utf-8"))
-        else:
-            self._data = {"applications": []}
+            return json.loads(self.path.read_text(encoding="utf-8"))
+        return {"applications": []}
 
     def _key(self, job: Job) -> tuple[str, str]:
         return (job.source, job.external_id)
 
     def _write_locked(self, mutate: Callable[[dict], None]) -> None:
-        """Читает актуальные данные с диска под блокировкой (не
-        self._data, который мог устареть с момента __init__, если
-        файл поменял другой поток — демон/ручной запуск/генерация
-        резюме в дашборде работают в отдельных потоках), применяет
-        mutate() и пишет обратно; self._data обновляется тем же
-        результатом, чтобы последующие чтения в этом же прогоне
-        оставались согласованы с диском."""
+        """Читает актуальные данные с диска под блокировкой (self._data
+        теперь всегда читает диск заново, но без блокировки — под ней
+        нужна согласованная read-modify-write), применяет mutate() и
+        пишет обратно."""
         with state_file_lock(self.path):
             fresh = (
                 json.loads(self.path.read_text(encoding="utf-8"))
@@ -48,7 +51,6 @@ class AppliedLog:
                 json.dumps(fresh, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
-        self._data = fresh
 
     def already_applied(self, job: Job) -> bool:
         key = self._key(job)
