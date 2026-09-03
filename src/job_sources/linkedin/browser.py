@@ -57,6 +57,15 @@ def init_linkedin_browser(profile_dir: Path) -> uc.Chrome:
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
         options.add_argument("--no-sandbox")
+        # ponytail: тот же --disable-component-update, что сегодня
+        # добавили в chrome_utils.chrome_browser_options() для
+        # остальных источников — этот билдер флагов отдельный (UC
+        # вместо обычного Selenium), под общий helper не попадает.
+        # .linkedin_profile раздувался тем же component_crx_cache/
+        # Default/Extensions (233MB, 39MB одного component_crx_cache
+        # на момент находки) — clear_profile_cache() выше это чистит,
+        # но без флага копится заново на каждый прогон.
+        options.add_argument("--disable-component-update")
         # ponytail: this profile's own First Run flow was the one thing
         # missing that every other source's chrome_browser_options() already
         # sets — and First Run is what (re)derives the profile's "name" pref
