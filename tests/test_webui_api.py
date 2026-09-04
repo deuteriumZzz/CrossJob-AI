@@ -444,7 +444,12 @@ def test_notifications_test_reports_send_failure(client):
 
 
 def test_logs_endpoint_reports_disabled_file_logging(client):
-    response = client.get("/api/logs")
+    # LOG_TO_FILE — True по умолчанию (иначе /api/logs в интерфейсе
+    # всегда пуст, файл log/app.log никто не создаёт) — здесь явно
+    # патчим на False, чтобы проверить именно ветку "выключено",
+    # независимо от глобального дефолта.
+    with patch("src.webui.api.LOG_TO_FILE", False):
+        response = client.get("/api/logs")
     body = response.json()
     assert body["lines"] == []
     assert body["note"] is not None

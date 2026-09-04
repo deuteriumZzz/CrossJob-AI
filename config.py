@@ -5,7 +5,7 @@ from src.utils.constants import ERROR
 # Настройки логирования должны иметь префикс LOG_
 LOG_LEVEL = "INFO"
 LOG_SELENIUM_LEVEL = ERROR
-LOG_TO_FILE = False
+LOG_TO_FILE = True
 LOG_TO_CONSOLE = True
 
 MINIMUM_WAIT_TIME_IN_SECONDS = 60
