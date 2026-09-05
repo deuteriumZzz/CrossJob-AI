@@ -4,6 +4,7 @@ import time
 from bs4 import BeautifulSoup
 
 from src.job import Job
+from src.job_sources.block_detection import raise_if_blocked, visible_text
 from src.job_sources.himalayas.mapping import parse_search_html
 
 SEARCH_URL = "https://himalayas.app/jobs"
@@ -32,6 +33,7 @@ def search_jobs(driver, position: str) -> list[Job]:
     slug = _slugify(position)
     driver.get(f"{SEARCH_URL}/{slug}" if slug else SEARCH_URL)
     time.sleep(PAGE_LOAD_WAIT_SECONDS)
+    raise_if_blocked(visible_text(driver))
 
     for _ in range(SCROLL_STEPS):
         driver.execute_script(
