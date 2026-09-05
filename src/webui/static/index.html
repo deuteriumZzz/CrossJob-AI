@@ -335,6 +335,27 @@
       </div>
 
       <div class="panel">
+        <h3>Загрузить резюме (PDF)</h3>
+        <p class="muted small">Резюме используется только для оценки соответствия вакансии и генерации текста — не отправляется на площадку как файл.</p>
+        <div class="resume-action-grid">
+          <div class="resume-action-card">
+            <h4>Основное резюме</h4>
+            <p class="muted small">HeadHunter, geekjob, GetMatch, Хабр Карьера, Telegram.</p>
+            <input type="file" id="resume-upload-primary" accept="application/pdf" style="display:none" />
+            <button type="button" id="resume-upload-primary-btn" class="btn btn-secondary">📎 Загрузить resume.pdf</button>
+            <p id="resume-upload-primary-status" class="muted small"></p>
+          </div>
+          <div class="resume-action-card">
+            <h4>Для международных площадок <span class="muted small">— опционально</span></h4>
+            <p class="muted small">LinkedIn, Wellfound, Himalayas. Без него используется основное резюме.</p>
+            <input type="file" id="resume-upload-linkedin" accept="application/pdf" style="display:none" />
+            <button type="button" id="resume-upload-linkedin-btn" class="btn btn-secondary">📎 Загрузить resume_linkedin.pdf</button>
+            <p id="resume-upload-linkedin-status" class="muted small"></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
         <h3>Резюме без вакансии</h3>
         <p class="muted small">Общий вариант, не подогнанный ни под одно объявление — на случай, если резюме нужно просто в PDF.</p>
         <div class="filters">

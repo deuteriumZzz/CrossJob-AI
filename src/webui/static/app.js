@@ -2856,6 +2856,34 @@ function initDashboard() {
     .getElementById("gen-resume-audit")
     .addEventListener("click", startResumeAudit);
 
+  for (const [kind, inputId, btnId, statusId] of [
+    ["primary", "resume-upload-primary", "resume-upload-primary-btn", "resume-upload-primary-status"],
+    ["linkedin", "resume-upload-linkedin", "resume-upload-linkedin-btn", "resume-upload-linkedin-status"],
+  ]) {
+    const input = document.getElementById(inputId);
+    const status = document.getElementById(statusId);
+    document.getElementById(btnId).addEventListener("click", () => input.click());
+    input.addEventListener("change", async () => {
+      const file = input.files[0];
+      if (!file) return;
+      status.textContent = "Загрузка…";
+      const formData = new FormData();
+      formData.append("file", file);
+      try {
+        const result = await api(`/api/resume/upload?kind=${kind}`, {
+          method: "POST",
+          headers: {},
+          body: formData,
+        });
+        status.textContent = `✅ Загружено: ${result.filename} (${Math.round(result.size / 1024)} КБ)`;
+      } catch (e) {
+        status.textContent = `Ошибка: ${e.message}`;
+      } finally {
+        input.value = "";
+      }
+    });
+  }
+
   document
     .getElementById("refresh-plain-text")
     .addEventListener("click", async () => {

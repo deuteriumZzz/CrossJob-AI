@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -1938,6 +1938,31 @@ def get_generate_download(ctx: AppContext = Depends(get_ctx)) -> FileResponse:
     if not path or not Path(path).exists():
         raise HTTPException(404, "No generated file available.")
     return FileResponse(path, filename=Path(path).name)
+
+
+# kind="primary" — HeadHunter/geekjob/GetMatch/Хабр Карьера/Telegram
+# (RESUME_PDF). kind="linkedin" — LinkedIn/Wellfound/Himalayas,
+# опционально (RESUME_PDF_LINKEDIN, см. main.py) — без него эти три
+# площадки сами откатываются на resume.pdf.
+_RESUME_UPLOAD_FILENAME = {"primary": RESUME_PDF, "linkedin": RESUME_PDF_LINKEDIN}
+
+
+@app.post("/api/resume/upload")
+async def post_resume_upload(
+    kind: str,
+    file: UploadFile = File(...),
+    ctx: AppContext = Depends(get_ctx),
+) -> dict:
+    """Кнопка загрузки резюме в дашборде — заменяет ручное копирование
+    PDF в data_folder через Finder/Проводник."""
+    filename = _RESUME_UPLOAD_FILENAME.get(kind)
+    if filename is None:
+        raise HTTPException(400, "kind must be 'primary' or 'linkedin'")
+    content = await file.read()
+    if not content.startswith(b"%PDF-"):
+        raise HTTPException(400, "Файл не похож на PDF.")
+    (ctx.config["dataFolder"] / filename).write_bytes(content)
+    return {"filename": filename, "size": len(content)}
 
 
 if STATIC_DIR.exists():

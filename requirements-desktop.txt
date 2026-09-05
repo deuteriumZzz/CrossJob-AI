@@ -2,6 +2,7 @@
 # (python desktop_app.py) поверх requirements.txt — не нужны для
 # чистого CLI/cron-использования (main.py --auto/--daemon).
 fastapi==0.110.2
+python-multipart==0.0.9
 uvicorn==0.30.6
 pywebview==5.3.2
 # Только для сборки exe (pip install -r requirements-desktop.txt уже
