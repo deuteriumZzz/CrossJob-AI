@@ -1,4 +1,6 @@
-from src.libs.resume_and_cover_builder.anti_ai_rules import ANTI_AI_STRUCTURE_EN
+from src.libs.resume_and_cover_builder.anti_ai_rules import (
+    ANTI_AI_STRUCTURE_EN,
+)
 from src.libs.resume_and_cover_builder.template_base import (
     prompt_achievements_template,
     prompt_additional_skills_template,

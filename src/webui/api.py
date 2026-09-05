@@ -1944,7 +1944,10 @@ def get_generate_download(ctx: AppContext = Depends(get_ctx)) -> FileResponse:
 # (RESUME_PDF). kind="linkedin" — LinkedIn/Wellfound/Himalayas,
 # опционально (RESUME_PDF_LINKEDIN, см. main.py) — без него эти три
 # площадки сами откатываются на resume.pdf.
-_RESUME_UPLOAD_FILENAME = {"primary": RESUME_PDF, "linkedin": RESUME_PDF_LINKEDIN}
+_RESUME_UPLOAD_FILENAME = {
+    "primary": RESUME_PDF,
+    "linkedin": RESUME_PDF_LINKEDIN,
+}
 
 
 @app.post("/api/resume/upload")
