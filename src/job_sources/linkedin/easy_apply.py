@@ -1,6 +1,10 @@
 import time
 from typing import Optional
 
+from selenium.common.exceptions import (
+    ElementClickInterceptedException,
+    StaleElementReferenceException,
+)
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
 
@@ -102,14 +106,39 @@ def run_easy_apply(
 
 
 def _click(driver, xpath: str) -> bool:
-    try:
-        el = driver.find_element(By.XPATH, xpath)
-        if not el.is_displayed():
-            return False
-        el.click()
-        return True
-    except Exception:
-        return False
+    """find_elements (не find_element) + фильтр по видимости: во время
+    перехода между шагами модалка LinkedIn может держать в DOM узел
+    предыдущего шага, совпадающий с тем же xpath, но скрытый — если
+    он идёт первым, старый find_element(...).is_displayed() молча
+    возвращал False, хотя рабочая кнопка рядом уже видна (это и есть
+    "stuck (no Next/Submit)" из логов при реально доступной кнопке).
+    Отдельно ретраим на ElementClickInterceptedException (кнопка
+    видна, но перекрыта анимацией — прокручиваем и жмём ещё раз) и на
+    StaleElementReferenceException (узел от предыдущего рендера —
+    перезапрашиваем DOM), вместо того чтобы, как раньше, глушить обе
+    вместе с «кнопки нет» одним bare except."""
+    for attempt in range(2):
+        for el in driver.find_elements(By.XPATH, xpath):
+            if not el.is_displayed():
+                continue
+            try:
+                el.click()
+                return True
+            except ElementClickInterceptedException:
+                try:
+                    driver.execute_script(
+                        "arguments[0].scrollIntoView({block: 'center'});", el
+                    )
+                    el.click()
+                    return True
+                except Exception as e:
+                    logger.debug(f"_click intercepted+scroll failed on {xpath}: {e}")
+            except StaleElementReferenceException:
+                break
+            except Exception as e:
+                logger.debug(f"_click failed on {xpath}: {e}")
+        time.sleep(0.5)
+    return False
 
 
 def _dismiss(driver) -> None:
