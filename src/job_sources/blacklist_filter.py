@@ -17,18 +17,19 @@ def passes_blacklists(job: Job, preferences: dict) -> bool:
     # locations — общий allowlist для площадок, которые ищут широко
     # (например HH — по всей area=113 "Россия") и полагаются на этот
     # пост-фильтр, чтобы сузить до конкретных городов вроде "Москва".
-    # LinkedIn — исключение: он уже фильтрует по локации на уровне
-    # самого поиска (linkedin.locations/geoId в search.py), а job.
-    # location там никогда не заполняется (см. search_easy_apply_
-    # jobs) — этот же allowlist на LinkedIn проверяет пустую строку
-    # против списка русских городов и отбрасывает вообще ВСЕ
-    # вакансии до единой (подтверждено живьём: "Found 0 matching" на
-    # реальном прогоне, при том что напрямую тот же поиск находил
-    # вакансии). himalayas — та же ловушка на всякий случай: карточки
-    # поиска не подтверждены вживую (анти-бот интерстишл, см. docstring
-    # search_jobs), job.location там тоже не заполняется — не рискуем
-    # тем же "Found 0" багом, если пользователь настроит locations.
-    if job.source not in ("linkedin", "himalayas"):
+    # Исключения — площадки, где job.location никогда не заполняется:
+    # LinkedIn (фильтрует по локации на уровне самого поиска —
+    # linkedin.locations/geoId в search.py, см. search_easy_apply_
+    # jobs), himalayas (карточки поиска не подтверждены вживую —
+    # анти-бот интерстишл, см. docstring search_jobs), habr_career
+    # (habr_vacancy_to_job не размечает location — нет проверенного
+    # селектора) и telegram (посты — свободный текст, структурного
+    # поля локации в принципе нет). Для любой из них allowlist
+    # проверял бы пустую строку против списка городов и отбрасывал
+    # вообще ВСЕ вакансии до единой (подтверждено живьём на LinkedIn:
+    # "Found 0 matching" при том, что напрямую тот же поиск находил
+    # вакансии) — не рискуем тем же багом на остальных трёх.
+    if job.source not in ("linkedin", "himalayas", "habr_career", "telegram"):
         locations = effective_list(preferences, job.source, "locations")
         if locations and not matches_any(job.location, locations):
             return False
