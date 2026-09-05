@@ -1,72 +1,64 @@
-from unittest.mock import patch
-
 from src.job_sources.resume_audit import (
-    _ATS_HIRING_MANAGER_PROMPT,
-    _AUDIT_PROMPT,
-    _REWRITE_EXPERIENCE_PROMPT,
-    run_full_resume_audit,
+    AtsHiringManagerCheck,
+    ResumeAuditScore,
+    _format_ats_check_for_context,
+    _format_audit_for_context,
 )
 
 
-def test_audit_prompt_has_expected_variables_and_rules():
-    assert set(_AUDIT_PROMPT.input_variables) == {"resume", "job_description"}
-    template = _AUDIT_PROMPT.messages[0].prompt.template
-    assert "Отвечай только на русском" in template
-    assert "Оценку соответствия от 0 до 100" in template
-
-
-def test_ats_hiring_manager_prompt_has_expected_variables_and_rules():
-    assert set(_ATS_HIRING_MANAGER_PROMPT.input_variables) == {
-        "resume",
-        "job_description",
-        "audit_result",
-    }
-    template = _ATS_HIRING_MANAGER_PROMPT.messages[0].prompt.template
-    assert "фильтра ATS" in template
-    assert "менеджера по найму" in template
-
-
-def test_rewrite_experience_prompt_has_expected_variables_and_rules():
-    assert set(_REWRITE_EXPERIENCE_PROMPT.input_variables) == {
-        "resume",
-        "audit_result",
-        "ats_hiring_manager_result",
-    }
-    template = _REWRITE_EXPERIENCE_PROMPT.messages[0].prompt.template
-    assert "формулу Google XYZ" in template
-    assert "ничего не придумывай" in template
-
-
-def test_run_full_resume_audit_chains_steps_in_order():
-    with patch(
-        "src.job_sources.resume_audit.run_resume_audit",
-        return_value="audit-text",
-    ) as mock_audit, patch(
-        "src.job_sources.resume_audit.run_ats_hiring_manager_check",
-        return_value="ats-hm-text",
-    ) as mock_ats_hm, patch(
-        "src.job_sources.resume_audit.run_rewrite_experience",
-        return_value="rewritten-text",
-    ) as mock_rewrite:
-        result = run_full_resume_audit("resume", "job description", "key")
-
-    mock_audit.assert_called_once_with("resume", "job description", "key")
-    mock_ats_hm.assert_called_once_with(
-        "resume", "job description", "audit-text", "key"
+def test_format_audit_for_context_includes_all_nonempty_fields():
+    audit = ResumeAuditScore(
+        match_score=72,
+        missing_keywords=["Kubernetes", "Terraform"],
+        red_flags=["Нет цифр в разделе опыта"],
+        strong_sections=["Опыт: конкретные проекты"],
+        weak_sections=["Summary: слишком общий"],
+        comparison_note="Слабее, чем у типичного сильного кандидата.",
     )
-    mock_rewrite.assert_called_once_with(
-        "resume", "audit-text", "ats-hm-text", "key"
+    text = _format_audit_for_context(audit)
+    assert "72/100" in text
+    assert "Kubernetes, Terraform" in text
+    assert "Нет цифр в разделе опыта" in text
+    assert "Summary: слишком общий" in text
+    assert "Слабее, чем у типичного сильного кандидата." in text
+
+
+def test_format_audit_for_context_skips_empty_lists():
+    audit = ResumeAuditScore(
+        match_score=40,
+        missing_keywords=[],
+        red_flags=[],
+        strong_sections=[],
+        weak_sections=[],
+        comparison_note="",
     )
-    assert result == {
-        "audit": "audit-text",
-        "ats_hiring_manager": "ats-hm-text",
-        "rewritten_experience": "rewritten-text",
-    }
+    text = _format_audit_for_context(audit)
+    assert text == "Оценка соответствия: 40/100"
+
+
+def test_format_ats_check_for_context():
+    check = AtsHiringManagerCheck(
+        ats_pass=False,
+        keywords_present=["Python"],
+        keywords_missing=["Docker"],
+        formatting_issues=["Таблица в разделе навыков"],
+        hiring_manager_bucket="возможно",
+        skip_reasons=["Summary без конкретики"],
+    )
+    text = _format_ats_check_for_context(check)
+    assert "не пройдёт" in text
+    assert "Docker" in text
+    assert "Таблица в разделе навыков" in text
+    assert "возможно" in text
+    assert "Summary без конкретики" in text
+
+
+def demo() -> None:
+    test_format_audit_for_context_includes_all_nonempty_fields()
+    test_format_audit_for_context_skips_empty_lists()
+    test_format_ats_check_for_context()
+    print("ok")
 
 
 if __name__ == "__main__":
-    test_audit_prompt_has_expected_variables_and_rules()
-    test_ats_hiring_manager_prompt_has_expected_variables_and_rules()
-    test_rewrite_experience_prompt_has_expected_variables_and_rules()
-    test_run_full_resume_audit_chains_steps_in_order()
-    print("All tests passed.")
+    demo()

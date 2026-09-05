@@ -817,13 +817,59 @@
   <div class="command-palette" style="padding:18px 20px;max-width:720px;width:92vw">
     <h3 style="margin:0 0 2px">Аудит резюме под вакансию</h3>
     <p id="resume-audit-meta" class="muted small" style="margin:0 0 14px"></p>
-    <div style="max-height:65vh;overflow-y:auto;padding-right:4px">
-      <h4 style="margin:0 0 6px">1. Аудит резюме</h4>
-      <div id="resume-audit-body" style="white-space:pre-wrap;word-break:break-word;line-height:1.55;font-size:13.5px;margin-bottom:18px"></div>
-      <h4 style="margin:0 0 6px">2. Проверка ATS и менеджером по найму</h4>
-      <div id="resume-audit-ats-hm-body" style="white-space:pre-wrap;word-break:break-word;line-height:1.55;font-size:13.5px;margin-bottom:18px"></div>
-      <h4 style="margin:0 0 6px">3. Переписанный раздел опыта</h4>
-      <div id="resume-audit-rewrite-body" style="white-space:pre-wrap;word-break:break-word;line-height:1.55;font-size:13.5px"></div>
+    <div style="max-height:70vh;overflow-y:auto;padding-right:4px">
+
+      <div class="resume-audit-score-row">
+        <div class="resume-audit-score">
+          <span id="resume-audit-score-value" class="hero-figure">—</span>
+          <span class="muted small">/ 100</span>
+        </div>
+        <div class="resume-audit-meter-wrap">
+          <div class="meter"><div id="resume-audit-meter-fill" class="meter-fill"></div></div>
+          <span id="resume-audit-score-label" class="muted small"></span>
+        </div>
+      </div>
+
+      <div class="resume-audit-badges">
+        <span id="resume-audit-ats-badge" class="badge"></span>
+        <span id="resume-audit-bucket-badge" class="badge"></span>
+      </div>
+
+      <p id="resume-audit-comparison-note" class="muted small" style="margin:0 0 18px"></p>
+
+      <div class="resume-audit-columns">
+        <div>
+          <h4 style="margin:0 0 6px">⚠️ Тревожные сигналы</h4>
+          <ul id="resume-audit-red-flags" class="resume-audit-list"></ul>
+        </div>
+        <div>
+          <h4 style="margin:0 0 6px">🔑 Отсутствующие ключевые слова</h4>
+          <div id="resume-audit-missing-keywords" class="chip-row"></div>
+        </div>
+      </div>
+
+      <div class="resume-audit-columns" style="margin-top:16px">
+        <div>
+          <h4 style="margin:0 0 6px">✅ Сильные разделы</h4>
+          <ul id="resume-audit-strong-sections" class="resume-audit-list"></ul>
+        </div>
+        <div>
+          <h4 style="margin:0 0 6px">🔻 Слабые разделы</h4>
+          <ul id="resume-audit-weak-sections" class="resume-audit-list"></ul>
+        </div>
+      </div>
+
+      <div style="margin-top:16px">
+        <h4 style="margin:0 0 6px">🧩 Проблемы оформления для ATS</h4>
+        <ul id="resume-audit-formatting-issues" class="resume-audit-list"></ul>
+      </div>
+
+      <details style="margin-top:18px">
+        <summary style="cursor:pointer;font-weight:600;font-size:14px">📄 Переписанный раздел опыта</summary>
+        <div id="resume-audit-rewrite-body" style="white-space:pre-wrap;word-break:break-word;line-height:1.55;font-size:13.5px;margin-top:10px"></div>
+        <button type="button" class="btn btn-secondary" id="resume-audit-copy-rewrite" style="margin-top:10px">Скопировать текст</button>
+      </details>
+
     </div>
     <button type="button" class="btn btn-secondary" id="resume-audit-close" style="width:100%;justify-content:center;margin-top:16px">Закрыть</button>
   </div>

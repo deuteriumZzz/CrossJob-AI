@@ -5,16 +5,71 @@
 предыдущих). Каждый шаг — отдельный однократный вызов LLM (как в
 job_fit.py), не stateful чат-сессия: вывод предыдущего шага просто
 передаётся следующему как текст в промпте.
+
+Шаги 1 и 2 отдают структурированный JSON (llm.with_structured_output —
+тот же приём, что _NeedsReply в reply_answerer.py), чтобы дашборд мог
+нарисовать процент/бэйджи/чипы, а не парсить прозу регулярками. Шаг 3
+остаётся обычным текстом — это готовый контент для копирования в
+резюме, а не данные для UI.
 """
 
-from typing import cast
+from typing import Literal, cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel, Field
 
 from src.job_sources.llm_provider import get_chat_llm
-from src.libs.resume_and_cover_builder.anti_ai_rules import ANTI_AI_STRUCTURE_RU
+from src.libs.resume_and_cover_builder.anti_ai_rules import (
+    ANTI_AI_STRUCTURE_RU,
+)
+
+
+class ResumeAuditScore(BaseModel):
+    match_score: int = Field(
+        description="Оценка соответствия резюме вакансии, от 0 до 100"
+    )
+    missing_keywords: list[str] = Field(
+        description="До 5 главных отсутствующих ключевых слов, которые будет искать ATS"
+    )
+    red_flags: list[str] = Field(
+        description="До 3 тревожных сигналов, которые менеджер по найму заметит менее чем за 10 секунд"
+    )
+    strong_sections: list[str] = Field(
+        description="Сильные разделы резюме — каждый пункт с кратким 'почему'"
+    )
+    weak_sections: list[str] = Field(
+        description="Слабые разделы резюме — каждый пункт с кратким 'почему'"
+    )
+    comparison_note: str = Field(
+        description="1-2 предложения: как резюме выглядит в сравнении с резюме сильного кандидата на эту роль"
+    )
+
+
+class AtsHiringManagerCheck(BaseModel):
+    ats_pass: bool = Field(
+        description="Пройдёт ли резюме ATS-фильтр для этой вакансии"
+    )
+    keywords_present: list[str] = Field(
+        description="Ключевые слова из вакансии, которые уже есть в резюме"
+    )
+    keywords_missing: list[str] = Field(
+        description="Ключевые слова из вакансии, которых всё ещё не хватает"
+    )
+    formatting_issues: list[str] = Field(
+        description="Проблемы оформления, которые запутают парсер ATS "
+        "(таблицы, колонки, заголовки, спецсимволы, изображения) — "
+        "пустой список, если их нет"
+    )
+    hiring_manager_bucket: Literal["да", "возможно", "нет"] = Field(
+        description="В какую стопку менеджер по найму положит это резюме для этой роли"
+    )
+    skip_reasons: list[str] = Field(
+        description="Какие разделы менеджер по найму пропустил бы при беглом "
+        "просмотре и почему — пустой список, если пропускать нечего"
+    )
+
 
 _AUDIT_PROMPT = ChatPromptTemplate.from_template(
     """
@@ -22,15 +77,6 @@ _AUDIT_PROMPT = ChatPromptTemplate.from_template(
 
 Выступи в роли старшего рекрутера именно этой компании.
 Проанализируй моё резюме относительно описания этой вакансии.
-
-Дай мне:
-
-1. Оценку соответствия от 0 до 100
-2. Пять главных отсутствующих ключевых слов, которые будет искать ATS
-3. Три тревожных сигнала, которые менеджер по найму заметит менее чем за 10 секунд
-4. Какие разделы сильные и почему
-5. Какие разделы слабые и почему
-6. Как моё резюме выглядит в сравнении с резюме сильного кандидата на эту роль
 
 Будь предельно честным. Я лучше исправлю проблемы сейчас, чем позже останусь
 без ответа.
@@ -58,22 +104,13 @@ _ATS_HIRING_MANAGER_PROMPT = ChatPromptTemplate.from_template(
 
 Теперь выступи в роли двух разных специалистов:
 
-СНАЧАЛА: Выступи в роли фильтра ATS. Просканируй моё резюме и скажи:
-- Пройдёт ли оно ATS для этой вакансии? (Да/Нет)
-- Какие ключевые слова теперь присутствуют, а каких всё ещё не хватает?
-- Есть ли проблемы с оформлением, которые запутают парсер ATS? (таблицы,
-  колонки, заголовки, специальные символы, изображения)
+СНАЧАЛА: Выступи в роли фильтра ATS. Просканируй моё резюме на предмет
+ключевых слов вакансии и проблем с оформлением, которые запутают парсер
+ATS (таблицы, колонки, заголовки, специальные символы, изображения).
 
 ЗАТЕМ: Выступи в роли менеджера по найму, который за один раз читает 200
-резюме. Просмотри моё резюме и скажи:
-- Какие разделы ты бы пропустил(а)? Почему?
-- Что заставляет остановить прокрутку — в хорошем или плохом смысле?
-- В какую стопку ты бы положил(а) это резюме для этой роли: «да»,
-  «возможно» или «нет»?
-- Перепиши разделы, которые были бы пропущены, так, чтобы они действительно
-  останавливали прокрутку.
-
-Дай мне финальную версию резюме после применения всех исправлений.
+резюме. Определи, какие разделы он пропустил бы при беглом просмотре и в
+какую стопку положил бы это резюме для этой роли.
 
 Резюме:
 ```
@@ -130,49 +167,114 @@ _REWRITE_EXPERIENCE_PROMPT = ChatPromptTemplate.from_template(
 )
 
 
+def _format_audit_for_context(audit: ResumeAuditScore) -> str:
+    """Сериализует структурированную оценку шага 1 обратно в читаемый
+    текст — для передачи в промпты шагов 2/3 (они не работают со
+    структурой напрямую)."""
+    lines = [f"Оценка соответствия: {audit.match_score}/100"]
+    if audit.missing_keywords:
+        lines.append(
+            "Отсутствующие ключевые слова: "
+            + ", ".join(audit.missing_keywords)
+        )
+    if audit.red_flags:
+        lines.append(
+            "Тревожные сигналы:\n"
+            + "\n".join(f"- {r}" for r in audit.red_flags)
+        )
+    if audit.weak_sections:
+        lines.append(
+            "Слабые разделы:\n"
+            + "\n".join(f"- {s}" for s in audit.weak_sections)
+        )
+    if audit.strong_sections:
+        lines.append(
+            "Сильные разделы:\n"
+            + "\n".join(f"- {s}" for s in audit.strong_sections)
+        )
+    if audit.comparison_note:
+        lines.append(audit.comparison_note)
+    return "\n".join(lines)
+
+
+def _format_ats_check_for_context(check: AtsHiringManagerCheck) -> str:
+    """Тот же приём для результата шага 2 — на вход шага 3."""
+    lines = [f"ATS: {'пройдёт' if check.ats_pass else 'не пройдёт'}"]
+    if check.keywords_missing:
+        lines.append(
+            "Всё ещё не хватает ключевых слов: "
+            + ", ".join(check.keywords_missing)
+        )
+    if check.formatting_issues:
+        lines.append(
+            "Проблемы форматирования:\n"
+            + "\n".join(f"- {i}" for i in check.formatting_issues)
+        )
+    lines.append(
+        f"Менеджер по найму положил бы резюме в стопку: "
+        f"{check.hiring_manager_bucket}"
+    )
+    if check.skip_reasons:
+        lines.append(
+            "Разделы, которые пропустит менеджер:\n"
+            + "\n".join(f"- {r}" for r in check.skip_reasons)
+        )
+    return "\n".join(lines)
+
+
 def run_resume_audit(
     resume_text: str, job_description: str, llm_api_key: str
-) -> str:
+) -> ResumeAuditScore:
     """Шаг 1 — общая оценка резюме под вакансию."""
     llm = cast(BaseChatModel, get_chat_llm(llm_api_key, temperature=0.3))
-    chain = _AUDIT_PROMPT | llm | StrOutputParser()
-    return chain.invoke(
-        {"resume": resume_text, "job_description": job_description}
+    structured_llm = llm.with_structured_output(ResumeAuditScore)
+    chain = _AUDIT_PROMPT | structured_llm
+    return cast(
+        ResumeAuditScore,
+        chain.invoke(
+            {"resume": resume_text, "job_description": job_description}
+        ),
     )
 
 
 def run_ats_hiring_manager_check(
     resume_text: str,
     job_description: str,
-    audit_result: str,
+    audit_result: ResumeAuditScore,
     llm_api_key: str,
-) -> str:
+) -> AtsHiringManagerCheck:
     """Шаг 2 — ATS-фильтр + менеджер по найму, с учётом шага 1."""
     llm = cast(BaseChatModel, get_chat_llm(llm_api_key, temperature=0.3))
-    chain = _ATS_HIRING_MANAGER_PROMPT | llm | StrOutputParser()
-    return chain.invoke(
-        {
-            "resume": resume_text,
-            "job_description": job_description,
-            "audit_result": audit_result,
-        }
+    structured_llm = llm.with_structured_output(AtsHiringManagerCheck)
+    chain = _ATS_HIRING_MANAGER_PROMPT | structured_llm
+    return cast(
+        AtsHiringManagerCheck,
+        chain.invoke(
+            {
+                "resume": resume_text,
+                "job_description": job_description,
+                "audit_result": _format_audit_for_context(audit_result),
+            }
+        ),
     )
 
 
 def run_rewrite_experience(
     resume_text: str,
-    audit_result: str,
-    ats_hiring_manager_result: str,
+    audit_result: ResumeAuditScore,
+    ats_hiring_manager_result: AtsHiringManagerCheck,
     llm_api_key: str,
 ) -> str:
     """Шаг 3 — переписанный раздел опыта, с учётом шагов 1 и 2."""
-    llm = cast(BaseChatModel, get_chat_llm(llm_api_key, temperature=0.3))
+    llm = get_chat_llm(llm_api_key, temperature=0.3)
     chain = _REWRITE_EXPERIENCE_PROMPT | llm | StrOutputParser()
     return chain.invoke(
         {
             "resume": resume_text,
-            "audit_result": audit_result,
-            "ats_hiring_manager_result": ats_hiring_manager_result,
+            "audit_result": _format_audit_for_context(audit_result),
+            "ats_hiring_manager_result": _format_ats_check_for_context(
+                ats_hiring_manager_result
+            ),
         }
     )
 
@@ -190,7 +292,7 @@ def run_full_resume_audit(
         resume_text, audit, ats_hiring_manager, llm_api_key
     )
     return {
-        "audit": audit,
-        "ats_hiring_manager": ats_hiring_manager,
+        "audit": audit.model_dump(),
+        "ats_hiring_manager": ats_hiring_manager.model_dump(),
         "rewritten_experience": rewritten_experience,
     }

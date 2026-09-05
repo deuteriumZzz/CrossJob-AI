@@ -1544,14 +1544,93 @@ async function startResumeAudit() {
   pollResumeAuditStatus();
 }
 
+function resumeAuditScoreClass(score) {
+  if (score >= 75) return "ok";
+  if (score >= 50) return "warn";
+  return "err";
+}
+
+function resumeAuditScoreLabel(score) {
+  if (score >= 75) return "Сильное совпадение";
+  if (score >= 50) return "Среднее совпадение";
+  return "Слабое совпадение";
+}
+
+function setResumeAuditBadge(el, text, cls) {
+  el.className = `badge ${cls}`;
+  el.innerHTML = `<span class="badge-dot"></span>${escapeHtml(text)}`;
+}
+
+function renderResumeAuditList(el, items) {
+  el.innerHTML = (items || [])
+    .map((item) => `<li>${escapeHtml(item)}</li>`)
+    .join("");
+}
+
+function renderResumeAuditChips(el, items) {
+  el.innerHTML = (items || [])
+    .map((item) => `<span class="chip">${escapeHtml(item)}</span>`)
+    .join("");
+}
+
 function openResumeAuditModal(result) {
   document.getElementById("resume-audit-meta").textContent =
     document.getElementById("gen-job-url").value.trim();
-  document.getElementById("resume-audit-body").textContent = result.audit || "";
-  document.getElementById("resume-audit-ats-hm-body").textContent =
-    result.ats_hiring_manager || "";
+
+  const audit = result.audit || {};
+  const ats = result.ats_hiring_manager || {};
+  const score = audit.match_score ?? 0;
+  const scoreClass = resumeAuditScoreClass(score);
+
+  document.getElementById("resume-audit-score-value").textContent = score;
+  document.getElementById("resume-audit-score-label").textContent =
+    resumeAuditScoreLabel(score);
+  const meterFill = document.getElementById("resume-audit-meter-fill");
+  meterFill.className = `meter-fill ${scoreClass}`;
+  meterFill.style.width = `${Math.max(0, Math.min(100, score))}%`;
+
+  setResumeAuditBadge(
+    document.getElementById("resume-audit-ats-badge"),
+    ats.ats_pass ? "Пройдёт ATS" : "Не пройдёт ATS",
+    ats.ats_pass ? "ok" : "err"
+  );
+  const bucketClass =
+    ats.hiring_manager_bucket === "да"
+      ? "ok"
+      : ats.hiring_manager_bucket === "возможно"
+        ? "warn"
+        : "err";
+  setResumeAuditBadge(
+    document.getElementById("resume-audit-bucket-badge"),
+    `Менеджер по найму: ${ats.hiring_manager_bucket || "—"}`,
+    bucketClass
+  );
+
+  document.getElementById("resume-audit-comparison-note").textContent =
+    audit.comparison_note || "";
+  renderResumeAuditList(
+    document.getElementById("resume-audit-red-flags"),
+    audit.red_flags
+  );
+  renderResumeAuditChips(
+    document.getElementById("resume-audit-missing-keywords"),
+    audit.missing_keywords
+  );
+  renderResumeAuditList(
+    document.getElementById("resume-audit-strong-sections"),
+    audit.strong_sections
+  );
+  renderResumeAuditList(
+    document.getElementById("resume-audit-weak-sections"),
+    audit.weak_sections
+  );
+  renderResumeAuditList(
+    document.getElementById("resume-audit-formatting-issues"),
+    ats.formatting_issues
+  );
   document.getElementById("resume-audit-rewrite-body").textContent =
     result.rewritten_experience || "";
+
   const overlay = document.getElementById("resume-audit-overlay");
   overlay.style.display = "flex";
   trapFocus(overlay);
@@ -1983,6 +2062,12 @@ function initCommandPalette() {
   document
     .getElementById("resume-audit-close")
     .addEventListener("click", closeResumeAuditModal);
+  document
+    .getElementById("resume-audit-copy-rewrite")
+    .addEventListener("click", (e) => {
+      const text = document.getElementById("resume-audit-rewrite-body").textContent;
+      copyToClipboard(text, e.currentTarget);
+    });
 
   const platformDrawerOverlay = document.getElementById("platform-drawer-overlay");
   platformDrawerOverlay.addEventListener("click", (e) => {

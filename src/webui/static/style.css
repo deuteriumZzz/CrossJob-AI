@@ -877,6 +877,121 @@ p.muted {
   border-left-color: var(--warn);
 }
 
+/* ---------- Аудит резюме: hero-число + meter вместо стены прозы ---------- */
+
+.hero-figure {
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: proportional-nums;
+}
+
+.resume-audit-score-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+
+.resume-audit-score {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.resume-audit-meter-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.meter {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.meter-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--muted-2);
+  transition: width 0.4s var(--ease-out);
+}
+
+.meter-fill.ok {
+  background: var(--ok);
+}
+
+.meter-fill.warn {
+  background: var(--warn);
+}
+
+.meter-fill.err {
+  background: var(--err);
+}
+
+.resume-audit-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.badge.warn {
+  background: rgba(224, 192, 90, 0.15);
+  color: var(--warn);
+}
+
+.badge.err {
+  background: rgba(224, 135, 135, 0.15);
+  color: var(--err);
+}
+
+.resume-audit-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+@media (max-width: 560px) {
+  .resume-audit-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.resume-audit-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.resume-audit-list:empty::before {
+  content: "—";
+  color: var(--muted-2);
+  margin-left: -18px;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
 .analytics-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
