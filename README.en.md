@@ -5,7 +5,7 @@
 ### Automated job search & apply — LLM screening, a dashboard, and anti-ban pacing
 
 [![CI](https://github.com/deuteriumZzz/CrossJob-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/deuteriumZzz/CrossJob-AI/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)](requirements.txt)
 [![Platform](https://img.shields.io/badge/OS-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](docs/GUIDE.md#сборка-в-exe-macos-и-windows)
 [![Guide](https://img.shields.io/badge/📖_Guide-docs%2FGUIDE.md-2ea44f)](docs/GUIDE.md)
@@ -204,4 +204,4 @@ The same checks run in CI on every push/PR to `main` (see [ci.yml](.github/workf
 
 ## License
 
-[MIT](LICENSE) — Dmitry Vologdin, 2026.
+[PolyForm Noncommercial 1.0.0](LICENSE) — Dmitry Vologdin, 2026. Use, modification, and forks are permitted for any noncommercial purpose; embedding this in a commercial product or paid service is not.

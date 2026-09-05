@@ -5,7 +5,7 @@
 ### Автопоиск и автоотклик на вакансии — с LLM-подбором, дашбордом и анти-бан пацингом
 
 [![CI](https://github.com/deuteriumZzz/CrossJob-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/deuteriumZzz/CrossJob-AI/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)](requirements.txt)
 [![Platform](https://img.shields.io/badge/OS-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](docs/GUIDE.md#сборка-в-exe-macos-и-windows)
 [![Guide](https://img.shields.io/badge/📖_Полный_гайд-docs%2FGUIDE.md-2ea44f)](docs/GUIDE.md)
@@ -184,4 +184,4 @@ python -m pytest tests/ -q
 
 ## Лицензия
 
-[MIT](LICENSE) — Dmitry Vologdin, 2026.
+[PolyForm Noncommercial 1.0.0](LICENSE) — Dmitry Vologdin, 2026. Использование, изменение и форки разрешены для любых некоммерческих целей; встраивание в коммерческий продукт или платный сервис — нет.
