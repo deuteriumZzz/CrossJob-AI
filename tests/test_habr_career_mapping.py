@@ -55,10 +55,36 @@ def test_habr_vacancy_to_job_missing_fields_degrades_gracefully():
     assert job.link == "https://career.habr.com/vacancies/111"
     assert job.source == "habr_career"
     assert job.role == ""
+    assert job.location == ""
+
+
+def _conditions_html(chip_svg_class: str, chip_text: str) -> str:
+    return f"""
+<html><body>
+<div class="vacancy-meta">
+  <div class="basic-chip">
+    <div class="chip-with-icon__icon"><svg class="svg-icon {chip_svg_class}"></svg></div>
+    <span class="chip-with-icon__text">{chip_text}</span>
+  </div>
+</div>
+</body></html>
+"""
+
+
+def test_habr_vacancy_to_job_extracts_remote_location():
+    html = _conditions_html("svg-icon--icon-format", "Можно удалённо")
+    assert habr_vacancy_to_job(html, "111").location == "Можно удалённо"
+
+
+def test_habr_vacancy_to_job_extracts_city_location():
+    html = _conditions_html("svg-icon--icon-placemark", "Новосибирск")
+    assert habr_vacancy_to_job(html, "111").location == "Новосибирск"
 
 
 if __name__ == "__main__":
     test_parse_search_results_dedupes()
     test_habr_vacancy_to_job_maps_fields()
     test_habr_vacancy_to_job_missing_fields_degrades_gracefully()
+    test_habr_vacancy_to_job_extracts_remote_location()
+    test_habr_vacancy_to_job_extracts_city_location()
     print("All tests passed.")
