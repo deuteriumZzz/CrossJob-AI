@@ -42,14 +42,20 @@
     <text x="2" y="44" font-family="-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="20" fill="#99a3ad">Поиск и автоотклик на вакансии — без ручной рутины</text>
     <g font-family="-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="15" fill="#99a3ad">
       <text x="2" y="88">HeadHunter</text>
-      <circle cx="98" cy="83" r="2.5" fill="#3a3f48"/>
-      <text x="112" y="88">SuperJob</text>
-      <circle cx="196" cy="83" r="2.5" fill="#3a3f48"/>
-      <text x="210" y="88">Zarplata.ru</text>
-      <circle cx="310" cy="83" r="2.5" fill="#3a3f48"/>
-      <text x="324" y="88">LinkedIn</text>
-      <circle cx="408" cy="83" r="2.5" fill="#3a3f48"/>
-      <text x="422" y="88">Telegram</text>
+      <circle cx="95" cy="83" r="2.5" fill="#3a3f48"/>
+      <text x="109" y="88">Хабр Карьера</text>
+      <circle cx="222" cy="83" r="2.5" fill="#3a3f48"/>
+      <text x="236" y="88">geekjob</text>
+      <circle cx="300" cy="83" r="2.5" fill="#3a3f48"/>
+      <text x="314" y="88">GetMatch</text>
+
+      <text x="2" y="112">Telegram</text>
+      <circle cx="72" cy="107" r="2.5" fill="#3a3f48"/>
+      <text x="86" y="112">LinkedIn</text>
+      <circle cx="160" cy="107" r="2.5" fill="#3a3f48"/>
+      <text x="174" y="112">Wellfound</text>
+      <circle cx="256" cy="107" r="2.5" fill="#3a3f48"/>
+      <text x="270" y="112">Himalayas</text>
     </g>
   </g>
 </svg>
