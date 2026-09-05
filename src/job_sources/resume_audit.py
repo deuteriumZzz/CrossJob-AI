@@ -14,6 +14,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 from src.job_sources.llm_provider import get_chat_llm
+from src.libs.resume_and_cover_builder.anti_ai_rules import ANTI_AI_STRUCTURE_RU
 
 _AUDIT_PROMPT = ChatPromptTemplate.from_template(
     """
@@ -125,6 +126,7 @@ _REWRITE_EXPERIENCE_PROMPT = ChatPromptTemplate.from_template(
 {resume}
 ```
 """
+    + ANTI_AI_STRUCTURE_RU
 )
 
 
