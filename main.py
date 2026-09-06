@@ -3120,8 +3120,21 @@ def _answer_headhunter_messages(
     try:
         messages = fetch_new_employer_messages(driver)
     except Exception as e:
-        logger.warning(f"Failed to fetch hh.ru chat messages: {e}")
-        return
+        # ponytail: один retry через паузу — покрывает транзиентный
+        # "Timed out receiving message from renderer" (рендерер не
+        # успел ответить, а не сама страница/разметка сломана), как и
+        # launch_chrome_with_retry для запуска Chrome. Не крашит
+        # прогон в любом случае — просто пропускает автоответ на этот
+        # цикл, если не помогло и со второй попытки.
+        logger.warning(
+            f"Failed to fetch hh.ru chat messages, retrying once: {e}"
+        )
+        time.sleep(5)
+        try:
+            messages = fetch_new_employer_messages(driver)
+        except Exception as e2:
+            logger.warning(f"Retry also failed to fetch hh.ru chat messages: {e2}")
+            return
 
     for message in messages:
         external_id = message["external_id"]
