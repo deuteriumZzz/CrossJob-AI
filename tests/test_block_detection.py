@@ -49,6 +49,27 @@ def test_raise_if_blocked_does_not_flag_robotics_vacancy():
     raise_if_blocked("Инженер по робототехнике, опыт с промышленными роботами")
 
 
+def test_raise_if_blocked_raises_on_cloudflare_interstitial():
+    # Регрессия: himalayas.app отдавал Cloudflare-интерстишл
+    # ("Один момент…" / Ray ID), который не совпадал ни с одним
+    # капча-триггером — источник тихо принимал заглушку за 0 вакансий.
+    with pytest.raises(PlatformBlockedError):
+        raise_if_blocked(
+            "Один момент…\nВыполнение проверки безопасности\n"
+            "Ray ID: a36e7e137dbe4035"
+        )
+
+
+def test_raise_if_blocked_does_not_flag_cloudflare_as_employer():
+    # "cloudflare" само по себе не в списке ключевых слов — иначе
+    # вакансия, упоминающая эту технологию/работодателя в описании,
+    # ложно считалась бы блокировкой.
+    raise_if_blocked(
+        "Backend Engineer at Cloudflare — experience with "
+        "Cloudflare Workers required"
+    )
+
+
 def test_mark_blocked_then_is_still_blocked():
     with tempfile.TemporaryDirectory() as tmp:
         output_folder = Path(tmp)
