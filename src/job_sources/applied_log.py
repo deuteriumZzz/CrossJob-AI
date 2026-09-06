@@ -170,20 +170,18 @@ class AppliedLog:
     def count_in_period(
         self, period: Period, source: str | None = None
     ) -> int:
-        """Реальные (status=applied) отправки с начала сегодняшнего
-        дня/этой недели/этого месяца — на этом основана сводка
-        статистики день/неделя/месяц."""
+        """Реальные (status=applied) отправки за сегодня/последние 7
+        дней/последние 30 дней. Скользящие окна, а не календарные
+        неделя/месяц — иначе в начале месяца календарная неделя может
+        начинаться раньше 1-го числа, и "за неделю" в статистике
+        выходит больше "за месяц"."""
         now = datetime.now().astimezone()
         if period == "day":
             since = now.replace(hour=0, minute=0, second=0, microsecond=0)
         elif period == "week":
-            since = (now - timedelta(days=now.weekday())).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
+            since = now - timedelta(days=7)
         else:
-            since = now.replace(
-                day=1, hour=0, minute=0, second=0, microsecond=0
-            )
+            since = now - timedelta(days=30)
         return sum(
             1
             for e in self._data["applications"]
@@ -303,3 +301,32 @@ class AppliedLog:
 
         self._write_locked(_mutate)
         return purged
+
+    def purge_old_applications(self, retention_days: int) -> int:
+        """Удаляет из истории целиком (не только письмо) записи
+        старше retention_days — настраивается пользователем в
+        Настройки → Лимиты откликов (см. config.APPLICATION_RETENTION_DAYS,
+        0 = хранить бессрочно). В отличие от purge_old_cover_letters
+        теряется и дедупликация по этим вакансиям, поэтому это
+        отдельная, более редкая по умолчанию настройка. Возвращает
+        число удалённых записей."""
+        if retention_days <= 0:
+            return 0
+        cutoff = datetime.now().astimezone() - timedelta(days=retention_days)
+
+        def _is_stale(entry: dict) -> bool:
+            return datetime.fromisoformat(entry["applied_at"]) < cutoff
+
+        if not any(_is_stale(e) for e in self._data["applications"]):
+            return 0
+
+        removed = 0
+
+        def _mutate(data: dict) -> None:
+            nonlocal removed
+            kept = [e for e in data["applications"] if not _is_stale(e)]
+            removed = len(data["applications"]) - len(kept)
+            data["applications"] = kept
+
+        self._write_locked(_mutate)
+        return removed

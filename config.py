@@ -39,6 +39,11 @@ LINKEDIN_DAILY_APPLICATION_LIMIT = 8
 # навсегда для дедупликации/статистики.
 COVER_LETTER_RETENTION_DAYS = 7
 
+# Сколько дней хранить саму запись об отклике (историю) в
+# applied_log.json — 0 значит "хранить бессрочно" (см.
+# AppliedLog.purge_old_applications, настраивается в UI пользователем).
+APPLICATION_RETENTION_DAYS = 0
+
 LLM_MODEL_TYPE = "openai"
 LLM_MODEL = "gpt-4o-mini"
 # Требуется только для моделей OLLAMA

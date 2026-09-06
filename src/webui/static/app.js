@@ -945,6 +945,9 @@ const render = {
     document.getElementById("limit-min-score").value = limits.job_min_score;
     document.getElementById("limit-suitability-score").value =
       limits.job_suitability_score;
+    document.getElementById("limit-history-retention").value = String(
+      limits.application_retention_days || 0
+    );
     renderTotalBudget(status, limits.total_daily_application_limit);
     if (limits.llm_daily_cost_alert_usd != null) {
       document.getElementById("llm-alert-usd").value =
@@ -3006,6 +3009,10 @@ function initDashboard() {
     );
     const llmAlertRaw = document.getElementById("llm-alert-usd").value;
     const llmAlert = llmAlertRaw ? parseFloat(llmAlertRaw) : null;
+    const retentionDays = parseInt(
+      document.getElementById("limit-history-retention").value,
+      10
+    );
     status.textContent = "Сохранение…";
     try {
       await api("/api/settings/limits", {
@@ -3019,6 +3026,9 @@ function initDashboard() {
           job_suitability_score: Number.isFinite(suitabilityScore)
             ? suitabilityScore
             : null,
+          application_retention_days: Number.isFinite(retentionDays)
+            ? retentionDays
+            : 0,
           ...(llmAlert !== null ? { llm_daily_cost_alert_usd: llmAlert } : {}),
         }),
       });

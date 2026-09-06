@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from config import (
+    APPLICATION_RETENTION_DAYS,
     DAILY_APPLICATION_LIMIT,
     JOB_MAX_APPLICATIONS,
     JOB_MIN_SCORE,
@@ -777,6 +778,7 @@ class LimitsSettingsUpdate(BaseModel):
     llm_daily_cost_alert_usd: Optional[float] = None
     job_min_score: Optional[float] = None
     job_suitability_score: Optional[float] = None
+    application_retention_days: Optional[int] = None
 
 
 def _limits_snapshot(ctx: AppContext) -> dict:
@@ -806,6 +808,10 @@ def _limits_snapshot(ctx: AppContext) -> dict:
         "job_min_score": limits.get("job_min_score", JOB_MIN_SCORE),
         "job_suitability_score": limits.get(
             "job_suitability_score", JOB_SUITABILITY_SCORE
+        ),
+        # 0 — хранить историю откликов бессрочно (по умолчанию).
+        "application_retention_days": limits.get(
+            "application_retention_days", APPLICATION_RETENTION_DAYS
         ),
     }
 
@@ -843,6 +849,18 @@ def post_limits_settings(
             "limits",
             "llm_daily_cost_alert_usd",
             body.llm_daily_cost_alert_usd,
+        )
+
+    if body.application_retention_days is not None:
+        if body.application_retention_days < 0:
+            raise HTTPException(
+                400, "application_retention_days must be >= 0"
+            )
+        set_source_field(
+            ctx.config_file,
+            "limits",
+            "application_retention_days",
+            body.application_retention_days,
         )
 
     if (

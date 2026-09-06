@@ -387,6 +387,93 @@ def test_purge_old_cover_letters_clears_only_stale_ones():
         assert reloaded.purge_old_cover_letters(retention_days=7) == 0
 
 
+def test_count_in_period_week_never_exceeds_month():
+    """Регрессия: раньше "неделя" считалась с понедельника текущей
+    календарной недели, а "месяц" — с 1-го числа. В начале месяца
+    понедельник мог быть ещё в прошлом месяце, и "за неделю" выходило
+    больше "за месяц". Теперь оба — скользящие окна от now(), так что
+    month всегда ⊇ week ⊇ day."""
+    with tempfile.TemporaryDirectory() as tmp:
+        log_path = Path(tmp) / "applied_log.json"
+        applied_log = AppliedLog(log_path)
+
+        def record(external_id):
+            applied_log.record(
+                Job(
+                    role="A",
+                    company="Acme",
+                    link=f"https://example.com/{external_id}",
+                    source="headhunter",
+                    external_id=external_id,
+                ),
+                cover_letter="x",
+                resume_id="r1",
+                status="applied",
+                score=6,
+                gaps=[],
+            )
+
+        record("today")
+        record("within_week")
+        _backdate_cover_letter(log_path, "within_week", days_ago=3)
+        record("within_month_only")
+        _backdate_cover_letter(log_path, "within_month_only", days_ago=10)
+        record("too_old")
+        _backdate_cover_letter(log_path, "too_old", days_ago=40)
+
+        reloaded = AppliedLog(log_path)
+        assert reloaded.count_in_period("day") == 1
+        assert reloaded.count_in_period("week") == 2
+        assert reloaded.count_in_period("month") == 3
+        assert reloaded.count_in_period("month") >= reloaded.count_in_period(
+            "week"
+        )
+
+
+def test_purge_old_applications_removes_entire_entry():
+    with tempfile.TemporaryDirectory() as tmp:
+        log_path = Path(tmp) / "applied_log.json"
+        applied_log = AppliedLog(log_path)
+
+        def record(external_id):
+            applied_log.record(
+                Job(
+                    role="A",
+                    company="Acme",
+                    link=f"https://example.com/{external_id}",
+                    source="headhunter",
+                    external_id=external_id,
+                ),
+                cover_letter="x",
+                resume_id="r1",
+                status="applied",
+                score=6,
+                gaps=[],
+            )
+
+        record("fresh")
+        record("stale")
+        _backdate_cover_letter(log_path, "stale", days_ago=40)
+
+        reloaded = AppliedLog(log_path)
+        # 0 (по умолчанию) — хранить бессрочно, ничего не удаляется
+        assert reloaded.purge_old_applications(0) == 0
+
+        removed = reloaded.purge_old_applications(retention_days=30)
+        assert removed == 1
+        assert (
+            reloaded.find_by_source_and_external_id("headhunter", "fresh")
+            is not None
+        )
+        assert (
+            reloaded.find_by_source_and_external_id("headhunter", "stale")
+            is None
+        )
+
+        # повторный вызов — уже нечего удалять
+        assert reloaded.purge_old_applications(retention_days=30) == 0
+
+
 if __name__ == "__main__":
     test_record_dedup_and_html_report_written()
     test_already_applied_to_company_ignores_dry_runs()
@@ -397,4 +484,6 @@ if __name__ == "__main__":
     test_most_common_gaps_counts_across_entries()
     test_suggest_blacklist_candidates_needs_min_attempts_and_no_reply()
     test_purge_old_cover_letters_clears_only_stale_ones()
+    test_count_in_period_week_never_exceeds_month()
+    test_purge_old_applications_removes_entire_entry()
     print("All tests passed.")
