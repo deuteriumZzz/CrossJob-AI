@@ -214,8 +214,11 @@ def chrome_browser_options(profile_dir: Optional[Path] = None):
 # перекрывающая рендер, и т.п.) — весь прогон площадки тогда "зависает"
 # без единой ошибки в логе, что и наблюдалось на HH/GetMatch. Таймаут
 # здесь общий для всех браузерных источников (HH/GetMatch/LinkedIn/
-# rabota.ru/geekjob), т.к. все они идут через init_browser().
-PAGE_LOAD_TIMEOUT_SECONDS = 45
+# rabota.ru/geekjob), т.к. все они идут через init_browser(). Поднят
+# с 45 до 75 — живьём стабильно ловили "Timed out receiving message
+# from renderer" на ~42-43с (habr_career/HH-чат/geekjob, 2026-09-06):
+# страницы не зависали намертво, просто не укладывались в 45с.
+PAGE_LOAD_TIMEOUT_SECONDS = 75
 SCRIPT_TIMEOUT_SECONDS = 30
 
 
