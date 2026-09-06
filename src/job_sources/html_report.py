@@ -14,15 +14,17 @@ def render_applications_html(
     top_gaps: Optional[list[tuple[str, int]]] = None,
 ) -> str:
     top_gaps = top_gaps or []
-    applications = [e for e in entries if e["status"] != "skipped_low_fit"]
-    skipped = [e for e in entries if e["status"] == "skipped_low_fit"]
+    applications = [
+        e for e in entries if not e["status"].startswith("skipped_")
+    ]
+    skipped = [e for e in entries if e["status"].startswith("skipped_")]
     rows = "\n".join(_row(e) for e in reversed(applications))
     skipped_section = ""
     if skipped:
         skipped_rows = "\n".join(_row(e) for e in reversed(skipped))
         skipped_section = f"""
 <details>
-<summary>{len(skipped)} пропущено из-за низкого балла</summary>
+<summary>{len(skipped)} пропущено (низкий балл / не удалось откликнуться)</summary>
 <table>
 <thead><tr>{_COLUMNS}</tr></thead>
 <tbody>
@@ -56,7 +58,7 @@ def render_applications_html(
   a {{ color: #7ab8ff; }}
   .status-applied {{ color: #6fdc8c; }}
   .status-dry_run {{ color: #e0c05a; }}
-  .status-skipped_low_fit {{ color: #d97a7a; }}
+  [class^="status-skipped_"] {{ color: #d97a7a; }}
   details summary {{ cursor: pointer; color: #99a3ad; margin: 1rem 0; }}
   pre {{ white-space: pre-wrap; font-family: inherit; margin: 0.5rem 0 0; }}
   .count {{ color: #99a3ad; margin-bottom: 1rem; }}

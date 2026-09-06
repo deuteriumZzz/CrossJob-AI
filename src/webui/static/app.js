@@ -173,6 +173,7 @@ const STATUS_LABELS = {
   applied: "отправлено",
   dry_run: "тестовый прогон",
   skipped_low_fit: "пропущено (слабое совпадение)",
+  skipped_easy_apply_failed: "пропущено (форма Easy Apply)",
 };
 
 function statusLabel(status) {

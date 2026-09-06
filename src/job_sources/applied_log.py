@@ -10,7 +10,9 @@ from src.job import Job
 from src.job_sources.html_report import render_applications_html
 from src.utils.file_lock import state_file_lock
 
-Status = Literal["applied", "dry_run", "skipped_low_fit"]
+Status = Literal[
+    "applied", "dry_run", "skipped_low_fit", "skipped_easy_apply_failed"
+]
 Period = Literal["day", "week", "month"]
 
 

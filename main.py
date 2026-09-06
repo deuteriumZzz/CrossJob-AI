@@ -1136,11 +1136,18 @@ def _log_funnel_summary(
     пагинации."""
     new_entries = applied_log.entries_since(source, run_start)
     low_fit = sum(1 for e in new_entries if e["status"] == "skipped_low_fit")
+    easy_apply_failed = sum(
+        1 for e in new_entries if e["status"] == "skipped_easy_apply_failed"
+    )
     applied = sum(1 for e in new_entries if e["status"] == "applied")
     dry_run = sum(1 for e in new_entries if e["status"] == "dry_run")
+    easy_apply_failed_part = (
+        f" easy_apply_failed={easy_apply_failed}" if easy_apply_failed else ""
+    )
     logger.info(
         f"[{source}] funnel: found={found} already_seen={already_seen} "
         f"low_fit={low_fit} applied={applied} dry_run={dry_run}"
+        f"{easy_apply_failed_part}"
     )
 
 
@@ -2056,6 +2063,18 @@ def search_and_apply_linkedin(
                 dry_run=not auto_apply,
             )
             if not submitted:
+                # Без записи сюда та же сломанная форма (незнакомое
+                # поле, зависший Easy Apply и т.п.) пыталась бы
+                # откликаться заново на каждом плановом прогоне —
+                # already_applied() смотрит именно в applied_log.
+                applied_log.record(
+                    job,
+                    "",
+                    "",
+                    "skipped_easy_apply_failed",
+                    fit.score,
+                    fit.gaps,
+                )
                 continue
 
             try:

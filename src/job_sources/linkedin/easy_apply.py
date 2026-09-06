@@ -73,6 +73,7 @@ def run_easy_apply(
             )
             _dismiss(driver)
             return False
+        _answer_uncovered_required_fields(driver, answerer)
 
         if _click(driver, SUBMIT_XPATH):
             if dry_run:
@@ -280,6 +281,66 @@ def _answer_visible_questions(driver, answerer) -> bool:
         return False
 
     return True
+
+
+def _label_text_for(driver, field) -> str:
+    """ponytail: НЕ подтверждено на живой сессии для этого конкретного
+    класса полей. Обычные <label for=id> достаточно распространены в
+    формах LinkedIn/сторонних ATS, но не гарантированы — placeholder
+    как фолбэк покрывает случай, когда его нет (см. "Location (city)"
+    на живом скриншоте пользователя, 2026-09-06: placeholder "Enter
+    city or location" присутствует независимо от разметки лейбла)."""
+    field_id = field.get_attribute("id")
+    if field_id:
+        labels = driver.find_elements(
+            By.CSS_SELECTOR, f'label[for="{field_id}"]'
+        )
+        if labels:
+            text = labels[0].text.strip()
+            if text:
+                return text.rstrip("*").strip()
+    return (field.get_attribute("placeholder") or "").strip()
+
+
+def _answer_uncovered_required_fields(driver, answerer) -> None:
+    """ponytail: НЕ подтверждено на живой сессии. Покрывает обязательные
+    текстовые поля ВНЕ блоков [componentkey^='ea_focus_'] — например
+    "Location (city)" на шаге Contact Info у вакансий, проксируемых
+    через сторонний ATS вроде Workable (см. живой скриншот
+    пользователя, 2026-09-06). Раньше такие поля молча оставались
+    пустыми: LinkedIn не пускал дальше по валидации, а _answer_visible_
+    questions их не видит (не в её группах) — форма зависала на месте
+    до MAX_STEPS без единой явной причины в логе. Только текстовые
+    поля: select/radio/checkbox уже обрабатываются точнее в другом
+    месте (_answer_visible_questions, _set_phone_country_code_if_present)
+    — обобщать их здесь рискованнее, чем оставить как есть."""
+    try:
+        form = driver.find_element(By.CSS_SELECTOR, MODAL_SELECTOR)
+    except Exception:
+        return
+
+    for field in form.find_elements(
+        By.CSS_SELECTOR,
+        "input[type='text'], input[type='tel'], input[type='number'], "
+        "input[type='email'], textarea",
+    ):
+        if not field.is_displayed() or field.get_attribute("value"):
+            continue
+        is_required = (
+            field.get_attribute("required") is not None
+            or field.get_attribute("aria-required") == "true"
+        )
+        if not is_required:
+            continue
+        question = _label_text_for(driver, field)
+        if not question:
+            continue
+        try:
+            field.send_keys(
+                answerer.answer(question, max_length=_field_max_length(field))
+            )
+        except Exception as e:
+            logger.debug(f"_answer_uncovered_required_fields failed: {e}")
 
 
 def _field_max_length(field) -> Optional[int]:
