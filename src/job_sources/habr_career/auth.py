@@ -41,7 +41,16 @@ class HabrCareerSession:
     def ensure_logged_in(self, parameters: dict) -> None:
         driver = init_browser(self.profile_dir)
         try:
-            driver.get(HC_BASE)
+            # ponytail: один retry через паузу — покрывает транзиентный
+            # "Timed out receiving message from renderer" (тот же
+            # паттерн, что и у fetch_new_employer_messages), иначе он
+            # крашит весь прогон habr_career, не только этот вызов.
+            try:
+                driver.get(HC_BASE)
+            except Exception as e:
+                logger.warning(f"career.habr.com не открылась, повторяю: {e}")
+                time.sleep(5)
+                driver.get(HC_BASE)
             time.sleep(3)
             if self._is_logged_in(driver):
                 return

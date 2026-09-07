@@ -2193,7 +2193,15 @@ def search_and_apply_habr_career(
     run_start = datetime.now().astimezone()
 
     if auto_apply:
-        HabrCareerSession(profile_dir).ensure_logged_in(parameters)
+        try:
+            HabrCareerSession(profile_dir).ensure_logged_in(parameters)
+        except Exception as e:
+            logger.exception(
+                "habr.career login crashed (already retried once "
+                f"internally) — aborting this run, will retry next "
+                f"scheduled run: {e}"
+            )
+            return
 
     sent_count = 0
     job_max_applications = _job_max_applications(parameters, "habr_career")
