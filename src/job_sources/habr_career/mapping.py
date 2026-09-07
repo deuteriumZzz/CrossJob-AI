@@ -1,3 +1,5 @@
+from typing import Optional, Union
+
 from bs4 import BeautifulSoup
 
 from src.job import Job
@@ -18,7 +20,13 @@ def _extract_location(soup: BeautifulSoup) -> str:
     вакансия без пометки, возвращаем ''."""
     location = ""
     for icon in soup.select(".vacancy-meta svg.svg-icon"):
-        classes = icon.get("class") or []
+        raw_classes: Optional[Union[str, list]] = icon.get("class")
+        if raw_classes is None:
+            classes: list[str] = []
+        elif isinstance(raw_classes, str):
+            classes = [raw_classes]
+        else:
+            classes = raw_classes
         chip = icon.find_parent(class_="basic-chip")
         text_el = chip.select_one(".chip-with-icon__text") if chip else None
         text = text_el.get_text(strip=True) if text_el else ""
