@@ -1187,14 +1187,7 @@ def search_and_apply_headhunter(
         logger.warning("hh.ru is cooling down after a block — skipping.")
         return
 
-    try:
-        HeadHunterSession(profile_dir).ensure_logged_in(parameters)
-    except Exception as e:
-        logger.exception(
-            "hh.ru login crashed (already retried once internally) — "
-            f"aborting this run, will retry next scheduled run: {e}"
-        )
-        return
+    HeadHunterSession(profile_dir).ensure_logged_in(parameters)
 
     with HeadHunterBrowserClient(profile_dir) as client:
 
@@ -1437,15 +1430,7 @@ def search_geekjob(
     # вход (быстро), чем заставлять ждать несколько минут поиска ради
     # окна логина в конце.
     if auto_apply:
-        try:
-            GeekjobSession(profile_dir).ensure_logged_in(parameters)
-        except Exception as e:
-            logger.exception(
-                "geekjob.ru login crashed (already retried once "
-                f"internally) — aborting this run, will retry next "
-                f"scheduled run: {e}"
-            )
-            return
+        GeekjobSession(profile_dir).ensure_logged_in(parameters)
 
     client = GeekjobClient(profile_dir)
     source: JobSource = GeekjobSource(client)
@@ -1802,15 +1787,7 @@ def search_getmatch(
     profile_dir = output_folder / ".chrome_profile_getmatch"
     if auto_apply:
         assert email is not None  # enforced above when auto_apply is set
-        try:
-            GetMatchSession(profile_dir).ensure_logged_in(email, parameters)
-        except Exception as e:
-            logger.exception(
-                "GetMatch login crashed (already retried once "
-                f"internally) — aborting this run, will retry next "
-                f"scheduled run: {e}"
-            )
-            return
+        GetMatchSession(profile_dir).ensure_logged_in(email, parameters)
 
     with GetMatchClient(profile_dir) as client:
         source: JobSource = GetMatchSource(client)
@@ -1997,15 +1974,7 @@ def search_and_apply_linkedin(
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
     try:
-        try:
-            session.ensure_logged_in(parameters)
-        except Exception as e:
-            logger.exception(
-                "LinkedIn login crashed (already retried once "
-                f"internally) — aborting this run, will retry next "
-                f"scheduled run: {e}"
-            )
-            return
+        session.ensure_logged_in(parameters)
         source: JobSource = LinkedInSource(session.driver)
         jobs = source.search(parameters)
         logger.info(f"Found {len(jobs)} matching LinkedIn Easy Apply jobs.")
@@ -2224,15 +2193,7 @@ def search_and_apply_habr_career(
     run_start = datetime.now().astimezone()
 
     if auto_apply:
-        try:
-            HabrCareerSession(profile_dir).ensure_logged_in(parameters)
-        except Exception as e:
-            logger.exception(
-                "habr.career login crashed (already retried once "
-                f"internally) — aborting this run, will retry next "
-                f"scheduled run: {e}"
-            )
-            return
+        HabrCareerSession(profile_dir).ensure_logged_in(parameters)
 
     sent_count = 0
     job_max_applications = _job_max_applications(parameters, "habr_career")
@@ -2434,15 +2395,7 @@ def search_and_apply_wellfound(
     run_start = datetime.now().astimezone()
 
     if auto_apply:
-        try:
-            WellfoundSession(profile_dir).ensure_logged_in(parameters)
-        except Exception as e:
-            logger.exception(
-                "wellfound.com login crashed (already retried once "
-                f"internally) — aborting this run, will retry next "
-                f"scheduled run: {e}"
-            )
-            return
+        WellfoundSession(profile_dir).ensure_logged_in(parameters)
 
     resume_text = extract_pdf_text(str(resume_pdf_path))
     sent_count = 0
@@ -2632,15 +2585,7 @@ def search_and_apply_himalayas(
 
     session = HimalayasSession(output_folder / ".chrome_profile_himalayas")
     try:
-        try:
-            session.ensure_logged_in(parameters)
-        except Exception as e:
-            logger.exception(
-                "himalayas.app login crashed (already retried once "
-                f"internally) — aborting this run, will retry next "
-                f"scheduled run: {e}"
-            )
-            return
+        session.ensure_logged_in(parameters)
         source: JobSource = HimalayasSource(session.driver)
         try:
             jobs = source.search(parameters)

@@ -2,6 +2,8 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 import main
 
 
@@ -20,7 +22,12 @@ def _parameters(data_folder: Path) -> dict:
     }
 
 
-def test_search_getmatch_aborts_run_when_login_keeps_failing():
+def test_search_getmatch_propagates_when_login_keeps_failing():
+    """ensure_logged_in() already retries once internally
+    (get_with_retry) — if it still fails, search_getmatch() must let
+    that exception through rather than swallow it, so the scheduler's
+    own try/except (src/scheduler.py) can record an "error" run status
+    and send the Telegram alert instead of silently reporting "ok"."""
     with tempfile.TemporaryDirectory() as tmp:
         data_folder = Path(tmp)
         parameters = _parameters(data_folder)
@@ -30,10 +37,11 @@ def test_search_getmatch_aborts_run_when_login_keeps_failing():
             session_cls.return_value.ensure_logged_in.side_effect = Exception(
                 "Timed out receiving message from renderer"
             )
-            main.search_getmatch(parameters, "sk-test")
+            with pytest.raises(Exception, match="renderer"):
+                main.search_getmatch(parameters, "sk-test")
             client_cls.assert_not_called()
 
 
 if __name__ == "__main__":
-    test_search_getmatch_aborts_run_when_login_keeps_failing()
+    test_search_getmatch_propagates_when_login_keeps_failing()
     print("All tests passed.")
