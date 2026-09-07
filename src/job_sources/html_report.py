@@ -24,7 +24,8 @@ def render_applications_html(
         skipped_rows = "\n".join(_row(e) for e in reversed(skipped))
         skipped_section = f"""
 <details>
-<summary>{len(skipped)} пропущено (низкий балл / не удалось откликнуться)</summary>
+<summary>{len(skipped)} пропущено (низкий балл /
+не удалось откликнуться)</summary>
 <table>
 <thead><tr>{_COLUMNS}</tr></thead>
 <tbody>
