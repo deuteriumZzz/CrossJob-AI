@@ -3,7 +3,7 @@ from pathlib import Path
 
 from src.job_sources.telegram_notify import notify_manual_login_required
 from src.logging import logger
-from src.utils.chrome_utils import init_browser
+from src.utils.chrome_utils import get_with_retry, init_browser
 
 WF_BASE = "https://wellfound.com"
 LOGIN_TIMEOUT_SECONDS = 300
@@ -27,7 +27,7 @@ class WellfoundSession:
     def ensure_logged_in(self, parameters: dict) -> None:
         driver = init_browser(self.profile_dir)
         try:
-            driver.get(f"{WF_BASE}/login")
+            get_with_retry(driver, f"{WF_BASE}/login")
             time.sleep(3)
             if "/login" not in driver.current_url:
                 return

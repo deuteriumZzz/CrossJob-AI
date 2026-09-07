@@ -4,6 +4,7 @@ from pathlib import Path
 from src.job_sources.linkedin.browser import init_linkedin_browser
 from src.job_sources.telegram_notify import notify_manual_login_required
 from src.logging import logger
+from src.utils.chrome_utils import get_with_retry
 
 LOGIN_URL = "https://www.linkedin.com/login"
 LOGIN_TIMEOUT_SECONDS = 300
@@ -26,12 +27,12 @@ class LinkedInSession:
         self.driver = init_linkedin_browser(profile_dir)
 
     def ensure_logged_in(self, parameters: dict) -> None:
-        self.driver.get("https://www.linkedin.com/feed/")
+        get_with_retry(self.driver, "https://www.linkedin.com/feed/")
         time.sleep(3)
         if "/feed" in self.driver.current_url:
             return
 
-        self.driver.get(LOGIN_URL)
+        get_with_retry(self.driver, LOGIN_URL)
         logger.info(
             "Открылось окно входа LinkedIn — войдите вручную (email, "
             "пароль, любая 2FA-проверка) в открывшемся браузере "

@@ -5,7 +5,7 @@ from selenium.webdriver.common.by import By
 
 from src.job_sources.telegram_notify import notify_manual_login_required
 from src.logging import logger
-from src.utils.chrome_utils import init_browser
+from src.utils.chrome_utils import get_with_retry, init_browser
 
 GJ_BASE = "https://geekjob.ru"
 LOGIN_TIMEOUT_SECONDS = 300
@@ -32,7 +32,7 @@ class GeekjobSession:
     def ensure_logged_in(self, parameters: dict) -> None:
         driver = init_browser(self.profile_dir)
         try:
-            driver.get(GJ_BASE)
+            get_with_retry(driver, GJ_BASE)
             time.sleep(3)
             if self._is_logged_in(driver):
                 return

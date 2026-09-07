@@ -4,6 +4,7 @@ from pathlib import Path
 from src.job_sources.himalayas.browser import init_himalayas_browser
 from src.job_sources.telegram_notify import notify_manual_login_required
 from src.logging import logger
+from src.utils.chrome_utils import get_with_retry
 
 LOGIN_URL = "https://himalayas.app/login"
 LOGIN_TIMEOUT_SECONDS = 300
@@ -23,9 +24,9 @@ class HimalayasSession:
         self.driver = init_himalayas_browser(profile_dir)
 
     def ensure_logged_in(self, parameters: dict) -> None:
-        self.driver.get("https://himalayas.app/")
+        get_with_retry(self.driver, "https://himalayas.app/")
         time.sleep(3)
-        self.driver.get(LOGIN_URL)
+        get_with_retry(self.driver, LOGIN_URL)
         time.sleep(3)
         if "/login" not in self.driver.current_url:
             return
