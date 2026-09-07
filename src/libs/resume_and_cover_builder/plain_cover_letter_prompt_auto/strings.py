@@ -1,7 +1,9 @@
-from src.libs.resume_and_cover_builder.anti_ai_rules import \
-    ANTI_AI_STRUCTURE_EN
-from src.libs.resume_and_cover_builder.cover_letter_prompt import \
-    strings as _base_strings
+from src.libs.resume_and_cover_builder.anti_ai_rules import (
+    ANTI_AI_STRUCTURE_EN,
+)
+from src.libs.resume_and_cover_builder.cover_letter_prompt import (
+    strings as _base_strings,
+)
 
 summarize_prompt_template = _base_strings.summarize_prompt_template
 

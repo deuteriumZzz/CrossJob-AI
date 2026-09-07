@@ -133,7 +133,9 @@ def _click(driver, xpath: str) -> bool:
                     el.click()
                     return True
                 except Exception as e:
-                    logger.debug(f"_click intercepted+scroll failed on {xpath}: {e}")
+                    logger.debug(
+                        f"_click intercepted+scroll failed on {xpath}: {e}"
+                    )
             except StaleElementReferenceException:
                 break
             except Exception as e:

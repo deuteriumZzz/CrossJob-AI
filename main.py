@@ -1224,7 +1224,9 @@ def search_and_apply_headhunter(
             )
             return
         logger.info(f"Found {len(jobs)} matching HeadHunter vacancies.")
-        already_seen = sum(1 for job in jobs if applied_log.already_applied(job))
+        already_seen = sum(
+            1 for job in jobs if applied_log.already_applied(job)
+        )
         run_start = datetime.now().astimezone()
 
         daily_limit = randomized_daily_limit(
@@ -1626,7 +1628,9 @@ def search_telegram(
         jobs = source.search(parameters)
 
         logger.info(f"Found {len(jobs)} matching Telegram posts.")
-        already_seen = sum(1 for job in jobs if applied_log.already_applied(job))
+        already_seen = sum(
+            1 for job in jobs if applied_log.already_applied(job)
+        )
         run_start = datetime.now().astimezone()
 
         sent_count = 0
@@ -1801,7 +1805,9 @@ def search_getmatch(
             )
             return
         logger.info(f"Found {len(jobs)} matching GetMatch vacancies.")
-        already_seen = sum(1 for job in jobs if applied_log.already_applied(job))
+        already_seen = sum(
+            1 for job in jobs if applied_log.already_applied(job)
+        )
         run_start = datetime.now().astimezone()
 
         sent_count = 0
@@ -1972,7 +1978,9 @@ def search_and_apply_linkedin(
         source: JobSource = LinkedInSource(session.driver)
         jobs = source.search(parameters)
         logger.info(f"Found {len(jobs)} matching LinkedIn Easy Apply jobs.")
-        already_seen = sum(1 for job in jobs if applied_log.already_applied(job))
+        already_seen = sum(
+            1 for job in jobs if applied_log.already_applied(job)
+        )
         run_start = datetime.now().astimezone()
 
         resume_text = extract_pdf_text(str(resume_pdf_path))
@@ -2591,7 +2599,9 @@ def search_and_apply_himalayas(
             )
             return
         logger.info(f"Found {len(jobs)} matching himalayas.app vacancies.")
-        already_seen = sum(1 for job in jobs if applied_log.already_applied(job))
+        already_seen = sum(
+            1 for job in jobs if applied_log.already_applied(job)
+        )
         run_start = datetime.now().astimezone()
 
         resume_text = extract_pdf_text(str(resume_pdf_path))
@@ -3152,7 +3162,9 @@ def _answer_headhunter_messages(
         try:
             messages = fetch_new_employer_messages(driver)
         except Exception as e2:
-            logger.warning(f"Retry also failed to fetch hh.ru chat messages: {e2}")
+            logger.warning(
+                f"Retry also failed to fetch hh.ru chat messages: {e2}"
+            )
             return
 
     for message in messages:

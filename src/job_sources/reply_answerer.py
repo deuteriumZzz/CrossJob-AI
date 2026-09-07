@@ -10,8 +10,9 @@ from pdfminer.high_level import extract_text
 from pydantic import BaseModel, Field
 
 from src.job_sources.llm_provider import get_chat_llm
-from src.libs.resume_and_cover_builder.anti_ai_rules import \
-    ANTI_AI_STRUCTURE_RU
+from src.libs.resume_and_cover_builder.anti_ai_rules import (
+    ANTI_AI_STRUCTURE_RU,
+)
 
 _NEEDS_REPLY_PROMPT = ChatPromptTemplate.from_template(
     """
@@ -160,6 +161,8 @@ def message_needs_reply(message_text: str, llm_api_key: str) -> bool:
     structured = llm.with_structured_output(_NeedsReply)
     result = cast(
         _NeedsReply,
-        structured.invoke(_NEEDS_REPLY_PROMPT.format(message_text=message_text)),
+        structured.invoke(
+            _NEEDS_REPLY_PROMPT.format(message_text=message_text)
+        ),
     )
     return result.needs_reply

@@ -104,9 +104,9 @@ def test_answer_uncovered_required_fields_skips_filled_and_optional():
 
     optional_field = MagicMock()
     optional_field.is_displayed.return_value = True
-    optional_field.get_attribute.side_effect = lambda name: {
-        "value": ""
-    }.get(name)
+    optional_field.get_attribute.side_effect = lambda name: {"value": ""}.get(
+        name
+    )
 
     form.find_elements.return_value = [filled_field, optional_field]
 

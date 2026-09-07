@@ -853,9 +853,7 @@ def post_limits_settings(
 
     if body.application_retention_days is not None:
         if body.application_retention_days < 0:
-            raise HTTPException(
-                400, "application_retention_days must be >= 0"
-            )
+            raise HTTPException(400, "application_retention_days must be >= 0")
         set_source_field(
             ctx.config_file,
             "limits",

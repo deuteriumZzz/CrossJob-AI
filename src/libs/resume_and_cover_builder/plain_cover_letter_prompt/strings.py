@@ -1,5 +1,6 @@
-from src.libs.resume_and_cover_builder.anti_ai_rules import \
-    ANTI_AI_STRUCTURE_RU
+from src.libs.resume_and_cover_builder.anti_ai_rules import (
+    ANTI_AI_STRUCTURE_RU,
+)
 
 # Не наследуем summarize_prompt_template из cover_letter_prompt — там
 # явно "Write your entire analysis in the SAME language as the job

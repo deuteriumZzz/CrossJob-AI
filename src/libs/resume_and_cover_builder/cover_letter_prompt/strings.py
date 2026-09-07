@@ -1,7 +1,9 @@
-from src.libs.resume_and_cover_builder.anti_ai_rules import \
-    ANTI_AI_STRUCTURE_EN
-from src.libs.resume_and_cover_builder.template_base import \
-    prompt_cover_letter_template
+from src.libs.resume_and_cover_builder.anti_ai_rules import (
+    ANTI_AI_STRUCTURE_EN,
+)
+from src.libs.resume_and_cover_builder.template_base import (
+    prompt_cover_letter_template,
+)
 
 cover_letter_template = (
     """

@@ -23,7 +23,10 @@ def test_answer_headhunter_messages_retries_once_then_succeeds():
         applied_log = MagicMock()
         with patch(
             "main.fetch_new_employer_messages",
-            side_effect=[Exception("Timed out receiving message from renderer"), []],
+            side_effect=[
+                Exception("Timed out receiving message from renderer"),
+                [],
+            ],
         ) as fetch_mock, patch("main.time.sleep"):
             main._answer_headhunter_messages(
                 parameters, MagicMock(), applied_log, "sk-test"

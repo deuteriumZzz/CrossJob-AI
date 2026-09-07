@@ -27,7 +27,7 @@ def test_skipped_easy_apply_failed_goes_into_skipped_bucket():
 
     assert "1 записей" in html
     assert "2 пропущено" in html
-    assert 'status-skipped_easy_apply_failed' in html
+    assert "status-skipped_easy_apply_failed" in html
 
 
 if __name__ == "__main__":
