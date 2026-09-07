@@ -1787,7 +1787,15 @@ def search_getmatch(
     profile_dir = output_folder / ".chrome_profile_getmatch"
     if auto_apply:
         assert email is not None  # enforced above when auto_apply is set
-        GetMatchSession(profile_dir).ensure_logged_in(email, parameters)
+        try:
+            GetMatchSession(profile_dir).ensure_logged_in(email, parameters)
+        except Exception as e:
+            logger.exception(
+                "GetMatch login crashed (already retried once "
+                f"internally) — aborting this run, will retry next "
+                f"scheduled run: {e}"
+            )
+            return
 
     with GetMatchClient(profile_dir) as client:
         source: JobSource = GetMatchSource(client)

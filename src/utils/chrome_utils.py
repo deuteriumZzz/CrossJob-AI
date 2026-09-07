@@ -288,6 +288,32 @@ def launch_chrome_with_retry(
     ) from last_exc
 
 
+def get_with_retry(
+    driver: webdriver.Chrome,
+    url: str,
+    retries: int = 1,
+    pause_seconds: float = 5,
+) -> None:
+    """Общий retry для driver.get() — транзиентный "Timed out receiving
+    message from renderer" от chromedriver валил целые прогоны у
+    habr_career и getmatch (оба открывали страницу логина без защиты),
+    один и тот же паттерн копировался бы в каждый auth.py по отдельности
+    — вынесено сюда сразу, как только всплыл второй случай (см.
+    launch_chrome_with_retry выше — тот же урок про дрейф копипасты)."""
+    for attempt in range(1, retries + 2):
+        try:
+            driver.get(url)
+            return
+        except Exception as e:
+            if attempt > retries:
+                raise
+            logger.warning(
+                f"{url} didn't load (attempt {attempt}), "
+                f"retrying in {pause_seconds}s: {e}"
+            )
+            time.sleep(pause_seconds)
+
+
 def init_browser(profile_dir: Optional[Path] = None) -> webdriver.Chrome:
     if profile_dir is not None:
         clear_profile_cache(profile_dir)

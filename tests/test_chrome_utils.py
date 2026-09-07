@@ -3,8 +3,13 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
-from src.utils.chrome_utils import clear_profile_cache, clear_stale_chrome_lock
+from src.utils.chrome_utils import (
+    clear_profile_cache,
+    clear_stale_chrome_lock,
+    get_with_retry,
+)
 
 
 def test_no_lock_file_is_a_noop():
@@ -102,3 +107,26 @@ def test_force_kills_live_pid_and_removes_lock():
             assert not (profile_dir / "SingletonLock").exists()
         finally:
             proc.wait(timeout=5)
+
+
+def test_get_with_retry_retries_once_then_succeeds():
+    driver = MagicMock()
+    driver.get.side_effect = [
+        Exception("Timed out receiving message from renderer"),
+        None,
+    ]
+    with patch("src.utils.chrome_utils.time.sleep"):
+        get_with_retry(driver, "https://example.com")
+    assert driver.get.call_count == 2
+
+
+def test_get_with_retry_raises_after_exhausting_retries():
+    driver = MagicMock()
+    driver.get.side_effect = Exception("still stalled")
+    with patch("src.utils.chrome_utils.time.sleep"):
+        try:
+            get_with_retry(driver, "https://example.com")
+            assert False, "expected the exhausted retry to raise"
+        except Exception as e:
+            assert "still stalled" in str(e)
+    assert driver.get.call_count == 2
