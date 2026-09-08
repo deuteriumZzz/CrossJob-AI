@@ -23,6 +23,16 @@ included), scores how well you fit each one, writes a personalized cover
 letter with an LLM, and applies — either for real or in dry-run mode, so
 you can check what the bot is about to send before it sends anything.
 
+## Download
+
+Current alpha release: **[v0.1.0-alpha](https://github.com/deuteriumZzz/CrossJob-AI/releases/tag/v0.1.0-alpha)**.
+
+- [Download for macOS](https://github.com/deuteriumZzz/CrossJob-AI/releases/download/v0.1.0-alpha/CrossJob-AI-macOS.zip)
+- [Download for Windows](https://github.com/deuteriumZzz/CrossJob-AI/releases/download/v0.1.0-alpha/CrossJob-AI-Windows.zip)
+- [All releases and release notes](https://github.com/deuteriumZzz/CrossJob-AI/releases)
+
+This is an experimental alpha release. Read the warnings and setup instructions on the release page before using it.
+
 ## Table of contents
 
 - [What it does](#what-it-does)

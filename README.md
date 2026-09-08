@@ -21,6 +21,16 @@
 вакансию с помощью LLM и откликается — либо по-настоящему, либо в режиме
 dry-run, чтобы сначала проверить, что бот вообще собирается отправить.
 
+## Скачать
+
+Актуальная alpha-версия: **[v0.1.0-alpha](https://github.com/deuteriumZzz/CrossJob-AI/releases/tag/v0.1.0-alpha)**.
+
+- [Скачать для macOS](https://github.com/deuteriumZzz/CrossJob-AI/releases/download/v0.1.0-alpha/CrossJob-AI-macOS.zip)
+- [Скачать для Windows](https://github.com/deuteriumZzz/CrossJob-AI/releases/download/v0.1.0-alpha/CrossJob-AI-Windows.zip)
+- [Все релизы и примечания к версиям](https://github.com/deuteriumZzz/CrossJob-AI/releases)
+
+Это экспериментальная alpha-версия. Перед использованием прочитайте предупреждения и инструкции на странице релиза.
+
 ## Содержание
 
 - [Что делает](#что-делает)
@@ -134,7 +144,7 @@ Telegram и все настройки — в одном окне, без руч�
 Тот же сервер можно поднять напрямую и открыть в обычном браузере:
 `uvicorn src.webui.api:app --reload` (слушает только `127.0.0.1`).
 
-**Готовый упакованный .app/.exe** (для macOS и Windows) — скачайте с [GitHub Releases](https://github.com/deuteriumZzz/CrossJob-AI/releases) (когда релизы появятся) или соберите сами — см. [GUIDE.md](docs/GUIDE.md#сборка-в-exe-macos-и-windows) и [GUIDE.md](docs/GUIDE.md#как-запустить-упакованное-приложение).
+**Готовый упакованный .app/.exe** (для macOS и Windows) — скачайте с [GitHub Releases](https://github.com/deuteriumZzz/CrossJob-AI/releases) или соберите сами — см. [GUIDE.md](docs/GUIDE.md#сборка-в-exe-macos-и-windows) и [GUIDE.md](docs/GUIDE.md#как-запустить-упакованное-приложение).
 
 ## Лимиты и анти-бан
 
