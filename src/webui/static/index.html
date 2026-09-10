@@ -738,6 +738,21 @@
           </label>
         </div>
         <p class="muted small" id="autostart-status"></p>
+        <hr />
+        <p class="muted small">
+          Фоновый демон — планировщик отдельным системным сервисом
+          (launchd на macOS, Task Scheduler на Windows), с автоперезапуском
+          при падении. Не включайте одновременно с кнопкой "Запустить" в
+          шапке окна — получится два планировщика разом на одних и тех же
+          Chrome-профилях площадок.
+        </p>
+        <div class="filters">
+          <label class="limit-field" style="flex-direction:row;align-items:center;gap:8px">
+            <input id="daemon-service-toggle" type="checkbox" class="switch" disabled />
+            <span>Держать демон в фоне как системный сервис</span>
+          </label>
+        </div>
+        <p class="muted small" id="daemon-service-status"></p>
       </div>
 
       <div class="panel settings-pane" id="settings-usage">

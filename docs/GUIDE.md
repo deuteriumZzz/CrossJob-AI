@@ -17,6 +17,7 @@
 - [Шаг 5. Проверка истории откликов](#шаг-5-проверка-истории-откликов)
 - [Автоматический запуск (cron)](#автоматический-запуск-cron)
 - [Встроенный планировщик (--daemon)](#встроенный-планировщик---daemon-вместо-cron)
+  - [Запуск как фоновый сервис (launchd, macOS)](#запуск---daemon-как-фоновый-сервис-launchd-macos)
 - [Десктоп-приложение](#десктоп-приложение-веб-дашборд-в-нативном-окне)
   - [Сборка в exe (macOS и Windows)](#сборка-в-exe-macos-и-windows)
   - [Как запустить упакованное приложение](#как-запустить-упакованное-приложение)
@@ -306,6 +307,69 @@ headhunter:
 `data_folder/output/.scheduler_state.json` — это то, что показывает
 вкладка "Обзор" в десктоп-приложении (см. ниже).
 
+### Запуск --daemon как фоновый сервис (launchd, macOS)
+
+`python main.py --daemon` в обычном терминале живёт ровно пока открыто
+окно терминала — закрыли вкладку/терминал, разрядилась сеть, случайно
+нажали Ctrl+C — и демон тихо умирает без единой ошибки в логе, а
+следующий отклик уйдёт только когда кто-то это заметит и перезапустит
+руками. `launchd` — родной для macOS механизм автозапуска — решает это
+нативно: держит процесс живым, поднимает при падении/перезагрузке/
+выходе из системы, без терминала вообще.
+
+Создайте `~/Library/LaunchAgents/com.crossjob-ai.daemon.plist`
+(замените пути на свои):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.crossjob-ai.daemon</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/path/to/CrossJob-AI/venv/bin/python</string>
+        <string>/path/to/CrossJob-AI/main.py</string>
+        <string>--daemon</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/path/to/CrossJob-AI</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>/Users/YOUR_USER/Library/Logs/com.crossjob-ai.daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/YOUR_USER/Library/Logs/com.crossjob-ai.daemon.log</string>
+</dict>
+</plist>
+```
+
+Загрузить и запустить:
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.crossjob-ai.daemon.plist
+```
+
+Проверить, что работает, посмотреть логи, остановить:
+
+```bash
+launchctl list | grep crossjob-ai
+tail -f ~/Library/Logs/com.crossjob-ai.daemon.log
+launchctl bootout gui/$(id -u)/com.crossjob-ai.daemon
+```
+
+После правки кода перечитывает его только при перезапуске процесса —
+`launchctl kickstart -k gui/$(id -u)/com.crossjob-ai.daemon` перезапускает
+сразу, не дожидаясь падения. `WorkingDirectory` обязателен: код ищет
+`data_folder`/конфиги относительно текущей директории, а не рядом с
+`main.py`. Это тот же процесс, что описан в предупреждении выше — не
+включайте параллельно ещё и демон в GUI.
+
 ## Десктоп-приложение (веб-дашборд в нативном окне)
 
 Вместо голого CLI/cron есть окно с обзором площадок (статус, лимиты,
@@ -334,6 +398,18 @@ src.webui.api:app --reload` и открыть в обычном браузере
 Кнопка "Запустить"/"Остановить" в шапке окна включает/выключает тот
 же планировщик, что и `--daemon`, только в фоновом потоке процесса
 приложения, а не как отдельный процесс.
+
+> **Не запускайте оба одновременно.** Если `--daemon` (или
+> launchd-сервис ниже) уже работает в фоне, не нажимайте "Запустить" в
+> открытом дашборде — получится два планировщика разом, и оба полезут
+> в одни и те же Chrome-профили площадок (`data_folder/output/
+> .chrome_profile_*`). На практике это ломает текущий прогон:
+> chromedriver одного планировщика убивает Chrome другого при
+> конфликте блокировки профиля (`invalid session id: session deleted
+> as the browser has closed the connection`), плюс трафик на площадки
+> задваивается, что провоцирует rate-limit/бан. Дашборд в остальном
+> открывать можно сколько угодно — смотреть статус/историю/настройки
+> не запуская демон.
 
 На вкладке "Настройки" есть панель "Поиск" — должности (они же
 ключевые слова для Telegram-каналов), локации и три чёрных списка

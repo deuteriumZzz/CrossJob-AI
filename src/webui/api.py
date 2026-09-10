@@ -98,7 +98,7 @@ from src.libs.resume_and_cover_builder import StyleManager
 from src.logging import logger
 from src.scheduler import DEFAULT_INTERVAL_HOURS, Scheduler
 from src.scheduler_state import load_state
-from src.utils import autostart
+from src.utils import autostart, daemon_service
 from src.utils.constants import RESUME_PDF, RESUME_PDF_LINKEDIN, SECRETS_YAML
 
 # В PyInstaller-сборке (desktop_app.spec) __file__ не указывает на
@@ -1197,6 +1197,32 @@ def post_autostart(body: AutostartUpdate) -> dict:
     except Exception as e:
         raise HTTPException(500, f"Не удалось изменить автозапуск: {e}")
     return {"supported": True, "enabled": autostart.is_enabled()}
+
+
+class DaemonServiceUpdate(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/settings/daemon_service")
+def get_daemon_service() -> dict:
+    supported = daemon_service.is_supported()
+    return {
+        "supported": supported,
+        "enabled": daemon_service.is_enabled() if supported else False,
+    }
+
+
+@app.post("/api/settings/daemon_service")
+def post_daemon_service(body: DaemonServiceUpdate) -> dict:
+    if not daemon_service.is_supported():
+        raise HTTPException(
+            400, f"Фоновый демон не поддерживается на {sys.platform}."
+        )
+    try:
+        daemon_service.set_enabled(body.enabled)
+    except Exception as e:
+        raise HTTPException(500, f"Не удалось изменить фоновый демон: {e}")
+    return {"supported": True, "enabled": daemon_service.is_enabled()}
 
 
 @app.post("/api/telegram/login/cancel")

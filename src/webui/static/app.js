@@ -935,6 +935,16 @@ const render = {
         : "Не поддерживается на этой ОС.";
     });
 
+    api("/api/settings/daemon_service").then((svc) => {
+      const toggle = document.getElementById("daemon-service-toggle");
+      const note = document.getElementById("daemon-service-status");
+      toggle.checked = svc.enabled;
+      toggle.disabled = !svc.supported;
+      note.textContent = svc.supported
+        ? ""
+        : "Не поддерживается на этой ОС (или в собранном приложении).";
+    });
+
     document.getElementById("limit-total").value =
       limits.total_daily_application_limit || "";
     document.getElementById("limit-daily").value =
@@ -2726,6 +2736,31 @@ function initDashboard() {
         note.textContent = result.enabled
           ? "✅ Будет запускаться при входе в систему."
           : "Автозапуск выключен.";
+      } catch (e) {
+        toggle.checked = !wanted;
+        note.textContent = `Ошибка: ${e.message}`;
+      } finally {
+        toggle.disabled = false;
+      }
+    });
+
+  document
+    .getElementById("daemon-service-toggle")
+    .addEventListener("change", async (ev) => {
+      const toggle = ev.target;
+      const note = document.getElementById("daemon-service-status");
+      const wanted = toggle.checked;
+      toggle.disabled = true;
+      note.textContent = "Сохранение…";
+      try {
+        const result = await api("/api/settings/daemon_service", {
+          method: "POST",
+          body: JSON.stringify({ enabled: wanted }),
+        });
+        toggle.checked = result.enabled;
+        note.textContent = result.enabled
+          ? "✅ Демон держится в фоне системным сервисом."
+          : "Фоновый сервис выключен.";
       } catch (e) {
         toggle.checked = !wanted;
         note.textContent = `Ошибка: ${e.message}`;
