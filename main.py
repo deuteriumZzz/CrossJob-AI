@@ -2060,16 +2060,64 @@ def search_and_apply_linkedin(
             if auto_apply:
                 wait_before_apply()
 
-            answerer = EasyApplyAnswerer(
-                resume_text, profile, job, llm_api_key
-            )
-            submitted = run_easy_apply(
-                session.driver,
-                job,
-                resume_pdf_path,
-                answerer,
-                dry_run=not auto_apply,
-            )
+            try:
+                # template="auto_plain": сгенерировано ДО заполнения
+                # формы (не после, как раньше) — draft_answers в
+                # dynamic_form.py может вставить это же письмо в поле
+                # вроде "Cover letter"/"Why are you interested", если
+                # оно есть у конкретной вакансии, а не только записать
+                # в applied_log/дашборд как раньше (у Easy Apply нет
+                # отдельного поля под PDF письма, но текстовое поле
+                # под "почему вас заинтересовала вакансия" у некоторых
+                # форм есть). Язык по-прежнему определяется по тексту
+                # вакансии, а не закреплён, в отличие от остальных
+                # площадок.
+                cover_letter = generate_cover_letter_for_job(
+                    resume_pdf_path,
+                    job,
+                    llm_api_key,
+                    template="auto_plain",
+                )
+            except Exception as e:
+                logger.exception(
+                    f"Failed to generate cover letter for {job.role} at "
+                    f"{job.company}, skipping this vacancy: {e}"
+                )
+                continue
+
+            try:
+                # ponytail: раньше необработанное исключение отсюда
+                # (протухший Selenium-элемент, рейт-лимит LLM-провайдера
+                # и т.п. — подтверждено живьём 2026-09-09 на обоих)
+                # вылетало из всего цикла по вакансиям и обрывало
+                # search_and_apply_linkedin целиком на текущей вакансии —
+                # все следующие вакансии в этом заходе просто не
+                # обрабатывались. Одна сломанная форма не должна ронять
+                # весь прогон.
+                submitted = run_easy_apply(
+                    session.driver,
+                    job,
+                    resume_pdf_path,
+                    resume_text,
+                    str(profile),
+                    cover_letter,
+                    llm_api_key,
+                    dry_run=not auto_apply,
+                )
+            except Exception as e:
+                logger.exception(
+                    f"Easy Apply crashed on {job.role} at {job.company}, "
+                    f"skipping this vacancy: {e}"
+                )
+                applied_log.record(
+                    job,
+                    "",
+                    "",
+                    "skipped_easy_apply_failed",
+                    fit.score,
+                    fit.gaps,
+                )
+                continue
             if not submitted:
                 # Без записи сюда та же сломанная форма (незнакомое
                 # поле, зависший Easy Apply и т.п.) пыталась бы
@@ -2085,27 +2133,6 @@ def search_and_apply_linkedin(
                 )
                 continue
 
-            try:
-                # template="auto_plain": Easy Apply не прикладывает
-                # письмо как PDF (см. докстринг этой функции выше) —
-                # оно только пишется в applied_log/дашборд, поэтому
-                # letterhead-шаблон (template="html") тут не нужен и
-                # раньше оставлял в дашборде буквальные HTML-теги и
-                # незаполненные "[Your Name]"/"[Company Name]". Язык
-                # по-прежнему определяется по тексту вакансии, а не
-                # закреплён, в отличие от остальных площадок.
-                cover_letter = generate_cover_letter_for_job(
-                    resume_pdf_path,
-                    job,
-                    llm_api_key,
-                    template="auto_plain",
-                )
-            except Exception as e:
-                logger.exception(
-                    f"Failed to generate cover letter for {job.role} at "
-                    f"{job.company}, skipping this vacancy: {e}"
-                )
-                continue
             status: Literal["applied", "dry_run"] = (
                 "applied" if auto_apply else "dry_run"
             )

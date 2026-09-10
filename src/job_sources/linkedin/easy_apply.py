@@ -1,5 +1,4 @@
 import time
-from typing import Optional
 
 from selenium.common.exceptions import (
     ElementClickInterceptedException,
@@ -8,6 +7,12 @@ from selenium.common.exceptions import (
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
 
+from src.job_sources.linkedin.dynamic_form import (
+    apply_answers,
+    check_required_consent_checkboxes,
+    draft_answers,
+    scrape_visible_fields,
+)
 from src.logging import logger
 
 # ponytail: сверено на живой залогиненной сессии (2026-08-23, реальная
@@ -41,16 +46,44 @@ MAX_STEPS = 12
 
 
 def run_easy_apply(
-    driver, job, resume_pdf_path, answerer, dry_run: bool
+    driver,
+    job,
+    resume_pdf_path,
+    resume_text: str,
+    profile_text: str,
+    cover_letter: str,
+    llm_api_key: str,
+    dry_run: bool,
 ) -> bool:
     """Проводит кандидата через многошаговую форму Easy Apply. Возвращает
     True, если отклик отправлен (или был бы отправлен, в dry-run режиме);
     False — если форма упёрлась в то, что нельзя безопасно обработать:
-    вакансия пропускается, а не обрабатывается наугад."""
-    driver.get(job.link)
-    time.sleep(2)
+    вакансия пропускается, а не обрабатывается наугад.
 
-    if not _click(driver, EASY_APPLY_BUTTON_XPATH):
+    ponytail: раньше вопросы разбирались жёстко прописанными паттернами
+    (componentkey, конкретные атрибуты) — LinkedIn поменял разметку
+    2026-09 и всё сломал молча, без единой ошибки в логе (см. историю
+    в dynamic_form.py). Теперь на каждом шаге страница читается
+    динамически (scrape_visible_fields) и ответы генерирует LLM одним
+    батч-вызовом на все поля этого шага (draft_answers/apply_answers) —
+    переживает будущие изменения вёрстки лучше, чем привязка к
+    конкретным атрибутам, дороже по времени/токенам, но именно это и
+    выбрано осознанно (надёжнее и медленнее)."""
+    driver.get(job.link)
+
+    # ponytail: вакансия дошла сюда уже пройдя f_AL=true в поиске (см.
+    # search.py) — Easy Apply на ней точно был. Тяжёлый SPA-рендер
+    # LinkedIn не всегда укладывается в 2с, из-за чего единственная
+    # попытка клика ловила кнопку до её появления в DOM и хорошо
+    # подходящие вакансии ложно уходили в "No Easy Apply button".
+    # Поллинг вместо одного sleep+click, пока кнопка не появится.
+    clicked = False
+    for _ in range(8):
+        if _click(driver, EASY_APPLY_BUTTON_XPATH):
+            clicked = True
+            break
+        time.sleep(1)
+    if not clicked:
         logger.warning(f"No Easy Apply button on {job.link}, skipping.")
         return False
     time.sleep(2)
@@ -66,14 +99,23 @@ def run_easy_apply(
         _upload_resume_if_present(driver, resume_pdf_path)
         _set_phone_country_code_if_present(driver)
 
-        if not _answer_visible_questions(driver, answerer):
-            logger.warning(
-                f"Unrecognized question type on {job.link} — "
-                "skipping to be safe."
-            )
-            _dismiss(driver)
-            return False
-        _answer_uncovered_required_fields(driver, answerer)
+        try:
+            form = driver.find_element(By.CSS_SELECTOR, MODAL_SELECTOR)
+        except Exception:
+            form = None
+        if form is not None:
+            check_required_consent_checkboxes(driver, form)
+            fields = scrape_visible_fields(driver, form)
+            if fields:
+                answers = draft_answers(
+                    fields,
+                    job,
+                    resume_text,
+                    profile_text,
+                    cover_letter,
+                    llm_api_key,
+                )
+                apply_answers(driver, fields, answers)
 
         if _click(driver, SUBMIT_XPATH):
             if dry_run:
@@ -120,7 +162,10 @@ def _click(driver, xpath: str) -> bool:
     вместе с «кнопки нет» одним bare except."""
     for attempt in range(2):
         for el in driver.find_elements(By.XPATH, xpath):
-            if not el.is_displayed():
+            try:
+                if not el.is_displayed():
+                    continue
+            except StaleElementReferenceException:
                 continue
             try:
                 el.click()
@@ -200,168 +245,3 @@ def _upload_resume_if_present(driver, resume_pdf_path) -> None:
             file_input.send_keys(str(resume_pdf_path))
         except Exception:
             pass
-
-
-def _answer_visible_questions(driver, answerer) -> bool:
-    """Группа вопроса — [componentkey^="ea_focus_"] (подтверждено
-    живьём на шаге "Additional Questions"): текст вопроса — первый
-    <p> внутри группы (не <label> — labels пустые, текст радио-опций
-    лежит в aria-label самого элемента role=radio, а не в label рядом
-    с input, как раньше предполагалось). select/checkbox — не
-    встречены живьём ни на одной реальной вакансии, оставлены как
-    best-effort фолбэк на случай других форм."""
-    try:
-        form = driver.find_element(By.CSS_SELECTOR, MODAL_SELECTOR)
-    except Exception:
-        return True
-
-    groups = form.find_elements(By.CSS_SELECTOR, "[componentkey^='ea_focus_']")
-    for group in groups:
-        try:
-            question = group.find_element(By.TAG_NAME, "p").text.strip()
-        except Exception:
-            question = ""
-        if not question:
-            continue
-        question = question.rstrip("*").strip()
-
-        selects = group.find_elements(By.TAG_NAME, "select")
-        if selects:
-            select = Select(selects[0])
-            options = [
-                o.text.strip() for o in select.options if o.text.strip()
-            ]
-            if options:
-                select.select_by_visible_text(
-                    _closest_option(
-                        answerer.answer(question, options), options
-                    )
-                )
-            continue
-
-        radios = group.find_elements(By.CSS_SELECTOR, "[role='radio']")
-        if radios:
-            radio_labels = [
-                r.get_attribute("aria-label") or "" for r in radios
-            ]
-            radio_labels = [label for label in radio_labels if label]
-            if not radio_labels:
-                return False
-            chosen = _closest_option(
-                answerer.answer(question, radio_labels), radio_labels
-            )
-            for radio, radio_label in zip(radios, radio_labels):
-                if radio_label == chosen:
-                    driver.execute_script("arguments[0].click();", radio)
-                    break
-            continue
-
-        checkboxes = group.find_elements(
-            By.CSS_SELECTOR, "input[type='checkbox']"
-        )
-        if checkboxes:
-            for checkbox in checkboxes:
-                if not checkbox.is_selected():
-                    driver.execute_script("arguments[0].click();", checkbox)
-            continue
-
-        text_inputs = group.find_elements(
-            By.CSS_SELECTOR,
-            "input[type='text'], input[type='tel'], "
-            "input[type='number'], input[type='email'], textarea",
-        )
-        if text_inputs:
-            field = text_inputs[0]
-            if not field.get_attribute("value"):
-                field.send_keys(
-                    answerer.answer(
-                        question, max_length=_field_max_length(field)
-                    )
-                )
-            continue
-
-        return False
-
-    return True
-
-
-def _label_text_for(driver, field) -> str:
-    """ponytail: НЕ подтверждено на живой сессии для этого конкретного
-    класса полей. Обычные <label for=id> достаточно распространены в
-    формах LinkedIn/сторонних ATS, но не гарантированы — placeholder
-    как фолбэк покрывает случай, когда его нет (см. "Location (city)"
-    на живом скриншоте пользователя, 2026-09-06: placeholder "Enter
-    city or location" присутствует независимо от разметки лейбла)."""
-    field_id = field.get_attribute("id")
-    if field_id:
-        labels = driver.find_elements(
-            By.CSS_SELECTOR, f'label[for="{field_id}"]'
-        )
-        if labels:
-            text = labels[0].text.strip()
-            if text:
-                return text.rstrip("*").strip()
-    return (field.get_attribute("placeholder") or "").strip()
-
-
-def _answer_uncovered_required_fields(driver, answerer) -> None:
-    """ponytail: НЕ подтверждено на живой сессии. Покрывает обязательные
-    текстовые поля ВНЕ блоков [componentkey^='ea_focus_'] — например
-    "Location (city)" на шаге Contact Info у вакансий, проксируемых
-    через сторонний ATS вроде Workable (см. живой скриншот
-    пользователя, 2026-09-06). Раньше такие поля молча оставались
-    пустыми: LinkedIn не пускал дальше по валидации, а _answer_visible_
-    questions их не видит (не в её группах) — форма зависала на месте
-    до MAX_STEPS без единой явной причины в логе. Только текстовые
-    поля: select/radio/checkbox уже обрабатываются точнее в другом
-    месте (_answer_visible_questions, _set_phone_country_code_if_present)
-    — обобщать их здесь рискованнее, чем оставить как есть."""
-    try:
-        form = driver.find_element(By.CSS_SELECTOR, MODAL_SELECTOR)
-    except Exception:
-        return
-
-    for field in form.find_elements(
-        By.CSS_SELECTOR,
-        "input[type='text'], input[type='tel'], input[type='number'], "
-        "input[type='email'], textarea",
-    ):
-        if not field.is_displayed() or field.get_attribute("value"):
-            continue
-        is_required = (
-            field.get_attribute("required") is not None
-            or field.get_attribute("aria-required") == "true"
-        )
-        if not is_required:
-            continue
-        question = _label_text_for(driver, field)
-        if not question:
-            continue
-        try:
-            field.send_keys(
-                answerer.answer(question, max_length=_field_max_length(field))
-            )
-        except Exception as e:
-            logger.debug(f"_answer_uncovered_required_fields failed: {e}")
-
-
-def _field_max_length(field) -> Optional[int]:
-    """HTML `maxlength` поля, если он есть и валиден (подтверждено
-    живьём — короткие поля на LinkedIn вроде "hours per week"/
-    "compensation" ограничены 20-200 символами, счётчик "0/20" виден
-    прямо в форме)."""
-    raw = field.get_attribute("maxlength")
-    if raw and raw.isdigit():
-        return int(raw)
-    return None
-
-
-def _closest_option(answer: str, options: list) -> str:
-    answer_lower = answer.strip().lower()
-    for option in options:
-        if option.lower() == answer_lower:
-            return option
-    for option in options:
-        if option.lower() in answer_lower or answer_lower in option.lower():
-            return option
-    return options[0]
