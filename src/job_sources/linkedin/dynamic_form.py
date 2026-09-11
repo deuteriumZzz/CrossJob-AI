@@ -70,7 +70,10 @@ def _radio_label(driver, radio) -> str:
     aria-labelledby (ссылка на отдельный элемент с текстом варианта)
     пробуем первым; aria-label остаётся фолбэком для вакансий, где он
     всё же верный."""
-    labelledby = radio.get_attribute("aria-labelledby")
+    try:
+        labelledby = radio.get_attribute("aria-labelledby")
+    except Exception:
+        labelledby = None
     if labelledby:
         for label_id in labelledby.split():
             try:
@@ -79,7 +82,10 @@ def _radio_label(driver, radio) -> str:
                 continue
             if text:
                 return text
-    return (radio.get_attribute("aria-label") or "").strip()
+    try:
+        return (radio.get_attribute("aria-label") or "").strip()
+    except Exception:
+        return ""
 
 
 def _label_text_for(driver, field) -> str:
@@ -98,6 +104,42 @@ def _label_text_for(driver, field) -> str:
             if text:
                 return text.rstrip("*").strip()
     return (field.get_attribute("placeholder") or "").strip()
+
+
+def _group_label(driver, element, fallback: str) -> str:
+    """ponytail: для select-полей ближайший <p> иногда оказывается
+    заголовком СЕКЦИИ ("Preguntas adicionales"/"Additional Questions"),
+    а не текстом конкретного вопроса — подтверждено живьём 2026-09-11
+    на испаноязычной форме (LinkedIn рендерит форму на языке вакансии):
+    несколько разных select-вопросов об уровне владения разными
+    языками все отдавали один и то же текст секции вместо "¿Cuál es tu
+    dominio del idioma inglés?"/"...español?" и т.п., бот не мог их
+    различить и зацикливался. Не специфично для испанского — это
+    вопрос конкретной структуры ATS-формы, не языка. aria-labelledby/
+    aria-label/label[for] на самом поле — точнее и не зависят от
+    языка/секции, пробуем их первыми; ближайший <p> остаётся
+    фолбэком, раз он и раньше в основном срабатывал верно для
+    text/radio/checkbox."""
+    try:
+        labelledby = element.get_attribute("aria-labelledby")
+    except Exception:
+        labelledby = None
+    if labelledby:
+        for label_id in labelledby.split():
+            try:
+                text = driver.find_element(By.ID, label_id).text.strip()
+            except Exception:
+                continue
+            if text:
+                return text
+    try:
+        aria_label = (element.get_attribute("aria-label") or "").strip()
+    except Exception:
+        aria_label = ""
+    if aria_label:
+        return aria_label
+    label_text = _label_text_for(driver, element)
+    return label_text or fallback
 
 
 def _field_max_length(field) -> Optional[int]:
@@ -232,11 +274,12 @@ def scrape_visible_fields(driver, form) -> list[ScrapedField]:
                 if o.text.strip()
             ]
             if options:
+                select_question = _group_label(driver, selects[0], question)
                 seen_parents.add(parent.id)
                 claimed_elements.add(selects[0].id)
                 fields.append(
                     ScrapedField(
-                        index, question, "select", options, selects[0]
+                        index, select_question, "select", options, selects[0]
                     )
                 )
                 index += 1

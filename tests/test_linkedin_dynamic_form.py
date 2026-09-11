@@ -7,6 +7,7 @@ from src.job_sources.linkedin.dynamic_form import (
     _field_max_length,
     _FieldAnswer,
     _fill_text_field,
+    _group_label,
     _label_text_for,
     _radio_label,
     _text_like_inputs,
@@ -234,6 +235,35 @@ def test_scrape_visible_fields_drops_radio_when_all_labels_match_question():
     assert scrape_visible_fields(driver, form) == []
 
 
+def test_group_label_prefers_aria_label_over_ambiguous_paragraph():
+    """Ближайший <p> у select-полей иногда оказывается заголовком
+    СЕКЦИИ ("Preguntas adicionales"), не текстом конкретного вопроса —
+    подтверждено живьём 2026-09-11: несколько разных select про
+    уровень владения разными языками все отдавали один и тот же текст
+    секции, бот не мог их различить. aria-label на самом поле должен
+    побеждать такой фолбэк."""
+    element = MagicMock()
+    element.get_attribute.side_effect = lambda name: {
+        "aria-label": "¿Cuál es tu dominio del idioma inglés?"
+    }.get(name)
+
+    driver = MagicMock()
+    assert (
+        _group_label(driver, element, fallback="Preguntas adicionales")
+        == "¿Cuál es tu dominio del idioma inglés?"
+    )
+
+
+def test_group_label_falls_back_to_paragraph_when_no_accessible_name():
+    element = MagicMock()
+    element.get_attribute.return_value = None
+
+    driver = MagicMock()
+    driver.find_elements.return_value = []  # no <label for=...>
+
+    assert _group_label(driver, element, fallback="Email") == "Email"
+
+
 def test_scrape_visible_fields_detects_select_question():
     question_p = MagicMock()
     question_p.text = "Email*"
@@ -241,6 +271,7 @@ def test_scrape_visible_fields_detects_select_question():
     option1 = MagicMock()
     option1.text = "me@example.com"
     select_el = MagicMock()
+    select_el.get_attribute.return_value = None  # no aria-labelledby/-label
 
     group = MagicMock()
 
@@ -256,6 +287,7 @@ def test_scrape_visible_fields_detects_select_question():
     )
 
     driver = MagicMock()
+    driver.find_elements.return_value = []  # no <label for=...> either
     with patch(
         "src.job_sources.linkedin.dynamic_form.Select"
     ) as fake_select_cls:
@@ -399,6 +431,8 @@ if __name__ == "__main__":
     test_fill_text_field_selects_autocomplete_suggestion_if_present()
     test_scrape_visible_fields_skips_step_title_paragraphs()
     test_scrape_visible_fields_drops_radio_when_all_labels_match_question()
+    test_group_label_prefers_aria_label_over_ambiguous_paragraph()
+    test_group_label_falls_back_to_paragraph_when_no_accessible_name()
     test_scrape_visible_fields_detects_select_question()
     test_scrape_visible_fields_finds_uncovered_required_text_field()
     test_check_required_consent_checkboxes_clicks_unchecked_required()
