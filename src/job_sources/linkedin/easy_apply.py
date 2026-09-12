@@ -84,7 +84,21 @@ def run_easy_apply(
             break
         time.sleep(1)
     if not clicked:
-        logger.warning(f"No Easy Apply button on {job.link}, skipping.")
+        # ponytail: подтверждено живьём 2026-09-12 — вакансия, которая
+        # была открыта в момент поиска, к моменту отклика уже закрыта
+        # ("No longer accepting applications" прямо на странице). Это
+        # не баг разбора формы, а нормальный исход гонки между поиском
+        # и откликом — отдельное сообщение в логе, чтобы не гонять
+        # живой браузер заново, выясняя то же самое.
+        closed = driver.find_elements(
+            By.XPATH, "//*[contains(text(),'No longer accepting')]"
+        )
+        if closed:
+            logger.info(
+                f"{job.link} is no longer accepting applications, skipping."
+            )
+        else:
+            logger.warning(f"No Easy Apply button on {job.link}, skipping.")
         return False
     time.sleep(2)
 

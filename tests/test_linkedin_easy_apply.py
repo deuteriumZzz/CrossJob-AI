@@ -49,6 +49,38 @@ def test_run_easy_apply_retries_button_click_before_giving_up():
     assert fake_click.call_count == 8
 
 
+def test_run_easy_apply_recognizes_closed_posting():
+    """Вакансия могла быть открыта в момент поиска и закрыться к
+    моменту отклика ("No longer accepting applications" прямо на
+    странице, подтверждено живьём 2026-09-12) — это не баг разбора
+    формы, отдельное сообщение в логе вместо общего "no button"."""
+    job = MagicMock()
+    job.link = "https://www.linkedin.com/jobs/view/123/"
+
+    driver = MagicMock()
+    driver.find_elements.return_value = [MagicMock()]  # "No longer accepting"
+
+    with patch(
+        "src.job_sources.linkedin.easy_apply._click", return_value=False
+    ), patch("src.job_sources.linkedin.easy_apply.time.sleep"), patch(
+        "src.job_sources.linkedin.easy_apply.logger"
+    ) as fake_logger:
+        result = run_easy_apply(
+            driver,
+            job,
+            "resume.pdf",
+            "resume text",
+            "profile text",
+            "cover letter",
+            "llm-api-key",
+            dry_run=True,
+        )
+
+    assert result is False
+    fake_logger.warning.assert_not_called()
+    assert "no longer accepting" in fake_logger.info.call_args[0][0].lower()
+
+
 def test_run_easy_apply_scrapes_and_applies_answers_per_step():
     """Один шаг формы — один вызов scrape/draft/apply на dynamic_form,
     не жёстко прописанные паттерны по типам полей (см. историю в
