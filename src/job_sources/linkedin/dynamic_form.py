@@ -74,11 +74,16 @@ class ScrapedField:
 def _radio_label(driver, radio) -> str:
     """ponytail: aria-label на самом [role='radio']/checkbox иногда
     возвращает текст ВОПРОСА (группы), а не варианта ответа (Yes/No) —
-    подтверждено живьём 2026-09-09 (оба радио в паре Yes/No отдавали
-    одинаковый aria-label, совпадающий с текстом вопроса).
-    aria-labelledby (ссылка на отдельный элемент с текстом варианта)
-    пробуем первым; aria-label остаётся фолбэком для вакансий, где он
-    всё же верный."""
+    подтверждено живьём дважды (2026-09-09 и 2026-09-12) на одной и
+    той же форме ("Have you completed... Bachelor's Degree?"). Второй
+    раз реальный DOM показал точную причину: у этого radio нет
+    aria-labelledby вообще, aria-label ошибочно продублирован текстом
+    вопроса, а <label for=id> — пустой. Настоящий текст варианта лежит
+    в обычном <p> ВНУТРИ самого radio-div (виден визуально). Порядок
+    фолбэков поэтому: aria-labelledby (явная ссылка — надёжна, когда
+    есть) → <p> внутри radio (подтверждено живьём как надёжный
+    источник) → aria-label (последний, раз он и оказался источником
+    бага) → <label for=id>."""
     try:
         labelledby = radio.get_attribute("aria-labelledby")
     except Exception:
@@ -92,9 +97,19 @@ def _radio_label(driver, radio) -> str:
             if text:
                 return text
     try:
-        return (radio.get_attribute("aria-label") or "").strip()
+        inner_p = radio.find_element(By.TAG_NAME, "p")
+        text = inner_p.text.strip()
     except Exception:
-        return ""
+        text = ""
+    if text:
+        return text
+    try:
+        aria_label = (radio.get_attribute("aria-label") or "").strip()
+    except Exception:
+        aria_label = ""
+    if aria_label:
+        return aria_label
+    return _label_text_for(driver, radio)
 
 
 def _label_text_for(driver, field) -> str:

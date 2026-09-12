@@ -96,12 +96,50 @@ def test_radio_label_prefers_aria_labelledby_over_aria_label():
     assert _radio_label(driver, radio) == "Yes"
 
 
+def test_radio_label_uses_inner_paragraph_when_aria_is_wrong():
+    """Подтверждено живьём 2026-09-12 с реальным DOM: у этого radio нет
+    aria-labelledby вообще, а aria-label ошибочно продублирован
+    текстом вопроса — но визуально видимый "Yes"/"No" лежит в обычном
+    <p> ВНУТРИ самого radio-div. Без этого фолбэка вся radio-группа
+    отфильтровывалась (label совпадал с question) и вопрос пропадал —
+    0 полей найдено на шаге, где реально был виден Yes/No."""
+    radio = MagicMock()
+    radio.get_attribute.side_effect = lambda name: {
+        "aria-label": "Have you completed a Bachelor's Degree?"
+    }.get(name)
+    inner_p = MagicMock()
+    inner_p.text = "Yes"
+    radio.find_element.return_value = inner_p
+
+    driver = MagicMock()
+    assert _radio_label(driver, radio) == "Yes"
+
+
 def test_radio_label_falls_back_to_aria_label_without_labelledby():
     driver = MagicMock()
     radio = MagicMock()
     radio.get_attribute.side_effect = lambda name: {
         "aria-label": "Yes"
     }.get(name)
+    radio.find_element.side_effect = Exception("no inner <p>")
+
+    assert _radio_label(driver, radio) == "Yes"
+
+
+def test_radio_label_falls_back_to_label_for_when_aria_gives_nothing():
+    """Общий фолбэк на <label for=id> — используется, только если и
+    aria-labelledby, и внутренний <p>, и aria-label все пустые."""
+    radio = MagicMock()
+    radio.get_attribute.side_effect = lambda name: {
+        "id": "radio-yes"
+    }.get(name)
+    radio.find_element.side_effect = Exception("no inner <p>")
+
+    label = MagicMock()
+    label.text = "Yes"
+
+    driver = MagicMock()
+    driver.find_elements.return_value = [label]
 
     assert _radio_label(driver, radio) == "Yes"
 
@@ -187,6 +225,7 @@ def test_scrape_visible_fields_skips_step_title_paragraphs():
     radio.get_attribute.side_effect = lambda name: {
         "aria-label": "Yes"
     }.get(name)
+    radio.find_element.side_effect = Exception("no inner <p>")
 
     group = _make_group(radios=[radio])
     question_p.find_element.return_value = group
@@ -227,6 +266,7 @@ def test_scrape_visible_fields_skips_validation_message_paragraphs():
     radio.get_attribute.side_effect = lambda name: {
         "aria-label": "Yes"
     }.get(name)
+    radio.find_element.side_effect = Exception("no inner <p>")
 
     group = _make_group(radios=[radio])
     question_p.find_element.return_value = group
@@ -259,6 +299,7 @@ def test_scrape_visible_fields_drops_radio_when_all_labels_match_question():
     radio.get_attribute.side_effect = lambda name: {
         "aria-label": "Are you comfortable working remotely?"
     }.get(name)
+    radio.find_element.side_effect = Exception("no inner <p>")
 
     group = _make_group(radios=[radio, radio])
     question_p.find_element.return_value = group
@@ -464,7 +505,9 @@ if __name__ == "__main__":
     test_label_text_for_uses_label_element()
     test_label_text_for_falls_back_to_placeholder()
     test_radio_label_prefers_aria_labelledby_over_aria_label()
+    test_radio_label_uses_inner_paragraph_when_aria_is_wrong()
     test_radio_label_falls_back_to_aria_label_without_labelledby()
+    test_radio_label_falls_back_to_label_for_when_aria_gives_nothing()
     test_fill_text_field_selects_autocomplete_suggestion_if_present()
     test_scrape_visible_fields_skips_step_title_paragraphs()
     test_scrape_visible_fields_skips_validation_message_paragraphs()
