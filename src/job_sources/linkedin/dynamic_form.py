@@ -40,6 +40,15 @@ NON_QUESTION_LABELS = {
     "additional questions",
     "work authorization",
     "review",
+    # ponytail: валидационные сообщения ("This field is required",
+    # "Invalid input") — тоже свои <p>, а не только заголовки шагов.
+    # Подтверждено живьём 2026-09-12: у radio-группы про образование
+    # ближайшим <p> оказалось "This field is required" (осталось от
+    # предыдущей неудачной попытки отправить форму), а настоящий текст
+    # вопроса ("Have you completed... Bachelor's Degree?") утёк в
+    # варианты ответа вместо Yes/No.
+    "this field is required",
+    "invalid input",
 }
 PAGE_COUNTER_RE = re.compile(r"^\d+/\d+ pages$")
 

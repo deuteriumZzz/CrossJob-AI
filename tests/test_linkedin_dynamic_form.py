@@ -209,6 +209,43 @@ def test_scrape_visible_fields_skips_step_title_paragraphs():
     assert fields[0].options == ["Yes"]
 
 
+def test_scrape_visible_fields_skips_validation_message_paragraphs():
+    """"This field is required"/"Invalid input" — тоже свои <p>, не
+    только заголовки шагов — подтверждено живьём 2026-09-12: у
+    radio-группы про образование ближайшим <p> оказалось "This field
+    is required" (осталось от предыдущей неудачной попытки отправить
+    форму), настоящий вопрос ("Have you completed... Bachelor's
+    Degree?") утёк в варианты ответа вместо Yes/No. Без фильтра группа
+    привязывалась к сообщению об ошибке, а не к реальному вопросу."""
+    validation_p = MagicMock()
+    validation_p.text = "This field is required"
+
+    question_p = MagicMock()
+    question_p.text = "Have you completed a Bachelor's Degree?*"
+
+    radio = MagicMock()
+    radio.get_attribute.side_effect = lambda name: {
+        "aria-label": "Yes"
+    }.get(name)
+
+    group = _make_group(radios=[radio])
+    question_p.find_element.return_value = group
+
+    form = MagicMock()
+    form.find_elements.side_effect = (
+        lambda by, selector: [validation_p, question_p]
+        if selector == "p"
+        else []
+    )
+
+    driver = MagicMock()
+    fields = scrape_visible_fields(driver, form)
+
+    assert len(fields) == 1
+    assert fields[0].text == "Have you completed a Bachelor's Degree?"
+    assert fields[0].kind == "radio"
+
+
 def test_scrape_visible_fields_drops_radio_when_all_labels_match_question():
     """Если aria-labelledby тоже подвёл и оба радио всё равно отдают
     текст вопроса — поле не должно попасть в результат вообще (LLM не
@@ -430,6 +467,7 @@ if __name__ == "__main__":
     test_radio_label_falls_back_to_aria_label_without_labelledby()
     test_fill_text_field_selects_autocomplete_suggestion_if_present()
     test_scrape_visible_fields_skips_step_title_paragraphs()
+    test_scrape_visible_fields_skips_validation_message_paragraphs()
     test_scrape_visible_fields_drops_radio_when_all_labels_match_question()
     test_group_label_prefers_aria_label_over_ambiguous_paragraph()
     test_group_label_falls_back_to_paragraph_when_no_accessible_name()
