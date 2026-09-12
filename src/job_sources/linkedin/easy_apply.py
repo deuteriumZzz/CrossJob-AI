@@ -88,6 +88,7 @@ def run_easy_apply(
         return False
     time.sleep(2)
 
+    fields: list = []
     for _ in range(MAX_STEPS):
         # ponytail: подтверждено вживую — те же функции на той же
         # зависавшей вакансии прошли все шаги чисто, когда между ними
@@ -103,6 +104,7 @@ def run_easy_apply(
             form = driver.find_element(By.CSS_SELECTOR, MODAL_SELECTOR)
         except Exception:
             form = None
+        fields = []
         if form is not None:
             check_required_consent_checkboxes(driver, form)
             fields = scrape_visible_fields(driver, form)
@@ -130,7 +132,9 @@ def run_easy_apply(
 
         if not _click(driver, NEXT_OR_REVIEW_XPATH):
             logger.warning(
-                f"Easy Apply stuck (no Next/Submit) on {job.link} — skipping."
+                f"Easy Apply stuck (no Next/Submit) on {job.link} — "
+                f"skipping. Fields on this step: "
+                f"{[(f.kind, f.text) for f in fields]}"
             )
             _dismiss(driver)
             return False
@@ -142,7 +146,8 @@ def run_easy_apply(
         time.sleep(4)
 
     logger.warning(
-        f"Easy Apply exceeded {MAX_STEPS} steps on {job.link} — skipping."
+        f"Easy Apply exceeded {MAX_STEPS} steps on {job.link} — skipping. "
+        f"Fields on last step: {[(f.kind, f.text) for f in fields]}"
     )
     _dismiss(driver)
     return False
