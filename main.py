@@ -133,6 +133,7 @@ from src.job_sources.himalayas.apply import (
 from src.job_sources.himalayas.auth import HimalayasSession
 from src.job_sources.djinni.apply import DjinniProfileRequired, DjinniSession
 from src.job_sources.djinni.apply import apply_to_job as apply_to_djinni_job
+from src.job_sources.djinni.apply import bump_profile as bump_djinni_profile
 from src.job_sources.djinni.apply import unmet_requirements as djinni_unmet_requirements
 from src.job_sources.djinni.search import search as search_djinni_jobs
 from src.job_sources.himalayas.source import HimalayasSource
@@ -3284,6 +3285,29 @@ def check_email_replies(parameters: dict, llm_api_key: str) -> None:
             )
 
 
+DJINNI_BUMP_FILE = ".djinni_bump.json"
+
+
+def _djinni_bump_due(output_folder: Path) -> bool:
+    """Поднимать профиль можно раз в 7 дней — помним, когда можно снова,
+    чтобы не открывать браузер на каждом прогоне впустую."""
+    try:
+        next_at = json.loads((output_folder / DJINNI_BUMP_FILE).read_text(encoding="utf-8"))["next_at"]
+    except (OSError, ValueError, KeyError):
+        return True
+    return datetime.now().astimezone() >= datetime.fromisoformat(next_at)
+
+
+def _djinni_bump_done(output_folder: Path, result: str) -> None:
+    """bumped → через 7 дней; not_yet:N → через N дней (так пишет сам
+    Djinni); кнопки нет → попробуем на следующий день."""
+    days = 7 if result == "bumped" else int(result.split(":")[1]) if result.startswith("not_yet:") else 1
+    next_at = datetime.now().astimezone() + timedelta(days=days)
+    (output_folder / DJINNI_BUMP_FILE).write_text(
+        json.dumps({"last_result": result, "next_at": next_at.isoformat()}), encoding="utf-8"
+    )
+
+
 def search_and_apply_djinni(
     parameters: dict,
     llm_api_key: str,
@@ -3322,10 +3346,22 @@ def search_and_apply_djinni(
     job_max_applications = _job_max_applications(parameters, "djinni")
     daily_limit = randomized_daily_limit(_daily_limit(parameters, "djinni"))
 
-    # Браузер нужен только для отклика — в режиме «Только ищет» не открываем.
+    # Браузер нужен только для отклика и поднятия профиля — иначе не открываем.
     session: Optional[DjinniSession] = None
     sent_count = 0
     try:
+        if (parameters.get("djinni") or {}).get("auto_bump_resume") and _djinni_bump_due(output_folder):
+            try:
+                session = DjinniSession(output_folder / ".chrome_profile_djinni")
+                session.ensure_logged_in(parameters)
+                result = bump_djinni_profile(session.driver)
+                _djinni_bump_done(output_folder, result)
+                logger.info(f"Djinni: поднятие профиля — {result}")
+                if result == "bumped":
+                    notify_routine(parameters, "Djinni: профиль поднят в поиске рекрутеров.")
+            except Exception as e:
+                logger.warning(f"Не удалось поднять профиль на Djinni: {e}")
+
         for job in jobs:
             if stop_event is not None and stop_event.is_set():
                 logger.info("Stop requested — прерываю перед следующей вакансией.")

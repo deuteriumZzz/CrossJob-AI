@@ -91,3 +91,22 @@ def test_unmet_requirements_reads_djinni_reasons(monkeypatch):
     ]
     monkeypatch.setattr(da, "visible_text", lambda d: "Job text\nApply")
     assert da.unmet_requirements(driver, "u") == []
+
+
+def test_bump_schedule(tmp_path):
+    assert main._djinni_bump_due(tmp_path)  # ни разу не поднимали
+    main._djinni_bump_done(tmp_path, "not_yet:3")
+    assert not main._djinni_bump_due(tmp_path)
+    state = json.loads((tmp_path / main.DJINNI_BUMP_FILE).read_text())
+    assert state["last_result"] == "not_yet:3"
+
+
+def test_bump_profile_waits_when_djinni_says_so(monkeypatch):
+    from src.job_sources.djinni import apply as da
+
+    monkeypatch.setattr(da, "get_with_retry", lambda d, url: None)
+    monkeypatch.setattr(da.time, "sleep", lambda s: None)
+    monkeypatch.setattr(da, "visible_text", lambda d: "Last bumped 25 September · you can bump again in 7d\\nBump My Profile")
+    clicked = []
+    driver = type("D", (), {"find_elements": lambda self, *a: clicked.append(1) or []})()
+    assert da.bump_profile(driver) == "not_yet:7" and not clicked  # кнопку даже не ищет

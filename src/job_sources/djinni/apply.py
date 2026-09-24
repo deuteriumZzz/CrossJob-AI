@@ -12,6 +12,7 @@ dry_run, а не как отправленная."""
 
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 
@@ -108,6 +109,34 @@ def _visible_by_text(root, markers: tuple[str, ...]):
 def _already_applied(driver) -> bool:
     text = visible_text(driver).lower()
     return any(m in text for m in _APPLIED_MARKERS)
+
+
+_BUMP_AGAIN_RE = re.compile(r"you can bump again in (\d+)\s*d", re.I)
+
+
+def bump_profile(driver) -> str:
+    """Поднять профиль в поиске рекрутеров («Bump My Profile») — Djinni
+    разрешает раз в 7 дней. Возвращает "bumped", "not_yet:<дней>" или
+    "not_found". Подтверждено вживую 2026-09-25: рядом с кнопкой пишется
+    «Last bumped … · you can bump again in 7d»."""
+    get_with_retry(driver, f"{BASE}/my/profile/")
+    time.sleep(PAGE_LOAD_WAIT_SECONDS)
+    wait = _BUMP_AGAIN_RE.search(visible_text(driver))
+    if wait:
+        return f"not_yet:{wait.group(1)}"
+    button = next(
+        (b for b in driver.find_elements(By.CSS_SELECTOR, "button, a")
+         if b.is_displayed() and "bump my profile" in (b.text or "").lower()),
+        None,
+    )
+    if button is None or not button.is_enabled() or button.get_attribute("disabled"):
+        return "not_found"
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'}); arguments[0].click();", button)
+    time.sleep(PAGE_LOAD_WAIT_SECONDS)
+    # После поднятия Djinni снова пишет «можно через 7 дней».
+    driver.get(f"{BASE}/my/profile/")
+    time.sleep(PAGE_LOAD_WAIT_SECONDS)
+    return "bumped" if _BUMP_AGAIN_RE.search(visible_text(driver)) else "not_found"
 
 
 _UNMET_MARKER = "does not meet some of the requirements"

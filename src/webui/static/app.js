@@ -2317,7 +2317,12 @@ const render = {
                 <span>Зарплата для автоответа в чате HH</span>
                 <input type="text" class="d-hh-salary" value="${salary.hh_salary_expectations || ""}" placeholder="250000-300000 RUR" />
               </label>`
-                : ""
+                : s.name === "djinni"
+                  ? `<label class="limit-field" style="justify-content:flex-end">
+                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto-bump switch" ${s.auto_bump_resume ? "checked" : ""} />Поднимать профиль раз в 7 дней</span>
+                <span class="muted small">Кнопка «Bump My Profile» на Djinni — профиль снова наверху у рекрутеров. Бот нажимает её сам, как только Djinni разрешит.</span>
+              </label>`
+                  : ""
             }
             ${
               s.name === "linkedin"
