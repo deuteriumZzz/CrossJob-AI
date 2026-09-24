@@ -1204,7 +1204,7 @@ async function loadTelegramWatch() {
   updateGreetingPreview();
   renderTelegramResumes(w.resumes);
   document.getElementById("tgq-bot-state").innerHTML = w.bot_connected
-    ? "✅ В ваш бот уведомлений — с кнопками быстрого ответа."
+    ? "✅ В ваш CrossJob-бот — с кнопками быстрого ответа."
     : `⚠️ Бот уведомлений не подключён — <a href="#" data-goto-settings="settings-notifications">подключить</a> (1 минута), иначе кнопок не будет.`;
   bindGotoSettings(document.getElementById("tgq-bot-state"));
   return w;
@@ -1685,9 +1685,14 @@ const render = {
           const isSearchOnly =
             s.name === "telegram" ? !s.auto_message : !s.auto_apply;
           const isRunning = runNow.running && runNow.current_source === s.name;
-          const searchOnlyRow = isSearchOnly
-            ? `<div class="row"><span>Режим</span><span>🔍 только поиск</span></div>`
-            : "";
+          // Один понятный выбор вместо «расписание» + «автоотклик» + «только поиск».
+          const mode = !s.schedule_enabled ? "off" : isSearchOnly ? "search" : "apply";
+          const modeRow = `<div class="row"><span>Режим</span>
+              <select class="mode-select" data-source="${s.name}" aria-label="Режим ${sourceLabel(s.name)}">
+                <option value="apply"${mode === "apply" ? " selected" : ""}>Откликается сам</option>
+                <option value="search"${mode === "search" ? " selected" : ""}>Только ищет</option>
+                <option value="off"${mode === "off" ? " selected" : ""}>Выключена</option>
+              </select></div>`;
           const responseRow = `<div class="row"><span>Откликов сегодня</span>
               <span class="limit-ring-wrap">
                 <svg width="18" height="18" viewBox="0 0 32 32">
@@ -1712,13 +1717,10 @@ const render = {
               </button>
             </div>
             <h3>
-              <input type="checkbox" class="schedule-toggle switch" data-source="${s.name}" title="Бот проверяет по расписанию" ${s.schedule_enabled ? "checked" : ""} />
               <span class="dot ${isRunning ? "running" : dot}"></span> ${sourceIconHtml(s.name)}${sourceLabel(s.name)}
             </h3>
-            <div class="row"><span>Расписание</span><span>${s.schedule_enabled ? `каждые ${s.interval_hours}ч` : "выключено"}</span></div>
-            <div class="row"><span>Последний запуск</span><span>${fmtTime(s.last_run)}</span></div>
-            <div class="row"><span>Следующий запуск</span><span>${fmtTime(s.next_run)}</span></div>
-            ${searchOnlyRow}
+            ${modeRow}
+            <div class="row" title="Следующая проверка: ${escapeHtml(fmtTime(s.next_run))}"><span>Последняя проверка</span><span>${s.schedule_enabled ? fmtDay(s.last_run) : "—"}</span></div>
             ${responseRow}
             ${errorRowHtml(s.last_error)}
           </div>`;
@@ -1756,6 +1758,26 @@ const render = {
         })
         .join("");
 
+      document.querySelectorAll(".mode-select").forEach((sel) => {
+        sel.addEventListener("change", async () => {
+          sel.disabled = true;
+          try {
+            await api("/api/settings", {
+              method: "POST",
+              body: JSON.stringify({
+                source: sel.dataset.source,
+                schedule_enabled: sel.value !== "off",
+                ...(sel.value === "off" ? {} : { auto_apply: sel.value === "apply" }),
+              }),
+            });
+            showToast(`${sourceLabel(sel.dataset.source)}: ${sel.options[sel.selectedIndex].text.toLowerCase()}`, "success");
+          } catch (err) {
+            showToast(err.message.replace(/^\d+: /, ""), "error");
+          } finally {
+            sel.disabled = false;
+          }
+        });
+      });
       document.querySelectorAll(".schedule-toggle").forEach((box) => {
         box.addEventListener("change", async () => {
           box.disabled = true;
@@ -4044,7 +4066,7 @@ function initDragReorder(gridId, storageKey) {
 
 const CHANGELOG_VERSION = "2026-09-24-tg-quick";
 const CHANGELOG_ITEMS = [
-  "⚡ Telegram-парсер: вакансия из каналов через секунды в вашем боте — кнопки «Здравствуйте», «+ резюме», «сопроводительное под вакансию»; контакты HR из постов — сразу в «Базу компаний». Настройки → «Telegram-парсер»",
+  "✈️ Telegram-парсер: вакансия из каналов через секунды в вашем боте — кнопки «Здравствуйте», «+ резюме», «сопроводительное под вакансию»; контакты HR из постов — сразу в «Базу компаний». Настройки → «Telegram-парсер»",
   "Меню стало проще: 5 разделов — Главная, Вакансии, Общение, Аналитика, Настройки",
   "На Главной — «Что сделать сейчас»: черновики, новые ответы, интервью, контакты HR",
   "У любой вакансии «Действия» → «Найти HR этой компании»",

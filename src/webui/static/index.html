@@ -281,7 +281,7 @@
         <h3 style="margin-top:0">Как это работает</h3>
         <div class="howto-grid">
           <div><b>1. Читает каналы</b><p class="muted small">Через ваш личный аккаунт Telegram — как будто вы сами листаете каналы из списка. Если вы не подписаны на канал, парсер подпишется сам.</p></div>
-          <div><b>2. Присылает вакансию</b><p class="muted small">Пост с вашими ключевыми словами за секунды приходит в ваш <b>бот уведомлений</b> с кнопками «Здравствуйте», «+ резюме», «Сопроводительное». Контакты HR из поста — сразу в «Базу компаний».</p></div>
+          <div><b>2. Присылает вакансию</b><p class="muted small">Пост с вашими ключевыми словами за секунды приходит в ваш <b>CrossJob-бот</b> с кнопками «Здравствуйте», «+ резюме», «Сопроводительное». Контакты HR из поста — сразу в «Базу компаний».</p></div>
           <div><b>3. Пишет HR от вашего имени</b><p class="muted small">Когда вы нажимаете кнопку, сообщение уходит <b>с вашего личного аккаунта</b> — HR видит вас, а не бота и не канал. Без вашего нажатия никому ничего не отправляется.</p></div>
         </div>
       </div>
@@ -376,7 +376,7 @@
 
       <div class="panel">
         <h3>Диалоги</h3>
-        <p class="muted small">Автоответа на входящие нет — только уведомление в Telegram-бот и здесь. Отвечать нужно самому.</p>
+        <p class="muted small">Автоответа на входящие нет — только уведомление в CrossJob-бот и здесь. Отвечать нужно самому.</p>
         <div class="telegram-layout">
           <div id="tg-conv-list" class="conv-list">
             <p class="muted small">Загрузка…</p>
@@ -460,7 +460,7 @@
           </div>
           <div class="resume-action-card is-review">
             <h4>🔍 Аудит резюме</h4>
-            <p class="muted small">Оценка соответствия 0–100, отсутствующие ATS-ключевики, тревожные сигналы для рекрутера и переписанный раздел опыта — 3 шага LLM, только на реальных данных резюме.</p>
+            <p class="muted small">Оценка соответствия 0–100, отсутствующие ATS-ключевики, тревожные сигналы для рекрутера и переписанный раздел опыта — 3 шага ИИ, только на реальных данных резюме.</p>
             <button id="gen-resume-audit" class="btn btn-secondary">Проверить</button>
           </div>
         </div>
@@ -564,15 +564,15 @@
         <button type="button" class="active" data-settings-tab="settings-search">Поиск</button>
         <button type="button" data-settings-tab="settings-table">Площадки</button>
         <button type="button" data-settings-tab="settings-limits">Лимиты откликов</button>
-        <button type="button" data-settings-tab="settings-tg-quick">⚡ Telegram-парсер</button>
+        <button type="button" data-settings-tab="settings-tg-quick">✈️ Telegram-парсер</button>
         <button type="button" data-settings-tab="settings-outreach">Почта и письма</button>
-        <button type="button" data-settings-tab="settings-notifications" title="Не путать с Telegram-парсером — это бот, который присылает вам уведомления">Уведомления (бот)</button>
-        <button type="button" data-settings-tab="settings-llm">Провайдер LLM</button>
+        <button type="button" data-settings-tab="settings-notifications" title="Не путать с Telegram-парсером — это бот, который присылает вам уведомления">🤖 CrossJob-бот</button>
+        <button type="button" data-settings-tab="settings-llm">Провайдер ИИ</button>
         <details class="settings-more">
           <summary>Ещё ▾</summary>
           <div class="settings-more-menu">
             <button type="button" data-settings-tab="settings-autostart">Автозапуск</button>
-            <button type="button" data-settings-tab="settings-usage">Расходы на LLM</button>
+            <button type="button" data-settings-tab="settings-usage">Расходы на ИИ</button>
           </div>
         </details>
       </nav>
@@ -615,8 +615,8 @@
       </div>
 
       <div class="panel settings-pane" id="settings-llm">
-        <h3>Провайдер LLM</h3>
-        <p class="muted small">Переключение применяется сразу, без перезапуска — для всех вызовов LLM (оценка вакансий, письма, резюме).</p>
+        <h3>Провайдер ИИ</h3>
+        <p class="muted small">Переключение применяется сразу, без перезапуска — для всего, что делает ИИ: оценка вакансий, письма, резюме.</p>
         <div class="provider-grid" id="provider-grid">
           <button class="provider-card" data-provider="openai" title="OpenAI">
             <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3.4" fill="currentColor"/></svg>
@@ -777,7 +777,7 @@
             </select>
           </label>
           <label class="limit-field">
-            <span>Уведомить, если расходы на LLM за день превысят ($)</span>
+            <span>Уведомить, если расходы на ИИ за день превысят ($)</span>
             <input id="llm-alert-usd" type="number" min="0.01" step="0.01" placeholder="не задано" />
           </label>
           <label class="limit-field">
@@ -804,7 +804,7 @@
       </div>
 
       <div class="panel settings-pane" id="settings-notifications">
-        <h3>Уведомления (бот)</h3>
+        <h3>🤖 CrossJob-бот</h3>
         <p class="muted small">
           Ваш личный бот — через него CrossJob общается с вами: присылает вакансии из Telegram-парсера
           с кнопками ответа, ответы работодателей, черновики на подтверждение, утреннюю сводку и
@@ -875,9 +875,9 @@
       </div>
 
       <div class="panel settings-pane" id="settings-usage">
-        <h3>Расходы на LLM</h3>
+        <h3>Расходы на ИИ</h3>
         <div id="llm-exhausted-banner" class="risk-banner" style="display:none">
-          ⚠️ Похоже, все настроенные LLM-провайдеры сегодня недоступны (несколько ошибок подряд, ни одного успешного вызова) — вероятно, исчерпаны бесплатные лимиты. Вакансии пока оцениваются с fallback, без реальной LLM-проверки. Добавьте платный ключ или подождите до завтра (лимиты бесплатных провайдеров обычно сбрасываются раз в сутки).
+          ⚠️ Похоже, все настроенные провайдеры ИИ сегодня недоступны (несколько ошибок подряд, ни одного успешного вызова) — вероятно, исчерпаны бесплатные лимиты. Вакансии пока оцениваются с fallback, без реальной LLM-проверки. Добавьте платный ключ или подождите до завтра (лимиты бесплатных провайдеров обычно сбрасываются раз в сутки).
         </div>
         <p id="usage-summary" class="muted small">Загрузка…</p>
         <p id="usage-note" class="muted small"></p>
@@ -892,7 +892,7 @@
       <div class="panel settings-pane" id="settings-tg-quick">
         <div class="tgq-head">
           <div>
-            <h3 style="margin:0">⚡ Telegram-парсер</h3>
+            <h3 style="margin:0">✈️ Telegram-парсер</h3>
             <p class="muted small" style="margin:4px 0 0">Новый пост в ваших каналах с нужным словом — через секунды в вашем боте, с кнопками «Здравствуйте», «+ резюме» и «сопроводительное под вакансию».</p>
           </div>
           <label style="display:flex;align-items:center;gap:8px;white-space:nowrap"><input id="tgq-enabled" type="checkbox" class="switch" />Включить</label>
@@ -947,7 +947,7 @@
 
       <div class="panel settings-pane" id="settings-outreach">
         <h3>Контакты и письма HR</h3>
-        <p class="muted small">Как бот пишет HR напрямую. Ни одно письмо или сообщение не уходит без вашего подтверждения — черновики ждут во «Входящих» и в Telegram-боте («отправить &lt;код&gt;»).</p>
+        <p class="muted small">Как бот пишет HR напрямую. Ни одно письмо или сообщение не уходит без вашего подтверждения — черновики ждут во «Входящих» и в CrossJob-боте (кнопки «Отправить» / «Пропустить»).</p>
 
         <h4>Почта Gmail</h4>
         <p class="muted small" id="outreach-email-status"></p>

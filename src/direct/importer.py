@@ -209,7 +209,7 @@ def rows_from_text(
 
             logger.warning(f"Импорт: часть {index + 1}/{len(parts)} не разобрана LLM: {e}")
     if parts and failed == len(parts) and not extract_emails(text):
-        raise ValueError("LLM не смог разобрать файл — проверьте ключ LLM или сохраните список как CSV/XLSX.")
+        raise ValueError("ИИ не смог разобрать файл — проверьте ключ ИИ или сохраните список как CSV/XLSX.")
     if progress:
         progress(len(parts), len(parts))
     source_emails = {e.lower() for e in extract_emails(text)}

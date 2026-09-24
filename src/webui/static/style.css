@@ -3537,3 +3537,12 @@ details.panel.more[open] > summary {
 .base-bulk[hidden] {
   display: none;
 }
+.mode-select {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+}

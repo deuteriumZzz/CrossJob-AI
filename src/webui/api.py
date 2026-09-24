@@ -415,7 +415,7 @@ _ERROR_PATTERNS = (
         # страница hh показывалась как "неверный API-ключ LLM".
         ("invalid_api_key", "incorrect api key", "error code: 401", "status code 401", "401 unauthorized"),
         "Провайдер LLM не принял API-ключ — проверьте его в "
-        "Настройки → Провайдер LLM.",
+        "Настройки → Провайдер ИИ.",
     ),
     (
         ("insufficient_quota", "exceeded your current quota"),
@@ -569,7 +569,7 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
         },
         {
             "name": "check_telegram_commands",
-            "label": "Telegram-бот — команды и утренняя сводка",
+            "label": "CrossJob-бот — команды и утренняя сводка",
             "note": "/status, «отправить <код>», сводка в заданный час.",
         },
     ]
@@ -1235,11 +1235,11 @@ def _setup_checklist(ctx: AppContext) -> list[dict]:
     checks = [
         ("resume", "Резюме", (data_folder / RESUME_PDF).exists(),
          "загрузите PDF — по нему пишутся письма и отклики", "resume"),
-        ("llm", "Ключ LLM", bool(ctx.llm_api_key),
+        ("llm", "Ключ ИИ", bool(ctx.llm_api_key),
          "нужен для писем и подбора вакансий", "settings-llm"),
         ("daemon", "Бот запущен", ctx.scheduler_thread is not None and ctx.scheduler_thread.is_alive(),
          "нажмите «▶ Запустить» вверху — без этого поиск и Telegram не работают", ""),
-        ("bot", "Telegram-бот уведомлений", bot_credentials(ctx.config) is not None,
+        ("bot", "Telegram-CrossJob-бот", bot_credentials(ctx.config) is not None,
          "сюда приходят вакансии с кнопками и ответы HR", "settings-notifications"),
         ("schedule", "Площадки в расписании", any((ctx.config.get(n) or {}).get("schedule_enabled") for n, _ in ALL_SOURCES),
          "поставьте галочку на карточке площадки ниже", ""),
@@ -1334,7 +1334,7 @@ def _run_import(ctx: AppContext, token: str, filename: str, data: bytes) -> None
             rows = rows_from_table(table)
         else:
             if not ctx.llm_api_key:
-                raise ValueError("Для текста/PDF нужен ключ LLM — или сохраните файл как CSV/XLSX.")
+                raise ValueError("Для текста/PDF нужен ключ ИИ — или сохраните файл как CSV/XLSX.")
             if not text.strip():
                 raise ValueError("В файле нет текста (возможно, это скан) — сохраните список как CSV/XLSX.")
 
@@ -1556,7 +1556,7 @@ def post_campaign_action(
         raise HTTPException(409, "По этой рассылке уже идёт работа")
     if action == "prepare":
         if not ctx.llm_api_key:
-            raise HTTPException(400, "Нужен ключ LLM (Настройки → Провайдер LLM)")
+            raise HTTPException(400, "Нужен ключ ИИ (Настройки → Провайдер ИИ)")
         _start_campaign_job(ctx.config, ctx.llm_api_key, campaign_id, "prepare")
     elif action == "followups":
         if not (ConfigValidator.load_yaml(ctx.secrets_file).get("email") or {}).get("app_password"):
@@ -1625,7 +1625,7 @@ def post_contact_draft(
             vacancy.get("text", ""), body.kind, ctx.llm_api_key,
         )
     except Exception as e:
-        raise HTTPException(502, f"LLM: {e}")
+        raise HTTPException(502, f"ИИ не ответил: {e}")
     extra = {"channel": "email", "subject": message["subject"]} if body.kind == "email" else {}
     code = DraftStore(ctx.output_folder / HR_DRAFTS_FILE).add(
         body.value, message["text"], "first" if body.kind == "telegram" else "email",
@@ -1743,7 +1743,7 @@ def post_interview_prep(
         raise HTTPException(404, "Заявка не найдена")
     prep = _prepare_interview(ctx.config, ctx.llm_api_key, entry)
     if not prep:
-        raise HTTPException(502, "Не удалось подготовить справку (LLM)")
+        raise HTTPException(502, "Не удалось подготовить справку — ИИ не ответил")
     return {"prep": prep}
 
 
@@ -1807,7 +1807,7 @@ def post_interview_questions(
                 ctx.llm_api_key,
             )
         except Exception as e:
-            raise HTTPException(502, f"LLM: {e}")
+            raise HTTPException(502, f"ИИ не ответил: {e}")
         ctx.applied_log.update_fields(
             body.source, body.external_id, interview_questions=questions
         )
@@ -1835,7 +1835,7 @@ def post_interview_feedback(
             resume, entry["title"], body.question, body.answer, ctx.llm_api_key
         )
     except Exception as e:
-        raise HTTPException(502, f"LLM: {e}")
+        raise HTTPException(502, f"ИИ не ответил: {e}")
     return {"feedback": feedback}
 
 
@@ -3206,7 +3206,7 @@ def post_test_notification(ctx: AppContext = Depends(get_ctx)) -> dict:
     if not bot_token or not chat_id:
         raise HTTPException(
             400,
-            "Бот уведомлений не подключён — Настройки → «Уведомления (бот)».",
+            "Бот уведомлений не подключён — Настройки → «🤖 CrossJob-бот».",
         )
     try:
         send_notification(
