@@ -48,6 +48,7 @@
         <div class="brand-name">CrossJob<span>-AI</span></div>
         <div class="brand-sub">панель управления</div>
       </div>
+      <button id="help-open" class="theme-toggle help-toggle" title="Как пользоваться" aria-label="Как пользоваться">?</button>
       <button id="theme-toggle" class="theme-toggle" title="Переключить тему" aria-label="Переключить тему">
         <svg class="theme-icon-sun" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="4" stroke="currentColor" stroke-width="1.6"/><path d="M10 1.8v2M10 16.2v2M18.2 10h-2M3.8 10h-2M15.6 4.4l-1.4 1.4M5.8 14.2l-1.4 1.4M15.6 15.6l-1.4-1.4M5.8 5.8 4.4 4.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
         <svg class="theme-icon-moon" viewBox="0 0 20 20" fill="none"><path d="M17 11.5A7.5 7.5 0 0 1 8.5 3 7.5 7.5 0 1 0 17 11.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
@@ -103,6 +104,46 @@
       <svg viewBox="0 0 20 20" fill="none"><path d="M12.5 4.5 7 10l5.5 5.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
   </aside>
+
+  <dialog id="help-dialog" class="help-dialog" aria-labelledby="help-title">
+    <div class="help-head">
+      <h2 id="help-title" style="margin:0">Как пользоваться</h2>
+      <button type="button" class="btn btn-ghost btn-small" id="help-close" aria-label="Закрыть">✕</button>
+    </div>
+    <p class="muted">Три способа выйти на работодателя. Можно пользоваться одним или всеми сразу — бот делает рутину, решения остаются за вами.</p>
+
+    <section class="help-case">
+      <h3>1. Площадки — hh, LinkedIn и другие</h3>
+      <ol>
+        <li>Главная → включите нужные площадки переключателем.</li>
+        <li>Режим на карточке: <b>откликается сам</b> (бот отправляет отклики до дневного лимита) или <b>только ищет</b> (вакансии появляются в «Вакансиях», откликаетесь вы).</li>
+        <li>Нажмите <b>▶ Запустить</b>. Ответы работодателей — в «Общение → Входящие».</li>
+      </ol>
+    </section>
+    <section class="help-case">
+      <h3>2. Telegram-парсер</h3>
+      <ol>
+        <li>Общение → Telegram-парсер → войдите своим аккаунтом (один раз) и добавьте каналы.</li>
+        <li>Подходящий пост за секунды приходит в <b>CrossJob-бот</b> с кнопками «Здравствуйте», «+ резюме», «Сопроводительное».</li>
+        <li>Нажали кнопку — сообщение уходит HR <b>с вашего аккаунта</b>. Контакты из постов сами попадают в базу компаний.</li>
+      </ol>
+    </section>
+    <section class="help-case">
+      <h3>3. Рассылка по базе компаний</h3>
+      <ol>
+        <li>Компании → База → <b>📥 Загрузить файл</b> (Excel, CSV, PDF, Word) — или копите базу из Telegram и вакансий.</li>
+        <li>Отметьте компании → <b>✉️ Написать выбранным</b> — или Компании → Рассылки → «Подготовить письма».</li>
+        <li>Просмотрите письма и нажмите <b>Отправить</b>: уходят через ваш Gmail с резюме, по одному. Кто молчит неделю — бот предложит напоминание.</li>
+      </ol>
+    </section>
+
+    <h3>Частые вопросы</h3>
+    <details><summary>Бот может что-то отправить без меня?</summary><p>Только отклики на площадках в режиме «откликается сам». Сообщения HR в Telegram и письма рассылки уходят только после вашего нажатия.</p></details>
+    <details><summary>Где хранятся мои данные?</summary><p>Только на вашем компьютере, в папке <code>data_folder</code>. База компаний копируется каждый день (7 последних копий), выгрузить её в Excel — Компании → «⬇ Скачать в Excel».</p></details>
+    <details><summary>Слишком много сообщений от бота</summary><p>Настройки → 🤖 CrossJob-бот → «Тихий режим»: несрочное придёт одним списком в утренней сводке.</p></details>
+    <details><summary>Площадка на паузе после капчи</summary><p>Откройте сайт площадки в браузере бота, пройдите проверку и напишите боту <code>/resume hh</code> (или имя площадки).</p></details>
+    <details><summary>Что-то не подключено или не работает</summary><p>Настройки → «Подключения» — там видно, что красное, и кнопка «Подключить». Подробности ошибок — Настройки → Логи.</p></details>
+  </dialog>
 
   <main>
     <nav id="subnav" class="subnav" aria-label="Подразделы" style="display:none"></nav>
@@ -225,7 +266,7 @@
               <th>Контакт</th>
               <th class="col-source">Откуда</th>
               <th data-sort="status">Статус</th>
-              <th data-sort="last">Последнее действие</th>
+              <th data-sort="last" class="col-last">Последнее действие</th>
               <th></th>
             </tr>
           </thead>

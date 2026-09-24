@@ -13,6 +13,8 @@ _OFFSET_FILE = ".telegram_control_offset.json"
 _STATUS_RE = re.compile(r"^/status\s*$", re.IGNORECASE)
 _PAUSE_RE = re.compile(r"^/pause\s+(\w+)\s*$", re.IGNORECASE)
 _RESUME_RE = re.compile(r"^/resume\s+(\w+)\s*$", re.IGNORECASE)
+# Короткие имена, которые люди пишут на самом деле.
+_SOURCE_ALIASES = {"hh": "headhunter", "habr": "habr_career", "li": "linkedin", "gm": "getmatch", "tg": "telegram"}
 _HELP_RE = re.compile(r"^/(help|start)\s*$", re.IGNORECASE)
 _SEND_DRAFT_RE = re.compile(
     r"^(?:отправить|send)\s+([a-f0-9]{4})\s*$", re.IGNORECASE
@@ -24,8 +26,8 @@ _SKIP_DRAFT_RE = re.compile(
 HELP_TEXT = (
     "Команды:\n"
     "/status — статус всех площадок за сегодня\n"
-    "/pause <площадка> — снять площадку с расписания демона\n"
-    "/resume <площадка> — вернуть площадку в расписание\n"
+    "/pause <площадка> — поставить площадку на паузу (например, /pause hh)\n"
+    "/resume <площадка> — снова включить (например, после капчи)\n"
     "отправить <код> / пропустить <код> — черновик ответа HR"
 )
 
@@ -113,13 +115,13 @@ def parse_control_commands(updates: list[dict], chat_id: str) -> list[dict]:
         match = _PAUSE_RE.match(text)
         if match:
             commands.append(
-                {"action": "pause", "source": match.group(1).lower()}
+                {"action": "pause", "source": _SOURCE_ALIASES.get(match.group(1).lower(), match.group(1).lower())}
             )
             continue
         match = _RESUME_RE.match(text)
         if match:
             commands.append(
-                {"action": "resume", "source": match.group(1).lower()}
+                {"action": "resume", "source": _SOURCE_ALIASES.get(match.group(1).lower(), match.group(1).lower())}
             )
             continue
 

@@ -775,7 +775,7 @@ function renderContactsList() {
         const more = card.contacts.length - 1;
         const open = baseState.open.has(card.key) || card.key === focusContactKey;
         return `
-      <tr class="base-row${open ? " is-open" : ""}${card.key === focusContactKey ? " is-focused" : ""}" data-card-key="${escapeHtml(card.key)}">
+      <tr class="base-row${open ? " is-open" : ""}${card.key === focusContactKey ? " is-focused" : ""}" data-card-key="${escapeHtml(card.key)}" tabindex="0" aria-expanded="${open}">
         <td class="base-check"><input type="checkbox" data-select="${escapeHtml(card.key)}" aria-label="Выбрать" ${baseState.selected.has(card.key) ? "checked" : ""} /></td>
         <td><strong>${escapeHtml(card.company || p?.value || "Без названия")}</strong>
           ${card.website ? `<div class="muted small">${escapeHtml(card.website.replace(/^https?:\/\//, "").replace(/\/$/, ""))}</div>` : ""}</td>
@@ -783,7 +783,7 @@ function renderContactsList() {
           ${card.hr ? `<div class="muted small">${escapeHtml(card.hr)}</div>` : ""}</td>
         <td class="small col-source">${card.source_kinds.map((k) => SOURCE_KIND[k]).join("<br>")}</td>
         <td>${statusPill(card.status)}</td>
-        <td class="small">${card.last ? `${escapeHtml(truncate(card.last.text, 60))}<div class="muted">${fmtDay(card.last.at)}</div>` : "—"}</td>
+        <td class="small col-last">${card.last ? `${escapeHtml(truncate(card.last.text, 60))}<div class="muted">${fmtDay(card.last.at)}</div>` : "—"}</td>
         <td class="base-toggle" aria-hidden="true">${open ? "▾" : "▸"}</td>
       </tr>
       ${open ? `<tr class="base-detail"><td colspan="7">${baseDetailHtml(card)}</td></tr>` : ""}`;
@@ -801,14 +801,25 @@ function renderContactsList() {
     baseState.open.add(focusContactKey);
     focusContactKey = null;
   }
-  el.querySelectorAll(".base-row").forEach((row) =>
+  const toggleRow = (row) => {
+    const k = row.dataset.cardKey;
+    baseState.open.has(k) ? baseState.open.delete(k) : baseState.open.add(k);
+    renderContactsList();
+    el.querySelector(`.base-row[data-card-key="${CSS.escape(k)}"]`)?.focus();
+  };
+  el.querySelectorAll(".base-row").forEach((row) => {
     row.addEventListener("click", (e) => {
       if (e.target.closest("input, a, button")) return;
-      const k = row.dataset.cardKey;
-      baseState.open.has(k) ? baseState.open.delete(k) : baseState.open.add(k);
-      renderContactsList();
-    })
-  );
+      toggleRow(row);
+    });
+    // С клавиатуры: Tab до строки, Enter/пробел — раскрыть.
+    row.addEventListener("keydown", (e) => {
+      if ((e.key === "Enter" || e.key === " ") && e.target === row) {
+        e.preventDefault();
+        toggleRow(row);
+      }
+    });
+  });
   el.querySelectorAll("[data-select]").forEach((box) =>
     box.addEventListener("change", () => {
       box.checked ? baseState.selected.add(box.dataset.select) : baseState.selected.delete(box.dataset.select);
@@ -4298,6 +4309,13 @@ function initDashboard() {
   });
 
   initSidebarCollapse();
+  // Справка «Как пользоваться» — нативный <dialog>: Esc и фокус из коробки.
+  const help = document.getElementById("help-dialog");
+  document.getElementById("help-open").addEventListener("click", () => help.showModal());
+  document.getElementById("help-close").addEventListener("click", () => help.close());
+  help.addEventListener("click", (e) => {
+    if (e.target === help) help.close(); // клик мимо окна
+  });
   updateActivity();
   setInterval(updateActivity, 4000);
   initSettingsDirtyTracking();

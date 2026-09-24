@@ -394,3 +394,10 @@ def test_quiet_mode_moves_routine_to_digest(tmp_path, monkeypatch):
     assert not (tmp_path / main.QUIET_QUEUE_FILE).exists()
     main.notify_routine({**params, "digest": {}}, "без тихого режима")
     assert sent[-1] == "без тихого режима"
+
+
+def test_bot_accepts_short_platform_names():
+    from src.job_sources.telegram_control import parse_control_commands
+
+    updates = [{"update_id": 1, "message": {"chat": {"id": 7}, "text": "/resume hh"}}]
+    assert parse_control_commands(updates, "7") == [{"action": "resume", "source": "headhunter"}]

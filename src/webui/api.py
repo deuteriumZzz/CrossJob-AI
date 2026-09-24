@@ -1256,7 +1256,7 @@ def get_todo(ctx: AppContext = Depends(get_ctx)) -> dict:
         items.append({
             "id": "paused", "count": len(paused), "view": "overview",
             "text": _plural(len(paused), "площадка на паузе", "площадки на паузе", "площадок на паузе") + " после капчи/блокировки: " + ", ".join(paused)
-            + " — пройдите капчу в браузере и отправьте боту /resume <площадка>",
+            + f" — пройдите проверку на сайте и напишите боту /resume {paused[0]}",
         })
     return {
         "items": items,
