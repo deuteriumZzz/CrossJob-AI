@@ -112,13 +112,6 @@
           <h2>Главная</h2>
           <p class="muted">Что ждёт вашего решения, статистика и площадки</p>
         </div>
-        <div class="toolbar">
-          <button id="dry-run-button" class="btn btn-secondary" title="Прогоняет площадки из расписания прямо сейчас, но ничего реально не отправляет — как будто у всех выключен «Автоотклик»/«Автосообщения», результат смотрите в Истории со статусом «Тестовый прогон»">
-            <svg viewBox="0 0 20 20" fill="none"><path d="M10 3.5a6.5 6.5 0 1 0 6.5 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M10 3.5 7.8 5.7M10 3.5l2.2 2.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <span class="btn-label">Тестовый прогон</span>
-          </button>
-          <span class="muted small">Включённые площадки бот проверяет сам по расписанию, пока он запущен (кнопка «▶ Запустить» слева)</span>
-        </div>
       </div>
       <div id="todo-panel" class="panel todo-panel"></div>
       <div id="stats-row" class="stats-row"></div>
@@ -166,6 +159,7 @@
           <option value="skipped_low_fit">Пропущено (слабое совпадение)</option>
           <option value="skipped_easy_apply_failed">Пропущено (форма Easy Apply)</option>
         </select>
+        <label class="checkbox-row"><input id="filter-show-rejected" type="checkbox" class="switch" /> Показывать отказы</label>
         <input id="filter-query" type="text" placeholder="Поиск по компании/названию" aria-label="Поиск по компании/названию" />
         <button id="history-apply-filters" class="btn btn-secondary">Применить</button>
       </div>
@@ -330,7 +324,7 @@
       </details>
 
       <div class="panel">
-        <h3>Каналы и правила поиска</h3>
+        <h3>Каналы</h3>
         <div class="limits-grid">
           <label class="limit-field">
             <span>Каналы (username или ссылка t.me/..., один на строку)</span>
@@ -345,6 +339,8 @@
             <input id="tg-daily-limit" type="number" min="1" placeholder="15" />
           </label>
         </div>
+        <details class="more">
+          <summary>Ещё: писать всем из постов автоматически, без кнопки (рискованно)</summary>
         <div class="limits-grid">
           <label class="limit-field" style="justify-content:flex-end">
             <span style="display:flex;align-items:center;gap:8px"><input id="tg-auto-message" type="checkbox" class="switch" />Автоматически писать найденному в посте контакту первым</span>
@@ -369,6 +365,7 @@
           автоответа на входящие: продолжать разговор (в т.ч. присылать резюме, если попросят) —
           вручную, из диалогов ниже.
         </div>
+        </details>
         <div class="filters">
           <button id="tg-settings-save" class="btn btn-primary">Сохранить</button>
           <span id="tg-settings-status" class="muted small"></span>
@@ -593,6 +590,12 @@
         <div id="accounts-services" class="accounts-list"></div>
         <h4>Площадки</h4>
         <div id="accounts-platforms" class="accounts-list"></div>
+        <div class="filters">
+          <button id="dry-run-button" class="btn btn-secondary" title="Прогоняет площадки из расписания прямо сейчас, но ничего реально не отправляет — как будто у всех выключен «Автоотклик»/«Автосообщения», результат смотрите в Истории со статусом «Тестовый прогон»">
+            <svg viewBox="0 0 20 20" fill="none"><path d="M10 3.5a6.5 6.5 0 1 0 6.5 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M10 3.5 7.8 5.7M10 3.5l2.2 2.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span class="btn-label">Проверить площадки, ничего не отправляя</span>
+          </button>
+        </div>
       </div>
 
       <div class="panel settings-pane" id="settings-search">
@@ -813,7 +816,7 @@
             </select>
           </label>
         </div>
-        <p class="muted small">Общий лимит — это жёсткий потолок: как только сегодня суммарно по ВСЕМ площадкам отправлено столько откликов, автооткликер останавливается везде, даже если у отдельной площадки в таблице ниже свой лимит ещё не исчерпан. Дневной лимит и максимум за один заход выше — то, что действует для площадки, у которой нет своего значения в таблице ниже (галочка "своё значение" в соответствующей колонке выключена). Включите галочку у нужной площадки, чтобы задать число только для неё — не трогая остальные.</p>
+        <p class="muted small">Общий лимит — сколько откликов в день максимум по всем площадкам вместе. Своё число для отдельной площадки — галочкой «своё значение» в таблице ниже.</p>
         <div id="total-budget-info" class="limit-bar-info"></div>
         <div class="filters">
           <button id="limits-save" class="btn btn-primary">Сохранить</button>

@@ -1698,13 +1698,14 @@ const render = {
             s.name === "telegram" ? !s.auto_message : !s.auto_apply;
           const isRunning = runNow.running && runNow.current_source === s.name;
           // Один понятный выбор вместо «расписание» + «автоотклик» + «только поиск».
-          const mode = !s.schedule_enabled ? "off" : isSearchOnly ? "search" : "apply";
-          const modeRow = `<div class="row"><span>Режим</span>
-              <select class="mode-select" data-source="${s.name}" aria-label="Режим ${sourceLabel(s.name)}">
-                <option value="apply"${mode === "apply" ? " selected" : ""}>Откликается сам</option>
-                <option value="search"${mode === "search" ? " selected" : ""}>Только ищет</option>
-                <option value="off"${mode === "off" ? " selected" : ""}>Выключена</option>
-              </select></div>`;
+          // Вкл/выкл — переключатель, как у Telegram-парсера; что делать, когда
+          // включена, — две кнопки: откликаться самому или только искать.
+          const modeRow = s.schedule_enabled
+            ? `<div class="segmented" role="group" aria-label="Режим ${sourceLabel(s.name)}">
+                <button type="button" class="${isSearchOnly ? "" : "active"}" data-mode="apply" data-source="${s.name}" aria-pressed="${!isSearchOnly}">Откликается сам</button>
+                <button type="button" class="${isSearchOnly ? "active" : ""}" data-mode="search" data-source="${s.name}" aria-pressed="${isSearchOnly}">Только ищет</button>
+              </div>`
+            : `<div class="row"><span>Выключена</span><span class="muted">включите переключателем</span></div>`;
           const responseRow = `<div class="row"><span>Откликов сегодня</span>
               <span class="limit-ring-wrap">
                 <svg width="18" height="18" viewBox="0 0 32 32">
@@ -1729,6 +1730,7 @@ const render = {
               </button>
             </div>
             <h3>
+              <input type="checkbox" class="switch platform-toggle" data-source="${s.name}" title="Включить или выключить площадку" aria-label="Включить ${sourceLabel(s.name)}" ${s.schedule_enabled ? "checked" : ""} />
               <span class="dot ${isRunning ? "running" : dot}"></span> ${sourceIconHtml(s.name)}${sourceLabel(s.name)}
             </h3>
             ${modeRow}
@@ -1770,26 +1772,29 @@ const render = {
         })
         .join("");
 
-      document.querySelectorAll(".mode-select").forEach((sel) => {
-        sel.addEventListener("change", async () => {
-          sel.disabled = true;
-          try {
-            await api("/api/settings", {
-              method: "POST",
-              body: JSON.stringify({
-                source: sel.dataset.source,
-                schedule_enabled: sel.value !== "off",
-                ...(sel.value === "off" ? {} : { auto_apply: sel.value === "apply" }),
-              }),
-            });
-            showToast(`${sourceLabel(sel.dataset.source)}: ${sel.options[sel.selectedIndex].text.toLowerCase()}`, "success");
-          } catch (err) {
-            showToast(err.message.replace(/^\d+: /, ""), "error");
-          } finally {
-            sel.disabled = false;
-          }
-        });
-      });
+      const savePlatform = async (source, body, label) => {
+        try {
+          await api("/api/settings", { method: "POST", body: JSON.stringify({ source, ...body }) });
+          showToast(`${sourceLabel(source)}: ${label}`, "success");
+        } catch (err) {
+          showToast(err.message.replace(/^\d+: /, ""), "error");
+        }
+        lastOverviewSnapshot = "";
+        render.overview();
+      };
+      document.querySelectorAll(".platform-toggle").forEach((box) =>
+        box.addEventListener("change", () => {
+          box.disabled = true;
+          savePlatform(box.dataset.source, { schedule_enabled: box.checked }, box.checked ? "включена" : "выключена");
+        })
+      );
+      document.querySelectorAll(".segmented [data-mode]").forEach((btn) =>
+        btn.addEventListener("click", () => {
+          if (btn.classList.contains("active")) return;
+          const apply = btn.dataset.mode === "apply";
+          savePlatform(btn.dataset.source, { auto_apply: apply }, apply ? "откликается сам" : "только ищет");
+        })
+      );
       document.querySelectorAll(".schedule-toggle").forEach((box) => {
         box.addEventListener("change", async () => {
           box.disabled = true;
@@ -1823,7 +1828,11 @@ const render = {
     const tbody = document.getElementById("history-rows");
     if (!historyLoaded) tbody.innerHTML = skeletonRows(6, 7);
 
-    const entries = await api(`/api/applications?${params}`);
+    // Отказы по умолчанию скрыты — на виду живые отклики.
+    const showRejected = document.getElementById("filter-show-rejected").checked;
+    const entries = (await api(`/api/applications?${params}`)).filter(
+      (e) => showRejected || e.effective_stage !== "rejected"
+    );
     historyLoaded = true;
 
     // ponytail: тот же фикс мерцания, что и на "Обзоре" — без этого
@@ -4455,7 +4464,7 @@ function initDashboard() {
       .map((s) => s.name);
     if (!sources.length) {
       showToast(
-        "Нет площадок в расписании — включите хотя бы одну галочкой на карточке ниже",
+        "Ни одна площадка не включена — выберите режим на карточке площадки на Главной",
         "info"
       );
       return;
@@ -4473,12 +4482,12 @@ function initDashboard() {
         }
       });
       showToast(
-        "Тестовый прогон завершён — результат в Истории (статус «Тестовый прогон»)",
+        "Проверка закончена — что нашлось, смотрите в «Вакансиях» (статус «тестовый прогон»), ничего не отправлено",
         "success"
       );
-      render.overview();
+      loadAccounts();
     } catch (e) {
-      showToast(`Не удалось запустить тестовый прогон: ${e.message}`, "error");
+      showToast(`Не удалось запустить проверку: ${e.message}`, "error");
     }
   });
 
@@ -4494,6 +4503,7 @@ function initDashboard() {
   document
     .getElementById("filter-status")
     .addEventListener("change", () => render.history());
+  document.getElementById("filter-show-rejected").addEventListener("change", () => render.history());
   document.getElementById("filter-query").addEventListener("keydown", (e) => {
     if (e.key === "Enter") render.history();
   });

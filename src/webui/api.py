@@ -912,7 +912,10 @@ def get_hr_drafts(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
     """Очередь «Ждут вашего решения»: все черновики (ответы и
     напоминания в Telegram, письма HR) с вакансией, к которой относятся."""
     by_link = {e["link"]: e for e in ctx.applied_log.find_by_company("")}
-    drafts = DraftStore(ctx.output_folder / HR_DRAFTS_FILE).all()
+    drafts = {
+        code: d for code, d in DraftStore(ctx.output_folder / HR_DRAFTS_FILE).all().items()
+        if not d.get("campaign")  # письма рассылки — в «Рассылках»
+    }
     return sorted(
         (
             {
@@ -1166,7 +1169,15 @@ def get_todo(ctx: AppContext = Depends(get_ctx)) -> dict:
     from datetime import timedelta
 
     items: list[dict] = []
-    drafts = DraftStore(ctx.output_folder / HR_DRAFTS_FILE).all()
+    all_drafts = DraftStore(ctx.output_folder / HR_DRAFTS_FILE).all()
+    # Письма рассылки живут в «Рассылках», во «Входящих» — только личные ответы HR.
+    drafts = {k: d for k, d in all_drafts.items() if not d.get("campaign")}
+    campaign_drafts = len(all_drafts) - len(drafts)
+    if campaign_drafts:
+        items.append({
+            "id": "campaign_drafts", "count": campaign_drafts, "view": "outreach",
+            "text": _plural(campaign_drafts, "письмо рассылки ждёт", "письма рассылки ждут", "писем рассылки ждут") + " отправки",
+        })
     if drafts:
         items.append({
             "id": "drafts", "count": len(drafts), "view": "replies",
