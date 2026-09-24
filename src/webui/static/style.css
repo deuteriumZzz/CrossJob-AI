@@ -2921,29 +2921,6 @@ kbd {
   margin-bottom: 14px;
   border-bottom: 1px solid var(--border-soft);
 }
-.setup-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 8px 0 6px;
-}
-.setup-chip {
-  font-size: 12px;
-  padding: 3px 9px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-}
-.setup-chip.ok {
-  color: var(--ok);
-}
-.setup-chip.missing {
-  color: var(--err);
-  border-color: var(--err);
-}
-.todo-count.setup-x {
-  color: var(--err);
-  font-size: 16px;
-}
 .todo-item:disabled {
   cursor: default;
 }
@@ -3574,4 +3551,117 @@ details.panel.more[open] > summary {
 .account-text {
   flex: 1;
   display: grid;
+}
+
+/* Мастер настройки на Главной */
+.setup-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+.setup-progress {
+  flex: 1;
+  min-width: 120px;
+}
+.setup-next {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+}
+.setup-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.setup-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 4px 10px 4px 4px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.setup-step:disabled {
+  cursor: default;
+}
+.setup-step-mark {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--panel-2);
+  font-size: 11px;
+  font-weight: 700;
+}
+.is-done .setup-step {
+  color: var(--ok);
+  border-color: transparent;
+}
+.is-done .setup-step-mark {
+  background: var(--ok);
+  color: var(--bg);
+}
+.is-next .setup-step {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+/* Что бот делает сейчас — в меню */
+.activity {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+.activity:empty {
+  display: none;
+}
+.activity-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+.activity-spin {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  animation: activity-spin 0.9s linear infinite;
+}
+@keyframes activity-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-spin {
+    animation: none;
+  }
 }

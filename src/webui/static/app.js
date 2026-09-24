@@ -1098,29 +1098,37 @@ async function renderTodo() {
   applySubnavBadges();
   const setup = todo.setup || [];
   const missing = setup.filter((c) => !c.ok);
-  // «Готовность» — только пока что-то не подключено.
-  const setupHtml = missing.length
+  // Мастер настройки — пока что-то не подключено. Шаги идут по порядку,
+  // «Следующий шаг» — одна главная кнопка.
+  const next = missing[0];
+  const done = setup.length - missing.length;
+  const setupHtml = next
     ? `<div class="setup">
-        <h3 style="margin:0 0 4px">Готовность: ${setup.length - missing.length} из ${setup.length}</h3>
-        <div class="setup-chips">${setup
-          .map((c) => `<span class="setup-chip ${c.ok ? "ok" : "missing"}">${c.ok ? "✓" : "✗"} ${escapeHtml(c.label)}</span>`)
-          .join("")}</div>
-        ${missing
+        <div class="setup-head">
+          <h3 style="margin:0">Настройка: ${done} из ${setup.length}</h3>
+          <div class="progress setup-progress"><div style="width:${Math.round((100 * done) / setup.length)}%"></div></div>
+        </div>
+        <div class="setup-next">
+          <div><span class="muted small">Следующий шаг</span><div><b>${escapeHtml(next.label)}</b> — ${escapeHtml(next.hint)}</div></div>
+          ${next.goto ? `<button type="button" class="btn btn-primary" data-setup-goto="${escapeHtml(next.goto)}">${next.goto === "start-bot" ? "▶ Запустить" : "Сделать →"}</button>` : ""}
+        </div>
+        <ol class="setup-steps">${setup
           .map(
-            (c) => `<button type="button" class="todo-item" data-setup-goto="${escapeHtml(c.goto)}" ${c.goto ? "" : "disabled"}>
-              <span class="todo-count setup-x">✗</span>
-              <span class="todo-text"><b>${escapeHtml(c.label)}</b> — ${escapeHtml(c.hint)}</span>
-              <span class="todo-go" aria-hidden="true">${c.goto ? "→" : ""}</span>
-            </button>`
+            (c, i) => `<li class="${c.ok ? "is-done" : c === next ? "is-next" : ""}">
+              <button type="button" class="setup-step" data-setup-goto="${escapeHtml(c.goto)}" ${c.goto && !c.ok ? "" : "disabled"}>
+                <span class="setup-step-mark">${c.ok ? "✓" : i + 1}</span>${escapeHtml(c.label)}
+              </button></li>`
           )
-          .join("")}
+          .join("")}</ol>
       </div>`
     : "";
   const bindSetup = () =>
     el.querySelectorAll("[data-setup-goto]").forEach((btn) =>
       btn.addEventListener("click", () => {
         const goto = btn.dataset.setupGoto;
-        if (goto.startsWith("settings-")) {
+        if (goto === "start-bot") {
+          document.getElementById("daemon-toggle").click();
+        } else if (goto.startsWith("settings-")) {
           switchTab("settings");
           switchSettingsTab(goto);
           if (goto === "settings-tg-quick") loadTelegramWatch();
@@ -1651,9 +1659,9 @@ const render = {
       void statsRow.offsetWidth;
       statsRow.classList.add("content-fade-in");
       statsRow.innerHTML = `
-        <div class="stat-card"><div class="value" data-target="${stats.day}">0</div><div class="label">Сегодня</div></div>
-        <div class="stat-card"><div class="value" data-target="${stats.week}">0</div><div class="label">За неделю</div></div>
-        <div class="stat-card"><div class="value" data-target="${stats.month}">0</div><div class="label">За месяц</div></div>
+        <div class="stat-card"><div class="value" data-target="${stats.day}">0</div><div class="label">откликов сегодня</div></div>
+        <div class="stat-card"><div class="value" data-target="${stats.week}">0</div><div class="label">за неделю</div></div>
+        <div class="stat-card"><div class="value" data-target="${stats.month}">0</div><div class="label">за месяц</div></div>
       `;
       statsRow.querySelectorAll(".value").forEach((el) => {
         countUp(el, parseInt(el.dataset.target, 10));
@@ -3486,6 +3494,27 @@ async function saveOutreachSettings() {
   }
 }
 
+// Что бот делает прямо сейчас — видно с любой страницы, клик ведёт туда.
+async function updateActivity() {
+  if (document.visibilityState !== "visible") return;
+  let items;
+  try {
+    items = await api("/api/activity");
+  } catch (e) {
+    return;
+  }
+  const el = document.getElementById("activity");
+  el.innerHTML = items
+    .map(
+      (a) => `<button type="button" class="activity-item" data-activity-view="${a.view}">
+        <span class="activity-spin" aria-hidden="true"></span>
+        <span>${escapeHtml(a.text)}${a.source ? " " + escapeHtml(sourceLabel(a.source)) : ""}${a.total ? ` · ${a.done}/${a.total}` : ""}</span>
+      </button>`
+    )
+    .join("");
+  el.querySelectorAll("[data-activity-view]").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.activityView)));
+}
+
 // «Подключения»: сервисы (то же, что «Готовность» на Главной) и
 // площадки — вход, пауза после капчи, последняя ошибка.
 async function loadAccounts() {
@@ -4170,6 +4199,8 @@ function initDashboard() {
   });
 
   initSidebarCollapse();
+  updateActivity();
+  setInterval(updateActivity, 4000);
   initSettingsDirtyTracking();
   initCommandPalette();
   initKeyboardShortcuts();

@@ -1193,8 +1193,8 @@ def get_todo(ctx: AppContext = Depends(get_ctx)) -> dict:
     interviews = [e for e in entries if effective_stage(e) == "interview"]
     if interviews:
         items.append({
-            "id": "interviews", "count": len(interviews), "view": "history",
-            "text": _plural(len(interviews), "интервью", "интервью", "интервью") + " — подготовьтесь: «Действия» → подготовка и тренажёр",
+            "id": "interviews", "count": len(interviews), "view": "replies",
+            "text": _plural(len(interviews), "интервью", "интервью", "интервью") + " — «Подготовиться» у каждого во «Входящих»",
         })
     new_contacts = [
         c for c in get_contacts(ctx) if c["status"] == "new" and c["contacts"]
@@ -1236,24 +1236,21 @@ def _setup_checklist(ctx: AppContext) -> list[dict]:
     tg_logged_in = (ctx.output_folder / ".telegram_session.session").exists()
     profile_file = data_folder / "job_application_profile.yaml"
     profile = ConfigValidator.load_yaml(profile_file) if profile_file.exists() else {}
+    # Порядок — это порядок шагов мастера на Главной: от резюме до «Запустить».
     checks = [
         ("resume", "Резюме", (data_folder / RESUME_PDF).exists(),
          "загрузите PDF — по нему пишутся письма и отклики", "resume"),
         ("llm", "Ключ ИИ", bool(ctx.llm_api_key),
-         "нужен для писем и подбора вакансий", "settings-llm"),
-        ("daemon", "Бот запущен", ctx.scheduler_thread is not None and ctx.scheduler_thread.is_alive(),
-         "нажмите «▶ Запустить» вверху — без этого поиск и Telegram не работают", ""),
-        ("bot", "CrossJob-бот", bot_credentials(ctx.config) is not None,
-         "сюда приходят вакансии с кнопками и ответы HR", "settings-notifications"),
-        ("schedule", "Площадки в расписании", any((ctx.config.get(n) or {}).get("schedule_enabled") for n, _ in ALL_SOURCES),
-         "поставьте галочку на карточке площадки ниже", ""),
+         "нужен для писем и подбора вакансий — бесплатный ключ получается за минуту", "settings-llm"),
+        ("schedule", "Площадки", any((ctx.config.get(n) or {}).get("schedule_enabled") for n, _ in ALL_SOURCES),
+         "выберите режим «Откликается сам» или «Только ищет» на карточках площадок ниже", ""),
         ("salary", "Зарплатные ожидания",
          bool(ctx.config.get("salary_expectations") or (
              profile.get("salary_expectations") or {}
          ).get("salary_range_usd")),
          "нужны для подбора вакансий и ответов на анкеты", "settings-table"),
-        ("gmail", "Почта Gmail", bool((secrets.get("email") or {}).get("app_password")),
-         "для рассылки компаниям с резюме во вложении", "settings-outreach"),
+        ("bot", "CrossJob-бот", bot_credentials(ctx.config) is not None,
+         "сюда приходят вакансии с кнопками и ответы HR", "settings-notifications"),
         ("telegram", "Вход в Telegram", tg_logged_in,
          "чтобы читать каналы с вакансиями", "telegram"),
     ]
@@ -1262,6 +1259,12 @@ def _setup_checklist(ctx: AppContext) -> list[dict]:
             ("watch", "Telegram-парсер", bool(telegram.get("watch_enabled")) and bool(telegram.get("channels")),
              "включите и добавьте каналы — вакансии будут приходить за секунды", "settings-tg-quick")
         )
+    checks += [
+        ("gmail", "Почта Gmail", bool((secrets.get("email") or {}).get("app_password")),
+         "для рассылки компаниям с резюме во вложении", "settings-outreach"),
+        ("daemon", "Запустить бота", ctx.scheduler_thread is not None and ctx.scheduler_thread.is_alive(),
+         "бот начнёт искать вакансии и следить за каналами", "start-bot"),
+    ]
     items = [
         {"id": i, "label": label, "ok": ok, "hint": "" if ok else hint, "goto": goto}
         for i, label, ok, hint, goto in checks
@@ -3196,6 +3199,25 @@ def get_run_now_status(ctx: AppContext = Depends(get_ctx)) -> dict:
         "current_source": ctx.run_now_current_source if running else None,
         "stopping": stopping,
     }
+
+
+@app.get("/api/activity")
+def get_activity(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
+    """Что бот делает прямо сейчас — для индикатора в меню (лёгкий опрос,
+    без чтения базы): рассылки, разбор файла, «Запустить сейчас»."""
+    items = []
+    campaigns = CampaignStore(ctx.output_folder).all()
+    kind_text = {"prepare": "Пишу письма", "send": "Отправляю письма", "followups": "Отправляю напоминания"}
+    for cid, job in list(CampaignJob.RUNNING.items()):
+        name = (campaigns.get(cid) or {}).get("name", "")
+        items.append({"text": f"{kind_text.get(job.kind, job.kind)} — {name}", "done": job.done,
+                      "total": len(job.emails), "view": "outreach"})
+    for job in IMPORT_JOBS.values():
+        if job["state"] == "running":
+            items.append({"text": f"Разбираю {job['filename']}", "done": job["done"], "total": job["total"], "view": "contacts"})
+    if ctx.run_now_thread is not None and ctx.run_now_thread.is_alive() and ctx.run_now_current_source:
+        items.append({"text": "Проверяю площадку", "source": ctx.run_now_current_source, "done": 0, "total": 0, "view": "overview"})
+    return items
 
 
 @app.post("/api/notifications/test")

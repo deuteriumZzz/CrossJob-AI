@@ -198,7 +198,8 @@ def test_edit_and_skip_campaign_letter(client):  # noqa: F811
 
 def test_setup_checklist_points_to_fix(client):  # noqa: F811
     setup = {c["id"]: c for c in client.get("/api/todo").json()["setup"]}
-    assert setup["daemon"]["ok"] is False and "Запустить" in setup["daemon"]["hint"]
+    assert setup["daemon"]["ok"] is False and setup["daemon"]["goto"] == "start-bot"
+    assert list(setup)[0] == "resume" and list(setup)[-1] == "daemon"  # шаги мастера по порядку
     assert setup["gmail"]["ok"] is False and setup["gmail"]["goto"] == "settings-outreach"
     assert "watch" not in setup  # без входа в Telegram пункт про каналы не показываем
 
@@ -333,3 +334,43 @@ def test_company_blacklist_applies_to_base(client):  # noqa: F811
     ctx.config["company_blacklist"] = ["Ромашка"]
     assert client.get("/api/contacts").json()[0]["status"] == "skip"
     assert client.get("/api/campaigns").json()["available"] == 0
+
+
+def test_campaign_bot_buttons(client, monkeypatch):  # noqa: F811
+    ctx = api.get_ctx()
+    store = camp.CampaignStore(ctx.output_folder)
+    cid = store.create("Осень", [{"key": "a", "email": "a@x.io", "company": "A"},
+                                  {"key": "b", "email": "b@x.io", "company": "B"}])
+    drafts = DraftStore(ctx.output_folder / main.HR_DRAFTS_FILE)
+    for email in ("a@x.io", "b@x.io"):
+        code = drafts.add(email, "Hello", "email", "", channel="email", subject="S", campaign=cid)
+        store.update_item(cid, email, status="draft", code=code)
+    calls = []
+    monkeypatch.setattr(main, "bot_request", lambda token, method, payload: calls.append((method, payload)) or {})
+    cb = lambda data: {"id": "1", "data": data, "message": {"chat": {"id": 1}, "message_id": 5}}  # noqa: E731
+
+    main._handle_vacancy_button(ctx.config, "", "tok", cb(f"cv:{cid}:d"))
+    shown = [p for m, p in calls if m == "sendMessage"]
+    assert len(shown) == 2 and shown[0]["reply_markup"]["inline_keyboard"][0][0]["text"] == "✅ Отправить"
+
+    main._handle_vacancy_button(ctx.config, "", "tok", cb(f"x:{store.get(cid)['items']['a@x.io']['code']}"))
+    assert store.get(cid)["items"]["a@x.io"]["status"] == "skipped"
+
+    started = []
+    monkeypatch.setattr(main, "start_campaign_job", lambda p, k, c, kind, *a: started.append((c, kind)))
+    main._handle_vacancy_button(ctx.config, "", "tok", cb(f"cs:{cid}"))
+    assert started == [(cid, "send")]
+
+
+def test_activity_shows_running_work(client):  # noqa: F811
+    ctx = api.get_ctx()
+    cid = camp.CampaignStore(ctx.output_folder).create("Осень", [{"key": "a", "email": "a@x.io", "company": "A"}])
+    job = camp.CampaignJob(cid, "send", ["a@x.io"], lambda e: None, pause=False)
+    camp.CampaignJob.RUNNING[cid] = job
+    api.IMPORT_JOBS["t1"] = {"state": "running", "stage": "", "done": 2, "total": 5, "filename": "big.pdf"}
+    try:
+        texts = [a["text"] for a in client.get("/api/activity").json()]
+        assert texts == ["Отправляю письма — Осень", "Разбираю big.pdf"]
+    finally:
+        camp.CampaignJob.RUNNING.pop(cid, None)
+        api.IMPORT_JOBS.pop("t1", None)
