@@ -281,6 +281,9 @@ def get_ctx() -> AppContext:
     if _ctx is None:
         try:
             _ctx = AppContext(_data_folder)
+            from src.utils.backup import daily_backup
+
+            daily_backup(_ctx.output_folder)  # и без запущенного бота
         except (FileNotFoundError, ConfigError) as e:
             raise HTTPException(
                 428,
@@ -946,6 +949,8 @@ def _contact_status(contact: dict, conversations, entries, drafts, campaign=None
     value = contact["value"].lower()
     if campaign and value in campaign.get("replied", ()):
         return "replied"
+    if campaign and value in campaign.get("bounced", ()):
+        return "bounced"
     if any(d["contact"].lower() == value for d in drafts.values()):
         return "draft"
     if campaign and value in campaign.get("sent", ()):
@@ -965,7 +970,41 @@ def _contact_status(contact: dict, conversations, entries, drafts, campaign=None
     return "new"
 
 
-_STATUS_ORDER = ["new", "draft", "written", "replied"]
+_STATUS_ORDER = ["new", "bounced", "draft", "written", "replied"]
+
+
+def _contact_events(ctx: AppContext, conversations, entries, drafts) -> dict[str, list[dict]]:
+    """История по каждому контакту (email/@ник → [{at, text}]) — для
+    «последнего действия» и истории в карточке компании."""
+    events: dict[str, list[dict]] = {}
+
+    def add(value: str, at: str, text: str) -> None:
+        if value and at:
+            events.setdefault(value.lower(), []).append({"at": at, "text": text})
+
+    for campaign in CampaignStore(ctx.output_folder).all().values():
+        for email, item in campaign["items"].items():
+            add(email, item.get("sent_at", ""), "письмо отправлено")
+            add(email, item.get("followed_up_at", ""), "напоминание отправлено")
+            add(email, item.get("replied_at", ""), "ответили на письмо")
+            if item["status"] == "bounced":
+                add(email, item.get("sent_at", ""), "письмо не дошло (возврат)")
+    for draft in drafts.values():
+        add(draft["contact"], draft.get("created_at", ""), "черновик ждёт отправки")
+    for conv in conversations.all():
+        for m in conv["messages"]:
+            add(conv["contact"], m["at"], "ответ в Telegram" if m["direction"] == "in" else "написали в Telegram")
+    for e in entries:
+        add(e.get("outreach_email", ""), e.get("outreach_sent_at", ""), "письмо HR по вакансии")
+    for history in events.values():
+        history.sort(key=lambda ev: ev["at"])
+    return events
+
+
+def _source_kind(source: str) -> str:
+    """Для фильтра и значка в базе: file / telegram / dossier / vacancy."""
+    group = _source_group(source)
+    return {"Telegram-каналы": "telegram", "Досье компаний": "dossier", "Тексты вакансий": "vacancy"}.get(group, "file")
 
 
 @app.get("/api/contacts")
@@ -983,20 +1022,99 @@ def get_contacts(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
     drafts = DraftStore(ctx.output_folder / HR_DRAFTS_FILE).all()
     campaigns = CampaignStore(ctx.output_folder)
     campaign = {
-        "sent": campaigns.emails_with_status("sent", "bounced", "failed"),
+        "sent": campaigns.emails_with_status("sent", "failed"),
+        "bounced": campaigns.emails_with_status("bounced"),
         "replied": campaigns.emails_with_status("replied"),
     }
+    events = _contact_events(ctx, conversations, entries, drafts)
     cards = []
     for key, card in book.all().items():
         contacts = [
-            {**c, "status": _contact_status(c, conversations, entries, drafts, campaign)}
+            {**c, "status": _contact_status(c, conversations, entries, drafts, campaign),
+             "source_kind": _source_kind(c.get("source", ""))}
             for c in card["contacts"]
         ]
         status = max(
             (c["status"] for c in contacts), key=_STATUS_ORDER.index, default="new"
         )
-        cards.append({"key": key, **card, "contacts": contacts, "status": status})
+        if card.get("do_not_contact"):
+            status = "skip"
+        history = sorted(
+            [{"at": c.get("found_at", ""), "text": f"добавлен {c['value']} — {c.get('source') or 'источник не указан'}"} for c in card["contacts"]]
+            + [ev for c in card["contacts"] for ev in events.get(c["value"].lower(), [])],
+            key=lambda ev: ev["at"],
+        )
+        primary = next((c for c in contacts if c["kind"] == "email"), contacts[0] if contacts else None)
+        cards.append({
+            "key": key, **card, "contacts": contacts, "status": status,
+            "primary": primary,
+            "hr": next((c["name"] for c in contacts if c.get("name")), ""),
+            "source_kinds": sorted({c["source_kind"] for c in contacts}),
+            "history": history,
+            "last": history[-1] if history else None,
+        })
     return sorted(cards, key=lambda c: c.get("updated_at", ""), reverse=True)
+
+
+class ContactsBulk(BaseModel):
+    keys: list[str]
+    action: str  # skip / unskip / delete
+
+
+@app.post("/api/contacts/bulk")
+def post_contacts_bulk(body: ContactsBulk, ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Действия над выбранными компаниями базы. delete возвращает
+    удалённые карточки — UI может «Отменить» через /api/contacts/restore."""
+    book = ContactBook(ctx.output_folder)
+    if body.action in ("skip", "unskip"):
+        book.update(body.keys, do_not_contact=body.action == "skip")
+        return {"ok": True}
+    if body.action == "delete":
+        return {"removed": book.delete(body.keys)}
+    raise HTTPException(400, "Неизвестное действие")
+
+
+class ContactsRestore(BaseModel):
+    cards: list[dict]
+
+
+@app.post("/api/contacts/restore")
+def post_contacts_restore(body: ContactsRestore, ctx: AppContext = Depends(get_ctx)) -> dict:
+    ContactBook(ctx.output_folder).restore(body.cards)
+    return {"ok": True}
+
+
+_STATUS_TEXT = {
+    "new": "не писали", "bounced": "возврат", "draft": "черновик",
+    "written": "написали", "replied": "ответили", "skip": "не писать",
+}
+
+
+@app.get("/api/contacts/export")
+def get_contacts_export(ctx: AppContext = Depends(get_ctx)) -> Response:
+    """База в CSV для Excel/Google Таблиц. Те же заголовки понимает импорт —
+    можно поправить в Excel и загрузить обратно."""
+    import csv
+    import io
+
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=";")
+    writer.writerow(["Компания", "Email", "Telegram", "Имя HR", "Сайт", "Упор", "Источник", "Статус", "Последнее действие", "Дата"])
+    for card in get_contacts(ctx):
+        by_kind = lambda kind: ", ".join(c["value"] for c in card["contacts"] if c["kind"] == kind)  # noqa: E731
+        last = card["last"] or {}
+        writer.writerow([
+            card.get("company", ""), by_kind("email"), by_kind("telegram"), card["hr"],
+            card.get("website", ""), card.get("emphasis", ""),
+            "; ".join(sorted({c.get("source", "") for c in card["contacts"]})),
+            _STATUS_TEXT.get(card["status"], card["status"]), last.get("text", ""), (last.get("at") or "")[:10],
+        ])
+    name = f"crossjob-companies-{datetime.now().strftime('%Y-%m-%d')}.csv"
+    # utf-8-sig — чтобы Excel открыл кириллицу без «кракозябр».
+    return Response(
+        buf.getvalue().encode("utf-8-sig"), media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={name}"},
+    )
 
 
 class DossierRequest(BaseModel):
@@ -1353,6 +1471,8 @@ def get_campaigns(ctx: AppContext = Depends(get_ctx)) -> dict:
     sources: dict[str, int] = {}
     available = 0
     for card in get_contacts(ctx):
+        if card["status"] == "skip":
+            continue  # «не писать» — в рассылки не попадает
         email = next(
             (c for c in card["contacts"] if c["kind"] == "email" and c["status"] == "new"
              and c["value"].lower() not in in_campaigns),
@@ -1387,6 +1507,7 @@ def _source_group(source: str) -> str:
 class CampaignCreate(BaseModel):
     name: str = ""
     source: str = ""  # "" — все источники
+    keys: list[str] = []  # выбранные в базе компании; пусто — все подходящие
 
 
 @app.post("/api/campaigns")
@@ -1396,17 +1517,21 @@ def post_campaign(body: CampaignCreate, ctx: AppContext = Depends(get_ctx)) -> d
     in_campaigns = set().union(*[set(c["items"]) for c in store.all().values()]) if store.all() else set()
     targets = []
     for card in get_contacts(ctx):
+        if card["status"] == "skip":
+            continue  # «не писать» — в рассылки не попадает
         email = next(
             (c for c in card["contacts"] if c["kind"] == "email" and c["status"] == "new"
              and c["value"].lower() not in in_campaigns
              and (not body.source or _source_group(c.get("source", "")) == body.source)),
             None,
         )
-        if email:
+        if email and (not body.keys or card["key"] in body.keys):
             targets.append({"key": card["key"], "email": email["value"], "company": card["company"] or email["value"]})
     if not targets:
-        raise HTTPException(400, "Нет компаний с email, которым вы ещё не писали")
-    name = body.name.strip() or f"{body.source or 'Все источники'} — {datetime.now().strftime('%d.%m %H:%M')}"
+        raise HTTPException(400, "Среди выбранных нет компаний с email, которым вы ещё не писали" if body.keys
+                            else "Нет компаний с email, которым вы ещё не писали")
+    label = f"Выбранные ({len(targets)})" if body.keys else body.source or "Все источники"
+    name = body.name.strip() or f"{label} — {datetime.now().strftime('%d.%m %H:%M')}"
     return _campaign_view(ctx, store.get(store.create(name, targets)))
 
 

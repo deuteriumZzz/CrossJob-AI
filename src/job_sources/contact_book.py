@@ -34,6 +34,27 @@ _LINKEDIN_RE = re.compile(
 )
 
 
+# Общие почтовые сервисы — по ним компанию не узнать.
+_FREE_MAIL = {
+    "gmail.com", "googlemail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com",
+    "proton.me", "protonmail.com", "mail.ru", "bk.ru", "list.ru", "inbox.ru", "yandex.ru",
+    "ya.ru", "yandex.com", "rambler.ru", "gmx.com", "aol.com", "live.com",
+}
+
+
+def _domain(value: str) -> str:
+    """acme.io из «https://www.acme.io/jobs» или «hr@acme.io»; пусто для gmail и т.п."""
+    value = value.strip().lower()
+    host = value.split("@", 1)[1] if "@" in value else re.sub(r"^[a-z]+://", "", value).split("/")[0]
+    host = host.removeprefix("www.")
+    return "" if not host or "." not in host or host in _FREE_MAIL else host
+
+
+def _card_domains(card: dict) -> set[str]:
+    values = [card.get("website") or ""] + [c["value"] for c in card["contacts"] if c["kind"] == "email"]
+    return {d for d in map(_domain, values) if d}
+
+
 def company_key(company: str) -> str:
     text = _LEGAL_FORMS_RE.sub(" ", company.casefold())
     return _NON_WORD_RE.sub(" ", text).strip()
@@ -101,6 +122,13 @@ class ContactBook:
         now = datetime.now().astimezone().isoformat()
         with state_file_lock(self.path):
             data = self._load()
+            if key not in data["companies"]:
+                # «Acme», «ACME LLC» и acme.io — одна компания: ищем по домену
+                # сайта/почты, иначе одной компании ушло бы два письма.
+                incoming = _card_domains({"website": website, "contacts": contacts})
+                key = next(
+                    (k for k, c in data["companies"].items() if incoming & _card_domains(c)), key
+                )
             card = data["companies"].setdefault(
                 key,
                 {
@@ -134,6 +162,31 @@ class ContactBook:
 
     def all(self) -> dict:
         return self._load()["companies"]
+
+    def update(self, keys: list[str], **fields) -> None:
+        """Поля нескольких компаний сразу (например, do_not_contact)."""
+        with state_file_lock(self.path):
+            data = self._load()
+            for key in keys:
+                if key in data["companies"]:
+                    data["companies"][key].update(fields)
+            self._save(data)
+
+    def delete(self, keys: list[str]) -> list[dict]:
+        """Удаляет компании, возвращает удалённые — для «Отменить»."""
+        with state_file_lock(self.path):
+            data = self._load()
+            removed = [{"key": k, **data["companies"].pop(k)} for k in keys if k in data["companies"]]
+            self._save(data)
+        return removed
+
+    def restore(self, cards: list[dict]) -> None:
+        with state_file_lock(self.path):
+            data = self._load()
+            for card in cards:
+                card = dict(card)
+                data["companies"][card.pop("key")] = card
+            self._save(data)
 
     def get(self, key: str) -> dict | None:
         return self.all().get(key)

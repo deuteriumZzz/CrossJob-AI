@@ -330,9 +330,9 @@ const NAV_GROUPS = {
     ["replies", "Входящие"],
     ["telegram", "Telegram-парсер"],
   ],
-  outreach: [
-    ["outreach", "Рассылка"],
-    ["contacts", "База компаний"],
+  contacts: [
+    ["contacts", "База"],
+    ["outreach", "Рассылки"],
   ],
   analytics: [["analytics", "Аналитика"]],
   settings: [
@@ -666,15 +666,25 @@ const CONTACT_KIND = {
   email: { icon: "✉️", label: "Email" },
   linkedin: { icon: "in", label: "LinkedIn" },
 };
+// Один язык статусов для базы, рассылки и входящих: слово + цвет.
 const CONTACT_STATUS = {
   new: "не писали",
-  draft: "черновик ✍️",
+  draft: "черновик",
   written: "написали",
-  replied: "ответили 🟢",
+  replied: "ответили",
+  bounced: "возврат",
+  skip: "не писать",
+};
+const SOURCE_KIND = {
+  file: "📄 мой файл",
+  telegram: "✈️ Telegram",
+  dossier: "🔎 сайт компании",
+  vacancy: "💼 вакансия",
 };
 let lastContacts = [];
 let focusContactKey = null;
-let contactsShown = 30;
+let contactsShown = 50;
+const baseState = { status: "", sort: "last", dir: -1, selected: new Set(), open: new Set() };
 
 function contactHref(c) {
   if (c.kind === "telegram") return `https://t.me/${encodeURIComponent(c.value)}`;
@@ -682,110 +692,164 @@ function contactHref(c) {
   return c.value;
 }
 
-// Откуда контакт — те же группы, что _source_group в api.py.
-function contactSourceGroup(source = "") {
-  if (source.startsWith("файл ")) return "file";
-  if (source.startsWith("пост в @")) return "telegram";
-  if (source.startsWith("сайт") || source.startsWith("Hunter")) return "dossier";
-  return "vacancy";
+// «сегодня 14:30», «вчера», «25 сент.» — вместо 24.09.2026, 23:56:02.
+function fmtDay(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const days = Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 864e5);
+  const time = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  if (days === 0) return `сегодня ${time}`;
+  if (days === 1) return `вчера ${time}`;
+  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: days > 300 ? "numeric" : undefined });
 }
 
-function renderContactsSummary() {
-  const withEmail = lastContacts.filter((card) => card.contacts.some((c) => c.kind === "email"));
-  const notWritten = withEmail.filter((card) => card.contacts.some((c) => c.kind === "email" && c.status === "new"));
-  document.getElementById("contacts-summary").innerHTML = `
-    <span>Компаний: <b>${lastContacts.length}</b> · с email: <b>${withEmail.length}</b> · не писали: <b>${notWritten.length}</b></span>
-    ${notWritten.length ? `<button type="button" class="btn btn-primary btn-small" data-goto-outreach>✉️ Написать тем, кому не писали →</button>` : ""}`;
-  document.querySelector("#contacts-summary [data-goto-outreach]")?.addEventListener("click", () => switchTab("outreach"));
+function statusPill(status) {
+  return `<span class="status-pill st-${status}">${CONTACT_STATUS[status] || status}</span>`;
 }
 
 function renderContactsList() {
-  renderContactsSummary();
   const el = document.getElementById("contacts-list");
-  const status = document.getElementById("contacts-filter-status").value;
-  const kind = document.getElementById("contacts-filter-kind").value;
   const source = document.getElementById("contacts-filter-source").value;
   const query = document.getElementById("contacts-filter-query").value.trim().toLowerCase();
-  const sort = document.getElementById("contacts-sort").value;
-  const STATUS_RANK = { replied: 0, draft: 1, new: 2, written: 3 };
+
+  // Счётчики — они же фильтры по статусу.
+  const counts = {};
+  lastContacts.forEach((c) => (counts[c.status] = (counts[c.status] || 0) + 1));
+  const chips = [["", "Все", lastContacts.length], ...Object.entries(CONTACT_STATUS).map(([k, t]) => [k, t, counts[k] || 0])]
+    .filter(([k, , n]) => !k || n);
+  const chipBox = document.getElementById("base-chips");
+  chipBox.innerHTML = chips
+    .map(([k, label, n]) => `<button type="button" class="chip${k === baseState.status ? " active" : ""}" data-status="${k}">${label} <b>${n}</b></button>`)
+    .join("");
+  chipBox.querySelectorAll("[data-status]").forEach((b) =>
+    b.addEventListener("click", () => {
+      baseState.status = b.dataset.status;
+      renderContactsList();
+    })
+  );
+
+  if (!lastContacts.length) {
+    el.innerHTML = `<tr><td colspan="7">${emptyStateHtml("База пока пуста. Загрузите свой список компаний кнопкой «📥 Загрузить файл» — или включите Telegram-парсер: он сам добавляет HR из постов.")}</td></tr>`;
+    renderBaseBulk();
+    return;
+  }
   const filtered = lastContacts.filter((card) => {
-    if (status && card.status !== status) return false;
-    if (kind && !card.contacts.some((c) => c.kind === kind)) return false;
-    if (source && !card.contacts.some((c) => contactSourceGroup(c.source) === source)) return false;
+    if (baseState.status && card.status !== baseState.status) return false;
+    if (source && !card.source_kinds.includes(source)) return false;
     if (!query) return true;
-    return [card.company, ...card.vacancies.map((v) => v.title)]
+    return [card.company, card.hr, card.website, ...card.contacts.map((c) => c.value), ...card.vacancies.map((v) => v.title)]
       .filter(Boolean)
       .some((v) => v.toLowerCase().includes(query));
   });
-  if (!lastContacts.length) {
-    el.innerHTML = emptyStateHtml(
-      "Пока пусто. Контакты появятся, когда площадки найдут вакансии с контактом HR — Telegram-каналы, «Прямой поиск» и другие."
-    );
-    return;
-  }
+  const key = {
+    company: (c) => (c.company || c.primary?.value || "").toLowerCase(),
+    status: (c) => Object.keys(CONTACT_STATUS).indexOf(c.status),
+    added: (c) => c.created_at || "",
+    last: (c) => c.last?.at || "",
+  }[baseState.sort];
+  filtered.sort((a, b) => (key(a) > key(b) ? 1 : key(a) < key(b) ? -1 : 0) * baseState.dir);
+  document.querySelectorAll("#base-table th[data-sort]").forEach((th) => {
+    th.classList.toggle("sorted", th.dataset.sort === baseState.sort);
+    th.dataset.dir = th.dataset.sort === baseState.sort ? (baseState.dir > 0 ? "↑" : "↓") : "";
+  });
   if (!filtered.length) {
-    el.innerHTML = emptyStateHtml("Ничего не найдено.");
+    el.innerHTML = `<tr><td colspan="7">${emptyStateHtml("Ничего не найдено.")}</td></tr>`;
+    renderBaseBulk();
     return;
   }
-  if (sort === "status") {
-    filtered.sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status]);
-  }
-  const cards = filtered.slice(0, contactsShown);
-  el.innerHTML = cards
-    .map(
-      (card) => `
-    <div class="panel contact-card${card.key === focusContactKey ? " is-focused" : ""}" data-card-key="${escapeHtml(card.key)}">
-      <div class="contact-card-head">
-        <strong>${escapeHtml(card.company || card.contacts[0]?.value || "Без названия")}
-          ${card.website ? `<a class="muted small" href="${escapeHtml(card.website)}" target="_blank" rel="noopener">${escapeHtml(card.website.replace(/^https?:\/\//, "").replace(/\/$/, ""))}</a>` : ""}
-        </strong>
-        <span>
-          <span class="muted small">${CONTACT_STATUS[card.status]}</span>
-          ${card.company ? `${card.website ? "" : `<input type="text" class="dossier-site" placeholder="сайт компании" aria-label="Сайт компании" />`}
-          <button type="button" class="btn btn-ghost btn-small" data-dossier data-key="${escapeHtml(card.key)}" title="Найти контакты на сайте компании${""} и через Hunter">🔎 Досье</button>` : ""}
-        </span>
-      </div>
-      ${card.vacancies
-        .slice(-2)
-        .map(
-          (v) => `<div class="muted small">${sourceIconHtml(v.source)}<a href="${escapeHtml(v.link)}" target="_blank" rel="noopener">${escapeHtml(v.title || v.link)}</a></div>`
-        )
-        .join("")}
-      <div class="contact-rows">
-        ${card.contacts
-          .map(
-            (c) => `
-          <div class="contact-row">
-            <span>${CONTACT_KIND[c.kind]?.icon || "•"} <a href="${escapeHtml(contactHref(c))}" target="_blank" rel="noopener">${escapeHtml(c.kind === "telegram" ? "@" + c.value : c.value)}</a>
-              ${c.name ? `<span class="muted small">${escapeHtml(c.name)}${c.position ? ", " + escapeHtml(c.position) : ""}</span>` : ""}
-              <span class="muted small">— ${escapeHtml(c.source || "")}${c.found_at ? ", " + fmtTime(c.found_at).split(",")[0] : ""}</span>
-            </span>
-            <span>
-              <span class="muted small">${CONTACT_STATUS[c.status]}</span>
-              ${
-                (c.kind === "telegram" || c.kind === "email") && c.status === "new"
-                  ? `<button type="button" class="btn btn-secondary btn-small" data-contact-draft data-key="${escapeHtml(card.key)}" data-kind="${c.kind}" data-value="${escapeHtml(c.value)}">✍️ ${c.kind === "email" ? "Черновик письма" : "Черновик сообщения"}</button>`
-                  : ""
-              }
-            </span>
-          </div>`
-          )
-          .join("")}
-      </div>
-    </div>`
-    )
-    .join("") +
-    (filtered.length > cards.length
-      ? `<button type="button" class="btn btn-secondary" id="contacts-more" style="width:100%;justify-content:center">Показать ещё (${filtered.length - cards.length})</button>`
+  const rows = filtered.slice(0, contactsShown);
+  el.innerHTML =
+    rows
+      .map((card) => {
+        const p = card.primary;
+        const more = card.contacts.length - 1;
+        const open = baseState.open.has(card.key) || card.key === focusContactKey;
+        return `
+      <tr class="base-row${open ? " is-open" : ""}${card.key === focusContactKey ? " is-focused" : ""}" data-card-key="${escapeHtml(card.key)}">
+        <td class="base-check"><input type="checkbox" data-select="${escapeHtml(card.key)}" aria-label="Выбрать" ${baseState.selected.has(card.key) ? "checked" : ""} /></td>
+        <td><strong>${escapeHtml(card.company || p?.value || "Без названия")}</strong>
+          ${card.website ? `<div class="muted small">${escapeHtml(card.website.replace(/^https?:\/\//, "").replace(/\/$/, ""))}</div>` : ""}</td>
+        <td>${p ? `${CONTACT_KIND[p.kind]?.icon || "•"} ${escapeHtml(p.kind === "telegram" ? "@" + p.value : p.value)}` : "—"}${more > 0 ? ` <span class="muted small">+${more}</span>` : ""}
+          ${card.hr ? `<div class="muted small">${escapeHtml(card.hr)}</div>` : ""}</td>
+        <td class="small col-source">${card.source_kinds.map((k) => SOURCE_KIND[k]).join("<br>")}</td>
+        <td>${statusPill(card.status)}</td>
+        <td class="small">${card.last ? `${escapeHtml(truncate(card.last.text, 60))}<div class="muted">${fmtDay(card.last.at)}</div>` : "—"}</td>
+        <td class="base-toggle" aria-hidden="true">${open ? "▾" : "▸"}</td>
+      </tr>
+      ${open ? `<tr class="base-detail"><td colspan="7">${baseDetailHtml(card)}</td></tr>` : ""}`;
+      })
+      .join("") +
+    (filtered.length > rows.length
+      ? `<tr><td colspan="7"><button type="button" class="btn btn-secondary" id="contacts-more" style="width:100%;justify-content:center">Показать ещё (${filtered.length - rows.length})</button></td></tr>`
       : "");
   document.getElementById("contacts-more")?.addEventListener("click", () => {
-    contactsShown += 30;
+    contactsShown += 50;
     renderContactsList();
   });
   if (focusContactKey) {
-    el.querySelector(".contact-card.is-focused")?.scrollIntoView({ block: "center", behavior: REDUCE_MOTION ? "auto" : "smooth" });
+    el.querySelector(".base-row.is-focused")?.scrollIntoView({ block: "center", behavior: REDUCE_MOTION ? "auto" : "smooth" });
+    baseState.open.add(focusContactKey);
     focusContactKey = null;
   }
+  el.querySelectorAll(".base-row").forEach((row) =>
+    row.addEventListener("click", (e) => {
+      if (e.target.closest("input, a, button")) return;
+      const k = row.dataset.cardKey;
+      baseState.open.has(k) ? baseState.open.delete(k) : baseState.open.add(k);
+      renderContactsList();
+    })
+  );
+  el.querySelectorAll("[data-select]").forEach((box) =>
+    box.addEventListener("change", () => {
+      box.checked ? baseState.selected.add(box.dataset.select) : baseState.selected.delete(box.dataset.select);
+      renderBaseBulk();
+    })
+  );
+  const all = document.getElementById("base-select-all");
+  all.checked = rows.length > 0 && rows.every((c) => baseState.selected.has(c.key));
+  all.onchange = () => {
+    rows.forEach((c) => (all.checked ? baseState.selected.add(c.key) : baseState.selected.delete(c.key)));
+    renderContactsList();
+  };
+  bindBaseDetail(el);
+  renderBaseBulk();
+}
+
+function baseDetailHtml(card) {
+  return `
+    <div class="base-detail-grid">
+      <div>
+        <h4>Контакты</h4>
+        ${card.contacts
+          .map(
+            (c) => `<div class="contact-row">
+              <span>${CONTACT_KIND[c.kind]?.icon || "•"} <a href="${escapeHtml(contactHref(c))}" target="_blank" rel="noopener">${escapeHtml(c.kind === "telegram" ? "@" + c.value : c.value)}</a>
+                ${c.name ? `<span class="muted small">${escapeHtml(c.name)}${c.position ? ", " + escapeHtml(c.position) : ""}</span>` : ""}
+                <div class="muted small">${escapeHtml(c.source || "")}</div></span>
+              <span>${statusPill(c.status)}
+                ${(c.kind === "telegram" || c.kind === "email") && c.status === "new" && card.status !== "skip"
+                  ? `<button type="button" class="btn btn-secondary btn-small" data-contact-draft data-key="${escapeHtml(card.key)}" data-kind="${c.kind}" data-value="${escapeHtml(c.value)}">✍️ Написать</button>`
+                  : ""}</span>
+            </div>`
+          )
+          .join("")}
+        ${card.emphasis ? `<p class="small"><b>На что сделать упор:</b> ${escapeHtml(card.emphasis)}</p>` : ""}
+        ${card.vacancies.length ? `<h4>Вакансии</h4>${card.vacancies.slice(-3).map((v) => `<div class="small">${sourceIconHtml(v.source)}<a href="${escapeHtml(v.link)}" target="_blank" rel="noopener">${escapeHtml(v.title || v.link)}</a></div>`).join("")}` : ""}
+        ${card.company ? `<div class="step-actions">${card.website ? "" : `<input type="text" class="dossier-site" placeholder="сайт компании" aria-label="Сайт компании" />`}
+          <button type="button" class="btn btn-ghost btn-small" data-dossier data-key="${escapeHtml(card.key)}" title="Найти контакты на сайте компании и через Hunter">🔎 Найти ещё контакты</button></div>` : ""}
+      </div>
+      <div>
+        <h4>История</h4>
+        <ol class="base-history">${card.history
+          .slice()
+          .reverse()
+          .map((h) => `<li><span class="muted small">${fmtDay(h.at)}</span> ${escapeHtml(h.text)}</li>`)
+          .join("")}</ol>
+      </div>
+    </div>`;
+}
+
+function bindBaseDetail(el) {
   el.querySelectorAll("[data-dossier]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const site = btn.parentElement.querySelector(".dossier-site");
@@ -796,15 +860,12 @@ function renderContactsList() {
           method: "POST",
           body: JSON.stringify({ key: btn.dataset.key, website: site ? site.value.trim() : "" }),
         });
-        showToast(
-          res.added ? `Найдено новых контактов: ${res.added}` : "Новых контактов на сайте нет",
-          res.added ? "success" : "info"
-        );
+        showToast(res.added ? `Найдено новых контактов: ${res.added}` : "Новых контактов на сайте нет", res.added ? "success" : "info");
         render.contacts();
       } catch (err) {
         showToast(err.message.replace(/^\d+: /, ""), "error", 6000);
         btn.disabled = false;
-        btn.textContent = "🔎 Досье";
+        btn.textContent = "🔎 Найти ещё контакты";
       }
     });
   });
@@ -817,13 +878,76 @@ function renderContactsList() {
           method: "POST",
           body: JSON.stringify({ key: btn.dataset.key, kind: btn.dataset.kind, value: btn.dataset.value }),
         });
-        showToast("Черновик готов — проверьте и отправьте во «Входящих».", "success", 6000);
+        showToast("Черновик готов — проверьте и отправьте в «Общение → Входящие».", "success", 6000);
         render.contacts();
       } catch (err) {
         showToast(err.message.replace(/^\d+: /, ""), "error");
         btn.disabled = false;
       }
     });
+  });
+}
+
+// Панель действий над выбранными — появляется, только когда что-то отмечено.
+function renderBaseBulk() {
+  const bar = document.getElementById("base-bulk");
+  const keys = [...baseState.selected].filter((k) => lastContacts.some((c) => c.key === k));
+  baseState.selected = new Set(keys);
+  if (!keys.length) {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  const skipped = keys.every((k) => lastContacts.find((c) => c.key === k)?.status === "skip");
+  bar.innerHTML = `
+    <span>Выбрано: <b>${keys.length}</b></span>
+    <button type="button" class="btn btn-primary btn-small" data-bulk="write">✉️ Написать выбранным</button>
+    <button type="button" class="btn btn-secondary btn-small" data-bulk="${skipped ? "unskip" : "skip"}">${skipped ? "Снова можно писать" : "🚫 Не писать"}</button>
+    <button type="button" class="btn btn-ghost btn-small" data-bulk="delete">🗑 Удалить</button>
+    <button type="button" class="btn btn-ghost btn-small" data-bulk="clear">Снять выбор</button>`;
+  bar.querySelectorAll("[data-bulk]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      const action = b.dataset.bulk;
+      try {
+        if (action === "clear") {
+          baseState.selected.clear();
+        } else if (action === "write") {
+          await api("/api/campaigns", { method: "POST", body: JSON.stringify({ keys }) });
+          baseState.selected.clear();
+          showToast("Рассылка создана — подготовьте письма", "success");
+          switchTab("outreach");
+          return;
+        } else if (action === "delete") {
+          const { removed } = await api("/api/contacts/bulk", { method: "POST", body: JSON.stringify({ keys, action }) });
+          baseState.selected.clear();
+          showUndo(`Удалено компаний: ${removed.length}`, async () => {
+            await api("/api/contacts/restore", { method: "POST", body: JSON.stringify({ cards: removed }) });
+            render.contacts();
+          });
+        } else {
+          await api("/api/contacts/bulk", { method: "POST", body: JSON.stringify({ keys, action }) });
+        }
+      } catch (err) {
+        showToast(err.message.replace(/^\d+: /, ""), "error");
+      }
+      render.contacts();
+    })
+  );
+}
+
+// Удаление без «Вы уверены?»: сразу, но 10 секунд можно «Отменить».
+function showUndo(text, undo) {
+  document.getElementById("undo-bar")?.remove();
+  const bar = document.createElement("div");
+  bar.id = "undo-bar";
+  bar.className = "undo-bar";
+  bar.innerHTML = `<span>${escapeHtml(text)}</span><button type="button" class="btn btn-secondary btn-small">Отменить</button>`;
+  document.body.appendChild(bar);
+  const timer = setTimeout(() => bar.remove(), 10000);
+  bar.querySelector("button").addEventListener("click", async () => {
+    clearTimeout(timer);
+    bar.remove();
+    await undo();
   });
 }
 
@@ -3677,7 +3801,7 @@ const TOUR_STEPS = [
   { tab: "overview", text: "«Главная» — что готово к работе, что ждёт вашего решения, площадки, Telegram-парсер и рассылка." },
   { tab: "history", text: "«Вакансии» — куда бот откликнулся, этап по каждой и действия: подготовка к интервью, найти HR." },
   { tab: "replies", text: "«Общение» — ответы работодателей и переписка в Telegram, черновики ответов на подтверждение." },
-  { tab: "outreach", text: "«Рассылка» — база компаний (в т.ч. из вашего файла) и персональные письма им через Gmail." },
+  { tab: "contacts", text: "«Компании» — ваша база компаний и HR (из файла, Telegram, вакансий) и рассылки им через Gmail." },
   { tab: "analytics", text: "«Аналитика» — ответы и интервью за неделю по каждому источнику, воронка, рынок." },
   { tab: "settings", text: "«Настройки» — поиск, площадки, почта, Telegram-парсер и резюме." },
 ];
@@ -5046,7 +5170,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("contacts-filter-source").value = "telegram";
     switchTab("contacts");
   });
-  ["contacts-filter-status", "contacts-filter-source", "contacts-filter-kind", "contacts-sort"].forEach((id) =>
+  document.querySelectorAll("#base-table th[data-sort]").forEach((th) =>
+    th.addEventListener("click", () => {
+      baseState.dir = baseState.sort === th.dataset.sort ? -baseState.dir : th.dataset.sort === "company" ? 1 : -1;
+      baseState.sort = th.dataset.sort;
+      renderContactsList();
+    })
+  );
+  ["contacts-filter-source"].forEach((id) =>
     document.getElementById(id).addEventListener("change", renderContactsList)
   );
   document.getElementById("contacts-filter-query").addEventListener("input", renderContactsList);

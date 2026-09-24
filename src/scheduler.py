@@ -71,6 +71,9 @@ class Scheduler:
         return due
 
     def run_once(self) -> None:
+        from src.utils.backup import daily_backup
+
+        daily_backup(self.output_folder)
         for name in self.due_sources():
             run_at = self.now_fn()
             interval_hours = (self.parameters.get(name) or {}).get(

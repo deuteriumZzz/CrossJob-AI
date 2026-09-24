@@ -282,3 +282,46 @@ def test_campaign_reply_shows_in_inbox(client):  # noqa: F811
     store.update_item(cid, "hr@acme.io", status="replied", replied_at="2026-09-20T10:00:00+00:00")
     item = next(i for i in client.get("/api/inbox").json() if i["channel"] == "email")
     assert item["company"] == "Acme" and item["stage"] == "replied" and "from%3Ahr@acme.io" in item["link"]
+
+
+def test_daily_backup_keeps_a_week(tmp_path):
+    from datetime import date, timedelta
+
+    from src.utils.backup import daily_backup
+
+    out = tmp_path / "output"
+    out.mkdir()
+    (out / "contact_book.json").write_text("{}", encoding="utf-8")
+    start = date(2026, 9, 1)
+    for i in range(10):
+        daily_backup(out, start + timedelta(days=i))
+    assert daily_backup(out, start + timedelta(days=9)) is None  # второй раз за день — не копируем
+    days = sorted(p.name for p in (tmp_path / "backups").iterdir())
+    assert len(days) == 7 and days[-1] == "2026-09-10"
+    assert (tmp_path / "backups" / "2026-09-10" / "contact_book.json").exists()
+
+
+def test_base_bulk_actions_export_and_domain_merge(client):  # noqa: F811
+    ctx = api.get_ctx()
+    book = ContactBook(ctx.output_folder)
+    book.add("Acme", [{"kind": "email", "value": "hr@acme.io", "source": "файл a.csv, строка 2"}], website="acme.io")
+    book.add("ACME LLC", [{"kind": "email", "value": "jobs@acme.io", "source": "пост в @chan"}])  # тот же домен
+    book.add("Beta", [{"kind": "email", "value": "hr@beta.dev", "source": "текст вакансии"}])
+    cards = {c["company"]: c for c in client.get("/api/contacts").json()}
+    assert set(cards) == {"Acme", "Beta"} and len(cards["Acme"]["contacts"]) == 2
+    assert cards["Acme"]["source_kinds"] == ["file", "telegram"] and cards["Acme"]["last"]["text"].startswith("добавлен")
+
+    client.post("/api/contacts/bulk", json={"keys": [cards["Beta"]["key"]], "action": "skip"})
+    assert {c["company"]: c["status"] for c in client.get("/api/contacts").json()}["Beta"] == "skip"
+    assert client.get("/api/campaigns").json()["available"] == 1  # «не писать» в рассылку не идёт
+
+    csv_text = client.get("/api/contacts/export").content.decode("utf-8-sig")
+    assert csv_text.splitlines()[0].startswith("Компания;Email") and "не писать" in csv_text
+
+    removed = client.post("/api/contacts/bulk", json={"keys": [cards["Acme"]["key"]], "action": "delete"}).json()["removed"]
+    assert [c["company"] for c in client.get("/api/contacts").json()] == ["Beta"]
+    client.post("/api/contacts/restore", json={"cards": removed})
+    assert len(client.get("/api/contacts").json()) == 2
+
+    campaign = client.post("/api/campaigns", json={"keys": [cards["Acme"]["key"]]}).json()
+    assert campaign["stats"]["total"] == 1 and campaign["name"].startswith("Выбранные (1)")

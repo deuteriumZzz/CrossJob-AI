@@ -70,9 +70,9 @@
         <span>Общение</span>
         <span id="telegram-unread-badge" class="tab-badge" style="display:none"></span>
       </button>
-      <button data-tab="outreach" title="Рассылка — письма компаниям из вашей базы через Gmail">
+      <button data-tab="contacts" title="Компании — ваша база компаний и HR и рассылки им">
         <svg viewBox="0 0 20 20" fill="none"><rect x="2.5" y="4.5" width="15" height="11" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="m3 5.5 7 5.5 7-5.5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-        <span>Рассылка</span>
+        <span>Компании</span>
       </button>
       <button data-tab="analytics" title="Аналитика — воронка, рынок, офферы">
         <svg viewBox="0 0 20 20" fill="none"><path d="M3.5 16.5v-5M9 16.5V5.5M14.5 16.5v-8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -199,44 +199,45 @@
       <div class="view-header">
         <div>
           <h2>База компаний</h2>
-          <p class="muted">Всё, что собрано: компании и HR из вашего файла, Telegram-каналов, текстов вакансий и сайтов компаний — у каждого контакта указано, откуда он.</p>
+          <p class="muted">Все компании и HR, которых вы собрали: из своего файла, Telegram-каналов и вакансий. Нажмите на строку — контакты и история.</p>
         </div>
-        <div>
+        <div class="toolbar">
           <input type="file" id="import-file" accept=".csv,.tsv,.xlsx,.txt,.pdf,.docx" style="display:none" />
-          <button type="button" id="import-btn" class="btn btn-secondary">📥 Загрузить свой файл</button>
+          <button type="button" id="import-btn" class="btn btn-secondary">📥 Загрузить файл</button>
+          <a class="btn btn-ghost" href="/api/contacts/export" download title="Таблица для Excel или Google Таблиц — можно поправить и загрузить обратно">⬇ Скачать в Excel</a>
         </div>
       </div>
       <div id="import-preview"></div>
-      <div class="base-summary panel" id="contacts-summary"></div>
 
+      <div class="chip-group" id="base-chips" role="group" aria-label="Статус"></div>
       <div class="filters">
-        <select id="contacts-filter-status" aria-label="Статус">
-          <option value="">Любой статус</option>
-          <option value="new">Не писали</option>
-          <option value="draft">Черновик</option>
-          <option value="written">Написали</option>
-          <option value="replied">Ответили</option>
-        </select>
+        <input id="contacts-filter-query" type="text" placeholder="Поиск: компания, email, HR, вакансия" aria-label="Поиск" />
         <select id="contacts-filter-source" aria-label="Источник">
           <option value="">Любой источник</option>
-          <option value="file">Из моего файла</option>
-          <option value="telegram">Telegram</option>
-          <option value="dossier">Сайты компаний</option>
-          <option value="vacancy">Вакансии</option>
-        </select>
-        <select id="contacts-filter-kind" aria-label="Тип контакта">
-          <option value="">Любой контакт</option>
-          <option value="telegram">Telegram</option>
-          <option value="email">Email</option>
-          <option value="linkedin">LinkedIn</option>
-        </select>
-        <input id="contacts-filter-query" type="text" placeholder="Поиск по компании или вакансии" aria-label="Поиск по компании или вакансии" />
-        <select id="contacts-sort" aria-label="Сортировка">
-          <option value="recent">Сначала свежие</option>
-          <option value="status">Сначала ответившие и черновики</option>
+          <option value="file">📄 Мой файл</option>
+          <option value="telegram">✈️ Telegram</option>
+          <option value="vacancy">💼 Вакансии</option>
+          <option value="dossier">🔎 Сайты компаний</option>
         </select>
       </div>
-      <div id="contacts-list"></div>
+      <div class="base-bulk" id="base-bulk" hidden></div>
+      <div class="table-wrap">
+        <table class="base-table" id="base-table">
+          <thead>
+            <tr>
+              <th class="base-check"><input type="checkbox" id="base-select-all" aria-label="Выбрать все" /></th>
+              <th data-sort="company">Компания</th>
+              <th>Контакт</th>
+              <th class="col-source">Откуда</th>
+              <th data-sort="status">Статус</th>
+              <th data-sort="last">Последнее действие</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="contacts-list"></tbody>
+        </table>
+      </div>
+      <p class="muted small">Резервная копия базы делается сама раз в день (хранятся 7 последних).</p>
 
       <details class="panel" id="direct-companies-panel">
         <summary><strong>Отслеживаемые компании</strong> <span class="muted small">— вакансии прямо с их сайтов (площадка «Прямой поиск»)</span></summary>
