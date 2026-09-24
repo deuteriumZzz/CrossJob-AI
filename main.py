@@ -106,10 +106,6 @@ from src.job_sources.headhunter.browser_replies import (
     find_external_link,
     send_reply,
 )
-from src.job_sources.headhunter.browser_resume import (
-    clone_resume,
-    start_resume_draft,
-)
 from src.job_sources.headhunter.browser_session import HeadHunterSession
 from src.job_sources.headhunter.browser_source import HeadHunterBrowserSource
 from src.job_sources.headhunter.form_fill import (
@@ -4138,58 +4134,6 @@ def block_headhunter_employer(parameters: dict, company: str) -> bool:
             parameters, f"HeadHunter: работодатель '{company}' заблокирован."
         )
     return ok
-
-
-def clone_headhunter_resume(parameters: dict, resume_id: str) -> Optional[str]:
-    """Клонирует резюме на hh.ru кликом (браузерный аналог
-    hh-applicant-tool clone_resume.py — та операция там идёт через
-    OAuth API, здесь заменена на клик, см. browser_resume.clone_resume).
-    Вызывается ТОЛЬКО вручную из дашборда, не часть автоматического
-    цикла."""
-    output_folder: Path = parameters["outputFileDirectory"]
-    profile_dir = output_folder / ".chrome_profile_headhunter"
-    driver = init_browser(profile_dir)
-    try:
-        new_url = clone_resume(driver, resume_id)
-    finally:
-        driver.quit()
-
-    if new_url:
-        notify(parameters, f"HeadHunter: резюме склонировано — {new_url}")
-    return new_url
-
-
-def create_headhunter_resume_draft(parameters: dict) -> Optional[str]:
-    """Запускает мастер создания резюме на hh.ru с предзаполненной
-    желаемой должностью (первая из headhunter.positions/positions в
-    work_preferences.yaml) — остальное пользователь дозаполняет
-    вручную, см. browser_resume.start_resume_draft про обоснование.
-    Вызывается ТОЛЬКО вручную из дашборда."""
-    hh_preferences = parameters.get("headhunter") or {}
-    positions = hh_preferences.get("positions") or parameters.get("positions")
-    desired_title = (positions or [""])[0]
-    if not desired_title:
-        logger.warning(
-            "Нет ни одной должности в positions — нечем предзаполнить "
-            "черновик резюме, отменяю."
-        )
-        return None
-
-    output_folder: Path = parameters["outputFileDirectory"]
-    profile_dir = output_folder / ".chrome_profile_headhunter"
-    driver = init_browser(profile_dir)
-    try:
-        draft_url = start_resume_draft(driver, desired_title)
-    finally:
-        driver.quit()
-
-    if draft_url:
-        notify(
-            parameters,
-            f"HeadHunter: черновик резюме создан — {draft_url}. "
-            "Доделайте вручную на hh.ru.",
-        )
-    return draft_url
 
 
 def check_telegram_replies(parameters: dict, llm_api_key: str) -> None:
