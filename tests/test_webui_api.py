@@ -200,51 +200,6 @@ def test_block_employer_starts_background_run(client):
     assert calls == ["Рога и Копыта"]
 
 
-def test_clone_resume_starts_background_run(client):
-    calls = []
-
-    def fake_clone(parameters, resume_id):
-        calls.append(resume_id)
-        return "https://hh.ru/resume/new"
-
-    with patch(
-        "src.webui.api.clone_headhunter_resume", side_effect=fake_clone
-    ):
-        response = client.post(
-            "/api/headhunter/clone-resume", json={"resume_id": "abc123"}
-        )
-        assert response.status_code == 200
-        assert response.json() == {"started": True, "resume_id": "abc123"}
-
-    for _ in range(50):
-        if calls:
-            break
-        time.sleep(0.05)
-    assert calls == ["abc123"]
-
-
-def test_create_resume_draft_starts_background_run(client):
-    calls = []
-
-    def fake_create(parameters):
-        calls.append(parameters is not None)
-        return "https://hh.ru/applicant/resumes/constructor/draft1"
-
-    with patch(
-        "src.webui.api.create_headhunter_resume_draft",
-        side_effect=fake_create,
-    ):
-        response = client.post("/api/headhunter/create-resume-draft")
-        assert response.status_code == 200
-        assert response.json() == {"started": True}
-
-    for _ in range(50):
-        if calls:
-            break
-        time.sleep(0.05)
-    assert calls == [True]
-
-
 def test_settings_update_persists_auto_reply_and_bump_resume(client):
     response = client.post(
         "/api/settings",

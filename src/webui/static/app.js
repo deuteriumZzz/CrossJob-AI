@@ -1246,22 +1246,59 @@ function updateGreetingPreview() {
     .replaceAll("{link}", "https://t.me/канал/123");
 }
 
-function renderTelegramResumes(resumes) {
-  const el = document.getElementById("tgq-resumes");
-  el.innerHTML = resumes.length
-    ? resumes
-        .map(
-          (r) => `<div class="tgq-file"><span>📄 ${escapeHtml(r.name)} <span class="muted small">${Math.round(r.size / 1024)} КБ</span></span>
-            <button type="button" class="btn btn-ghost btn-small" data-tgq-delete="${escapeHtml(r.name)}" aria-label="Удалить ${escapeHtml(r.name)}">Удалить</button></div>`
-        )
-        .join("")
-    : `<p class="muted small">Пока нет — будет прикладываться основное resume.pdf.</p>`;
-  el.querySelectorAll("[data-tgq-delete]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const res = await api(`/api/telegram/resumes/${encodeURIComponent(btn.dataset.tgqDelete)}`, { method: "DELETE" });
-      renderTelegramResumes(res.resumes);
-    });
-  });
+// «Мои резюме» — одна таблица: какое резюме, где используется, файл, действие.
+function renderTelegramResumes() {
+  renderResumes();
+}
+
+async function renderResumes() {
+  const el = document.getElementById("resume-table");
+  if (!el) return;
+  let r;
+  try {
+    r = await api("/api/resumes");
+  } catch (e) {
+    return;
+  }
+  const fileCell = (f, missing) =>
+    f.exists
+      ? `<span class="resume-file" title="${escapeHtml(f.name)}">📄 <span class="resume-name">${escapeHtml(f.name)}</span></span>
+         <span class="muted small">${Math.max(1, Math.round(f.size / 1024))} КБ · ${fmtDay(f.updated_at)}</span>`
+      : `<span class="${missing === "err" ? "err-text" : "muted"} small">${missing === "err" ? "не загружено" : "не загружено — берётся основное"}</span>`;
+  const row = (title, where, file, action) => `
+    <div class="resume-row" role="row">
+      <div role="cell"><b>${title}</b></div>
+      <div role="cell" class="muted small">${where}</div>
+      <div role="cell" class="resume-file-cell">${file}</div>
+      <div role="cell" class="resume-action">${action}</div>
+    </div>`;
+  el.innerHTML = `
+    <div class="resume-row resume-head" role="row">
+      <div role="columnheader">Резюме</div><div role="columnheader">Где используется</div><div role="columnheader">Файл</div><div role="columnheader"></div>
+    </div>
+    ${row("Основное", "hh, geekjob, GetMatch, Хабр Карьера, Telegram; письма на русском",
+      fileCell(r.primary, "err"),
+      `<button type="button" class="btn btn-${r.primary.exists ? "ghost" : "primary"} btn-small" data-upload="primary">${r.primary.exists ? "Заменить" : "Загрузить"}</button>`)}
+    ${row("Для международных", "LinkedIn, Wellfound, Himalayas; письма на английском",
+      fileCell(r.linkedin, "soft"),
+      `<button type="button" class="btn btn-ghost btn-small" data-upload="linkedin">${r.linkedin.exists ? "Заменить" : "Загрузить"}</button>`)}
+    ${r.extra
+      .map((f) =>
+        row("Дополнительное", "своя кнопка «+ 📎» под вакансией в Telegram; можно выбрать в рассылке",
+          fileCell(f),
+          `<button type="button" class="btn btn-ghost btn-small" data-delete-extra="${escapeHtml(f.name)}" aria-label="Удалить ${escapeHtml(f.name)}">Удалить</button>`)
+      )
+      .join("")}
+    ${r.extra.length ? "" : `<div class="resume-row resume-empty"><div class="muted small">Дополнительных пока нет — например, резюме под другую роль. Кнопка «📎 Добавить дополнительное» выше.</div></div>`}`;
+  el.querySelectorAll("[data-upload]").forEach((b) =>
+    b.addEventListener("click", () => document.getElementById(`resume-upload-${b.dataset.upload}`).click())
+  );
+  el.querySelectorAll("[data-delete-extra]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      await api(`/api/telegram/resumes/${encodeURIComponent(b.dataset.deleteExtra)}`, { method: "DELETE" });
+      renderResumes();
+    })
+  );
 }
 
 async function uploadTelegramResumes(files) {
@@ -1603,7 +1640,7 @@ const render = {
   },
 
   resume() {
-    api("/api/settings/telegram-watch").then((w) => renderTelegramResumes(w.resumes)).catch(() => {});
+    renderResumes();
   },
 
   async overview() {
@@ -4674,31 +4711,6 @@ function initDashboard() {
       btn.textContent = "Запрошено";
     });
 
-  document
-    .getElementById("hh-resume-clone")
-    .addEventListener("click", async () => {
-      const resumeId = document
-        .getElementById("hh-resume-clone-id")
-        .value.trim();
-      if (!resumeId) return;
-      const statusEl = document.getElementById("hh-resume-status");
-      statusEl.textContent = "Запущено — откроется браузер…";
-      await api("/api/headhunter/clone-resume", {
-        method: "POST",
-        body: JSON.stringify({ resume_id: resumeId }),
-      });
-      statusEl.textContent = "Запрошено, результат — в логах/уведомлениях.";
-    });
-
-  document
-    .getElementById("hh-resume-create-draft")
-    .addEventListener("click", async () => {
-      const statusEl = document.getElementById("hh-resume-status");
-      statusEl.textContent = "Запущено — откроется браузер…";
-      await api("/api/headhunter/create-resume-draft", { method: "POST" });
-      statusEl.textContent = "Запрошено, ссылка на черновик — в логах/уведомлениях.";
-    });
-
   Promise.all([
     api("/api/generate/styles"),
     api("/api/generate/styles/ats-report"),
@@ -4735,46 +4747,35 @@ function initDashboard() {
     .getElementById("gen-resume-audit")
     .addEventListener("click", startResumeAudit);
 
-  for (const [kind, inputId, btnId, statusId] of [
-    ["primary", "resume-upload-primary", "resume-upload-primary-btn", "resume-upload-primary-status"],
-    ["linkedin", "resume-upload-linkedin", "resume-upload-linkedin-btn", "resume-upload-linkedin-status"],
-  ]) {
-    const input = document.getElementById(inputId);
-    const status = document.getElementById(statusId);
-    document.getElementById(btnId).addEventListener("click", () => input.click());
+  ["primary", "linkedin"].forEach((kind) => {
+    const input = document.getElementById(`resume-upload-${kind}`);
+    const status = document.getElementById("tgq-resume-status");
     input.addEventListener("change", async () => {
       const file = input.files[0];
       if (!file) return;
-      status.textContent = "Загрузка…";
+      status.textContent = `Загружаю ${file.name}…`;
       const formData = new FormData();
       formData.append("file", file);
       try {
-        const result = await api(`/api/resume/upload?kind=${kind}`, {
-          method: "POST",
-          headers: {},
-          body: formData,
-        });
-        status.textContent = `✅ Загружено: ${result.filename} (${Math.round(result.size / 1024)} КБ)`;
+        await api(`/api/resume/upload?kind=${kind}`, { method: "POST", headers: {}, body: formData });
+        renderResumes();
+        if (kind === "primary") {
+          // ИИ перечитывает новое резюме — из него берутся имя, опыт и навыки для писем.
+          status.textContent = "✅ Загружено. ИИ перечитывает резюме…";
+          api("/api/resume/refresh-plain-text", { method: "POST" })
+            .then(() => (status.textContent = "✅ Резюме обновлено — письма пойдут уже по нему"))
+            .catch((e) => (status.textContent = `Загружено, но ИИ не смог его прочитать: ${e.message.replace(/^\d+: /, "")}`));
+        } else {
+          status.textContent = "✅ Резюме обновлено";
+        }
       } catch (e) {
-        status.textContent = `Ошибка: ${e.message}`;
+        status.textContent = `Ошибка: ${e.message.replace(/^\d+: /, "")}`;
       } finally {
         input.value = "";
       }
     });
-  }
+  });
 
-  document
-    .getElementById("refresh-plain-text")
-    .addEventListener("click", async () => {
-      const status = document.getElementById("refresh-plain-text-status");
-      status.textContent = "Обновление…";
-      try {
-        await api("/api/resume/refresh-plain-text", { method: "POST" });
-        status.textContent = "Готово.";
-      } catch (e) {
-        status.textContent = `Ошибка: ${e.message}`;
-      }
-    });
 
   document.getElementById("limits-save").addEventListener("click", async () => {
     const status = document.getElementById("limits-status");

@@ -444,37 +444,21 @@
       <div class="view-header">
         <div>
           <h2>Мои резюме</h2>
-          <p class="muted">Все ваши резюме в одном месте: для площадок, для кнопок в Telegram и для рассылки. Ниже — версия под вакансию и разбор, что улучшить.</p>
+          <p class="muted">Все ваши резюме в одном месте. Ниже — версия под конкретную вакансию и разбор, что улучшить.</p>
         </div>
       </div>
 
       <div class="panel">
-        <h3>Загрузить резюме (PDF)</h3>
-        <p class="muted small">Резюме используется только для оценки соответствия вакансии и генерации текста — не отправляется на площадку как файл.</p>
-        <div class="resume-action-grid">
-          <div class="resume-action-card">
-            <h4>Основное резюме</h4>
-            <p class="muted small">HeadHunter, geekjob, GetMatch, Хабр Карьера, Telegram.</p>
-            <input type="file" id="resume-upload-primary" accept="application/pdf" style="display:none" />
-            <button type="button" id="resume-upload-primary-btn" class="btn btn-secondary">📎 Загрузить resume.pdf</button>
-            <p id="resume-upload-primary-status" class="muted small"></p>
-          </div>
-          <div class="resume-action-card">
-            <h4>Для международных площадок <span class="muted small">— опционально</span></h4>
-            <p class="muted small">LinkedIn, Wellfound, Himalayas. Без него используется основное резюме.</p>
-            <input type="file" id="resume-upload-linkedin" accept="application/pdf" style="display:none" />
-            <button type="button" id="resume-upload-linkedin-btn" class="btn btn-secondary">📎 Загрузить resume_linkedin.pdf</button>
-            <p id="resume-upload-linkedin-status" class="muted small"></p>
-          </div>
-          <div class="resume-action-card">
-            <h4>Дополнительные <span class="muted small">— опционально</span></h4>
-            <p class="muted small">Под разные роли. Каждое — своя кнопка «+ 📎» под вакансией из Telegram, и его можно выбрать при отправке рассылки.</p>
-            <div id="tgq-resumes" class="tgq-files"></div>
-            <input type="file" id="tgq-resume-file" accept="application/pdf" multiple style="display:none" />
-            <button type="button" id="tgq-resume-add" class="btn btn-secondary">📎 Добавить резюме (PDF)</button>
-            <p id="tgq-resume-status" class="muted small" role="status"></p>
-          </div>
+        <div class="panel-head">
+          <h3 style="margin:0">Резюме</h3>
+          <button type="button" id="tgq-resume-add" class="btn btn-secondary btn-small">📎 Добавить дополнительное</button>
         </div>
+        <p class="muted small">Уходят во вложении писем и сообщений HR; по ним ИИ подбирает вакансии и пишет письма.</p>
+        <div class="resume-table" id="resume-table" role="table" aria-label="Мои резюме"></div>
+        <input type="file" id="resume-upload-primary" accept="application/pdf" style="display:none" />
+        <input type="file" id="resume-upload-linkedin" accept="application/pdf" style="display:none" />
+        <input type="file" id="tgq-resume-file" accept="application/pdf" multiple style="display:none" />
+        <p id="tgq-resume-status" class="muted small" role="status"></p>
       </div>
 
       <div class="panel">
@@ -489,7 +473,7 @@
 
       <div class="panel">
         <h3>Под конкретную вакансию</h3>
-        <p class="muted small">Рендерится через Selenium (то же, что в консольном меню) — может занять до минуты.</p>
+        <p class="muted small">Вставьте ссылку на вакансию — ИИ подготовит документ по вашему резюме, это займёт до минуты.</p>
         <div class="filters">
           <input id="gen-job-url" type="text" placeholder="Ссылка на вакансию" aria-label="Ссылка на вакансию" style="flex:1;min-width:260px" />
         </div>
@@ -519,27 +503,7 @@
         <div class="gen-progress" id="gen-progress"><div class="gen-progress-bar"></div></div>
       </div>
 
-      <div class="panel">
-        <div class="filters">
-          <button id="refresh-plain-text" class="btn btn-ghost">Обновить из PDF (если заменили resume.pdf)</button>
-          <span id="refresh-plain-text-status" class="muted small"></span>
-        </div>
-      </div>
 
-      <details class="panel more">
-        <summary><strong>🧪 Резюме на hh.ru</strong> <span class="muted small">— экспериментально</span></summary>
-        <p class="muted small">
-          Ручные действия (открывают реальный браузер) — не часть
-          автоматического цикла. Клонирование и создание — best-effort
-          клики, разметка не подтверждена на живом аккаунте.
-        </p>
-        <div class="filters">
-          <input type="text" id="hh-resume-clone-id" placeholder="id резюме для клонирования" aria-label="ID резюме для клонирования" />
-          <button id="hh-resume-clone" class="btn btn-secondary">Клонировать</button>
-          <button id="hh-resume-create-draft" class="btn btn-secondary">Начать новое резюме (черновик)</button>
-        </div>
-        <span id="hh-resume-status" class="muted small"></span>
-      </details>
     </section>
 
     <section id="view-analytics" class="view">

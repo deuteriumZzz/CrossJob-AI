@@ -401,3 +401,15 @@ def test_bot_accepts_short_platform_names():
 
     updates = [{"update_id": 1, "message": {"chat": {"id": 7}, "text": "/resume hh"}}]
     assert parse_control_commands(updates, "7") == [{"action": "resume", "source": "headhunter"}]
+
+
+def test_resumes_overview(client):  # noqa: F811
+    ctx = api.get_ctx()
+    (ctx.config["dataFolder"] / "resume.pdf").write_bytes(b"%PDF-1")
+    extra = ctx.config["dataFolder"] / "telegram"
+    extra.mkdir(exist_ok=True)
+    (extra / "Very_Long_Name_Backend_Developer_CV.pdf").write_bytes(b"%PDF-1")
+    r = client.get("/api/resumes").json()
+    assert r["primary"]["exists"] and r["primary"]["name"] == "resume.pdf"
+    assert r["linkedin"] == {"exists": False}
+    assert [f["name"] for f in r["extra"]] == ["Very_Long_Name_Backend_Developer_CV.pdf"]

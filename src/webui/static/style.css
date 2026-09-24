@@ -2959,20 +2959,6 @@ kbd {
 .tgq-block h4 {
   margin: 0 0 8px;
 }
-.tgq-files {
-  display: grid;
-  gap: 6px;
-  margin: 6px 0 10px;
-}
-.tgq-file {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 10px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-sm);
-}
 
 /* Импорт файла и рассылка (Общение → База компаний / Рассылка) */
 #import-preview:not(:empty) {
@@ -3736,5 +3722,80 @@ details.panel.more[open] > summary {
   .base-table td {
     padding-left: 6px;
     padding-right: 6px;
+  }
+}
+
+/* Мои резюме — ровная таблица */
+.panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.resume-table {
+  margin-top: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.resume-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.9fr) minmax(0, 1.6fr) minmax(0, 1.5fr) 96px;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border-soft);
+}
+.resume-row:first-child {
+  border-top: 0;
+}
+.resume-head {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  background: var(--panel-2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.resume-empty {
+  grid-template-columns: 1fr;
+}
+.resume-file-cell {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.resume-file {
+  display: flex;
+  min-width: 0;
+  gap: 4px;
+}
+/* Длинное имя файла — многоточие, полное имя при наведении. */
+.resume-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.resume-action {
+  justify-self: end;
+}
+@media (max-width: 700px) {
+  .resume-head {
+    display: none;
+  }
+  .resume-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 12px;
+  }
+  .resume-row > :nth-child(2),
+  .resume-row > :nth-child(3) {
+    grid-column: 1 / -1;
+  }
+  .resume-row > .resume-action {
+    grid-row: 1;
+    grid-column: 2;
   }
 }

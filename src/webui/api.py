@@ -48,13 +48,7 @@ from main import prefill_direct_application as _prefill_direct_application
 from main import prepare_interview as _prepare_interview
 from main import start_campaign_job as _start_campaign_job
 from main import send_hr_draft as _send_hr_draft
-from main import (
-    clone_headhunter_resume,
-)
 from main import create_cover_letter as _create_cover_letter
-from main import (
-    create_headhunter_resume_draft,
-)
 from main import create_resume_audit as _create_resume_audit
 from main import create_resume_pdf as _create_resume_pdf
 from main import create_resume_pdf_job_tailored as _create_resume_tailored
@@ -1990,42 +1984,6 @@ def post_block_employer(
     return {"started": True, "company": body.company}
 
 
-class CloneResumeRequest(BaseModel):
-    resume_id: str
-
-
-@app.post("/api/headhunter/clone-resume")
-def post_clone_resume(
-    body: CloneResumeRequest, ctx: AppContext = Depends(get_ctx)
-) -> dict:
-    """Клонирует резюме на hh.ru кликом (браузерный аналог
-    hh-applicant-tool clone_resume.py). Открывает реальный браузер —
-    фоновым потоком, тот же паттерн, что /api/run-now."""
-
-    def _run() -> None:
-        clone_headhunter_resume(ctx.config, body.resume_id)
-
-    threading.Thread(target=_run, daemon=True).start()
-    return {"started": True, "resume_id": body.resume_id}
-
-
-@app.post("/api/headhunter/create-resume-draft")
-def post_create_resume_draft(ctx: AppContext = Depends(get_ctx)) -> dict:
-    """Запускает мастер создания резюме на hh.ru с предзаполненной
-    должностью (см. create_headhunter_resume_draft) — черновик,
-    остальное пользователь дозаполняет вручную."""
-
-    def _run() -> None:
-        create_headhunter_resume_draft(ctx.config)
-
-    threading.Thread(target=_run, daemon=True).start()
-    return {"started": True}
-
-
-class BlacklistRequest(BaseModel):
-    companies: list[str]
-
-
 @app.post("/api/blacklist")
 def post_blacklist(
     body: BlacklistRequest, ctx: AppContext = Depends(get_ctx)
@@ -3505,6 +3463,25 @@ _RESUME_UPLOAD_FILENAME = {
     "primary": RESUME_PDF,
     "linkedin": RESUME_PDF_LINKEDIN,
 }
+
+
+@app.get("/api/resumes")
+def get_resumes(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """«Мои резюме»: основное, для международных площадок и дополнительные —
+    есть ли файл, размер, когда обновлён."""
+    def info(path: Path) -> dict:
+        if not path.exists():
+            return {"exists": False}
+        stat = path.stat()
+        return {"exists": True, "name": path.name, "size": stat.st_size,
+                "updated_at": datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat()}
+
+    data_folder: Path = ctx.config["dataFolder"]
+    return {
+        "primary": info(data_folder / RESUME_PDF),
+        "linkedin": info(data_folder / RESUME_PDF_LINKEDIN),
+        "extra": [info(data_folder / TELEGRAM_FOLDER / r["name"]) for r in _telegram_resume_list(ctx)],
+    }
 
 
 @app.post("/api/resume/upload")
