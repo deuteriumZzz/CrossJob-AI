@@ -43,29 +43,50 @@ def _load_json(path: Path) -> dict:
         return {}
 
 
-def poll_control_commands(
-    bot_token: str, chat_id: str, output_folder: Path
+def poll_bot_updates(
+    bot_token: str, output_folder: Path, timeout: int = 0
 ) -> list[dict]:
-    """Тот же приём опроса getUpdates, что
-    headhunter.telegram_approval.poll_form_commands — свой offset-файл
-    (не пересекается с очередью подтверждения анкет), команды
-    удалённого управления демоном вместо подтверждения форм.
-    Возвращает {"action": "status"|"help"|"pause"|"resume", "source": ...}."""
-    offset_data = _load_json(_offset_path(output_folder))
-    offset = offset_data.get("offset", 0)
-
+    """ЕДИНСТВЕННЫЙ читатель обновлений бота. Раньше команды и анкеты hh
+    читали getUpdates каждый со своим offset-файлом — но Telegram,
+    отдав обновления одному, помечает их прочитанными для всех, и
+    «да <id>» для анкеты могло пропасть, если первым его забрал разбор
+    /status. Теперь читаем здесь, а разбирают parse_* из одного списка.
+    timeout>0 — long polling (постоянный шлюз: кнопки срабатывают сразу)."""
+    offset = _load_json(_offset_path(output_folder)).get("offset", 0)
     response = httpx.get(
         f"{TELEGRAM_API_BASE}/bot{bot_token}/getUpdates",
-        params={"offset": offset, "timeout": 0},
-        timeout=10,
+        params={
+            "offset": offset,
+            "timeout": timeout,
+            "allowed_updates": json.dumps(["message", "callback_query"]),
+        },
+        timeout=timeout + 10,
     )
     response.raise_for_status()
     updates = response.json().get("result", [])
+    if updates:
+        last = max(u.get("update_id", 0) for u in updates)
+        _offset_path(output_folder).write_text(
+            json.dumps({"offset": last + 1}), encoding="utf-8"
+        )
+    return updates
 
+
+def poll_control_commands(
+    bot_token: str, chat_id: str, output_folder: Path
+) -> list[dict]:
+    """Опрос + разбор команд за один вызов (см. poll_bot_updates)."""
+    return parse_control_commands(
+        poll_bot_updates(bot_token, output_folder), chat_id
+    )
+
+
+def parse_control_commands(updates: list[dict], chat_id: str) -> list[dict]:
+    """Команды удалённого управления демоном из уже прочитанных
+    обновлений: {"action": "status"|"help"|"pause"|"resume"|
+    "send_draft"|"skip_draft", ...}."""
     commands = []
-    max_update_id = offset - 1
     for update in updates:
-        max_update_id = max(max_update_id, update.get("update_id", 0))
         message = update.get("message") or {}
         if str(message.get("chat", {}).get("id")) != str(chat_id):
             continue
@@ -102,8 +123,4 @@ def poll_control_commands(
             )
             continue
 
-    if updates:
-        _offset_path(output_folder).write_text(
-            json.dumps({"offset": max_update_id + 1}), encoding="utf-8"
-        )
     return commands

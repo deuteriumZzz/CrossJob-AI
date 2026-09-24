@@ -117,3 +117,49 @@ def test_dossier_collects_from_site_pages(monkeypatch):
         ("telegram", "acme_hr", "сайт: /careers"),
         ("linkedin", "https://www.linkedin.com/in/anna-acme", "сайт: /careers"),
     }
+
+
+def test_todo_and_find_hr(client, monkeypatch):  # noqa: F811
+    ctx = api.get_ctx()
+    assert client.get("/api/todo").json()["items"] == []
+
+    ctx.applied_log.record(Job(role="Python Dev", company="Acme", link="https://hh.ru/vacancy/1",
+                               source="headhunter", external_id="1"), "", "", "applied", 8, [])
+    ctx.applied_log.update_reply_state("headhunter", "1", "Приглашение на интервью")
+    DraftStore(ctx.output_folder / main.HR_DRAFTS_FILE).add("hr_anna", "Ответ", "reply", "")
+
+    todo = client.get("/api/todo").json()
+    ids = {i["id"]: i for i in todo["items"]}
+    assert ids["drafts"]["count"] == 1 and ids["drafts"]["view"] == "replies"
+    assert ids["interviews"]["count"] == 1
+    assert ids["replies"]["count"] == 1
+    assert todo["badges"]["replies"] == 1
+
+    monkeypatch.setattr(api, "collect_dossier", lambda card, key: {
+        "website": "https://acme.io",
+        "contacts": [{"kind": "email", "value": "jobs@acme.io", "source": "сайт: /careers",
+                      "source_url": "https://acme.io/careers"}]})
+    res = client.post("/api/contacts/from-application",
+                      json={"source": "headhunter", "external_id": "1"}).json()
+    assert res == {"key": "acme", "added": 1, "message": ""}
+    card = ContactBook(ctx.output_folder).get("acme")
+    assert card["website"] == "https://acme.io"
+    assert card["vacancies"][0]["source"] == "headhunter"
+    ids = {i["id"]: i for i in client.get("/api/todo").json()["items"]}
+    assert ids["contacts"]["count"] == 1
+
+    monkeypatch.setattr(api, "collect_dossier", lambda card, key: {"website": "", "contacts": []})
+    ctx.applied_log.record(Job(role="Dev", company="NoSite", link="https://hh.ru/vacancy/2",
+                               source="headhunter", external_id="2"), "", "", "applied", 8, [])
+    res = client.post("/api/contacts/from-application",
+                      json={"source": "headhunter", "external_id": "2"}).json()
+    assert res["key"] == "nosite" and "Сайт компании не найден" in res["message"]
+
+
+def test_classify_error_does_not_mistake_stack_addresses_for_401():
+    raw = ("Message: timeout: Timed out receiving message from renderer: 75.000\n"
+           "Stacktrace:\n0   chromedriver   0x00000001072ac93a chromedriver + 4098362\n"
+           "1   chromedriver   0x0000000106f401f5 chromedriver + 442869")
+    assert "не загрузилась" in api._classify_error(raw)["summary"]
+    assert "API-ключ" not in api._classify_error("stack 0x0000000106f401f5")["summary"]
+    assert "API-ключ" in api._classify_error("Error code: 401 - invalid key")["summary"]

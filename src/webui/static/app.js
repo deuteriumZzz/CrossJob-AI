@@ -320,11 +320,60 @@ async function refreshTelegramConnectStatus() {
   return true;
 }
 
+// 5 разделов в меню вместо 9 вкладок: подразделы показываются строкой
+// над содержимым раздела. Ключ — раздел (data-tab кнопки меню), значение —
+// его подразделы (id view-*) с подписями; первый — открывается по клику.
+const NAV_GROUPS = {
+  overview: [["overview", "Главная"]],
+  history: [["history", "Вакансии"]],
+  replies: [
+    ["replies", "Входящие"],
+    ["contacts", "Контакты HR"],
+    ["telegram", "Telegram"],
+  ],
+  analytics: [["analytics", "Аналитика"]],
+  settings: [
+    ["settings", "Настройки"],
+    ["resume", "Резюме"],
+    ["logs", "Логи"],
+  ],
+};
+const VIEW_GROUP = Object.fromEntries(
+  Object.entries(NAV_GROUPS).flatMap(([group, views]) =>
+    views.map(([view]) => [view, group])
+  )
+);
+let currentView = "overview";
+
+function renderSubnav(group, view) {
+  const subnav = document.getElementById("subnav");
+  const views = NAV_GROUPS[group] || [];
+  if (views.length < 2) {
+    subnav.style.display = "none";
+    return;
+  }
+  subnav.style.display = "";
+  subnav.innerHTML = views
+    .map(
+      ([id, label]) =>
+        `<button type="button" class="${id === view ? "active" : ""}" data-subview="${id}">${label}<span class="subnav-badge" data-subbadge="${id}"></span></button>`
+    )
+    .join("");
+  subnav.querySelectorAll("[data-subview]").forEach((btn) => {
+    btn.addEventListener("click", () => switchTab(btn.dataset.subview));
+  });
+}
+
 function switchTab(name) {
-  const prevName = document.querySelector("nav.tabs button.active")?.dataset.tab;
+  if (!VIEW_GROUP[name]) name = "overview";
+  const prevName = currentView;
+  currentView = name;
+  const group = VIEW_GROUP[name];
   document
     .querySelectorAll("nav.tabs button")
-    .forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+    .forEach((b) => b.classList.toggle("active", b.dataset.tab === group));
+  renderSubnav(group, name);
+  applySubnavBadges();
   document
     .querySelectorAll("main .view")
     .forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
@@ -339,7 +388,7 @@ function switchTab(name) {
   render[name]?.();
   moveTabIndicator(
     document.getElementById("nav-tab-indicator"),
-    document.querySelector(`nav.tabs button[data-tab="${name}"]`)
+    document.querySelector(`nav.tabs button[data-tab="${group}"]`)
   );
   if (name === "settings") {
     // switchSettingsTab() двигает #settings-tab-indicator только по
@@ -621,6 +670,8 @@ const CONTACT_STATUS = {
   replied: "ответили 🟢",
 };
 let lastContacts = [];
+let focusContactKey = null;
+let contactsShown = 30;
 
 function contactHref(c) {
   if (c.kind === "telegram") return `https://t.me/${encodeURIComponent(c.value)}`;
@@ -633,7 +684,9 @@ function renderContactsList() {
   const status = document.getElementById("contacts-filter-status").value;
   const kind = document.getElementById("contacts-filter-kind").value;
   const query = document.getElementById("contacts-filter-query").value.trim().toLowerCase();
-  const cards = lastContacts.filter((card) => {
+  const sort = document.getElementById("contacts-sort").value;
+  const STATUS_RANK = { replied: 0, draft: 1, new: 2, written: 3 };
+  const filtered = lastContacts.filter((card) => {
     if (status && card.status !== status) return false;
     if (kind && !card.contacts.some((c) => c.kind === kind)) return false;
     if (!query) return true;
@@ -647,14 +700,18 @@ function renderContactsList() {
     );
     return;
   }
-  if (!cards.length) {
+  if (!filtered.length) {
     el.innerHTML = emptyStateHtml("Ничего не найдено.");
     return;
   }
+  if (sort === "status") {
+    filtered.sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status]);
+  }
+  const cards = filtered.slice(0, contactsShown);
   el.innerHTML = cards
     .map(
       (card) => `
-    <div class="panel contact-card">
+    <div class="panel contact-card${card.key === focusContactKey ? " is-focused" : ""}" data-card-key="${escapeHtml(card.key)}">
       <div class="contact-card-head">
         <strong>${escapeHtml(card.company || card.contacts[0]?.value || "Без названия")}
           ${card.website ? `<a class="muted small" href="${escapeHtml(card.website)}" target="_blank" rel="noopener">${escapeHtml(card.website.replace(/^https?:\/\//, "").replace(/\/$/, ""))}</a>` : ""}
@@ -694,7 +751,18 @@ function renderContactsList() {
       </div>
     </div>`
     )
-    .join("");
+    .join("") +
+    (filtered.length > cards.length
+      ? `<button type="button" class="btn btn-secondary" id="contacts-more" style="width:100%;justify-content:center">Показать ещё (${filtered.length - cards.length})</button>`
+      : "");
+  document.getElementById("contacts-more")?.addEventListener("click", () => {
+    contactsShown += 30;
+    renderContactsList();
+  });
+  if (focusContactKey) {
+    el.querySelector(".contact-card.is-focused")?.scrollIntoView({ block: "center", behavior: REDUCE_MOTION ? "auto" : "smooth" });
+    focusContactKey = null;
+  }
   el.querySelectorAll("[data-dossier]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const site = btn.parentElement.querySelector(".dossier-site");
@@ -736,6 +804,162 @@ function renderContactsList() {
   });
 }
 
+// «Что сделать сейчас» — первое, что видно на Главной. Заодно раздаёт
+// счётчики в строку подразделов «Общения».
+let lastTodoBadges = {};
+
+async function renderTodo() {
+  const el = document.getElementById("todo-panel");
+  let todo;
+  try {
+    todo = await api("/api/todo");
+  } catch (e) {
+    return;
+  }
+  lastTodoBadges = todo.badges || {};
+  applySubnavBadges();
+  if (!todo.items.length) {
+    el.innerHTML = `<div class="todo-calm">✓ Сейчас ничего не ждёт вашего решения — бот работает сам.</div>`;
+    return;
+  }
+  el.innerHTML = `
+    <h3 style="margin:0 0 10px">Что сделать сейчас</h3>
+    ${todo.items
+      .map(
+        (i) => `
+      <button type="button" class="todo-item" data-todo-view="${i.view}">
+        <span class="todo-count">${i.count}</span>
+        <span class="todo-text">${escapeHtml(i.text)}</span>
+        <span class="todo-go" aria-hidden="true">→</span>
+      </button>`
+      )
+      .join("")}`;
+  el.querySelectorAll("[data-todo-view]").forEach((btn) => {
+    btn.addEventListener("click", () => switchTab(btn.dataset.todoView));
+  });
+}
+
+function applySubnavBadges() {
+  document.querySelectorAll("[data-subbadge]").forEach((badge) => {
+    const n = lastTodoBadges[badge.dataset.subbadge];
+    badge.textContent = n ? String(n) : "";
+  });
+}
+
+async function loadTelegramWatch() {
+  const w = await api("/api/settings/telegram-watch");
+  // Строка статуса во вкладке «Общение → Telegram».
+  const line = document.getElementById("tg-quick-line-status");
+  if (line) {
+    line.textContent = w.running
+      ? `⚡ Быстрый отклик работает: ${w.channels} каналов, найдено с запуска: ${w.matched}`
+      : w.enabled
+        ? "⚡ Быстрый отклик включён — заработает после «Запустить»"
+        : "⚡ Быстрый отклик выключен";
+  }
+  const pane = document.getElementById("settings-tg-quick");
+  if (!pane) return w;
+  document.getElementById("tgq-enabled").checked = w.enabled;
+  const status = document.getElementById("tgq-status");
+  status.className = `tgq-status ${w.running ? "is-on" : w.enabled ? "is-wait" : "is-off"}`;
+  status.textContent = w.running
+    ? `Работает — слушаю ${w.channels} каналов, подходящих постов с запуска: ${w.matched}`
+    : w.enabled
+      ? w.daemon_running
+        ? "Подключаюсь к Telegram…"
+        : "Включено — заработает, когда нажмёте «Запустить» слева"
+      : "Выключено";
+  const keywords = document.getElementById("tgq-keywords");
+  keywords.value = w.keywords.join("\n");
+  initTagInput(keywords);
+  document.getElementById("tgq-keywords-hint").textContent = w.keywords.length
+    ? ""
+    : `Пусто — ищу по словам из ваших должностей: ${w.default_keywords.join(", ") || "—"}`;
+  const stop = document.getElementById("tgq-stop");
+  stop.value = w.stop_words.join("\n");
+  initTagInput(stop);
+  const greeting = document.getElementById("tgq-greeting");
+  greeting.value = w.greeting;
+  updateGreetingPreview();
+  renderTelegramResumes(w.resumes);
+  document.getElementById("tgq-bot-state").innerHTML = w.bot_connected
+    ? "✅ В ваш бот уведомлений — с кнопками быстрого ответа."
+    : `⚠️ Бот уведомлений не подключён — <a href="#" data-goto-settings="settings-notifications">подключить</a> (1 минута), иначе кнопок не будет.`;
+  bindGotoSettings(document.getElementById("tgq-bot-state"));
+  return w;
+}
+
+function updateGreetingPreview() {
+  const text = document.getElementById("tgq-greeting").value || "";
+  document.getElementById("tgq-greeting-preview").textContent = text
+    .replaceAll("{role}", "Python-разработчик")
+    .replaceAll("{link}", "https://t.me/канал/123");
+}
+
+function renderTelegramResumes(resumes) {
+  const el = document.getElementById("tgq-resumes");
+  el.innerHTML = resumes.length
+    ? resumes
+        .map(
+          (r) => `<div class="tgq-file"><span>📄 ${escapeHtml(r.name)} <span class="muted small">${Math.round(r.size / 1024)} КБ</span></span>
+            <button type="button" class="btn btn-ghost btn-small" data-tgq-delete="${escapeHtml(r.name)}" aria-label="Удалить ${escapeHtml(r.name)}">Удалить</button></div>`
+        )
+        .join("")
+    : `<p class="muted small">Пока нет — будет прикладываться основное resume.pdf.</p>`;
+  el.querySelectorAll("[data-tgq-delete]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const res = await api(`/api/telegram/resumes/${encodeURIComponent(btn.dataset.tgqDelete)}`, { method: "DELETE" });
+      renderTelegramResumes(res.resumes);
+    });
+  });
+}
+
+async function uploadTelegramResumes(files) {
+  const status = document.getElementById("tgq-resume-status");
+  for (const file of files) {
+    status.textContent = `Загружаю ${file.name}…`;
+    const form = new FormData();
+    form.append("file", file);
+    const response = await fetch("/api/telegram/resumes", { method: "POST", body: form });
+    if (!response.ok) {
+      status.textContent = `${file.name}: ${(await response.json()).detail || "ошибка"}`;
+      return;
+    }
+    renderTelegramResumes((await response.json()).resumes);
+  }
+  status.textContent = "✅ Сохранено";
+}
+
+async function saveTelegramWatch() {
+  const status = document.getElementById("tgq-save-status");
+  try {
+    await api("/api/settings/telegram-watch", {
+      method: "POST",
+      body: JSON.stringify({
+        enabled: document.getElementById("tgq-enabled").checked,
+        keywords: tagItemsOf(document.getElementById("tgq-keywords")),
+        stop_words: tagItemsOf(document.getElementById("tgq-stop")),
+        greeting: document.getElementById("tgq-greeting").value,
+      }),
+    });
+    status.textContent = "✅ Сохранено. Слова применяются сразу; включение — при следующем «Запустить».";
+    loadTelegramWatch();
+  } catch (err) {
+    status.textContent = err.message;
+  }
+}
+
+function bindGotoSettings(root) {
+  root.querySelectorAll("[data-goto-settings]").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.preventDefault();
+      switchTab("settings");
+      switchSettingsTab(el.dataset.gotoSettings);
+      if (el.dataset.gotoSettings === "settings-tg-quick") loadTelegramWatch();
+    });
+  });
+}
+
 const render = {
   async contacts() {
     lastContacts = await api("/api/contacts");
@@ -744,6 +968,7 @@ const render = {
   },
 
   async overview() {
+    renderTodo();
     if (!overviewLoaded) {
       document.getElementById("stats-row").innerHTML = skeletonStats();
       document.getElementById("source-grid-ru").innerHTML = skeletonSourceGrid(5);
@@ -983,7 +1208,7 @@ const render = {
         <td>${fmtTime(e.applied_at)}</td>
         <td>${sourceIconHtml(e.source)}${sourceLabel(e.source)}</td>
         <td>${escapeHtml(e.company)}</td>
-        <td><a href="${escapeHtml(e.link)}" target="_blank" rel="noopener">${escapeHtml(e.title)}</a></td>
+        <td><a href="${escapeHtml(e.link)}" target="_blank" rel="noopener">${escapeHtml(e.title)}</a>${rowActionsHtml(e, i)}</td>
         <td>${statusLabel(e.status)}${e.remote_region ? `<div class="muted small">${REGION_LABELS[e.remote_region] || ""}</div>` : ""}</td>
         <td>${e.status === "applied" ? stageSelectHtml(e) : `<span class="muted small">—</span>`}</td>
         <td title="${e.gaps && e.gaps.length ? escapeHtml(e.gaps.join("; ")) : ""}">
@@ -1000,7 +1225,7 @@ const render = {
               ? `<button type="button" class="btn btn-secondary btn-small" data-cover-letter-btn data-row-index="${i}">📄 Читать письмо</button>`
               : `<span class="muted small">—</span>`
           }
-          ${rowActionsHtml(e, i)}
+
         </td>
       </tr>`
       )
@@ -1026,6 +1251,31 @@ const render = {
         } finally {
           btn.disabled = false;
           btn.textContent = "🎯 Подготовка";
+        }
+      });
+    });
+    tbody.querySelectorAll("[data-find-hr]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const e = reversed[parseInt(btn.dataset.rowIndex, 10)];
+        btn.disabled = true;
+        btn.textContent = "Ищу контакты…";
+        try {
+          const res = await api("/api/contacts/from-application", {
+            method: "POST",
+            body: JSON.stringify({ source: e.source, external_id: e.external_id }),
+          });
+          showToast(
+            res.message ||
+              (res.added ? `Найдено контактов: ${res.added}` : "Компания добавлена в «Контакты» — публичных контактов на сайте нет"),
+            res.added ? "success" : "info",
+            7000
+          );
+          focusContactKey = res.key;
+          switchTab("contacts");
+        } catch (err) {
+          showToast(err.message.replace(/^\d+: /, ""), "error");
+          btn.disabled = false;
+          btn.textContent = "👤 Найти HR этой компании";
         }
       });
     });
@@ -1485,6 +1735,7 @@ const render = {
   },
 
   async telegram() {
+    loadTelegramWatch();
     const [status, settings, conversations] = await Promise.all([
       api("/api/telegram/status"),
       api("/api/settings/telegram"),
@@ -2140,13 +2391,11 @@ let commandActiveIndex = 0;
 
 function collectCommandItems(query) {
   const items = [];
-  document.querySelectorAll("nav.tabs button[data-tab]").forEach((btn) => {
-    items.push({
-      label: btn.querySelector("span")?.textContent || btn.dataset.tab,
-      hint: "Раздел",
-      action: () => switchTab(btn.dataset.tab),
+  Object.values(NAV_GROUPS)
+    .flat()
+    .forEach(([view, label]) => {
+      items.push({ label, hint: "Раздел", action: () => switchTab(view) });
     });
-  });
   document.querySelectorAll("#settings-jump button[data-settings-tab]").forEach((btn) => {
     items.push({
       label: `Настройки → ${btn.textContent}`,
@@ -2414,6 +2663,9 @@ function rowActionsHtml(e, i) {
   }
   if (e.source === "direct" && e.status === "dry_run" && /greenhouse\.io|lever\.co/.test(e.link)) {
     actions.push(`<button type="button" data-prefill-btn data-row-index="${i}">✍️ Заполнить форму отклика</button>`);
+  }
+  if (e.company) {
+    actions.push(`<button type="button" data-find-hr data-row-index="${i}">👤 Найти HR этой компании</button>`);
   }
   if (e.contacts && e.contacts.length) {
     actions.push(
@@ -2806,7 +3058,7 @@ function initPointerEffects() {
 
 // ---------- Directional переходы между вкладками ----------
 
-const NAV_ORDER = ["overview", "history", "replies", "telegram", "analytics", "settings", "logs"];
+const NAV_ORDER = Object.values(NAV_GROUPS).flat().map(([view]) => view);
 
 function directionalReveal(viewEl, fromName, toName) {
   if (REDUCE_MOTION || !viewEl) return;
@@ -2851,10 +3103,10 @@ function fireConfetti() {
 // ---------- Онбординг-тур (только при первом запуске) ----------
 
 const TOUR_STEPS = [
-  { tab: "overview", text: "«Обзор» — статус всех площадок и дневная статистика откликов сразу на входе." },
-  { tab: "history", text: "«История» — что уже отправлено, с фильтрами и таймлайном." },
-  { tab: "telegram", text: "«Telegram» — поиск по каналам вакансий и переписка с контактами." },
-  { tab: "settings", text: "«Настройки» — расписание, LLM-провайдер, лимиты откликов и всё остальное по вкладкам." },
+  { tab: "overview", text: "«Главная» — что требует вашего внимания сейчас и статус всех площадок." },
+  { tab: "history", text: "«Вакансии» — куда бот откликнулся, этап по каждой и действия: подготовка к интервью, найти HR." },
+  { tab: "replies", text: "«Общение» — ответы работодателей, черновики на подтверждение, контакты HR и Telegram." },
+  { tab: "settings", text: "«Настройки» — поиск, резюме, площадки, почта и логи." },
 ];
 
 function initOnboardingTour() {
@@ -3154,8 +3406,12 @@ function initDragReorder(gridId, storageKey) {
 
 // ---------- Changelog popover ----------
 
-const CHANGELOG_VERSION = "2026-09-24-outreach";
+const CHANGELOG_VERSION = "2026-09-24-tg-quick";
 const CHANGELOG_ITEMS = [
+  "⚡ Быстрый отклик в Telegram: вакансия из каналов через секунды в вашем боте — кнопки «Здравствуйте», «+ резюме», «сопроводительное под вакансию». Настройки → «Быстрый отклик в Telegram»",
+  "Меню стало проще: 5 разделов — Главная, Вакансии, Общение, Аналитика, Настройки",
+  "На Главной — «Что сделать сейчас»: черновики, новые ответы, интервью, контакты HR",
+  "У любой вакансии «Действия» → «Найти HR этой компании»",
   "«Входящие»: ответы hh и HR из Telegram в одном месте + черновики ответов на подтверждение",
   "Этап у каждого отклика и воронка до оффера в Аналитике",
   "Настройки → «Контакты и письма»: почта Gmail, Hunter, сводка, напоминания HR",
@@ -4165,11 +4421,7 @@ function initDashboard() {
       }
     });
 
-  const knownTabs = new Set(
-    Array.from(document.querySelectorAll("nav.tabs button")).map(
-      (b) => b.dataset.tab
-    )
-  );
+  const knownTabs = new Set(Object.keys(VIEW_GROUP));
   const initialTab = location.hash.replace("#", "");
   switchTab(knownTabs.has(initialTab) ? initialTab : "overview");
   // ponytail: раньше опрос гонял только вкладку "Обзор" — история
@@ -4186,7 +4438,7 @@ function initDashboard() {
     "telegram",
   ]);
   function refreshActiveTab() {
-    const active = document.querySelector("nav.tabs button.active")?.dataset.tab;
+    const active = currentView;
     if (active && LIVE_TABS.has(active)) render[active]();
     else if (active === "settings") {
       // Только подсветка провайдеров + статус Telegram, не полный
@@ -4250,7 +4502,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     .addEventListener("click", addDirectCompany);
   document.getElementById("offer-add").addEventListener("click", addOffer);
   document.getElementById("outreach-save").addEventListener("click", saveOutreachSettings);
-  ["contacts-filter-status", "contacts-filter-kind"].forEach((id) =>
+  document.getElementById("tgq-save").addEventListener("click", saveTelegramWatch);
+  document.getElementById("tgq-greeting").addEventListener("input", updateGreetingPreview);
+  document.getElementById("tgq-resume-add").addEventListener("click", () =>
+    document.getElementById("tgq-resume-file").click()
+  );
+  document.getElementById("tgq-resume-file").addEventListener("change", (e) => {
+    uploadTelegramResumes([...e.target.files]);
+    e.target.value = "";
+  });
+  document
+    .querySelector('[data-settings-tab="settings-tg-quick"]')
+    .addEventListener("click", loadTelegramWatch);
+  bindGotoSettings(document.getElementById("view-telegram"));
+  ["contacts-filter-status", "contacts-filter-kind", "contacts-sort"].forEach((id) =>
     document.getElementById(id).addEventListener("change", renderContactsList)
   );
   document.getElementById("contacts-filter-query").addEventListener("input", renderContactsList);

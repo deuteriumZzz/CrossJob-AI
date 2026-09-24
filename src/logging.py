@@ -12,13 +12,13 @@ from config import LOG_LEVEL, LOG_SELENIUM_LEVEL, LOG_TO_CONSOLE, LOG_TO_FILE
 
 
 def remove_default_loggers():
-    """Чистим обработчики и старый лог-файл, чтобы при повторном
-    запуске/импорте логи прошлого запуска не мешались с текущим."""
+    """Чистим обработчики стандартного logging. Лог-файл НЕ удаляем:
+    раньше app.log стирался при каждом импорте (запуск бота, дашборда,
+    тестов) — после падения и перезапуска причина пропадала вместе с
+    логом. Размер и так ограничен ротацией (10 MB, хранение неделю)."""
     root_logger = logging.getLogger()
     if root_logger.hasHandlers():
         root_logger.handlers.clear()
-    if os.path.exists("log/app.log"):
-        os.remove("log/app.log")
 
 
 def init_loguru_logger():

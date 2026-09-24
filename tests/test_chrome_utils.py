@@ -130,3 +130,34 @@ def test_get_with_retry_raises_after_exhausting_retries():
         except Exception as e:
             assert "still stalled" in str(e)
     assert driver.get.call_count == 2
+
+
+def test_resilient_get_retries_once_after_renderer_timeout():
+    from selenium.common.exceptions import TimeoutException
+
+    from src.utils.chrome_utils import _with_resilient_get
+
+    class _Driver:
+        def __init__(self, failures):
+            self.failures, self.calls, self.stopped = failures, [], 0
+
+        def get(self, url):
+            self.calls.append(url)
+            if len(self.calls) <= self.failures:
+                raise TimeoutException("Timed out receiving message from renderer: 75.000")
+
+        def execute_script(self, script):
+            self.stopped += 1
+
+    driver = _with_resilient_get(_Driver(failures=1))
+    driver.get("https://hh.ru/vacancy/1")
+    assert driver.calls == ["https://hh.ru/vacancy/1"] * 2
+    assert driver.stopped == 1
+
+    stubborn = _with_resilient_get(_Driver(failures=2))
+    try:
+        stubborn.get("https://hh.ru/vacancy/2")
+    except TimeoutException:
+        pass
+    else:
+        raise AssertionError("вторая неудача должна дойти до вызывающего кода")

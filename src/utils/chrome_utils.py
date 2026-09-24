@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
@@ -256,6 +257,30 @@ def _log_chrome_crash_diagnostics(exc: Exception) -> None:
         )
 
 
+def _with_resilient_get(driver):
+    """driver.get() с одним повтором при таймауте загрузки ("Timed out
+    receiving message from renderer") — у всех площадок сразу, а не в
+    каждом из десятков driver.get() по отдельности. Найдено в логах
+    2026-09-24: одна зависшая страница hh (Chrome 154) роняла весь
+    прогон площадки. Перед повтором останавливаем зависшую загрузку."""
+    original_get = driver.get
+
+    def get(url: str) -> None:
+        try:
+            original_get(url)
+        except TimeoutException as e:
+            logger.warning(f"{url} не загрузилась за отведённое время, повторяю: {e.msg}")
+            try:
+                driver.execute_script("window.stop();")
+            except Exception:
+                pass
+            time.sleep(3)
+            original_get(url)
+
+    driver.get = get
+    return driver
+
+
 def launch_chrome_with_retry(
     build_driver: Callable[[], webdriver.Chrome],
     profile_dir: Optional[Path],
@@ -272,7 +297,7 @@ def launch_chrome_with_retry(
         if profile_dir is not None:
             clear_stale_chrome_lock(profile_dir, force=attempt > 1)
         try:
-            return build_driver()
+            return _with_resilient_get(build_driver())
         except Exception as e:
             last_exc = e
             _log_chrome_crash_diagnostics(e)

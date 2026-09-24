@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import re
 import sys
 import threading
 from datetime import datetime, timezone
@@ -104,6 +105,9 @@ from src.direct.ats import discover_ats, fetch_jobs
 from src.direct.email_channel import build_message, send_email
 from src.direct.companies import load_companies, save_companies
 from src.direct.dossier import collect_dossier
+from src.job_sources.block_detection import is_still_blocked
+from src.job_sources.telegram.watcher import TELEGRAM_FOLDER
+from src.job_sources.telegram_notify import bot_credentials
 from src.job_sources.contact_book import ContactBook
 from src.job_sources.hr_replies import (
     CATEGORY_LABELS,
@@ -387,12 +391,21 @@ def _resume_readiness(data_folder: Path, source: str) -> Optional[dict]:
 # теряется — ухудшается только читаемость нераспознанных случаев.
 _ERROR_PATTERNS = (
     (
+        ("timed out receiving message from renderer",),
+        "Страница площадки не загрузилась — браузер завис на ней. Бот "
+        "повторяет загрузку сам; если повторяется часто — площадка "
+        "тормозит или ограничивает доступ.",
+    ),
+    (
         ("rate_limit_exceeded", "rate limit"),
         "Провайдер LLM временно перегружен — бот подождёт и повторит "
         "на следующем прогоне.",
     ),
     (
-        ("invalid_api_key", "incorrect api key", "401"),
+        # "401" только как HTTP-статус: голое "401" попадалось в
+        # шестнадцатеричных адресах стека chromedriver, и зависшая
+        # страница hh показывалась как "неверный API-ключ LLM".
+        ("invalid_api_key", "incorrect api key", "error code: 401", "status code 401", "401 unauthorized"),
         "Провайдер LLM не принял API-ключ — проверьте его в "
         "Настройки → Провайдер LLM.",
     ),
@@ -942,6 +955,104 @@ def post_contact_dossier(
     book.add(card["company"], dossier["contacts"], website=dossier["website"])
     after = len((book.get(body.key) or card)["contacts"])
     return {"website": dossier["website"], "added": after - before}
+
+
+@app.get("/api/todo")
+def get_todo(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """«Что сделать сейчас» на Главной: только то, что ждёт человека,
+    каждое — со ссылкой на нужный подраздел. Пустой список = бот
+    справляется сам."""
+    from datetime import timedelta
+
+    items: list[dict] = []
+    drafts = DraftStore(ctx.output_folder / HR_DRAFTS_FILE).all()
+    if drafts:
+        items.append({
+            "id": "drafts", "count": len(drafts), "view": "replies",
+            "text": "сообщений HR ждут вашего «Отправить»",
+        })
+    since = datetime.now().astimezone() - timedelta(days=3)
+    entries = ctx.applied_log.find_by_company("")
+    fresh = [
+        e for e in entries
+        if effective_stage(e) in ("replied", "interview", "offer")
+        and datetime.fromisoformat(e.get("state_at") or e.get("stage_at") or e["applied_at"]) >= since
+    ]
+    unread = [
+        c for c in TelegramConversations(
+            ctx.output_folder / "telegram_conversations.json"
+        ).all()
+        if c.get("unread")
+    ]
+    if fresh or unread:
+        items.append({
+            "id": "replies", "count": len(fresh) + len(unread), "view": "replies",
+            "text": "новых ответов от работодателей за 3 дня",
+        })
+    interviews = [e for e in entries if effective_stage(e) == "interview"]
+    if interviews:
+        items.append({
+            "id": "interviews", "count": len(interviews), "view": "history",
+            "text": "интервью — подготовьтесь: «Действия» → подготовка и тренажёр",
+        })
+    new_contacts = [
+        c for c in get_contacts(ctx) if c["status"] == "new" and c["contacts"]
+    ]
+    if new_contacts:
+        items.append({
+            "id": "contacts", "count": len(new_contacts), "view": "contacts",
+            "text": "компаний с контактом HR, которым вы ещё не писали",
+        })
+    paused = [
+        name for name, _ in ALL_SOURCES
+        if is_still_blocked(ctx.output_folder, name)
+    ]
+    if paused:
+        items.append({
+            "id": "paused", "count": len(paused), "view": "overview",
+            "text": "площадок на паузе после капчи/блокировки: " + ", ".join(paused)
+            + " — пройдите капчу в браузере и отправьте боту /resume <площадка>",
+        })
+    return {
+        "items": items,
+        "badges": {
+            "replies": len(drafts),
+            "contacts": len(new_contacts),
+        },
+    }
+
+
+class ApplicationRef(BaseModel):
+    source: str
+    external_id: str
+
+
+@app.post("/api/contacts/from-application")
+def post_contact_from_application(
+    body: ApplicationRef, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """«Найти HR» у любой вакансии из «Вакансий»: заводит компанию во
+    вкладке «Контакты» (с этой вакансией) и сразу пробует досье. Если сайт
+    компании неизвестен — карточка остаётся с полем «сайт компании»."""
+    entry = _entry_or_404(ctx, body.source, body.external_id)
+    if not entry["company"]:
+        raise HTTPException(400, "У вакансии не указана компания")
+    book = ContactBook(ctx.output_folder)
+    contacts = [
+        {"kind": "email", "value": c, "source": "текст вакансии", "source_url": entry["link"]}
+        for c in entry.get("contacts") or []
+    ]
+    key = book.add(
+        entry["company"],
+        contacts,
+        vacancy={"title": entry["title"], "link": entry["link"], "source": entry["source"]},
+        website=entry.get("company_url") or "",
+    )
+    try:
+        result = post_contact_dossier(DossierRequest(key=key), ctx)
+    except HTTPException as e:
+        return {"key": key, "added": 0, "message": e.detail}
+    return {"key": key, "added": result["added"], "message": ""}
 
 
 class ContactDraftRequest(BaseModel):
@@ -1705,6 +1816,109 @@ def post_telegram_settings(
         )
     ctx.reload_config()
     return _telegram_settings_snapshot(ctx)
+
+
+class TelegramWatchUpdate(BaseModel):
+    greeting: Optional[str] = None
+    enabled: Optional[bool] = None
+    keywords: Optional[list[str]] = None
+    stop_words: Optional[list[str]] = None
+    forward_to: Optional[str] = None
+
+
+def _telegram_watch_snapshot(ctx: AppContext) -> dict:
+    from src.job_sources.telegram.watcher import active_watcher, default_keywords
+
+    telegram = ctx.config.get("telegram") or {}
+    watcher = active_watcher()
+    return {
+        "enabled": bool(telegram.get("watch_enabled")),
+        "keywords": telegram.get("watch_keywords") or [],
+        "default_keywords": default_keywords(
+            telegram.get("positions") or ctx.config.get("positions") or []
+        ),
+        "stop_words": telegram.get("watch_stop_words") or [],
+        "forward_to": telegram.get("watch_forward_to") or "me",
+        "running": watcher is not None,
+        "channels": len(telegram.get("channels") or []),
+        "matched": watcher.matched_count if watcher else 0,
+        "daemon_running": ctx.scheduler_thread is not None
+        and ctx.scheduler_thread.is_alive(),
+        "bot_connected": bot_credentials(ctx.config) is not None,
+        "greeting": telegram.get("intro_message_template") or "",
+        "resumes": _telegram_resume_list(ctx),
+    }
+
+
+def _telegram_resume_list(ctx: AppContext) -> list[dict]:
+    folder = ctx.config["dataFolder"] / TELEGRAM_FOLDER
+    own = sorted(folder.glob("*.pdf")) if folder.exists() else []
+    return [{"name": p.name, "size": p.stat().st_size} for p in own]
+
+
+@app.post("/api/telegram/resumes")
+async def post_telegram_resume(
+    file: UploadFile = File(...), ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Резюме для кнопки «👋 + 📎» — сохраняется в data_folder/telegram/
+    под своим именем (оно же подпись на кнопке)."""
+    content = await file.read()
+    if not content.startswith(b"%PDF-"):
+        raise HTTPException(400, "Файл не похож на PDF.")
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(400, "Файл больше 20 МБ — Telegram такой не примет.")
+    stem = re.sub(r"[^\w\-]+", "_", Path(file.filename or "resume").stem).strip("_") or "resume"
+    folder = ctx.config["dataFolder"] / TELEGRAM_FOLDER
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{stem[:60]}.pdf").write_bytes(content)
+    return {"resumes": _telegram_resume_list(ctx)}
+
+
+@app.delete("/api/telegram/resumes/{name}")
+def delete_telegram_resume(name: str, ctx: AppContext = Depends(get_ctx)) -> dict:
+    folder = ctx.config["dataFolder"] / TELEGRAM_FOLDER
+    target = (folder / name).resolve()
+    if target.parent != folder.resolve() or target.suffix != ".pdf":
+        raise HTTPException(400, "Неверное имя файла")
+    target.unlink(missing_ok=True)
+    return {"resumes": _telegram_resume_list(ctx)}
+
+
+@app.get("/api/settings/telegram-watch")
+def get_telegram_watch(ctx: AppContext = Depends(get_ctx)) -> dict:
+    return _telegram_watch_snapshot(ctx)
+
+
+@app.post("/api/settings/telegram-watch")
+def post_telegram_watch(
+    body: TelegramWatchUpdate, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Мгновенные уведомления из каналов. Слова применяются на ходу;
+    включение/выключение — при следующем запуске бота."""
+    prefs = ctx.config_file
+    if body.enabled is not None:
+        set_source_field(prefs, "telegram", "watch_enabled", body.enabled)
+    if body.keywords is not None:
+        set_source_list_field(
+            prefs, "telegram", "watch_keywords",
+            [k.strip() for k in body.keywords if k.strip()],
+        )
+    if body.stop_words is not None:
+        set_source_list_field(
+            prefs, "telegram", "watch_stop_words",
+            [k.strip() for k in body.stop_words if k.strip()],
+        )
+    if body.forward_to is not None:
+        set_source_field(
+            prefs, "telegram", "watch_forward_to",
+            body.forward_to.strip().lstrip("@") or "me", quote=True,
+        )
+    if body.greeting is not None and body.greeting.strip():
+        set_source_field(
+            prefs, "telegram", "intro_message_template", body.greeting.strip(), quote=True,
+        )
+    ctx.reload_config()
+    return _telegram_watch_snapshot(ctx)
 
 
 def _telegram_session_path(ctx: AppContext) -> Path:

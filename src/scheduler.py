@@ -129,10 +129,21 @@ class Scheduler:
         self.stop_event.set()
 
     def run_forever(self, tick_seconds: int = 30) -> None:
+        from src.job_sources.telegram.watcher import start_telegram_watcher
+
         logger.info("Scheduler started.")
+        # Постоянный шлюз Telegram (telegram.watch_enabled) живёт, пока
+        # живёт демон: новые посты каналов приходят сразу, без расписания.
+        try:
+            watcher = start_telegram_watcher(self.parameters, self.llm_api_key)
+        except Exception as e:
+            logger.warning(f"Telegram-шлюз не запустился: {e}")
+            watcher = None
         try:
             while not self.stop_event.is_set():
                 self.run_once()
                 self.stop_event.wait(tick_seconds)
         finally:
+            if watcher is not None:
+                watcher.stop()
             logger.info("Scheduler stopped.")

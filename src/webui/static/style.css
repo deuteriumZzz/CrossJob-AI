@@ -2729,9 +2729,10 @@ kbd {
 }
 
 .row-actions {
-  display: inline-block;
+  display: block;
   position: relative;
-  margin-top: 4px;
+  margin-top: 6px;
+  width: fit-content;
 }
 .row-actions > summary {
   cursor: pointer;
@@ -2744,7 +2745,7 @@ kbd {
 }
 .row-actions-menu {
   position: absolute;
-  right: 0;
+  left: 0;
   z-index: 20;
   display: grid;
   min-width: 220px;
@@ -2824,4 +2825,157 @@ kbd {
   border: 1px solid var(--border);
   background: var(--bg-elevated);
   color: var(--text);
+}
+
+/* Подразделы раздела (Общение: Входящие · Контакты HR · Telegram) —
+   сегментированный переключатель над содержимым, в стиле таблеток
+   настроек, но спокойнее: это навигация, а не главное действие. */
+.subnav {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 20px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+}
+.subnav button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  padding: 7px 16px;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.subnav button:hover {
+  color: var(--text);
+}
+.subnav button.active {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.subnav-badge:empty {
+  display: none;
+}
+.subnav-badge {
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #0b1520;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.todo-panel {
+  margin-bottom: 18px;
+}
+.todo-calm {
+  color: var(--ok);
+  font-size: 14px;
+}
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 10px 12px;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--border-soft);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.todo-item:first-of-type {
+  border-top: 0;
+}
+.todo-item:hover {
+  background: var(--border-soft);
+}
+.todo-count {
+  min-width: 38px;
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+.todo-text {
+  flex: 1;
+  font-size: 14px;
+}
+.todo-go {
+  color: var(--muted);
+}
+
+.contact-card.is-focused {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(122, 184, 255, 0.25);
+}
+
+/* Быстрый отклик в Telegram — настройки */
+.tgq-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+.tgq-status {
+  margin: 14px 0 6px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+  background: var(--border-soft);
+  color: var(--muted);
+}
+.tgq-status.is-on {
+  color: var(--ok);
+}
+.tgq-status.is-wait {
+  color: var(--warn);
+}
+.tgq-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 22px 28px;
+  margin: 14px 0 6px;
+}
+.tgq-block h4 {
+  margin: 0 0 8px;
+}
+.tgq-files {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 10px;
+}
+.tgq-file {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+}
+.tg-quick-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
 }

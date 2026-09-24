@@ -132,10 +132,20 @@ def poll_form_commands(
     response.raise_for_status()
     updates = response.json().get("result", [])
 
+    commands = parse_form_commands(updates, chat_id)
+    if updates:
+        max_update_id = max(u.get("update_id", 0) for u in updates)
+        _offset_path(output_folder).write_text(
+            json.dumps({"offset": max_update_id + 1}), encoding="utf-8"
+        )
+    return commands
+
+
+def parse_form_commands(updates: list[dict], chat_id: str) -> list[dict]:
+    """Команды по анкетам hh из уже прочитанных обновлений бота (общий
+    читатель — telegram_control.poll_bot_updates)."""
     commands = []
-    max_update_id = offset - 1
     for update in updates:
-        max_update_id = max(max_update_id, update.get("update_id", 0))
         message = update.get("message") or {}
         if str(message.get("chat", {}).get("id")) != str(chat_id):
             continue
@@ -165,10 +175,6 @@ def poll_form_commands(
             )
             continue
 
-    if updates:
-        _offset_path(output_folder).write_text(
-            json.dumps({"offset": max_update_id + 1}), encoding="utf-8"
-        )
     return commands
 
 

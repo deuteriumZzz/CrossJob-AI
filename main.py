@@ -59,6 +59,12 @@ from src.direct.form_fill import prefill_application
 from src.direct.source import DirectSource
 from src.job_sources.contact_book import ContactBook, contacts_from_text
 from src.job_sources.telegram.post_parser import parse_post
+from src.job_sources.telegram.watcher import (
+    active_watcher,
+    get_watch_post,
+    save_telegram_letter,
+    telegram_resumes,
+)
 from src.job_sources.github_context import fetch_github_summary
 from src.job_sources.interview_calendar import build_ics, extract_interview_time
 from src.job_sources.interview_prep import generate_interview_prep
@@ -69,6 +75,7 @@ from src.job_sources.hr_replies import (
     FOLLOW_UP_TEXT,
     DraftStore,
     build_digest,
+    generate_first_message,
     classify_reply,
     due_follow_ups,
     format_draft_notification,
@@ -109,6 +116,7 @@ from src.job_sources.headhunter.form_fill import (
 from src.job_sources.headhunter.telegram_approval import (
     get_pending_form,
     notify_pending_form,
+    parse_form_commands,
     poll_form_commands,
     remove_pending_form,
     save_pending_form,
@@ -163,9 +171,15 @@ from src.job_sources.telegram.client import TelegramSourceClient
 from src.job_sources.telegram.contact import extract_contact
 from src.job_sources.telegram.source import TelegramSource
 from src.job_sources.telegram_control import HELP_TEXT as _TELEGRAM_HELP_TEXT
-from src.job_sources.telegram_control import poll_control_commands
+from src.job_sources.telegram_control import (
+    parse_control_commands,
+    poll_bot_updates,
+    poll_control_commands,
+)
 from src.job_sources.telegram_conversations import TelegramConversations
 from src.job_sources.telegram_notify import (
+    bot_credentials,
+    bot_request,
     notify_from_secrets,
     send_notification,
 )
@@ -1613,6 +1627,12 @@ def search_telegram(
     Иначе (нет контакта, или auto_message выключен) — как раньше,
     просто dry-run запись, годная только для ручного ответа.
     """
+    if active_watcher() is not None:
+        logger.info(
+            "Telegram: работает постоянный шлюз — посты приходят сразу, "
+            "проверка каналов по расписанию не нужна."
+        )
+        return
     data_folder: Path = parameters["dataFolder"]
     resume_pdf_path = data_folder / RESUME_PDF
     if not resume_pdf_path.exists():
@@ -3267,12 +3287,20 @@ def _process_pending_form_approvals(
         return
 
     output_folder: Path = parameters["outputFileDirectory"]
+    if active_watcher() is not None:
+        return  # бота читает постоянный шлюз
     try:
-        commands = poll_form_commands(bot_token, chat_id, output_folder)
+        updates = poll_bot_updates(bot_token, output_folder)
     except Exception as e:
         logger.warning(f"Failed to poll Telegram for form commands: {e}")
         return
+    handle_bot_updates(parameters, llm_api_key, updates)
 
+
+def _run_form_commands(
+    parameters: dict, llm_api_key: str, commands: list[dict]
+) -> None:
+    output_folder: Path = parameters["outputFileDirectory"]
     for cmd in commands:
         form_id = cmd["form_id"]
         record = get_pending_form(output_folder, form_id)
@@ -3688,14 +3716,46 @@ def check_telegram_commands(parameters: dict, llm_api_key: str) -> None:
 
     output_folder: Path = parameters["outputFileDirectory"]
     _maybe_send_daily_digest(parameters, bot_token, chat_id)
+    if active_watcher() is not None:
+        return  # бота читает постоянный шлюз — кнопки и команды сразу
     try:
-        commands = poll_control_commands(bot_token, chat_id, output_folder)
+        updates = poll_bot_updates(bot_token, output_folder)
     except Exception as e:
-        logger.warning(f"Failed to poll Telegram for control commands: {e}")
+        logger.warning(f"Failed to poll Telegram bot updates: {e}")
         return
+    handle_bot_updates(parameters, llm_api_key, updates)
+
+
+def handle_bot_updates(
+    parameters: dict, llm_api_key: str, updates: list[dict]
+) -> None:
+    """Всё, что пришло боту уведомлений, — из одного списка обновлений:
+    команды (/status, «отправить <код>»…), ответы по анкетам hh
+    («да <id>»…) и нажатия кнопок под вакансиями из Telegram-шлюза."""
+    creds = bot_credentials(parameters)
+    if not updates or creds is None:
+        return
+    bot_token, chat_id = creds
+    for update in updates:
+        callback = update.get("callback_query")
+        if callback and str((callback.get("message") or {}).get("chat", {}).get("id")) == chat_id:
+            try:
+                _handle_vacancy_button(parameters, llm_api_key, bot_token, callback)
+            except Exception as e:
+                logger.warning(f"Кнопка {callback.get('data')}: {e}")
+                bot_request(bot_token, "answerCallbackQuery", {
+                    "callback_query_id": callback["id"], "text": f"Ошибка: {e}"[:180], "show_alert": True,
+                })
+    _run_form_commands(parameters, llm_api_key, parse_form_commands(updates, chat_id))
+    _run_control_commands(parameters, parse_control_commands(updates, chat_id), bot_token, chat_id)
+
+
+def _run_control_commands(
+    parameters: dict, commands: list[dict], bot_token: str, chat_id: str
+) -> None:
     if not commands:
         return
-
+    output_folder: Path = parameters["outputFileDirectory"]
     applied_log = AppliedLog(output_folder / "applied_log.json")
     for cmd in commands:
         action = cmd["action"]
@@ -3890,6 +3950,8 @@ def create_headhunter_resume_draft(parameters: dict) -> Optional[str]:
 
 
 def check_telegram_replies(parameters: dict, llm_api_key: str) -> None:
+    if active_watcher() is not None:
+        return  # ответы HR шлюз ловит сам, в момент прихода
     """Проверяет личные диалоги, заведённые search_telegram
     (telegram.auto_message), на новые ответы контактов — так же, как
     check_headhunter_replies проверяет отклики на HH: только
@@ -3937,6 +3999,105 @@ def check_telegram_replies(parameters: dict, llm_api_key: str) -> None:
 
 
 HR_DRAFTS_FILE = ".hr_reply_drafts.json"
+
+
+def _telegram_client(parameters: dict) -> TelegramSourceClient:
+    tg = ConfigValidator.load_yaml(parameters["secretsFile"]).get("telegram") or {}
+    return TelegramSourceClient(
+        int(tg["api_id"]), tg["api_hash"],
+        parameters["outputFileDirectory"] / ".telegram_session",
+    )
+
+
+def _handle_vacancy_button(
+    parameters: dict, llm_api_key: str, bot_token: str, callback: dict
+) -> None:
+    """Кнопки под вакансией из шлюза (см. telegram/watcher.vacancy_keyboard):
+    q — «Здравствуйте» (+ резюме), l — письмо LLM под вакансию черновиком,
+    d — отправить черновик (+ резюме), x — пропустить черновик."""
+    output_folder: Path = parameters["outputFileDirectory"]
+    data_folder: Path = parameters["dataFolder"]
+    parts = (callback.get("data") or "").split(":")
+    message = callback.get("message") or {}
+    answer = {"callback_query_id": callback["id"]}
+
+    def done(status: str) -> None:
+        bot_request(bot_token, "answerCallbackQuery", {**answer, "text": status[:180]})
+        bot_request(bot_token, "editMessageReplyMarkup", {
+            "chat_id": message["chat"]["id"], "message_id": message["message_id"],
+            "reply_markup": {"inline_keyboard": [[{"text": status[:60], "callback_data": "noop"}]]},
+        })
+
+    resumes = telegram_resumes(data_folder)
+    if parts[0] in ("q", "l"):
+        post = get_watch_post(output_folder, parts[1])
+        if post is None:
+            raise ValueError("пост устарел — откройте его по ссылке")
+        contact = post["contacts"][int(parts[2])]
+    if parts[0] == "q":
+        resume_index = int(parts[3])
+        template = (parameters.get("telegram") or {}).get(
+            "intro_message_template"
+        ) or "Здравствуйте! Увидел вакансию «{role}» ({link}). Буду рад обсудить."
+        text = template.format(role=post["title"], link=post["link"])
+        with _telegram_client(parameters) as client:
+            client.send_message(contact["value"], text)
+            if resume_index >= 0:
+                client.send_file(contact["value"], resumes[resume_index])
+        TelegramConversations(output_folder / "telegram_conversations.json").record_outbound(
+            contact["value"], text, job_link=post["link"]
+        )
+        done(f"✅ Отправлено @{contact['value']}" + (" + резюме" if resume_index >= 0 else ""))
+    elif parts[0] == "l":
+        bot_request(bot_token, "answerCallbackQuery", {**answer, "text": "Пишу письмо под вакансию…"})
+        resume_pdf = resumes[0] if resumes else data_folder / RESUME_PDF
+        person = (yaml.safe_load(Path(parameters.get("plainTextResumeFile") or data_folder / PLAIN_TEXT_RESUME_YAML).read_text(encoding="utf-8")) or {}).get("personal_information") or {}
+        name = f"{person.get('name', '')} {person.get('surname', '')}".strip()
+        channel_kind = "email" if contact["kind"] == "email" else "telegram"
+        letter = generate_first_message(
+            resume_pdf, name, "", post["title"], post["text"], channel_kind, llm_api_key
+        )
+        path = save_telegram_letter(data_folder, post, letter["text"])
+        extra = {"channel": "email", "subject": letter["subject"]} if channel_kind == "email" else {}
+        code = DraftStore(output_folder / HR_DRAFTS_FILE).add(
+            contact["value"], letter["text"], "first" if channel_kind == "telegram" else "email",
+            post["link"], **extra,
+        )
+        # Telegram: без резюме или + резюме файлом. Email: резюме уходит
+        # вложением всегда (Gmail), кнопки — какое именно приложить.
+        send_row = (
+            [{"text": "✅ Отправить", "callback_data": f"d:{code}:-1"}]
+            if channel_kind == "telegram" or not resumes
+            else []
+        )
+        send_row += [
+            {"text": f"✅ + 📎 {resume.stem}", "callback_data": f"d:{code}:{r}"}
+            for r, resume in enumerate(resumes[:3])
+        ]
+        bot_request(bot_token, "sendMessage", {
+            "chat_id": message["chat"]["id"],
+            "reply_to_message_id": message["message_id"],
+            "text": f"✍️ Письмо для {contact['value']} (сохранено: telegram/letters/{path.name}):\n\n{letter['text']}",
+            "reply_markup": {"inline_keyboard": [send_row, [{"text": "✖️ Пропустить", "callback_data": f"x:{code}"}]]},
+        })
+    elif parts[0] == "d":
+        draft = DraftStore(output_folder / HR_DRAFTS_FILE).get(parts[1])
+        resume_index = int(parts[2])
+        is_email = bool(draft) and draft.get("channel") == "email"
+        result = send_hr_draft(
+            parameters, parts[1],
+            attachment=resumes[resume_index] if is_email and resume_index >= 0 else None,
+        )
+        if result.startswith("Отправлено") and draft and resume_index >= 0 and draft.get("channel", "telegram") == "telegram":
+            with _telegram_client(parameters) as client:
+                client.send_file(draft["contact"], resumes[resume_index])
+            result += " + резюме"
+        done(("✅ " if result.startswith("Отправлено") else "⚠️ ") + result)
+    elif parts[0] == "x":
+        DraftStore(output_folder / HR_DRAFTS_FILE).remove(parts[1])
+        done("✖️ Пропущено")
+    else:
+        bot_request(bot_token, "answerCallbackQuery", answer)
 
 
 def _conversation_job(conv: dict, applied_log: AppliedLog) -> dict:
@@ -4098,7 +4259,9 @@ def _draft_follow_ups(
         )
 
 
-def send_hr_draft(parameters: dict, code: str, text: str = "") -> str:
+def send_hr_draft(
+    parameters: dict, code: str, text: str = "", attachment: Optional[Path] = None
+) -> str:
     """Отправляет подтверждённый черновик (из Telegram-команды или
     дашборда); text — отредактированный текст, если правили. Возвращает
     фразу для пользователя."""
@@ -4110,7 +4273,9 @@ def send_hr_draft(parameters: dict, code: str, text: str = "") -> str:
     message = text.strip() or draft["text"]
     secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
     if draft.get("channel") == "email":
-        return _send_email_draft(parameters, secrets, drafts, code, draft, message)
+        return _send_email_draft(
+            parameters, secrets, drafts, code, draft, message, attachment
+        )
     tg_secrets = secrets.get("telegram") or {}
     if not tg_secrets.get("api_id") or not tg_secrets.get("api_hash"):
         return "Нет telegram.api_id/api_hash в secrets.yaml — не могу отправить."
@@ -4137,7 +4302,10 @@ def _send_email_draft(
     code: str,
     draft: dict,
     message: str,
+    attachment: Optional[Path] = None,
 ) -> str:
+    """Письмо HR только через Gmail (SMTP Google, пароль приложения), с
+    резюме во вложении: выбранным на кнопке (attachment) или основным."""
     credentials = secrets.get("email") or {}
     if not credentials.get("address") or not credentials.get("app_password"):
         return (
@@ -4157,7 +4325,7 @@ def _send_email_draft(
     )
     if draft["kind"] != "follow_up" and sent_today >= limit:
         return f"Дневной лимит писем ({limit}) исчерпан — отправлю завтра."
-    resume = parameters["dataFolder"] / RESUME_PDF_LINKEDIN
+    resume = attachment or parameters["dataFolder"] / RESUME_PDF_LINKEDIN
     if not resume.exists():
         resume = parameters["dataFolder"] / RESUME_PDF
     email_message = build_message(

@@ -60,29 +60,49 @@ class TelegramSourceClient:
     если включена) в консоли; файл сессии избавляет от этого при
     следующих запусках."""
 
+    _watcher = None
+
     def __init__(self, api_id: int, api_hash: str, session_path: Path):
         session_path.parent.mkdir(parents=True, exist_ok=True)
         _ensure_event_loop()
         self._client = TelegramClient(str(session_path), api_id, api_hash)
 
     def __enter__(self) -> "TelegramSourceClient":
+        # Пока работает постоянный шлюз, сессией владеет он — второе
+        # подключение той же сессией конфликтует; действия идут через
+        # его подключение (см. telegram/watcher.py).
+        from src.job_sources.telegram.watcher import active_watcher
+
+        self._watcher = active_watcher()
+        if self._watcher is not None:
+            return self
         _SESSION_LOCK.acquire()
         self._client.start()
         return self
 
     def __exit__(self, *exc_info) -> None:
+        if self._watcher is not None:
+            return
         self._client.disconnect()
         _SESSION_LOCK.release()
 
     def iter_channel_messages(self, channel: str, limit: int) -> list[Message]:
+        if self._watcher is not None:
+            return list(self._watcher.call(lambda c: c.get_messages(channel, limit=limit)))
         return list(self._client.iter_messages(channel, limit=limit))
 
     def send_message(self, contact: str, text: str) -> Message:
+        if self._watcher is not None:
+            return self._watcher.call(lambda c: c.send_message(contact, text))
         return self._client.send_message(contact, text)
 
     def send_file(
         self, contact: str, file_path: Path, caption: str = ""
     ) -> Message:
+        if self._watcher is not None:
+            return self._watcher.call(
+                lambda c: c.send_file(contact, str(file_path), caption=caption)
+            )
         return self._client.send_file(contact, str(file_path), caption=caption)
 
     def new_incoming_messages(
@@ -91,11 +111,13 @@ class TelegramSourceClient:
         """Сообщения от contact'а после min_id (0 — вся история), новые
         первыми. Личный диалог содержит и наши исходящие, и его
         входящие — оставляем только входящие (m.out is False)."""
-        return [
-            m
-            for m in self._client.iter_messages(contact, min_id=min_id)
-            if not m.out
-        ]
+        if self._watcher is not None:
+            messages = self._watcher.call(
+                lambda c: c.get_messages(contact, min_id=min_id, limit=100)
+            )
+        else:
+            messages = self._client.iter_messages(contact, min_id=min_id)
+        return [m for m in messages if not m.out]
 
 
 class TelegramStatusClient:
