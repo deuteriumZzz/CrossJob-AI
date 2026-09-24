@@ -106,7 +106,7 @@ from src.job_sources.telegram_control import HELP_TEXT as _TELEGRAM_HELP_TEXT
 from src.direct.ats import discover_ats, fetch_jobs
 from src.direct.email_channel import build_message, send_email
 from src.direct.companies import load_companies, save_companies
-from src.direct.campaign import CampaignJob, CampaignStore, campaign_stats
+from src.direct.campaign import CAMPAIGNS_FILE, CampaignJob, CampaignStore, campaign_stats
 from src.direct.dossier import collect_dossier
 from src.direct.importer import preview as import_preview
 from src.direct.importer import read_file, rows_from_table, rows_from_text
@@ -950,13 +950,16 @@ def _backfill_contact_book(ctx: AppContext, book: ContactBook) -> None:
         book._save({"companies": {}})
 
 
-def _contact_status(contact: dict, conversations, entries, drafts, campaign=None) -> str:
+def _contact_status(contact: dict, conversations, sent_by_email: dict, draft_contacts: set, campaign=None) -> str:
+    """sent_by_email: email → отклики, где ему писали; draft_contacts —
+    кому есть черновик (оба — заранее, иначе на тысячах компаний это
+    перебор всех откликов для каждого контакта)."""
     value = contact["value"].lower()
     if campaign and value in campaign.get("replied", ()):
         return "replied"
     if campaign and value in campaign.get("bounced", ()):
         return "bounced"
-    if any(d["contact"].lower() == value for d in drafts.values()):
+    if value in draft_contacts:
         return "draft"
     if campaign and value in campaign.get("sent", ()):
         return "written"
@@ -967,7 +970,7 @@ def _contact_status(contact: dict, conversations, entries, drafts, campaign=None
                 return "replied"
             return "written"
     if contact["kind"] == "email":
-        sent = [e for e in entries if (e.get("outreach_email") or "").lower() == value]
+        sent = sent_by_email.get(value, [])
         if any(e.get("email_replied") for e in sent):
             return "replied"
         if sent:
@@ -1020,6 +1023,27 @@ def get_contacts(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
     book = ContactBook(ctx.output_folder)
     if not book.path.exists():
         _backfill_contact_book(ctx, book)
+    # Пересчёт базы (статусы, история) дорогой на тысячах компаний, а
+    # Главная спрашивает часто — считаем заново, только если изменился
+    # какой-то из файлов, из которых она складывается, или чёрный список.
+    sources = [book.path, ctx.output_folder / CAMPAIGNS_FILE, ctx.output_folder / HR_DRAFTS_FILE,
+               ctx.output_folder / "telegram_conversations.json", ctx.applied_log.path]
+    cache_key = (
+        str(ctx.output_folder),
+        tuple(p.stat().st_mtime_ns if p.exists() else 0 for p in sources),
+        tuple(ctx.config.get("company_blacklist") or []),
+    )
+    if _CONTACTS_CACHE.get("key") == cache_key:
+        return _CONTACTS_CACHE["value"]
+    result = _build_contacts(ctx, book)
+    _CONTACTS_CACHE.update(key=cache_key, value=result)
+    return result
+
+
+_CONTACTS_CACHE: dict = {}
+
+
+def _build_contacts(ctx: AppContext, book: ContactBook) -> list[dict]:
     conversations = TelegramConversations(
         ctx.output_folder / "telegram_conversations.json"
     )
@@ -1032,12 +1056,17 @@ def get_contacts(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
         "replied": campaigns.emails_with_status("replied"),
     }
     events = _contact_events(ctx, conversations, entries, drafts)
+    sent_by_email: dict[str, list[dict]] = {}
+    for e in entries:
+        if e.get("outreach_email"):
+            sent_by_email.setdefault(e["outreach_email"].lower(), []).append(e)
+    draft_contacts = {d["contact"].lower() for d in drafts.values()}
     # Общий чёрный список из «Что ищу» действует и на рассылку.
     blacklist = {company_key(c) for c in ctx.config.get("company_blacklist") or [] if company_key(c)}
     cards = []
     for key, card in book.all().items():
         contacts = [
-            {**c, "status": _contact_status(c, conversations, entries, drafts, campaign),
+            {**c, "status": _contact_status(c, conversations, sent_by_email, draft_contacts, campaign),
              "source_kind": _source_kind(c.get("source", ""))}
             for c in card["contacts"]
         ]
