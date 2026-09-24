@@ -18,6 +18,7 @@ Status = Literal[
     "skipped_low_fit",
     "skipped_easy_apply_failed",
     "skipped_closed_posting",
+    "skipped_requirements",
 ]
 Period = Literal["day", "week", "month"]
 

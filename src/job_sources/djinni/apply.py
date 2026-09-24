@@ -37,6 +37,10 @@ _APPLIED_MARKERS = (
 )
 
 
+class DjinniProfileRequired(RuntimeError):
+    """Профиль кандидата на Djinni не создан — отклики невозможны."""
+
+
 class DjinniSession:
     def __init__(self, profile_dir: Path):
         self.driver = init_browser(profile_dir)
@@ -106,6 +110,36 @@ def _already_applied(driver) -> bool:
     return any(m in text for m in _APPLIED_MARKERS)
 
 
+_UNMET_MARKER = "does not meet some of the requirements"
+_UNMET_END = ("if you", "update your profile", "want to compare", "see applicant insights")
+
+
+def unmet_requirements(driver, job_link: str) -> list[str]:
+    """Пустит ли Djinni откликнуться. Пустой список — пустит; иначе строки
+    требований, которые профиль не проходит («Only from 7 years of
+    experience», «English B2»…) — подтверждено вживую 2026-09-25: Djinni
+    прячет кнопку отклика и пишет «Your profile does not meet some of the
+    requirements». Проверяем до письма, чтобы не тратить ИИ зря."""
+    driver.get(job_link)
+    time.sleep(PAGE_LOAD_WAIT_SECONDS)
+    raise_if_blocked(visible_text(driver))
+    text = visible_text(driver)
+    if "can't apply for jobs right now" in text.lower():
+        raise DjinniProfileRequired("На Djinni не заполнен профиль кандидата — откликаться нельзя, пока он не создан: djinni.co/my/wizard/")
+    start = text.find(_UNMET_MARKER)
+    if start < 0:
+        return []
+    reasons = []
+    for line in text[start + len(_UNMET_MARKER):].splitlines():
+        line = line.strip()
+        if not line or line.lower().startswith("specified by"):
+            continue
+        if any(line.lower().startswith(e) for e in _UNMET_END) or len(reasons) >= 10:
+            break
+        reasons.append(line)
+    return reasons or ["профиль не проходит требования компании"]
+
+
 def apply_to_job(driver, job_link: str, message: str) -> bool:
     """True — отклик подтверждённо отправлен (или уже был). False — не
     нашли кнопку/форму, попали на вход или не увидели подтверждения."""
@@ -116,6 +150,10 @@ def apply_to_job(driver, job_link: str, message: str) -> bool:
         return False
     if _already_applied(driver):
         return True
+    # Без заполненного профиля Djinni показывает кнопку, но откликнуться не
+    # даёт (подтверждено вживую 2026-09-25) — говорим прямо, что делать.
+    if "can't apply for jobs right now" in visible_text(driver).lower():
+        raise DjinniProfileRequired("На Djinni не заполнен профиль кандидата — откликаться нельзя, пока он не создан: djinni.co/my/wizard/")
 
     button = _visible_by_text(driver, _APPLY_MARKERS)
     if button is None:

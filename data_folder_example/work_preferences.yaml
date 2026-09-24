@@ -240,6 +240,11 @@ djinni:
   auto_apply: false
   schedule_enabled: false
   interval_hours: 3
+  # Как в вашем профиле Djinni: страна (ISO3, IDN/POL/UKR…) и стаж в годах —
+  # вакансии не для вашей страны и со стажем «от» больше вашего на год+
+  # отсеиваются сразу: Djinni на них всё равно не даст откликнуться.
+  country: ''
+  experience_years: 1.5
 
 
 # Утренняя сводка в Telegram-бот: отклики и ответы за сутки, что ждёт

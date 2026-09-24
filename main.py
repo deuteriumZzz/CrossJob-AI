@@ -131,8 +131,9 @@ from src.job_sources.himalayas.apply import (
     apply_to_job as apply_to_himalayas_job,
 )
 from src.job_sources.himalayas.auth import HimalayasSession
-from src.job_sources.djinni.apply import DjinniSession
+from src.job_sources.djinni.apply import DjinniProfileRequired, DjinniSession
 from src.job_sources.djinni.apply import apply_to_job as apply_to_djinni_job
+from src.job_sources.djinni.apply import unmet_requirements as djinni_unmet_requirements
 from src.job_sources.djinni.search import search as search_djinni_jobs
 from src.job_sources.himalayas.source import HimalayasSource
 from src.job_sources.job_fit import classify_fit, score_job_fit
@@ -3347,6 +3348,23 @@ def search_and_apply_djinni(
                 applied_log.record(job, "", "", "skipped_low_fit", fit.score, fit.gaps)
                 continue
 
+            if auto_apply:
+                if session is None:
+                    session = DjinniSession(output_folder / ".chrome_profile_djinni")
+                    session.ensure_logged_in(parameters)
+                # Djinni сам не пускает, если профиль не проходит требования
+                # (стаж, страна, английский, зарплата) — проверяем до письма.
+                try:
+                    unmet = djinni_unmet_requirements(session.driver, job.link)
+                except DjinniProfileRequired as e:
+                    logger.error(str(e))
+                    notify(parameters, f"Djinni: {e}")
+                    break
+                if unmet:
+                    logger.info(f"Skipping {job.role} at {job.company}: Djinni не пустит — {'; '.join(unmet[:3])}")
+                    applied_log.record(job, "", "", "skipped_requirements", fit.score, unmet)
+                    continue
+
             try:
                 # Язык письма — по вакансии (на Djinni бывают и английские, и
                 # украинские/русские тексты); humanizer внутри.
@@ -3359,12 +3377,13 @@ def search_and_apply_djinni(
 
             status: Literal["applied", "dry_run"] = "dry_run"
             if auto_apply:
-                if session is None:
-                    session = DjinniSession(output_folder / ".chrome_profile_djinni")
-                    session.ensure_logged_in(parameters)
                 wait_before_apply()
                 try:
                     applied = apply_to_djinni_job(session.driver, job.link, cover_letter)
+                except DjinniProfileRequired as e:
+                    logger.error(str(e))
+                    notify(parameters, f"Djinni: {e}")
+                    break
                 except PlatformBlockedError as e:
                     logger.error(f"djinni.co appears to have blocked us: {e}")
                     mark_blocked(output_folder, "djinni")

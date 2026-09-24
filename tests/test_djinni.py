@@ -58,3 +58,36 @@ def test_search_only_mode_records_dry_run_without_browser(tmp_path, monkeypatch)
     main.search_and_apply_djinni({"dataFolder": tmp_path, "outputFileDirectory": out, "djinni": {"auto_apply": False}}, "key")
     entry = json.loads((out / "applied_log.json").read_text())["applications"][0]
     assert entry["source"] == "djinni" and entry["status"] == "dry_run" and entry["cover_letter"] == "Hello"
+
+
+def test_country_and_experience_prefilter():
+    item = lambda i, countries, months: {  # noqa: E731
+        "@type": "JobPosting", "title": f"Job {i}", "url": f"https://djinni.co/jobs/{i}/", "identifier": i,
+        "hiringOrganization": "Acme", "applicantLocationRequirements": countries,
+        "experienceRequirements": {"monthsOfExperience": months},
+    }
+    html = "<script type=\"application/ld+json\">" + json.dumps([
+        item(1, {"@type": "Country", "address": {"addressCountry": "POL"}}, 12),  # одним объектом
+        item(2, [], 60),                                                          # стаж 5 лет
+        item(3, [{"address": {"addressCountry": "IDN"}}], 24),
+        item(4, [], 12),
+    ]) + "</script>"
+    assert [j.external_id for j in dj.parse_jobs(html, "IDN", 1.5 * 12 + 12)] == ["3", "4"]
+    assert len(dj.parse_jobs(html)) == 4
+
+
+def test_unmet_requirements_reads_djinni_reasons(monkeypatch):
+    from src.job_sources.djinni import apply as da
+
+    page = ("Apply\nYour profile does not meet some of the requirements specified by the company\n"
+            "Only from 7 years of experience\nYour experience: 1.5 years of experience\n"
+            "English B2 - Upper Intermediate\nYour level: B1 - Intermediate\nupdate your profile\nFooter")
+    monkeypatch.setattr(da, "visible_text", lambda d: page)
+    monkeypatch.setattr(da.time, "sleep", lambda s: None)
+    driver = type("D", (), {"get": lambda self, url: None})()
+    assert da.unmet_requirements(driver, "u") == [
+        "Only from 7 years of experience", "Your experience: 1.5 years of experience",
+        "English B2 - Upper Intermediate", "Your level: B1 - Intermediate",
+    ]
+    monkeypatch.setattr(da, "visible_text", lambda d: "Job text\nApply")
+    assert da.unmet_requirements(driver, "u") == []

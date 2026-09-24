@@ -64,8 +64,23 @@ def search_params(position: str, page: int = 1) -> dict:
     return params
 
 
-def parse_jobs(html: str) -> list[Job]:
-    """JobPosting из JSON-LD страницы выдачи → Job."""
+def _countries(item: dict) -> list[str]:
+    """Страны, откуда компания рассматривает кандидатов (ISO3). Djinni
+    пишет их то списком, то одним объектом, то строкой."""
+    raw = item.get("applicantLocationRequirements") or []
+    result = []
+    for r in raw if isinstance(raw, list) else [raw]:
+        address = r.get("address", "") if isinstance(r, dict) else r
+        code = address.get("addressCountry", "") if isinstance(address, dict) else address
+        if isinstance(code, str) and code:
+            result.append(code)
+    return result
+
+
+def parse_jobs(html: str, country: str = "", max_months: Optional[float] = None) -> list[Job]:
+    """JobPosting из JSON-LD страницы выдачи → Job. country/max_months —
+    сразу отсеять то, куда Djinni всё равно не даст откликнуться: вакансия
+    не для вашей страны или требует стажа больше max_months."""
     jobs: list[Job] = []
     for block in _LD_RE.findall(html):
         try:
@@ -75,11 +90,13 @@ def parse_jobs(html: str) -> list[Job]:
         for item in data if isinstance(data, list) else [data]:
             if not isinstance(item, dict) or item.get("@type") != "JobPosting" or not item.get("url"):
                 continue
-            countries = [
-                ((r.get("address") or {}).get("addressCountry") or "")
-                for r in item.get("applicantLocationRequirements") or []
-                if isinstance(r, dict)
-            ]
+            countries = _countries(item)
+            experience = item.get("experienceRequirements")
+            months = experience.get("monthsOfExperience") if isinstance(experience, dict) else None
+            if country and countries and country.upper() not in countries:
+                continue
+            if max_months is not None and months and months > max_months:
+                continue
             remote = item.get("jobLocationType") == "TELECOMMUTE"
             org = item.get("hiringOrganization") or ""
             # Компания бывает объектом Organization, а бывает просто строкой.
@@ -104,21 +121,28 @@ def search(preferences: dict, client: Optional[httpx.Client] = None) -> list[Job
     client = client or httpx.Client(headers={"User-Agent": USER_AGENT}, timeout=20, follow_redirects=True)
     seen: set[str] = set()
     jobs: list[Job] = []
+    own_settings = preferences.get("djinni") or {}
+    country = str(own_settings.get("country") or "")
+    years = own_settings.get("experience_years")
+    # Стаж с запасом в год: «от 2 лет» при ваших 1.5 Djinni ещё пропускает не всегда,
+    # но «от 5 лет» — точно нет, такие даже не оцениваем.
+    max_months = float(years) * 12 + 12 if years is not None else None
     try:
         for position in effective_list(preferences, "djinni", "positions"):
             for page in range(1, PAGES_PER_POSITION + 1):
                 response = client.get(f"{BASE}/jobs/", params=search_params(position, page))
-                found = parse_jobs(response.text)
+                page_jobs = parse_jobs(response.text)
+                found = parse_jobs(response.text, country, max_months)
                 # В обычной странице Djinni есть скрипт reCAPTCHA формы входа —
                 # слово «captcha» само по себе не блокировка. Блок — это 403/429
                 # или страница без единой вакансии.
-                if response.status_code in (403, 429) or (not found and page == 1):
+                if response.status_code in (403, 429) or (not page_jobs and page == 1):
                     raise_if_blocked(response)
                 for job in found:
                     if job.external_id not in seen and passes_blacklists(job, preferences):
                         seen.add(job.external_id)
                         jobs.append(job)
-                if len(found) < 15:
+                if len(page_jobs) < 15:
                     break  # последняя страница
                 time.sleep(random.uniform(1.0, 2.5))  # вежливо к сайту
     finally:

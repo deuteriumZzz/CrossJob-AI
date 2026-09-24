@@ -188,6 +188,7 @@ const STATUS_LABELS = {
   skipped_low_fit: "пропущено (слабое совпадение)",
   skipped_easy_apply_failed: "пропущено (форма Easy Apply)",
   skipped_closed_posting: "пропущено (вакансия закрыта)",
+  skipped_requirements: "пропущено (не проходит требования)",
 };
 
 const REGION_LABELS = {
