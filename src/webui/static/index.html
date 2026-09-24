@@ -404,8 +404,8 @@
     <section id="view-resume" class="view">
       <div class="view-header">
         <div>
-          <h2>Резюме и сопроводительное письмо</h2>
-          <p class="muted">Документы под вакансию и разбор, что в резюме стоит улучшить</p>
+          <h2>Мои резюме</h2>
+          <p class="muted">Все ваши резюме в одном месте: для площадок, для кнопок в Telegram и для рассылки. Ниже — версия под вакансию и разбор, что улучшить.</p>
         </div>
       </div>
 
@@ -426,6 +426,14 @@
             <input type="file" id="resume-upload-linkedin" accept="application/pdf" style="display:none" />
             <button type="button" id="resume-upload-linkedin-btn" class="btn btn-secondary">📎 Загрузить resume_linkedin.pdf</button>
             <p id="resume-upload-linkedin-status" class="muted small"></p>
+          </div>
+          <div class="resume-action-card">
+            <h4>Дополнительные <span class="muted small">— опционально</span></h4>
+            <p class="muted small">Под разные роли. Каждое — своя кнопка «+ 📎» под вакансией из Telegram, и его можно выбрать при отправке рассылки.</p>
+            <div id="tgq-resumes" class="tgq-files"></div>
+            <input type="file" id="tgq-resume-file" accept="application/pdf" multiple style="display:none" />
+            <button type="button" id="tgq-resume-add" class="btn btn-secondary">📎 Добавить резюме (PDF)</button>
+            <p id="tgq-resume-status" class="muted small" role="status"></p>
           </div>
         </div>
       </div>
@@ -561,7 +569,8 @@
       </div>
       <nav class="settings-jump" id="settings-jump">
         <div class="tab-indicator" id="settings-tab-indicator"></div>
-        <button type="button" class="active" data-settings-tab="settings-search">Поиск</button>
+        <button type="button" class="active" data-settings-tab="settings-accounts">Подключения</button>
+        <button type="button" data-settings-tab="settings-search">Что ищу</button>
         <button type="button" data-settings-tab="settings-table">Площадки</button>
         <button type="button" data-settings-tab="settings-limits">Лимиты откликов</button>
         <button type="button" data-settings-tab="settings-tg-quick">✈️ Telegram-парсер</button>
@@ -577,8 +586,16 @@
         </details>
       </nav>
 
-      <div class="panel settings-pane active" id="settings-search">
-        <h3>Поиск</h3>
+      <div class="panel settings-pane active" id="settings-accounts">
+        <h3>Подключения</h3>
+        <p class="muted small">Всё, к чему подключён CrossJob, в одном месте. Красное — нажмите, чтобы исправить.</p>
+        <div id="accounts-services" class="accounts-list"></div>
+        <h4>Площадки</h4>
+        <div id="accounts-platforms" class="accounts-list"></div>
+      </div>
+
+      <div class="panel settings-pane" id="settings-search">
+        <h3>Что ищу</h3>
         <p class="muted small">Какую работу искать: должности (по ним же парсер ищет посты в Telegram) и города или «удалённо». Каналы Telegram и диалоги — в «Общение → Telegram-парсер».</p>
         <div class="limits-grid">
           <label class="limit-field">
@@ -594,9 +611,13 @@
           <button id="search-generate-positions" class="btn btn-primary">🪄 Сгенерировать должности из резюме</button>
           <span id="search-generate-status" class="muted small"></span>
         </div>
+        <div class="filters">
+          <label class="checkbox-row"><input id="outreach-skip-us" type="checkbox" class="switch" /> Пропускать удалёнку «только из США»</label>
+          <label class="checkbox-row"><input id="outreach-skip-eu" type="checkbox" class="switch" /> Пропускать удалёнку «только из Европы»</label>
+        </div>
         <div class="limits-grid" style="margin-top:14px">
           <label class="limit-field">
-            <span>Чёрный список компаний (одна на строку)</span>
+            <span>Чёрный список компаний (одна на строку) — не откликаемся и не пишем им в рассылке</span>
             <textarea id="search-company-blacklist" rows="3"></textarea>
           </label>
           <label class="limit-field">
@@ -911,16 +932,12 @@
               <span>Стоп-слова — такие посты не присылать</span>
               <textarea id="tgq-stop" rows="2"></textarea>
             </label>
-            <p class="muted small">Каналы для поиска — во вкладке «Общение → Telegram».</p>
+            <p class="muted small">Каналы для поиска — в «Общение → Telegram-парсер».</p>
           </section>
 
           <section class="tgq-block">
             <h4>2. Резюме для кнопки «+ 📎»</h4>
-            <p class="muted small">Каждый файл — отдельная кнопка под вакансией (имя файла — подпись). Хранятся отдельно от основных резюме.</p>
-            <div id="tgq-resumes" class="tgq-files"></div>
-            <input type="file" id="tgq-resume-file" accept="application/pdf" multiple style="display:none" />
-            <button type="button" id="tgq-resume-add" class="btn btn-secondary">📎 Добавить резюме (PDF)</button>
-            <p id="tgq-resume-status" class="muted small" role="status"></p>
+            <p class="muted small">Какие резюме прикладывать — в <a href="#" data-goto-view="resume">«Мои резюме»</a>: каждое дополнительное резюме становится своей кнопкой.</p>
           </section>
 
           <section class="tgq-block">
@@ -976,10 +993,6 @@
           <input id="outreach-hunter" type="password" placeholder="API-ключ hunter.io" aria-label="API-ключ Hunter" autocomplete="off" />
           <span id="outreach-hunter-status" class="muted small"></span>
         </div>
-
-        <h4>Фильтры удалёнки</h4>
-        <label class="checkbox-row"><input id="outreach-skip-us" type="checkbox" /> Пропускать удалёнку «только из США»</label>
-        <label class="checkbox-row"><input id="outreach-skip-eu" type="checkbox" /> Пропускать удалёнку «только из Европы»</label>
 
         <div class="filters">
           <button id="outreach-save" class="btn btn-primary" type="button">Сохранить</button>

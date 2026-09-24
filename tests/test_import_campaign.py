@@ -325,3 +325,11 @@ def test_base_bulk_actions_export_and_domain_merge(client):  # noqa: F811
 
     campaign = client.post("/api/campaigns", json={"keys": [cards["Acme"]["key"]]}).json()
     assert campaign["stats"]["total"] == 1 and campaign["name"].startswith("Выбранные (1)")
+
+
+def test_company_blacklist_applies_to_base(client):  # noqa: F811
+    ctx = api.get_ctx()
+    ContactBook(ctx.output_folder).add("ООО Ромашка", [{"kind": "email", "value": "hr@romashka.ru", "source": "текст вакансии"}])
+    ctx.config["company_blacklist"] = ["Ромашка"]
+    assert client.get("/api/contacts").json()[0]["status"] == "skip"
+    assert client.get("/api/campaigns").json()["available"] == 0

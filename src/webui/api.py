@@ -113,7 +113,7 @@ from src.direct.importer import read_file, rows_from_table, rows_from_text
 from src.job_sources.block_detection import is_still_blocked
 from src.job_sources.telegram.watcher import TELEGRAM_FOLDER
 from src.job_sources.telegram_notify import bot_credentials
-from src.job_sources.contact_book import ContactBook
+from src.job_sources.contact_book import ContactBook, company_key
 from src.job_sources.hr_replies import (
     CATEGORY_LABELS,
     DraftStore,
@@ -538,6 +538,8 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
                 "readiness": _readiness(
                     secrets, ctx.config["dataFolder"], name
                 ),
+                # На паузе после капчи/блокировки — пока не /resume.
+                "paused": is_still_blocked(ctx.output_folder, name),
             }
         )
     # Проверки чата/ответов — НЕ "площадка" (нет поиска/отклика), а
@@ -1027,6 +1029,8 @@ def get_contacts(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
         "replied": campaigns.emails_with_status("replied"),
     }
     events = _contact_events(ctx, conversations, entries, drafts)
+    # Общий чёрный список из «Что ищу» действует и на рассылку.
+    blacklist = {company_key(c) for c in ctx.config.get("company_blacklist") or [] if company_key(c)}
     cards = []
     for key, card in book.all().items():
         contacts = [
@@ -1037,7 +1041,7 @@ def get_contacts(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
         status = max(
             (c["status"] for c in contacts), key=_STATUS_ORDER.index, default="new"
         )
-        if card.get("do_not_contact"):
+        if card.get("do_not_contact") or company_key(card.get("company") or "") in blacklist:
             status = "skip"
         history = sorted(
             [{"at": c.get("found_at", ""), "text": f"добавлен {c['value']} — {c.get('source') or 'источник не указан'}"} for c in card["contacts"]]
@@ -1239,7 +1243,7 @@ def _setup_checklist(ctx: AppContext) -> list[dict]:
          "нужен для писем и подбора вакансий", "settings-llm"),
         ("daemon", "Бот запущен", ctx.scheduler_thread is not None and ctx.scheduler_thread.is_alive(),
          "нажмите «▶ Запустить» вверху — без этого поиск и Telegram не работают", ""),
-        ("bot", "Telegram-CrossJob-бот", bot_credentials(ctx.config) is not None,
+        ("bot", "CrossJob-бот", bot_credentials(ctx.config) is not None,
          "сюда приходят вакансии с кнопками и ответы HR", "settings-notifications"),
         ("schedule", "Площадки в расписании", any((ctx.config.get(n) or {}).get("schedule_enabled") for n, _ in ALL_SOURCES),
          "поставьте галочку на карточке площадки ниже", ""),

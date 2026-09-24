@@ -337,7 +337,7 @@ const NAV_GROUPS = {
   analytics: [["analytics", "Аналитика"]],
   settings: [
     ["settings", "Настройки"],
-    ["resume", "Резюме"],
+    ["resume", "Мои резюме"],
     ["logs", "Логи"],
   ],
 };
@@ -1573,6 +1573,10 @@ const render = {
     loadCampaigns();
   },
 
+  resume() {
+    api("/api/settings/telegram-watch").then((w) => renderTelegramResumes(w.resumes)).catch(() => {});
+  },
+
   async overview() {
     renderTodo();
     renderOwnChannels();
@@ -2012,6 +2016,8 @@ const render = {
   },
 
   async settings() {
+    loadOutreachSettings(); // заполняет и сводку, и фильтры удалёнки на других вкладках
+    loadAccounts();
     const [status, salary, limits] = await Promise.all([
       api("/api/status"),
       api("/api/settings/salary"),
@@ -3478,6 +3484,46 @@ async function saveOutreachSettings() {
   } catch (err) {
     status.textContent = err.message;
   }
+}
+
+// «Подключения»: сервисы (то же, что «Готовность» на Главной) и
+// площадки — вход, пауза после капчи, последняя ошибка.
+async function loadAccounts() {
+  const [todo, status] = await Promise.all([api("/api/todo"), api("/api/status")]);
+  const row = (ok, title, hint, action) => `
+    <div class="account-row ${ok ? "is-ok" : "is-missing"}">
+      <span class="account-mark">${ok ? "✓" : "✗"}</span>
+      <span class="account-text"><b>${escapeHtml(title)}</b>${hint ? `<span class="muted small">${escapeHtml(hint)}</span>` : ""}</span>
+      ${action || ""}`;
+  const services = (todo.setup || []).filter((c) => !["schedule", "salary", "daemon"].includes(c.id));
+  document.getElementById("accounts-services").innerHTML = services
+    .map((c) => row(c.ok, c.label, c.hint, c.ok || !c.goto ? "</div>" : `<button type="button" class="btn btn-secondary btn-small" data-account-goto="${escapeHtml(c.goto)}">Подключить</button></div>`))
+    .join("");
+  const platforms = status.sources.filter((s) => s.schedule_enabled && s.name !== "telegram");
+  document.getElementById("accounts-platforms").innerHTML = platforms.length
+    ? platforms
+        .map((s) => {
+          const blocked = s.paused || s.status === "blocked";
+          const error = s.last_error?.summary || "";
+          const ok = !blocked && s.status !== "error";
+          const hint = blocked
+            ? "на паузе после капчи — пройдите её в браузере и отправьте боту /resume"
+            : error || (s.status === "never_run" ? "ещё не запускалась — вход попросит при первом запуске" : "работает");
+          return row(ok, sourceLabel(s.name), hint, "</div>");
+        })
+        .join("")
+    : `<p class="muted small">Ни одна площадка не включена — выберите режим на карточке площадки на Главной.</p>`;
+  document.querySelectorAll("[data-account-goto]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const goto = b.dataset.accountGoto;
+      if (goto.startsWith("settings-")) {
+        switchSettingsTab(goto);
+        if (goto === "settings-tg-quick") loadTelegramWatch();
+      } else {
+        switchTab(goto);
+      }
+    })
+  );
 }
 
 // Сводка живёт в «Уведомлениях», сохраняется сразу — без кнопки.
@@ -5173,6 +5219,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     .querySelector('[data-settings-tab="settings-tg-quick"]')
     .addEventListener("click", loadTelegramWatch);
   bindGotoSettings(document.getElementById("view-telegram"));
+  document.querySelectorAll("[data-goto-view]").forEach((a) =>
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      switchTab(a.dataset.gotoView);
+    })
+  );
   document.getElementById("tg-keys-save").addEventListener("click", async () => {
     try {
       await api("/api/telegram/keys", {
@@ -5205,6 +5257,23 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("contacts-filter-query").addEventListener("input", renderContactsList);
   document.getElementById("outreach-email-test").addEventListener("click", testOutreachEmail);
   ["outreach-digest", "outreach-digest-hour"].forEach((id) => document.getElementById(id).addEventListener("change", saveDigest));
+  // Фильтры удалёнки — в «Что ищу», сохраняются сразу.
+  ["outreach-skip-us", "outreach-skip-eu"].forEach((id) =>
+    document.getElementById(id).addEventListener("change", async () => {
+      try {
+        await api("/api/settings/outreach", {
+          method: "POST",
+          body: JSON.stringify({
+            skip_us_only: document.getElementById("outreach-skip-us").checked,
+            skip_europe_only: document.getElementById("outreach-skip-eu").checked,
+          }),
+        });
+        showToast("Сохранено", "success");
+      } catch (err) {
+        showToast(err.message.replace(/^\d+: /, ""), "error");
+      }
+    })
+  );
   document.querySelector('[data-settings-tab="settings-notifications"]').addEventListener("click", loadOutreachSettings);
   document
     .querySelector('[data-settings-tab="settings-outreach"]')
