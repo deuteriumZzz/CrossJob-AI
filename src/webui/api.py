@@ -101,8 +101,15 @@ from src.job_sources.telegram.client import (
 from src.job_sources.telegram_connect import get_bot_username, wait_for_start
 from src.job_sources.telegram_control import HELP_TEXT as _TELEGRAM_HELP_TEXT
 from src.direct.ats import discover_ats, fetch_jobs
+from src.direct.email_channel import build_message, send_email
 from src.direct.companies import load_companies, save_companies
-from src.job_sources.hr_replies import CATEGORY_LABELS, DraftStore
+from src.direct.dossier import collect_dossier
+from src.job_sources.contact_book import ContactBook
+from src.job_sources.hr_replies import (
+    CATEGORY_LABELS,
+    DraftStore,
+    generate_first_message,
+)
 from src.job_sources.interview_calendar import build_ics
 from src.job_sources.interview_prep import evaluate_answer, generate_questions
 from src.job_sources.offers import (
@@ -520,16 +527,29 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
     chat_checks: list[dict[str, Any]] = [
         {
             "name": "check_hh_replies",
-            "label": "HeadHunter — ответы в чате",
-            "note": "Работает только если включён headhunter.auto_reply.",
+            "label": "HeadHunter — статусы откликов и чат",
+            "note": (
+                "Приглашения/отказы → «Входящие». Автоответ в чате — "
+                "если включён headhunter.auto_reply."
+            ),
         },
         {
             "name": "check_telegram_replies",
-            "label": "Telegram — новые сообщения в диалогах",
+            "label": "Telegram — ответы HR в диалогах",
             "note": (
-                "Только уведомление — отвечать нужно вручную "
-                "во вкладке Telegram."
+                "Разбирает ответ (интерес/вопрос/отказ), готовит черновик "
+                "ответа во «Входящие»."
             ),
+        },
+        {
+            "name": "check_email_replies",
+            "label": "Почта — ответы на письма HR",
+            "note": "Нужна подключённая почта: Настройки → Контакты и письма.",
+        },
+        {
+            "name": "check_telegram_commands",
+            "label": "Telegram-бот — команды и утренняя сводка",
+            "note": "/status, «отправить <код>», сводка в заданный час.",
         },
     ]
     for check in chat_checks:
@@ -698,6 +718,273 @@ def get_inbox(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
             }
         )
     return sorted(items, key=lambda i: i["at"], reverse=True)
+
+
+class OutreachSettings(BaseModel):
+    email_address: Optional[str] = None
+    email_app_password: Optional[str] = None
+    hunter_api_key: Optional[str] = None
+    email_outreach: Optional[bool] = None
+    email_daily_limit: Optional[int] = None
+    follow_up_days: Optional[int] = None
+    digest_enabled: Optional[bool] = None
+    digest_hour: Optional[int] = None
+    skip_us_only: Optional[bool] = None
+    skip_europe_only: Optional[bool] = None
+
+
+@app.get("/api/settings/outreach")
+def get_outreach_settings(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Всё про контакты HR и письма в одном месте — вместо правки
+    secrets.yaml/work_preferences.yaml руками. Пароль и ключ не
+    отдаются, только маска."""
+    secrets = ConfigValidator.load_yaml(ctx.secrets_file)
+    email = secrets.get("email") or {}
+    direct = ctx.config.get("direct") or {}
+    digest = ctx.config.get("digest") or {}
+    excluded = ctx.config.get("excluded_remote_regions", ["us_only"])
+    hunter = secrets.get("hunter_api_key") or ""
+    return {
+        "email_address": email.get("address") or "",
+        "email_connected": bool(email.get("address") and email.get("app_password")),
+        "hunter_preview": _mask_api_key(hunter) if hunter else "",
+        "email_outreach": bool(direct.get("email_outreach")),
+        "email_daily_limit": int(direct.get("email_daily_limit", 20)),
+        "follow_up_days": int(
+            (ctx.config.get("telegram") or {}).get("follow_up_days", 7)
+        ),
+        "digest_enabled": digest.get("enabled", True) is not False,
+        "digest_hour": int(digest.get("hour", 9)),
+        "skip_us_only": "us_only" in (excluded or []),
+        "skip_europe_only": "europe_only" in (excluded or []),
+    }
+
+
+@app.post("/api/settings/outreach")
+def post_outreach_settings(
+    body: OutreachSettings, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    prefs = ctx.config_file
+    if body.email_address is not None:
+        set_source_field(
+            ctx.secrets_file, "email", "address", body.email_address.strip(), quote=True
+        )
+    if body.email_app_password:
+        # Пароль приложения Google показывается блоками с пробелами.
+        set_source_field(
+            ctx.secrets_file, "email", "app_password",
+            body.email_app_password.replace(" ", ""), quote=True,
+        )
+    if body.hunter_api_key:
+        set_top_level_field(ctx.secrets_file, "hunter_api_key", body.hunter_api_key.strip())
+    if body.email_outreach is not None:
+        set_source_field(prefs, "direct", "email_outreach", body.email_outreach)
+    if body.email_daily_limit is not None:
+        set_source_field(prefs, "direct", "email_daily_limit", max(1, body.email_daily_limit))
+    if body.follow_up_days is not None:
+        # Одна настройка на оба канала: Telegram-диалоги и письма.
+        days = max(0, body.follow_up_days)
+        set_source_field(prefs, "telegram", "follow_up_days", days)
+        set_source_field(prefs, "direct", "follow_up_days", days)
+    if body.digest_enabled is not None:
+        set_source_field(prefs, "digest", "enabled", body.digest_enabled)
+    if body.digest_hour is not None:
+        set_source_field(prefs, "digest", "hour", min(23, max(0, body.digest_hour)))
+    if body.skip_us_only is not None or body.skip_europe_only is not None:
+        current = get_outreach_settings(ctx)
+        regions = [
+            region
+            for region, on in (
+                ("us_only", body.skip_us_only if body.skip_us_only is not None else current["skip_us_only"]),
+                ("europe_only", body.skip_europe_only if body.skip_europe_only is not None else current["skip_europe_only"]),
+            )
+            if on
+        ]
+        set_list_field(prefs, "excluded_remote_regions", regions)
+    ctx.reload_config()
+    return get_outreach_settings(ctx)
+
+
+@app.post("/api/settings/outreach/test-email")
+def post_test_email(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Проверка почты: вход по паролю приложения и письмо самому себе."""
+    secrets = ConfigValidator.load_yaml(ctx.secrets_file)
+    credentials = secrets.get("email") or {}
+    if not credentials.get("address") or not credentials.get("app_password"):
+        raise HTTPException(400, "Сначала укажите адрес и пароль приложения")
+    try:
+        send_email(
+            credentials,
+            build_message(
+                credentials["address"],
+                credentials["address"],
+                "CrossJob-AI: проверка почты",
+                "Почта подключена — письма HR будут уходить с этого адреса.",
+            ),
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Не удалось отправить: {e}")
+    return {"ok": True}
+
+
+@app.get("/api/hr-drafts")
+def get_hr_drafts(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
+    """Очередь «Ждут вашего решения»: все черновики (ответы и
+    напоминания в Telegram, письма HR) с вакансией, к которой относятся."""
+    by_link = {e["link"]: e for e in ctx.applied_log.find_by_company("")}
+    drafts = DraftStore(ctx.output_folder / HR_DRAFTS_FILE).all()
+    return sorted(
+        (
+            {
+                "code": code,
+                **draft,
+                "channel": draft.get("channel", "telegram"),
+                "company": by_link.get(draft["job_link"], {}).get("company", ""),
+                "title": by_link.get(draft["job_link"], {}).get("title", ""),
+            }
+            for code, draft in drafts.items()
+        ),
+        key=lambda d: d["created_at"],
+        reverse=True,
+    )
+
+
+def _backfill_contact_book(ctx: AppContext, book: ContactBook) -> None:
+    """Один раз при первом открытии вкладки: контакты, найденные раньше
+    (email из вакансий «Прямого поиска»), переносятся в книгу."""
+    for e in ctx.applied_log.find_by_company(""):
+        if e.get("contacts"):
+            book.add(
+                e["company"],
+                [
+                    {"kind": "email", "value": c, "source": "текст вакансии",
+                     "source_url": e["link"]}
+                    for c in e["contacts"]
+                ],
+                vacancy={"title": e["title"], "link": e["link"], "source": e["source"]},
+            )
+    if not book.path.exists():
+        book._save({"companies": {}})
+
+
+def _contact_status(contact: dict, conversations, entries, drafts) -> str:
+    value = contact["value"].lower()
+    if any(d["contact"].lower() == value for d in drafts.values()):
+        return "draft"
+    if contact["kind"] == "telegram":
+        conv = conversations.get(contact["value"])
+        if conv:
+            if any(m["direction"] == "in" for m in conv["messages"]):
+                return "replied"
+            return "written"
+    if contact["kind"] == "email":
+        sent = [e for e in entries if (e.get("outreach_email") or "").lower() == value]
+        if any(e.get("email_replied") for e in sent):
+            return "replied"
+        if sent:
+            return "written"
+    return "new"
+
+
+_STATUS_ORDER = ["new", "draft", "written", "replied"]
+
+
+@app.get("/api/contacts")
+def get_contacts(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
+    """Вкладка «Контакты»: компании и люди, которым можно написать, со
+    статусом по каждому контакту (не писали / черновик / написали /
+    ответили) — статус считается из переписки и черновиков."""
+    book = ContactBook(ctx.output_folder)
+    if not book.path.exists():
+        _backfill_contact_book(ctx, book)
+    conversations = TelegramConversations(
+        ctx.output_folder / "telegram_conversations.json"
+    )
+    entries = ctx.applied_log.find_by_company("")
+    drafts = DraftStore(ctx.output_folder / HR_DRAFTS_FILE).all()
+    cards = []
+    for key, card in book.all().items():
+        contacts = [
+            {**c, "status": _contact_status(c, conversations, entries, drafts)}
+            for c in card["contacts"]
+        ]
+        status = max(
+            (c["status"] for c in contacts), key=_STATUS_ORDER.index, default="new"
+        )
+        cards.append({"key": key, **card, "contacts": contacts, "status": status})
+    return sorted(cards, key=lambda c: c.get("updated_at", ""), reverse=True)
+
+
+class DossierRequest(BaseModel):
+    key: str
+    website: str = ""
+
+
+@app.post("/api/contacts/dossier")
+def post_contact_dossier(
+    body: DossierRequest, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Досье компании: контакты со страниц её сайта и из Hunter — сразу
+    в карточку. website — если сайт ещё не известен (вводится в карточке)."""
+    book = ContactBook(ctx.output_folder)
+    card = book.get(body.key)
+    if card is None:
+        raise HTTPException(404, "Компания не найдена")
+    if body.website.strip():
+        card = {**card, "website": body.website.strip()}
+    hunter = ConfigValidator.load_yaml(ctx.secrets_file).get("hunter_api_key") or ""
+    dossier = collect_dossier(card, hunter)
+    if not dossier["website"]:
+        raise HTTPException(
+            404, "Сайт компании не найден — укажите его в карточке и повторите."
+        )
+    before = len(card["contacts"])
+    book.add(card["company"], dossier["contacts"], website=dossier["website"])
+    after = len((book.get(body.key) or card)["contacts"])
+    return {"website": dossier["website"], "added": after - before}
+
+
+class ContactDraftRequest(BaseModel):
+    key: str
+    kind: str
+    value: str
+
+
+@app.post("/api/contacts/draft")
+def post_contact_draft(
+    body: ContactDraftRequest, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Черновик первого сообщения этому контакту — появится во
+    «Входящих» в блоке «Ждут вашего решения»."""
+    if body.kind not in ("telegram", "email"):
+        raise HTTPException(400, "Написать можно в Telegram или на email")
+    card = ContactBook(ctx.output_folder).get(body.key)
+    if card is None:
+        raise HTTPException(404, "Компания не найдена")
+    vacancy = card["vacancies"][-1] if card["vacancies"] else {}
+    person = {}
+    resume_yaml = ctx.plain_text_resume_file
+    if resume_yaml and Path(resume_yaml).exists():
+        import yaml as _yaml
+
+        person = (_yaml.safe_load(Path(resume_yaml).read_text(encoding="utf-8")) or {}).get(
+            "personal_information"
+        ) or {}
+    name = f"{person.get('name', '')} {person.get('surname', '')}".strip()
+    resume = ctx.config["dataFolder"] / "resume.pdf"
+    try:
+        message = generate_first_message(
+            resume, name, card["company"], vacancy.get("title", ""),
+            vacancy.get("text", ""), body.kind, ctx.llm_api_key,
+        )
+    except Exception as e:
+        raise HTTPException(502, f"LLM: {e}")
+    extra = {"channel": "email", "subject": message["subject"]} if body.kind == "email" else {}
+    code = DraftStore(ctx.output_folder / HR_DRAFTS_FILE).add(
+        body.value, message["text"], "first" if body.kind == "telegram" else "email",
+        vacancy.get("link", ""), **extra,
+    )
+    return {"code": code, "text": message["text"]}
 
 
 class DraftSend(BaseModel):

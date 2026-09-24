@@ -57,6 +57,8 @@ from src.direct.contacts import extract_emails, hunter_hr_contacts
 from src.direct.email_channel import build_message, send_email, senders_replied
 from src.direct.form_fill import prefill_application
 from src.direct.source import DirectSource
+from src.job_sources.contact_book import ContactBook, contacts_from_text
+from src.job_sources.telegram.post_parser import parse_post
 from src.job_sources.github_context import fetch_github_summary
 from src.job_sources.interview_calendar import build_ics, extract_interview_time
 from src.job_sources.interview_prep import generate_interview_prep
@@ -1726,6 +1728,7 @@ def search_telegram(
 
             # https://t.me/{channel}/{message_id} — см. mapping.py.
             channel = job.link.rsplit("/", 2)[-2]
+            _collect_telegram_post(parameters, llm_api_key, job, channel)
             contact = extract_contact(job.description, channel)
             status: Literal["dry_run", "applied"] = "dry_run"
             if (
@@ -1775,6 +1778,40 @@ def search_telegram(
         _log_funnel_summary(
             "telegram", applied_log, len(jobs), already_seen, run_start
         )
+
+
+def _collect_telegram_post(
+    parameters: dict, llm_api_key: str, job: Job, channel: str
+) -> None:
+    """Полный разбор подходящего поста: компания/должность/зарплата
+    (LLM — в постах нет структуры) и все контакты из текста (@username,
+    email, t.me, LinkedIn) — во вкладку «Контакты». Job дополняется
+    компанией и нормальной должностью: так пост виден в «Истории» по-
+    человечески и сверяется с той же вакансией на других площадках."""
+    try:
+        parsed = parse_post(job.description, llm_api_key)
+    except Exception as e:
+        logger.warning(f"Не удалось разобрать пост {job.link}: {e}")
+        parsed = {"company": "", "role": "", "salary": ""}
+    job.company = parsed["company"] or job.company
+    job.role = parsed["role"] or job.role
+    job.salary = parsed["salary"] or job.salary
+    contacts = contacts_from_text(job.description, exclude=(channel,))
+    if not contacts:
+        return
+    ContactBook(parameters["outputFileDirectory"]).add(
+        job.company,
+        [
+            {**c, "source": f"пост в @{channel}", "source_url": job.link}
+            for c in contacts
+        ],
+        vacancy={
+            "title": job.role,
+            "link": job.link,
+            "source": "telegram",
+            "text": job.description[:4000],
+        },
+    )
 
 
 def search_getmatch(
@@ -2875,6 +2912,18 @@ def search_direct(
             job, cover_letter, "", "dry_run", fit.score, fit.gaps,
             contacts=contacts,
         )
+        if contacts:
+            ContactBook(output_folder).add(
+                job.company,
+                [
+                    {"kind": "email", "value": c, "source": "текст вакансии",
+                     "source_url": job.link}
+                    for c in contacts
+                ],
+                vacancy={"title": job.role, "link": job.link,
+                         "source": "direct", "text": job.description[:4000]},
+                website=job.company_url,
+            )
         processed += 1
         logger.info(
             f"[manual apply needed] {job.role} at {job.company} ({job.link})"
@@ -4076,7 +4125,7 @@ def send_hr_draft(parameters: dict, code: str, text: str = "") -> str:
         return f"Не удалось отправить @{draft['contact']}: {e}"
     TelegramConversations(
         output_folder / "telegram_conversations.json"
-    ).record_outbound(draft["contact"], message)
+    ).record_outbound(draft["contact"], message, job_link=draft.get("job_link", ""))
     drafts.remove(code)
     return f"Отправлено @{draft['contact']}."
 

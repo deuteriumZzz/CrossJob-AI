@@ -609,7 +609,140 @@ function skeletonRows(rows, cols) {
   ).join("");
 }
 
+const CONTACT_KIND = {
+  telegram: { icon: "✈️", label: "Telegram" },
+  email: { icon: "✉️", label: "Email" },
+  linkedin: { icon: "in", label: "LinkedIn" },
+};
+const CONTACT_STATUS = {
+  new: "не писали",
+  draft: "черновик ✍️",
+  written: "написали",
+  replied: "ответили 🟢",
+};
+let lastContacts = [];
+
+function contactHref(c) {
+  if (c.kind === "telegram") return `https://t.me/${encodeURIComponent(c.value)}`;
+  if (c.kind === "email") return `mailto:${c.value}`;
+  return c.value;
+}
+
+function renderContactsList() {
+  const el = document.getElementById("contacts-list");
+  const status = document.getElementById("contacts-filter-status").value;
+  const kind = document.getElementById("contacts-filter-kind").value;
+  const query = document.getElementById("contacts-filter-query").value.trim().toLowerCase();
+  const cards = lastContacts.filter((card) => {
+    if (status && card.status !== status) return false;
+    if (kind && !card.contacts.some((c) => c.kind === kind)) return false;
+    if (!query) return true;
+    return [card.company, ...card.vacancies.map((v) => v.title)]
+      .filter(Boolean)
+      .some((v) => v.toLowerCase().includes(query));
+  });
+  if (!lastContacts.length) {
+    el.innerHTML = emptyStateHtml(
+      "Пока пусто. Контакты появятся, когда площадки найдут вакансии с контактом HR — Telegram-каналы, «Прямой поиск» и другие."
+    );
+    return;
+  }
+  if (!cards.length) {
+    el.innerHTML = emptyStateHtml("Ничего не найдено.");
+    return;
+  }
+  el.innerHTML = cards
+    .map(
+      (card) => `
+    <div class="panel contact-card">
+      <div class="contact-card-head">
+        <strong>${escapeHtml(card.company || card.contacts[0]?.value || "Без названия")}
+          ${card.website ? `<a class="muted small" href="${escapeHtml(card.website)}" target="_blank" rel="noopener">${escapeHtml(card.website.replace(/^https?:\/\//, "").replace(/\/$/, ""))}</a>` : ""}
+        </strong>
+        <span>
+          <span class="muted small">${CONTACT_STATUS[card.status]}</span>
+          ${card.company ? `${card.website ? "" : `<input type="text" class="dossier-site" placeholder="сайт компании" aria-label="Сайт компании" />`}
+          <button type="button" class="btn btn-ghost btn-small" data-dossier data-key="${escapeHtml(card.key)}" title="Найти контакты на сайте компании${""} и через Hunter">🔎 Досье</button>` : ""}
+        </span>
+      </div>
+      ${card.vacancies
+        .slice(-2)
+        .map(
+          (v) => `<div class="muted small">${sourceIconHtml(v.source)}<a href="${escapeHtml(v.link)}" target="_blank" rel="noopener">${escapeHtml(v.title || v.link)}</a></div>`
+        )
+        .join("")}
+      <div class="contact-rows">
+        ${card.contacts
+          .map(
+            (c) => `
+          <div class="contact-row">
+            <span>${CONTACT_KIND[c.kind]?.icon || "•"} <a href="${escapeHtml(contactHref(c))}" target="_blank" rel="noopener">${escapeHtml(c.kind === "telegram" ? "@" + c.value : c.value)}</a>
+              ${c.name ? `<span class="muted small">${escapeHtml(c.name)}${c.position ? ", " + escapeHtml(c.position) : ""}</span>` : ""}
+              <span class="muted small">— ${escapeHtml(c.source || "")}${c.found_at ? ", " + fmtTime(c.found_at).split(",")[0] : ""}</span>
+            </span>
+            <span>
+              <span class="muted small">${CONTACT_STATUS[c.status]}</span>
+              ${
+                (c.kind === "telegram" || c.kind === "email") && c.status === "new"
+                  ? `<button type="button" class="btn btn-secondary btn-small" data-contact-draft data-key="${escapeHtml(card.key)}" data-kind="${c.kind}" data-value="${escapeHtml(c.value)}">✍️ ${c.kind === "email" ? "Черновик письма" : "Черновик сообщения"}</button>`
+                  : ""
+              }
+            </span>
+          </div>`
+          )
+          .join("")}
+      </div>
+    </div>`
+    )
+    .join("");
+  el.querySelectorAll("[data-dossier]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const site = btn.parentElement.querySelector(".dossier-site");
+      btn.disabled = true;
+      btn.textContent = "Ищу…";
+      try {
+        const res = await api("/api/contacts/dossier", {
+          method: "POST",
+          body: JSON.stringify({ key: btn.dataset.key, website: site ? site.value.trim() : "" }),
+        });
+        showToast(
+          res.added ? `Найдено новых контактов: ${res.added}` : "Новых контактов на сайте нет",
+          res.added ? "success" : "info"
+        );
+        render.contacts();
+      } catch (err) {
+        showToast(err.message.replace(/^\d+: /, ""), "error", 6000);
+        btn.disabled = false;
+        btn.textContent = "🔎 Досье";
+      }
+    });
+  });
+  el.querySelectorAll("[data-contact-draft]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.textContent = "Пишу…";
+      try {
+        await api("/api/contacts/draft", {
+          method: "POST",
+          body: JSON.stringify({ key: btn.dataset.key, kind: btn.dataset.kind, value: btn.dataset.value }),
+        });
+        showToast("Черновик готов — проверьте и отправьте во «Входящих».", "success", 6000);
+        render.contacts();
+      } catch (err) {
+        showToast(err.message.replace(/^\d+: /, ""), "error");
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
 const render = {
+  async contacts() {
+    lastContacts = await api("/api/contacts");
+    renderContactsList();
+    loadDirectCompanies();
+  },
+
   async overview() {
     if (!overviewLoaded) {
       document.getElementById("stats-row").innerHTML = skeletonStats();
@@ -867,18 +1000,7 @@ const render = {
               ? `<button type="button" class="btn btn-secondary btn-small" data-cover-letter-btn data-row-index="${i}">📄 Читать письмо</button>`
               : `<span class="muted small">—</span>`
           }
-          ${
-            e.effective_stage === "interview"
-              ? `<button type="button" class="btn btn-secondary btn-small" data-prep-btn data-row-index="${i}">🎯 Подготовка</button>
-                 <button type="button" class="btn btn-secondary btn-small" data-trainer-btn data-row-index="${i}">🎤 Тренажёр</button>
-                 <button type="button" class="btn btn-secondary btn-small" data-calendar-btn data-row-index="${i}">📅 В календарь</button>`
-              : ""
-          }
-          ${
-            e.source === "direct" && e.status === "dry_run" && /greenhouse\.io|lever\.co/.test(e.link)
-              ? `<button type="button" class="btn btn-secondary btn-small" data-prefill-btn data-row-index="${i}">✍️ Заполнить форму</button>`
-              : ""
-          }
+          ${rowActionsHtml(e, i)}
         </td>
       </tr>`
       )
@@ -949,6 +1071,7 @@ const render = {
     const tbody = document.getElementById("replies-rows");
     if (!repliesLoaded) tbody.innerHTML = skeletonRows(3, 4);
 
+    renderDraftsQueue();
     const entries = await api("/api/inbox");
     // Конфетти — только на реально новый ответ, появившийся после
     // первой загрузки за сессию, не на каждое открытие вкладки с уже
@@ -1529,40 +1652,12 @@ function renderRepliesRows() {
       <td>
         ${e.label ? `<span class="muted small">${escapeHtml(e.label)}</span><br>` : ""}
         ${escapeHtml(truncate(e.text || "", 160))}${e.channel === "telegram_dm" ? ` <button type="button" class="btn btn-ghost btn-small" data-open-dialog="${escapeHtml(e.contact)}">Открыть диалог</button>` : ""}
-        ${
-          e.draft
-            ? `<div class="hr-draft" data-draft-code="${escapeHtml(e.draft.code)}">
-                <div class="muted small">${e.draft.kind === "follow_up" ? "Напоминание" : "Черновик ответа"} · код ${escapeHtml(e.draft.code)}</div>
-                <textarea rows="3" aria-label="Текст черновика">${escapeHtml(e.draft.text)}</textarea>
-                <button type="button" class="btn btn-primary btn-small" data-draft-send>Отправить</button>
-                <button type="button" class="btn btn-ghost btn-small" data-draft-skip>Пропустить</button>
-              </div>`
-            : ""
-        }
+        ${e.draft ? `<div class="muted small">✍️ черновик ответа ждёт вверху</div>` : ""}
       </td>
       <td>${stageSelectHtml({ ...e, effective_stage: e.stage })}</td>
     </tr>`
     )
     .join("");
-  tbody.querySelectorAll("[data-draft-code]").forEach((box) => {
-    const code = box.dataset.draftCode;
-    box.querySelector("[data-draft-send]").addEventListener("click", async () => {
-      try {
-        const res = await api(`/api/hr-drafts/${code}/send`, {
-          method: "POST",
-          body: JSON.stringify({ text: box.querySelector("textarea").value }),
-        });
-        showToast(res.message, "success");
-        box.remove();
-      } catch (err) {
-        showToast(err.message, "error");
-      }
-    });
-    box.querySelector("[data-draft-skip]").addEventListener("click", async () => {
-      await api(`/api/hr-drafts/${code}/skip`, { method: "POST" });
-      box.remove();
-    });
-  });
   tbody.querySelectorAll("[data-open-dialog]").forEach((btn) => {
     btn.addEventListener("click", () => {
       switchTab("telegram");
@@ -2306,6 +2401,144 @@ function isPlatformDrawerOpen() {
   return document.getElementById("platform-drawer-overlay").style.display !== "none";
 }
 
+// Дополнительные действия строки "Истории" — в одном выпадающем меню,
+// а не 4-5 кнопок в ячейке.
+function rowActionsHtml(e, i) {
+  const actions = [];
+  if (e.effective_stage === "interview") {
+    actions.push(
+      `<button type="button" data-prep-btn data-row-index="${i}">🎯 Подготовка к интервью</button>`,
+      `<button type="button" data-trainer-btn data-row-index="${i}">🎤 Тренажёр</button>`,
+      `<button type="button" data-calendar-btn data-row-index="${i}">📅 В календарь</button>`
+    );
+  }
+  if (e.source === "direct" && e.status === "dry_run" && /greenhouse\.io|lever\.co/.test(e.link)) {
+    actions.push(`<button type="button" data-prefill-btn data-row-index="${i}">✍️ Заполнить форму отклика</button>`);
+  }
+  if (e.contacts && e.contacts.length) {
+    actions.push(
+      ...e.contacts.map((c) => `<a href="mailto:${escapeHtml(c)}">✉️ ${escapeHtml(c)}</a>`)
+    );
+  }
+  if (!actions.length) return "";
+  return `<details class="row-actions"><summary>Действия ▾</summary><div class="row-actions-menu">${actions.join("")}</div></details>`;
+}
+
+// Очередь "Ждут вашего решения" — все черновики (ответы и напоминания в
+// Telegram, письма HR): правка текста, отправить или пропустить.
+async function renderDraftsQueue() {
+  const el = document.getElementById("drafts-queue");
+  const drafts = await api("/api/hr-drafts");
+  if (!drafts.length) {
+    el.style.display = "none";
+    return;
+  }
+  const KIND = { reply: "Ответ HR", follow_up: "Напоминание", email: "Письмо HR" };
+  el.style.display = "";
+  el.innerHTML = `
+    <h3 style="margin-top:0">Ждут вашего решения · ${drafts.length}</h3>
+    ${drafts
+      .map(
+        (d) => `
+      <div class="hr-draft" data-draft-code="${escapeHtml(d.code)}">
+        <div class="muted small">
+          ${d.channel === "email" ? "✉️" : "✈️"} ${KIND[d.kind] || "Сообщение"} →
+          ${d.channel === "email" ? escapeHtml(d.contact) : "@" + escapeHtml(d.contact)}
+          ${d.company ? ` · ${escapeHtml(d.company)}${d.title ? " — " + escapeHtml(d.title) : ""}` : ""}
+          ${d.job_link ? ` · <a href="${escapeHtml(d.job_link)}" target="_blank" rel="noopener">вакансия</a>` : ""}
+        </div>
+        <textarea rows="4" aria-label="Текст черновика">${escapeHtml(d.text)}</textarea>
+        <div>
+          <button type="button" class="btn btn-primary btn-small" data-draft-send>Отправить</button>
+          <button type="button" class="btn btn-ghost btn-small" data-draft-skip>Пропустить</button>
+        </div>
+      </div>`
+      )
+      .join("")}`;
+  el.querySelectorAll("[data-draft-code]").forEach((box) => {
+    const code = box.dataset.draftCode;
+    box.querySelector("[data-draft-send]").addEventListener("click", async (ev) => {
+      ev.target.disabled = true;
+      try {
+        const res = await api(`/api/hr-drafts/${code}/send`, {
+          method: "POST",
+          body: JSON.stringify({ text: box.querySelector("textarea").value }),
+        });
+        showToast(res.message, "success");
+        renderDraftsQueue();
+      } catch (err) {
+        showToast(err.message.replace(/^\d+: /, ""), "error");
+        ev.target.disabled = false;
+      }
+    });
+    box.querySelector("[data-draft-skip]").addEventListener("click", async () => {
+      await api(`/api/hr-drafts/${code}/skip`, { method: "POST" });
+      renderDraftsQueue();
+    });
+  });
+}
+
+async function loadOutreachSettings() {
+  const s = await api("/api/settings/outreach");
+  document.getElementById("outreach-email").value = s.email_address;
+  document.getElementById("outreach-app-password").value = "";
+  document.getElementById("outreach-app-password").placeholder = s.email_connected
+    ? "Пароль сохранён — введите новый, чтобы заменить"
+    : "Пароль приложения (16 символов)";
+  document.getElementById("outreach-email-status").textContent = s.email_connected
+    ? `✅ Почта подключена: ${s.email_address}`
+    : "Почта не подключена — письма HR будут только черновиками для ручной отправки.";
+  document.getElementById("outreach-hunter-status").textContent = s.hunter_preview
+    ? `сохранён: ${s.hunter_preview}`
+    : "не задан";
+  document.getElementById("outreach-email-enabled").checked = s.email_outreach;
+  document.getElementById("outreach-email-limit").value = s.email_daily_limit;
+  document.getElementById("outreach-follow-up").value = s.follow_up_days;
+  document.getElementById("outreach-digest").checked = s.digest_enabled;
+  document.getElementById("outreach-digest-hour").value = s.digest_hour;
+  document.getElementById("outreach-skip-us").checked = s.skip_us_only;
+  document.getElementById("outreach-skip-eu").checked = s.skip_europe_only;
+}
+
+async function saveOutreachSettings() {
+  const status = document.getElementById("outreach-save-status");
+  const num = (id) => parseInt(document.getElementById(id).value, 10);
+  const body = {
+    email_address: document.getElementById("outreach-email").value.trim(),
+    email_outreach: document.getElementById("outreach-email-enabled").checked,
+    email_daily_limit: num("outreach-email-limit"),
+    follow_up_days: num("outreach-follow-up"),
+    digest_enabled: document.getElementById("outreach-digest").checked,
+    digest_hour: num("outreach-digest-hour"),
+    skip_us_only: document.getElementById("outreach-skip-us").checked,
+    skip_europe_only: document.getElementById("outreach-skip-eu").checked,
+  };
+  const password = document.getElementById("outreach-app-password").value.trim();
+  if (password) body.email_app_password = password;
+  const hunter = document.getElementById("outreach-hunter").value.trim();
+  if (hunter) body.hunter_api_key = hunter;
+  try {
+    await api("/api/settings/outreach", { method: "POST", body: JSON.stringify(body) });
+    document.getElementById("outreach-hunter").value = "";
+    status.textContent = "Сохранено";
+    loadOutreachSettings();
+  } catch (err) {
+    status.textContent = err.message;
+  }
+}
+
+async function testOutreachEmail() {
+  const status = document.getElementById("outreach-email-status");
+  await saveOutreachSettings();
+  status.textContent = "Отправляю письмо себе…";
+  try {
+    await api("/api/settings/outreach/test-email", { method: "POST" });
+    status.textContent = "✅ Письмо отправлено — проверьте почту. Всё работает.";
+  } catch (err) {
+    status.textContent = `❌ ${err.message.replace(/^\d+: /, "")}`;
+  }
+}
+
 function showOverlay(id) {
   const overlay = document.getElementById(id);
   overlay.style.display = "flex";
@@ -2708,6 +2941,11 @@ function renderOnboardingChecklist(status, llm, salary) {
       ok: status.sources.some((s) => s.schedule_enabled),
       hint: "Галочка на карточке площадки ниже.",
     },
+    {
+      label: "Вакансии из Telegram-каналов с контактом HR",
+      ok: status.sources.some((s) => s.name === "telegram" && s.schedule_enabled),
+      hint: "Каналы — во вкладке «Telegram», затем галочка на карточке Telegram ниже. Там рекрутеры сами оставляют свой контакт.",
+    },
   ];
   if (items.every((i) => i.ok)) {
     el.style.display = "none";
@@ -2916,12 +3154,14 @@ function initDragReorder(gridId, storageKey) {
 
 // ---------- Changelog popover ----------
 
-const CHANGELOG_VERSION = "2026-08-29-motion";
+const CHANGELOG_VERSION = "2026-09-24-outreach";
 const CHANGELOG_ITEMS = [
-  "Плавающий индикатор вкладок, toggle-переключатели, toast-уведомления",
-  "Ctrl/⌘+K — командная палитра, цифры 1–7 — переход по разделам",
-  "Кольцевой прогресс и цветные акценты площадок на Обзоре",
-  "Таймлайн и heatmap-активность в Истории/Аналитике",
+  "«Входящие»: ответы hh и HR из Telegram в одном месте + черновики ответов на подтверждение",
+  "Этап у каждого отклика и воронка до оффера в Аналитике",
+  "Настройки → «Контакты и письма»: почта Gmail, Hunter, сводка, напоминания HR",
+  "Площадка «Прямой поиск» и Настройки → «Компании»: вакансии прямо с сайтов компаний",
+  "У интервью в Истории → «Действия»: подготовка, тренажёр, событие в календарь",
+  "Аналитика: спрос на навыки, зарплаты на рынке, сравнение офферов",
 ];
 
 function initChangelogPopover() {
@@ -4009,6 +4249,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     .getElementById("direct-company-add")
     .addEventListener("click", addDirectCompany);
   document.getElementById("offer-add").addEventListener("click", addOffer);
+  document.getElementById("outreach-save").addEventListener("click", saveOutreachSettings);
+  ["contacts-filter-status", "contacts-filter-kind"].forEach((id) =>
+    document.getElementById(id).addEventListener("change", renderContactsList)
+  );
+  document.getElementById("contacts-filter-query").addEventListener("input", renderContactsList);
+  document.getElementById("outreach-email-test").addEventListener("click", testOutreachEmail);
+  document
+    .querySelector('[data-settings-tab="settings-outreach"]')
+    .addEventListener("click", loadOutreachSettings);
   document.getElementById("trainer-check").addEventListener("click", checkTrainerAnswer);
   document.getElementById("trainer-next").addEventListener("click", () => {
     if (!trainer || !trainer.questions.length) return;
@@ -4018,7 +4267,5 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.querySelectorAll("[data-close-overlay]").forEach((btn) => {
     btn.addEventListener("click", () => hideOverlay(btn.closest(".command-overlay")));
   });
-  document
-    .querySelector('[data-settings-tab="settings-companies"]')
-    .addEventListener("click", loadDirectCompanies);
+
 });

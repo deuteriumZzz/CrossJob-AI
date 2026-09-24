@@ -13,6 +13,7 @@ from src.job_sources.hr_replies import (
 )
 from src.job_sources.telegram_control import poll_control_commands
 from src.job_sources.telegram_conversations import TelegramConversations
+from tests.test_webui_api import client  # noqa: F401  (fixture)
 
 
 def _setup(tmp: str):
@@ -211,3 +212,53 @@ def test_control_commands_parse_draft_actions(monkeypatch):
         {"action": "send_draft", "code": "ab12"},
         {"action": "skip_draft", "code": "cd34"},
     ]
+
+
+def test_outreach_settings_roundtrip(client):  # noqa: F811
+    from src.webui import api as webapi
+
+    s = client.get("/api/settings/outreach").json()
+    assert s["email_connected"] is False
+    assert s["skip_us_only"] is True  # по умолчанию US-only отсекается
+    assert s["follow_up_days"] == 7
+
+    s = client.post("/api/settings/outreach", json={
+        "email_address": "me@gmail.com",
+        "email_app_password": "abcd efgh ijkl mnop",
+        "hunter_api_key": "hunter-key-123456",
+        "email_outreach": True,
+        "follow_up_days": 5,
+        "digest_hour": 8,
+        "skip_us_only": False,
+        "skip_europe_only": True,
+    }).json()
+    assert s["email_connected"] is True
+    assert s["email_outreach"] is True
+    assert s["follow_up_days"] == 5
+    assert s["digest_hour"] == 8
+    assert (s["skip_us_only"], s["skip_europe_only"]) == (False, True)
+    assert s["hunter_preview"] == "hunt…3456"
+
+    ctx = webapi.get_ctx()
+    secrets = main.ConfigValidator.load_yaml(ctx.secrets_file)
+    assert secrets["email"]["app_password"] == "abcdefghijklmnop"
+    assert ctx.config["direct"]["follow_up_days"] == 5
+    assert ctx.config["excluded_remote_regions"] == ["europe_only"]
+    assert "abcdefgh" not in str(client.get("/api/settings/outreach").json())
+
+
+def test_hr_drafts_queue_endpoint(client):  # noqa: F811
+    from src.webui import api as webapi
+
+    ctx = webapi.get_ctx()
+    ctx.applied_log.record(Job(role="Dev", company="Acme", link="https://t.me/jobs/9",
+                               source="telegram", external_id="9"), "", "", "applied", 8, [])
+    drafts = DraftStore(ctx.output_folder / main.HR_DRAFTS_FILE)
+    drafts.add("hr_anna", "Ответ", "reply", "https://t.me/jobs/9")
+    drafts.add("hr@acme.io", "Письмо", "email", "https://t.me/jobs/9", channel="email")
+    items = client.get("/api/hr-drafts").json()
+    assert {(i["channel"], i["company"]) for i in items} == {
+        ("telegram", "Acme"), ("email", "Acme"),
+    }
+    names = [c["name"] for c in client.get("/api/status").json()["chat_checks"]]
+    assert "check_email_replies" in names and "check_telegram_commands" in names

@@ -69,6 +69,10 @@
         <svg viewBox="0 0 20 20" fill="none"><path d="M3 5.5A2 2 0 0 1 5 3.5h10a2 2 0 0 1 2 2V12a2 2 0 0 1-2 2H8l-3.5 3V14H5a2 2 0 0 1-2-2V5.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
         <span>Входящие</span>
       </button>
+      <button data-tab="contacts" title="Контакты">
+        <svg viewBox="0 0 20 20" fill="none"><circle cx="8" cy="7" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M2.8 16.5c.6-2.8 2.7-4.3 5.2-4.3s4.6 1.5 5.2 4.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M13.5 4.5a2.8 2.8 0 0 1 0 5.4M15.5 12.6c1 .7 1.6 1.9 1.8 3.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>Контакты</span>
+      </button>
       <button data-tab="telegram" title="Telegram">
         <svg viewBox="0 0 20 20" fill="none"><path d="m2.5 10.3 14.6-6c.7-.3 1.4.3 1.1 1l-2.5 12.4c-.2.9-1.2 1.2-1.9.6l-3.4-2.7-2 1.9c-.3.3-.7.2-.8-.2l-.6-3.3 8.1-7.6c.3-.3-.1-.5-.4-.3L6 11.4l-3.3-1c-.7-.2-.7-1 -.2-1.1Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
         <span>Telegram</span>
@@ -193,6 +197,7 @@
           <p class="muted">Ответы работодателей со всех каналов: статусы hh и сообщения HR в Telegram</p>
         </div>
       </div>
+      <div id="drafts-queue" class="panel" style="display:none"></div>
       <div class="filters">
         <select id="replies-filter-source">
           <option value="">Все площадки</option>
@@ -215,6 +220,45 @@
           <tbody id="replies-rows"></tbody>
         </table>
       </div>
+    </section>
+
+
+    <section id="view-contacts" class="view">
+      <div class="view-header">
+        <div>
+          <h2>Контакты</h2>
+          <p class="muted">Компании и HR, которым можно написать напрямую. Собирается из текста вакансий, Telegram-каналов и сайтов компаний — у каждого контакта указано, где он найден. Написать — значит подготовить черновик: он ждёт вашего «Отправить» во «Входящих».</p>
+        </div>
+      </div>
+      <div class="filters">
+        <select id="contacts-filter-status" aria-label="Статус">
+          <option value="">Любой статус</option>
+          <option value="new">Не писали</option>
+          <option value="draft">Черновик</option>
+          <option value="written">Написали</option>
+          <option value="replied">Ответили</option>
+        </select>
+        <select id="contacts-filter-kind" aria-label="Тип контакта">
+          <option value="">Любой контакт</option>
+          <option value="telegram">Telegram</option>
+          <option value="email">Email</option>
+          <option value="linkedin">LinkedIn</option>
+        </select>
+        <input id="contacts-filter-query" type="text" placeholder="Поиск по компании или вакансии" aria-label="Поиск по компании или вакансии" />
+      </div>
+      <div id="contacts-list"></div>
+
+      <details class="panel" id="direct-companies-panel">
+        <summary><strong>Отслеживаемые компании</strong> <span class="muted small">— вакансии прямо с их сайтов (площадка «Прямой поиск»)</span></summary>
+        <p class="muted small">Вакансии этих компаний площадка «Прямой поиск» берёт прямо с их сайта (Greenhouse, Lever, Ashby, Workable). Введите адрес сайта — система найма определится сама. Плюс к ним площадка смотрит We Work Remotely и Hacker News «Who is hiring».</p>
+        <div class="filters">
+          <input id="direct-company-website" type="text" placeholder="Сайт, например linear.app" aria-label="Сайт компании" />
+          <input id="direct-company-name" type="text" placeholder="Название (необязательно)" aria-label="Название компании" />
+          <button id="direct-company-add" class="btn btn-primary" type="button">Найти и добавить</button>
+        </div>
+        <p id="direct-company-status" class="muted small" role="status"></p>
+        <div id="direct-companies"></div>
+      </details>
     </section>
 
     <section id="view-telegram" class="view">
@@ -494,7 +538,7 @@
         <button type="button" data-settings-tab="settings-autostart">Автозапуск</button>
         <button type="button" data-settings-tab="settings-usage">Расходы на LLM</button>
         <button type="button" data-settings-tab="settings-table">Площадки</button>
-        <button type="button" data-settings-tab="settings-companies">Компании</button>
+        <button type="button" data-settings-tab="settings-outreach">Контакты и письма</button>
       </nav>
 
       <div class="panel settings-pane active" id="settings-search">
@@ -802,17 +846,52 @@
         <div class="source-grid" id="platform-cards"></div>
       </div>
 
-      <div class="panel settings-pane" id="settings-companies">
-        <h3>Компании для прямого поиска</h3>
-        <p class="muted small">Вакансии этих компаний площадка «Прямой поиск» берёт прямо с их сайта (Greenhouse, Lever, Ashby, Workable). Введите адрес сайта — система найма определится сама. Плюс к ним площадка смотрит We Work Remotely и Hacker News «Who is hiring».</p>
+      <div class="panel settings-pane" id="settings-outreach">
+        <h3>Контакты и письма HR</h3>
+        <p class="muted small">Как бот пишет HR напрямую. Ни одно письмо или сообщение не уходит без вашего подтверждения — черновики ждут во «Входящих» и в Telegram-боте («отправить &lt;код&gt;»).</p>
+
+        <h4>Почта Gmail</h4>
+        <p class="muted small" id="outreach-email-status"></p>
         <div class="filters">
-          <input id="direct-company-website" type="text" placeholder="Сайт, например linear.app" aria-label="Сайт компании" />
-          <input id="direct-company-name" type="text" placeholder="Название (необязательно)" aria-label="Название компании" />
-          <button id="direct-company-add" class="btn btn-primary" type="button">Найти и добавить</button>
+          <input id="outreach-email" type="email" placeholder="you@gmail.com" aria-label="Адрес Gmail" autocomplete="off" />
+          <input id="outreach-app-password" type="password" placeholder="Пароль приложения (16 символов)" aria-label="Пароль приложения Google" autocomplete="new-password" />
+          <button id="outreach-email-test" class="btn btn-secondary" type="button">Проверить: письмо себе</button>
         </div>
-        <p id="direct-company-status" class="muted small" role="status"></p>
-        <div id="direct-companies"></div>
+        <details class="muted small">
+          <summary>Где взять пароль приложения?</summary>
+          <ol>
+            <li>Включите двухэтапную проверку в аккаунте Google.</li>
+            <li>Откройте <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">myaccount.google.com/apppasswords</a>, создайте пароль с любым названием.</li>
+            <li>Вставьте 16 символов в поле выше — это не пароль от почты, его можно отозвать в любой момент.</li>
+          </ol>
+        </details>
+        <label class="checkbox-row"><input id="outreach-email-enabled" type="checkbox" /> Готовить письма HR, если в вакансии есть email</label>
+        <div class="filters">
+          <label class="muted small">Не больше писем в день <input id="outreach-email-limit" type="number" min="1" max="100" style="width:80px" /></label>
+          <label class="muted small">Напоминание, если HR молчит, через (дней, 0 — не напоминать) <input id="outreach-follow-up" type="number" min="0" max="60" style="width:80px" /></label>
+        </div>
+
+        <h4>Проверенные email через Hunter</h4>
+        <p class="muted small">Необязательно. Если в вакансии нет контакта, бот ищет проверенный адрес HR компании на hunter.io (бесплатно ~50 проверок в месяц).</p>
+        <div class="filters">
+          <input id="outreach-hunter" type="password" placeholder="API-ключ hunter.io" aria-label="API-ключ Hunter" autocomplete="off" />
+          <span id="outreach-hunter-status" class="muted small"></span>
+        </div>
+
+        <h4>Утренняя сводка и фильтры</h4>
+        <div class="filters">
+          <label class="checkbox-row"><input id="outreach-digest" type="checkbox" /> Сводка в Telegram-бот каждый день в</label>
+          <input id="outreach-digest-hour" type="number" min="0" max="23" style="width:70px" aria-label="Час сводки" /> <span class="muted small">часов</span>
+        </div>
+        <label class="checkbox-row"><input id="outreach-skip-us" type="checkbox" /> Пропускать удалёнку «только из США»</label>
+        <label class="checkbox-row"><input id="outreach-skip-eu" type="checkbox" /> Пропускать удалёнку «только из Европы»</label>
+
+        <div class="filters">
+          <button id="outreach-save" class="btn btn-primary" type="button">Сохранить</button>
+          <span id="outreach-save-status" class="muted small" role="status"></span>
+        </div>
       </div>
+
     </section>
 
     <section id="view-logs" class="view">

@@ -2727,3 +2727,101 @@ kbd {
   padding: 8px 0;
   border-bottom: 1px solid var(--border-soft);
 }
+
+.row-actions {
+  display: inline-block;
+  position: relative;
+  margin-top: 4px;
+}
+.row-actions > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 12.5px;
+  color: var(--accent);
+}
+.row-actions > summary::-webkit-details-marker {
+  display: none;
+}
+.row-actions-menu {
+  position: absolute;
+  right: 0;
+  z-index: 20;
+  display: grid;
+  min-width: 220px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+}
+.row-actions-menu button,
+.row-actions-menu a {
+  text-align: left;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.row-actions-menu button:hover,
+.row-actions-menu a:hover {
+  background: var(--border-soft);
+}
+#drafts-queue .hr-draft {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+#drafts-queue .hr-draft:last-child {
+  border-bottom: 0;
+}
+#settings-outreach h4 {
+  margin: 18px 0 6px;
+}
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+  font-size: 14px;
+}
+
+.contact-card {
+  margin-bottom: 10px;
+}
+.contact-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.contact-rows {
+  margin-top: 8px;
+}
+.contact-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border-soft);
+}
+#direct-companies-panel > summary {
+  cursor: pointer;
+}
+
+.dossier-site {
+  width: 150px;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+}

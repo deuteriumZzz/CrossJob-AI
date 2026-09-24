@@ -218,3 +218,86 @@ def build_digest(
     if drafts:
         lines.append(f"Ждут вашего подтверждения: {len(drafts)} сообщ.")
     return "\n".join(lines)
+
+
+# --- Первое сообщение HR (вкладка «Контакты») --------------------------
+
+_FIRST_MESSAGE_PROMPT = ChatPromptTemplate.from_template(
+    """
+    Напиши первое сообщение кандидата рекрутеру по вакансии.
+    Язык: {language}. Канал: {channel}.
+
+    Правила:
+    - Возьми из вакансии три главных требования и на каждое дай
+      конкретный пример из резюме, по возможности с цифрами.
+    - Только факты из резюме — не придумывай опыт, цифры и факты о
+      компании, которых нет в тексте вакансии.
+    - Без клише ("внимательно изучив вашу вакансию", "с большим
+      интересом", "I am writing to express my interest").
+    - {length_rule}
+
+    Кандидат: {candidate_name}
+    Компания: {company}
+    Вакансия: {job_title}
+    Текст вакансии:
+    {vacancy_text}
+
+    Резюме:
+    {resume_text}
+
+    Верни только текст сообщения, без темы и подписи-шаблона.
+    """
+)
+
+_LENGTH_RULES = {
+    "telegram": "2–4 предложения, как в личном чате, без приветственной воды.",
+    "email": (
+        "150–180 слов: абзац «кто я и что ищу», абзац «почему именно эта "
+        "компания» (только по тексту вакансии), 2–3 достижения, в конце — "
+        "готов обсудить на звонке. Деловой тон."
+    ),
+}
+
+
+def _looks_russian(text: str) -> bool:
+    letters = [ch for ch in text if ch.isalpha()]
+    cyrillic = sum(1 for ch in letters if "а" <= ch.lower() <= "я" or ch in "ёЁ")
+    return bool(letters) and cyrillic / len(letters) > 0.3
+
+
+def generate_first_message(
+    resume_pdf_path: Path,
+    candidate_name: str,
+    company: str,
+    job_title: str,
+    vacancy_text: str,
+    channel: str,
+    llm_api_key: str,
+) -> dict:
+    """{"subject", "text"} первого сообщения HR: channel — "telegram"
+    или "email". Язык — как у вакансии (русская → по-русски)."""
+    from langchain_core.output_parsers import StrOutputParser
+    from pdfminer.high_level import extract_text
+
+    russian = _looks_russian(vacancy_text or job_title)
+    chain = (
+        _FIRST_MESSAGE_PROMPT
+        | get_chat_llm(llm_api_key, temperature=0.4)
+        | StrOutputParser()
+    )
+    text = chain.invoke(
+        {
+            "language": "русский" if russian else "English",
+            "channel": "Telegram" if channel == "telegram" else "email",
+            "length_rule": _LENGTH_RULES[channel],
+            "candidate_name": candidate_name or "кандидат",
+            "company": company or "не указана",
+            "job_title": job_title,
+            "vacancy_text": (vacancy_text or "")[:6000],
+            "resume_text": extract_text(str(resume_pdf_path)),
+        }
+    ).strip()
+    subject = f"{job_title} — {'отклик' if russian else 'Application'}"
+    if candidate_name:
+        subject += f" — {candidate_name}"
+    return {"subject": subject, "text": text}
