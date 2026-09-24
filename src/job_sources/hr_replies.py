@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import re
 import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -360,7 +361,7 @@ def generate_company_email(
             "language": "русский" if russian else "English",
             "contact_name": contact_name or "не указано",
             "target_position": target_position,
-            "candidate_name": candidate_name or "кандидат",
+            "candidate_name": candidate_name or "(имя — из резюме)",
             "company": card.get("company") or "не указана",
             "website": card.get("website") or "не указан",
             "vacancy": vacancy.get("title") or "не указана",
@@ -368,6 +369,8 @@ def generate_company_email(
             "resume_text": extract_text(str(resume_pdf_path)),
         }
     ).strip()
+    # Модель иногда оставляет заготовки вида «[Your Name]» — не отправляем их.
+    text = re.sub(r"\[(?:Your|Ваш[аеи]?)[^\]]*\]", candidate_name, text).strip()
     subject = (
         f"{target_position} — отклик — {candidate_name}" if russian
         else f"{target_position} Application — {candidate_name}"

@@ -595,7 +595,7 @@ def ensure_plain_text_resume(parameters: dict, llm_api_key: str) -> Path:
     resume.pdf лениво, при первом обращении к одному из этих
     пунктов, и переиспользуется дальше без повторной генерации."""
     plain_text_resume_file: Path = parameters["plainTextResumeFile"]
-    if not plain_text_resume_file.exists():
+    if not plain_text_resume_file.exists() or is_template_resume(plain_text_resume_file):
         resume_pdf_path = parameters["dataFolder"] / RESUME_PDF
         if not resume_pdf_path.exists():
             raise FileNotFoundError(
@@ -611,6 +611,40 @@ def ensure_plain_text_resume(parameters: dict, llm_api_key: str) -> Path:
             encoding="utf-8",
         )
     return plain_text_resume_file
+
+
+def is_template_resume(path: Path) -> bool:
+    """plain_text_resume.yaml — нетронутый пример с «[Your Name]» вместо
+    данных (не был сгенерирован из PDF)."""
+    try:
+        return "[Your Name]" in path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
+_NAME_LINE = re.compile(r"^[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё'’.-]+(?: [A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё'’.-]+){1,3}$")
+
+
+def candidate_name(parameters: dict, resume_pdf: Optional[Path] = None) -> str:
+    """Имя и фамилия для темы и подписи письма. Берём из того же PDF, что
+    уходит во вложении (в резюме имя — первая строка), иначе из
+    plain_text_resume.yaml, если он не шаблон. Пусто — не нашли."""
+    pdf = resume_pdf or parameters["dataFolder"] / RESUME_PDF
+    if pdf.exists():
+        try:
+            from pdfminer.high_level import extract_text
+
+            for line in extract_text(str(pdf), maxpages=1).splitlines()[:5]:
+                line = " ".join(line.split())
+                if _NAME_LINE.match(line):
+                    return line
+        except Exception as e:
+            logger.warning(f"Не удалось прочитать имя из {pdf.name}: {e}")
+    resume_yaml = Path(parameters.get("plainTextResumeFile") or parameters["dataFolder"] / PLAIN_TEXT_RESUME_YAML)
+    if resume_yaml.exists() and not is_template_resume(resume_yaml):
+        person = (yaml.safe_load(resume_yaml.read_text(encoding="utf-8")) or {}).get("personal_information") or {}
+        return f"{person.get('name', '')} {person.get('surname', '')}".strip()
+    return ""
 
 
 def force_refresh_plain_text_resume(
@@ -3033,14 +3067,11 @@ def start_campaign_job(
         raise ValueError("Рассылка не найдена")
 
     if kind == "prepare":
-        resume_yaml = Path(parameters.get("plainTextResumeFile") or data_folder / PLAIN_TEXT_RESUME_YAML)
-        # Нет текстовой версии резюме — имя пустое, но не падаем.
-        person = ((yaml.safe_load(resume_yaml.read_text(encoding="utf-8")) or {}) if resume_yaml.exists() else {}).get("personal_information") or {}
-        name = f"{person.get('name', '')} {person.get('surname', '')}".strip()
         positions = parameters.get("positions") or []
         resume_pdf = data_folder / RESUME_PDF_LINKEDIN
         if not resume_pdf.exists():
             resume_pdf = data_folder / RESUME_PDF
+        name = candidate_name(parameters, resume_pdf)
         emails = [e for e, item in campaign["items"].items() if item["status"] == "pending"]
 
         def step(email: str) -> Optional[str]:
@@ -4114,8 +4145,6 @@ def create_headhunter_resume_draft(parameters: dict) -> Optional[str]:
 
 
 def check_telegram_replies(parameters: dict, llm_api_key: str) -> None:
-    if active_watcher() is not None:
-        return  # ответы HR шлюз ловит сам, в момент прихода
     """Проверяет личные диалоги, заведённые search_telegram
     (telegram.auto_message), на новые ответы контактов — так же, как
     check_headhunter_replies проверяет отклики на HH: только
@@ -4123,6 +4152,8 @@ def check_telegram_replies(parameters: dict, llm_api_key: str) -> None:
     где есть чат с явной кнопкой "ответить" на площадке — здесь это
     личный диалог самого пользователя, автоматически отвечать в него
     от его имени не тот случай)."""
+    if active_watcher() is not None:
+        return  # ответы HR шлюз ловит сам, в момент прихода
     secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
     tg_secrets = secrets.get("telegram") or {}
     api_id = tg_secrets.get("api_id")
@@ -4215,10 +4246,7 @@ def _handle_vacancy_button(
     elif parts[0] == "l":
         bot_request(bot_token, "answerCallbackQuery", {**answer, "text": "Пишу письмо под вакансию…"})
         resume_pdf = resumes[0] if resumes else data_folder / RESUME_PDF
-        resume_yaml = Path(parameters.get("plainTextResumeFile") or data_folder / PLAIN_TEXT_RESUME_YAML)
-        # Нет текстовой версии резюме — имя пустое, но не падаем.
-        person = ((yaml.safe_load(resume_yaml.read_text(encoding="utf-8")) or {}) if resume_yaml.exists() else {}).get("personal_information") or {}
-        name = f"{person.get('name', '')} {person.get('surname', '')}".strip()
+        name = candidate_name(parameters, resume_pdf)
         channel_kind = "email" if contact["kind"] == "email" else "telegram"
         letter = generate_first_message(
             resume_pdf, name, "", post["title"], post["text"], channel_kind, llm_api_key

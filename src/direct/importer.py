@@ -10,7 +10,8 @@ import csv
 import io
 import re
 import zipfile
-from typing import cast
+from concurrent.futures import ThreadPoolExecutor
+from typing import Callable, Optional, cast
 from xml.etree import ElementTree as ET
 
 from src.direct.contacts import extract_emails
@@ -142,9 +143,34 @@ def rows_from_table(rows: list[list[str]]) -> list[dict]:
     return result
 
 
-def rows_from_text(text: str, llm_api_key: str) -> list[dict]:
-    """Свободный текст → компании через LLM. Адреса, которых нет в
-    исходном тексте дословно, отбрасываются (защита от выдумок)."""
+CHUNK_CHARS = 6000  # столько текста за один запрос к LLM — большой PDF идёт частями
+
+
+def _chunks(text: str) -> list[str]:
+    """Режем по строкам, чтобы компания не разрывалась посередине."""
+    chunks, current = [], ""
+    lines = [
+        piece
+        for line in text.splitlines(keepends=True)
+        for piece in (line[i:i + CHUNK_CHARS] for i in range(0, len(line), CHUNK_CHARS))
+    ]
+    for line in lines:
+        if current and len(current) + len(line) > CHUNK_CHARS:
+            chunks.append(current)
+            current = ""
+        current += line
+    if current.strip():
+        chunks.append(current)
+    return chunks
+
+
+def rows_from_text(
+    text: str, llm_api_key: str, progress: Optional[Callable[[int, int], None]] = None
+) -> list[dict]:
+    """Свободный текст → компании через LLM, по частям. Адреса, которых
+    нет в исходном тексте дословно, отбрасываются (защита от выдумок), а
+    адреса из текста, которые модель пропустила, добавляются строкой с
+    компанией по домену — чтобы из большого файла ничего не потерялось."""
     from langchain_core.language_models import BaseChatModel
     from langchain_core.prompts import ChatPromptTemplate
     from pydantic import BaseModel, Field
@@ -167,10 +193,25 @@ def rows_from_text(text: str, llm_api_key: str) -> list[dict]:
         "написано в тексте, ничего не придумывай; поля без данных — пустые.\n\n{text}"
     )
     llm = cast(BaseChatModel, get_chat_llm(llm_api_key, temperature=0))
-    parsed = cast(
-        _Companies,
-        llm.with_structured_output(_Companies).invoke(prompt.format(text=text[:20000])),
-    ).companies
+    parts = _chunks(text)
+    parsed: list = []
+    failed = 0
+    for index, part in enumerate(parts):
+        if progress:
+            progress(index, len(parts))
+        try:
+            parsed += cast(
+                _Companies, llm.with_structured_output(_Companies).invoke(prompt.format(text=part))
+            ).companies
+        except Exception as e:
+            failed += 1
+            from src.logging import logger
+
+            logger.warning(f"Импорт: часть {index + 1}/{len(parts)} не разобрана LLM: {e}")
+    if parts and failed == len(parts) and not extract_emails(text):
+        raise ValueError("LLM не смог разобрать файл — проверьте ключ LLM или сохраните список как CSV/XLSX.")
+    if progress:
+        progress(len(parts), len(parts))
     source_emails = {e.lower() for e in extract_emails(text)}
     result = []
     for number, c in enumerate(parsed, start=1):
@@ -184,6 +225,15 @@ def rows_from_text(text: str, llm_api_key: str) -> list[dict]:
         )
         if item["company"] or item["email"]:
             result.append(item)
+    found = {r["email"] for r in result}
+    for email in sorted(source_emails - found):
+        item = {f: "" for f in FIELDS}
+        domain = email.split("@")[1]
+        labels = domain.split(".")
+        # acme.co.uk → Acme, mail.acme.io → Acme
+        name = labels[-3] if len(labels) > 2 and labels[-2] in ("co", "com", "org", "net", "ac") else labels[-2]
+        item.update(email=email, website=domain, row=len(result) + 1, company=name.capitalize())
+        result.append(item)
     return result
 
 
@@ -226,6 +276,10 @@ def check_email(email: str) -> tuple[str, str]:
 
 def preview(rows: list[dict], known_emails: set[str], written_emails: set[str]) -> dict:
     """Что будет импортировано: сводка и строки с пометками."""
+    # Домены проверяем параллельно — иначе сотня адресов ждёт минуты.
+    domains = {r["email"].split("@")[1].lower() for r in rows if "@" in r["email"]}
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        list(pool.map(domain_accepts_mail, domains - set(_MX_CACHE)))
     seen: set[str] = set()
     items = []
     stats = {"total": len(rows), "ok": 0, "bad": 0, "unknown": 0,

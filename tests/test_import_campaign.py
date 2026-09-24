@@ -73,9 +73,46 @@ def test_free_text_drops_invented_emails(monkeypatch):
     assert [(r["company"], r["email"]) for r in rows] == [("Acme", "hr@acme.io"), ("Ghost", "")]
 
 
+def _import(client, name, data):  # noqa: F811
+    import time
+
+    token = client.post("/api/import/preview", files={"file": (name, data)}).json()["token"]
+    for _ in range(100):
+        job = client.get(f"/api/import/preview/{token}").json()
+        if job["state"] != "running":
+            return job
+        time.sleep(0.05)
+    raise AssertionError("импорт не закончился")
+
+
+def test_big_text_import_in_chunks_keeps_every_email(client, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(importer, "domain_accepts_mail", lambda d: True)
+    monkeypatch.setattr(importer, "CHUNK_CHARS", 60)
+    calls = []
+
+    def invoke(prompt):
+        calls.append(prompt)
+        if "Acme" in prompt:
+            return SimpleNamespace(companies=[SimpleNamespace(
+                company="Acme", email="hr@acme.io", name="Ann", website="", title="", emphasis="")])
+        raise RuntimeError("LLM timeout")  # часть не разобралась — адрес всё равно не теряем
+
+    llm = SimpleNamespace(with_structured_output=lambda schema: SimpleNamespace(invoke=invoke))
+    import src.job_sources.llm_provider as lp
+    monkeypatch.setattr(lp, "get_chat_llm", lambda *a, **k: llm)
+    api.get_ctx().llm_api_key = "key"
+    text = "Acme — пишите hr@acme.io, Анна\n" + "x" * 50 + "\nBeta Corp jobs@mail.beta.co.uk\n"
+    job = _import(client, "list.txt", text.encode())
+    assert job["state"] == "done" and len(calls) >= 2
+    assert {(i["company"], i["email"]) for i in job["items"]} == {("Acme", "hr@acme.io"), ("Beta", "jobs@mail.beta.co.uk")}
+
+    bad = _import(client, "scan.txt", b"   ")
+    assert bad["state"] == "error" and "нет текста" in bad["detail"]
+
+
 def test_import_api_and_full_campaign(client, monkeypatch):  # noqa: F811
     monkeypatch.setattr(importer, "domain_accepts_mail", lambda d: True)
-    prev = client.post("/api/import/preview", files={"file": ("list.csv", CSV, "text/csv")}).json()
+    prev = _import(client, "list.csv", CSV)
     assert prev["stats"]["ok"] == 1 and prev["stats"]["bad"] == 1
     res = client.post("/api/import/commit", json={"token": prev["token"]}).json()
     assert res["companies"] == 3 and res["contacts"] == 1
@@ -220,3 +257,28 @@ def test_campaign_follow_up_in_same_thread(client, monkeypatch):  # noqa: F811
     view = client.post(f"/api/campaigns/{cid}/followups", json={}).json()
     assert sent[0]["In-Reply-To"] == "<m1>" and not sent[0].is_multipart()  # без вложения
     assert view["stats"]["followed_up"] == 1 and view["stats"]["sent"] == 2
+
+
+def test_candidate_name_from_resume_pdf_not_template(tmp_path, monkeypatch):
+    import pdfminer.high_level as hl
+
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF")
+    monkeypatch.setattr(hl, "extract_text", lambda *a, **k: "\nВологдин Дмитрий\nМужчина, 32 года\n")
+    template = tmp_path / "plain_text_resume.yaml"
+    template.write_text("personal_information:\n  name: '[Your Name]'\n  surname: '[Your Surname]'\n", encoding="utf-8")
+    params = {"dataFolder": tmp_path, "plainTextResumeFile": template}
+    assert main.is_template_resume(template)
+    assert main.candidate_name(params, pdf) == "Вологдин Дмитрий"
+    # PDF без узнаваемой строки-имени и шаблонный yaml — лучше пусто, чем «[Your Name]».
+    monkeypatch.setattr(hl, "extract_text", lambda *a, **k: "Резюме: +7 953 000")
+    assert main.candidate_name(params, pdf) == ""
+
+
+def test_campaign_reply_shows_in_inbox(client):  # noqa: F811
+    ctx = api.get_ctx()
+    store = camp.CampaignStore(ctx.output_folder)
+    cid = store.create("Осень", [{"key": "a", "email": "hr@acme.io", "company": "Acme"}])
+    store.update_item(cid, "hr@acme.io", status="replied", replied_at="2026-09-20T10:00:00+00:00")
+    item = next(i for i in client.get("/api/inbox").json() if i["channel"] == "email")
+    assert item["company"] == "Acme" and item["stage"] == "replied" and "from%3Ahr@acme.io" in item["link"]

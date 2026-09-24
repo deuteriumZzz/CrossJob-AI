@@ -3331,3 +3331,118 @@ details.panel.more[open] > summary {
   background: transparent;
   color: var(--accent);
 }
+
+/* «Свои каналы» на Главной */
+.own-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* Входящие: карточки вместо таблицы */
+.chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  cursor: pointer;
+}
+.chip b {
+  color: var(--text);
+  margin-left: 4px;
+}
+.chip.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.inbox-list {
+  display: grid;
+  gap: 10px;
+}
+.inbox-item {
+  background: var(--panel);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+}
+.inbox-item.inbox-interview {
+  border-left-color: var(--ok);
+}
+.inbox-item.inbox-replied {
+  border-left-color: var(--accent);
+}
+.inbox-item.inbox-rejected {
+  opacity: 0.75;
+}
+.inbox-item.is-unread {
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.inbox-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.inbox-who {
+  margin: 4px 0 2px;
+  overflow-wrap: anywhere;
+}
+.inbox-text {
+  margin: 8px 0 0;
+  font-size: 14px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.inbox-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.inbox-actions:empty {
+  display: none;
+}
+.inbox-stage {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Telegram-парсер: «Как это работает» */
+.howto-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+}
+.howto-grid p {
+  margin: 4px 0 0;
+}
+.howto {
+  padding-left: 20px;
+  margin: 8px 0 12px;
+}
+.howto li {
+  margin-bottom: 8px;
+}
+.inbox-who a {
+  color: var(--text);
+  font-weight: 550;
+  text-decoration: none;
+}
+.inbox-who a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}

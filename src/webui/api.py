@@ -779,6 +779,19 @@ def get_inbox(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
                 "draft": draft,
             }
         )
+    # Ответы на письма рассылки — сам текст в Gmail, здесь ссылка на него.
+    for campaign in CampaignStore(ctx.output_folder).all().values():
+        for email, item in campaign["items"].items():
+            if item["status"] != "replied":
+                continue
+            items.append({
+                "channel": "email", "source": "email_campaign", "external_id": None,
+                "company": item["company"], "title": "", "contact": email,
+                "link": f"https://mail.google.com/mail/u/0/#search/from%3A{email}",
+                "text": f"Ответили на письмо из рассылки «{campaign['name']}» — откройте переписку в Gmail",
+                "at": item.get("replied_at") or item.get("sent_at") or campaign["created_at"],
+                "unread": False, "stage": "replied",
+            })
     return sorted(items, key=lambda i: i["at"], reverse=True)
 
 
@@ -1015,6 +1028,14 @@ def post_contact_dossier(
     return {"website": dossier["website"], "added": after - before}
 
 
+def _plural(n: int, one: str, few: str, many: str) -> str:
+    """Слово под число (1 ответ, 2 ответа, 5 ответов) — число пишет UI."""
+    n = abs(n) % 100
+    if 10 < n < 20:
+        return many
+    return one if n % 10 == 1 else few if 2 <= n % 10 <= 4 else many
+
+
 @app.get("/api/todo")
 def get_todo(ctx: AppContext = Depends(get_ctx)) -> dict:
     """«Что сделать сейчас» на Главной: только то, что ждёт человека,
@@ -1027,7 +1048,7 @@ def get_todo(ctx: AppContext = Depends(get_ctx)) -> dict:
     if drafts:
         items.append({
             "id": "drafts", "count": len(drafts), "view": "replies",
-            "text": "сообщений HR ждут вашего «Отправить»",
+            "text": _plural(len(drafts), "сообщение HR ждёт", "сообщения HR ждут", "сообщений HR ждут") + " вашего «Отправить»",
         })
     since = datetime.now().astimezone() - timedelta(days=3)
     entries = ctx.applied_log.find_by_company("")
@@ -1045,13 +1066,13 @@ def get_todo(ctx: AppContext = Depends(get_ctx)) -> dict:
     if fresh or unread:
         items.append({
             "id": "replies", "count": len(fresh) + len(unread), "view": "replies",
-            "text": "новых ответов от работодателей за 3 дня",
+            "text": _plural(len(fresh) + len(unread), "новый ответ", "новых ответа", "новых ответов") + " от работодателей за 3 дня",
         })
     interviews = [e for e in entries if effective_stage(e) == "interview"]
     if interviews:
         items.append({
             "id": "interviews", "count": len(interviews), "view": "history",
-            "text": "интервью — подготовьтесь: «Действия» → подготовка и тренажёр",
+            "text": _plural(len(interviews), "интервью", "интервью", "интервью") + " — подготовьтесь: «Действия» → подготовка и тренажёр",
         })
     new_contacts = [
         c for c in get_contacts(ctx) if c["status"] == "new" and c["contacts"]
@@ -1059,7 +1080,7 @@ def get_todo(ctx: AppContext = Depends(get_ctx)) -> dict:
     if new_contacts:
         items.append({
             "id": "contacts", "count": len(new_contacts), "view": "contacts",
-            "text": "компаний с контактом HR, которым вы ещё не писали",
+            "text": _plural(len(new_contacts), "компания с контактом HR, которой", "компании с контактом HR, которым", "компаний с контактом HR, которым") + " вы ещё не писали",
         })
     paused = [
         name for name, _ in ALL_SOURCES
@@ -1068,7 +1089,7 @@ def get_todo(ctx: AppContext = Depends(get_ctx)) -> dict:
     if paused:
         items.append({
             "id": "paused", "count": len(paused), "view": "overview",
-            "text": "площадок на паузе после капчи/блокировки: " + ", ".join(paused)
+            "text": _plural(len(paused), "площадка на паузе", "площадки на паузе", "площадок на паузе") + " после капчи/блокировки: " + ", ".join(paused)
             + " — пройдите капчу в браузере и отправьте боту /resume <площадка>",
         })
     return {
@@ -1177,39 +1198,78 @@ def _written_emails(ctx: AppContext) -> set[str]:
     )
 
 
-@app.post("/api/import/preview")
-async def post_import_preview(
-    file: UploadFile = File(...), ctx: AppContext = Depends(get_ctx)
-) -> dict:
-    """Шаг 1 импорта: разобрать файл и показать, что бот понял — ничего
-    не сохраняя. Сохранение — /api/import/commit с полученным token."""
-    import json as _json
-    import secrets as _secrets
+# ponytail: задачи импорта живут в памяти процесса — после перезапуска
+# дашборда незаконченный разбор надо запустить заново.
+IMPORT_JOBS: dict[str, dict] = {}
 
-    data = await file.read()
+
+def _run_import(ctx: AppContext, token: str, filename: str, data: bytes) -> None:
+    """Разбор файла в фоне: большой PDF идёт к LLM частями, адреса
+    проверяются параллельно — дашборд при этом не замирает."""
+    import json as _json
+
+    job = IMPORT_JOBS[token]
     try:
-        table, text = read_file(file.filename or "file.txt", data)
+        job["stage"] = "Читаю файл"
+        table, text = read_file(filename, data)
         if table is not None:
             rows = rows_from_table(table)
         else:
             if not ctx.llm_api_key:
                 raise ValueError("Для текста/PDF нужен ключ LLM — или сохраните файл как CSV/XLSX.")
-            rows = rows_from_text(text, ctx.llm_api_key)
+            if not text.strip():
+                raise ValueError("В файле нет текста (возможно, это скан) — сохраните список как CSV/XLSX.")
+
+            def progress(done: int, total: int) -> None:
+                job.update(stage="Раскладываю по компаниям", done=done, total=total)
+
+            rows = rows_from_text(text, ctx.llm_api_key, progress)
+        if not rows:
+            raise ValueError("Не нашёл в файле ни компаний, ни email.")
+        job.update(stage=f"Проверяю адреса ({len(rows)})", done=0, total=0)
+        known = {
+            c["value"].lower()
+            for card in ContactBook(ctx.output_folder).all().values()
+            for c in card["contacts"]
+            if c["kind"] == "email"
+        }
+        result = import_preview(rows, known, _written_emails(ctx))
+        (ctx.output_folder / IMPORT_PREVIEW_FILE).write_text(
+            _json.dumps({"token": token, "filename": filename, **result}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        job.update(state="done", stats=result["stats"], items=result["items"][:300])
     except (ValueError, KeyError, IndexError, zipfile.BadZipFile) as e:
-        raise HTTPException(400, str(e) or "Не удалось разобрать файл")
-    known = {
-        c["value"].lower()
-        for card in ContactBook(ctx.output_folder).all().values()
-        for c in card["contacts"]
-        if c["kind"] == "email"
-    }
-    result = import_preview(rows, known, _written_emails(ctx))
+        job.update(state="error", detail=str(e) or "Не удалось разобрать файл")
+    except Exception as e:
+        logger.exception("Импорт файла упал")
+        job.update(state="error", detail=f"Не удалось разобрать файл: {e}")
+
+
+@app.post("/api/import/preview")
+async def post_import_preview(
+    file: UploadFile = File(...), ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Шаг 1 импорта: запустить разбор файла в фоне, ничего не сохраняя.
+    Прогресс и результат — GET /api/import/preview/{token}, сохранение —
+    /api/import/commit."""
+    import secrets as _secrets
+    import threading
+
+    data = await file.read()
     token = _secrets.token_hex(4)
-    (ctx.output_folder / IMPORT_PREVIEW_FILE).write_text(
-        _json.dumps({"token": token, "filename": file.filename, **result}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    return {"token": token, "filename": file.filename, "stats": result["stats"], "items": result["items"][:300]}
+    filename = file.filename or "file.txt"
+    IMPORT_JOBS[token] = {"state": "running", "stage": "Загружаю", "done": 0, "total": 0, "filename": filename}
+    threading.Thread(target=_run_import, args=(ctx, token, filename, data), daemon=True).start()
+    return {"token": token}
+
+
+@app.get("/api/import/preview/{token}")
+def get_import_preview(token: str) -> dict:
+    job = IMPORT_JOBS.get(token)
+    if job is None:
+        raise HTTPException(404, "Разбор не найден — загрузите файл ещё раз")
+    return {"token": token, **job}
 
 
 class ImportCommit(BaseModel):
@@ -2262,8 +2322,8 @@ def get_telegram_watch(ctx: AppContext = Depends(get_ctx)) -> dict:
 def post_telegram_watch(
     body: TelegramWatchUpdate, ctx: AppContext = Depends(get_ctx)
 ) -> dict:
-    """Мгновенные уведомления из каналов. Слова применяются на ходу;
-    включение/выключение — при следующем запуске бота."""
+    """Telegram-парсер. Слова применяются на ходу; включение и выключение —
+    сразу, если бот запущен (иначе — при «Запустить»)."""
     prefs = ctx.config_file
     if body.enabled is not None:
         set_source_field(prefs, "telegram", "watch_enabled", body.enabled)
@@ -2287,6 +2347,15 @@ def post_telegram_watch(
             prefs, "telegram", "intro_message_template", body.greeting.strip(), quote=True,
         )
     ctx.reload_config()
+    daemon_running = ctx.scheduler_thread is not None and ctx.scheduler_thread.is_alive()
+    if body.enabled is not None and daemon_running:
+        from src.job_sources.telegram.watcher import active_watcher, start_telegram_watcher
+
+        watcher = active_watcher()
+        if body.enabled and watcher is None:
+            start_telegram_watcher(ctx.config, ctx.llm_api_key)
+        elif not body.enabled and watcher is not None:
+            watcher.stop()
     return _telegram_watch_snapshot(ctx)
 
 
@@ -2309,15 +2378,23 @@ def get_telegram_status(ctx: AppContext = Depends(get_ctx)) -> dict:
     попытки залогиниться самой (см. TelegramStatusClient: connect(), а
     не start(), иначе запрос из вебui завис бы в ожидании
     интерактивного ввода, которому неоткуда прийти)."""
+    from src.job_sources.telegram.watcher import active_watcher
+
     creds = _telegram_secrets(ctx)
     if creds is None:
         return {"configured": False, "connected": False}
+    if active_watcher() is not None:
+        # Парсер держит сессию открытой — значит, вход выполнен.
+        return {"configured": True, "connected": True}
     try:
         with TelegramStatusClient(
             int(creds[0]), creds[1], _telegram_session_path(ctx)
         ) as client:
             connected = client.is_authorized()
     except Exception as e:
+        if "locked" in str(e):
+            # Сессией прямо сейчас пользуется поиск/отправка — вход есть.
+            return {"configured": True, "connected": True}
         logger.warning(f"Failed to check Telegram session status: {e}")
         return {"configured": True, "connected": False}
     return {"configured": True, "connected": connected}
@@ -2335,6 +2412,23 @@ class TelegramLoginPassword(BaseModel):
     password: str
 
 
+class TelegramKeys(BaseModel):
+    api_id: str
+    api_hash: str
+
+
+@app.post("/api/telegram/keys")
+def post_telegram_keys(body: TelegramKeys, ctx: AppContext = Depends(get_ctx)) -> dict:
+    """api_id/api_hash с my.telegram.org — из дашборда, без правки
+    secrets.yaml руками. Нужны один раз, дальше — вход по коду."""
+    api_id, api_hash = body.api_id.strip(), body.api_hash.strip()
+    if not api_id.isdigit() or not re.fullmatch(r"[0-9a-f]{32}", api_hash):
+        raise HTTPException(400, "api_id — это число, api_hash — 32 символа (буквы a–f и цифры). Скопируйте их с my.telegram.org → API development tools.")
+    set_source_field(ctx.secrets_file, "telegram", "api_id", int(api_id))
+    set_source_field(ctx.secrets_file, "telegram", "api_hash", api_hash, quote=True)
+    return {"ok": True}
+
+
 @app.post("/api/telegram/login/start")
 def post_telegram_login_start(
     body: TelegramLoginPhone, ctx: AppContext = Depends(get_ctx)
@@ -2346,7 +2440,7 @@ def post_telegram_login_start(
     creds = _telegram_secrets(ctx)
     if creds is None:
         raise HTTPException(
-            400, "telegram.api_id/api_hash не заданы в secrets.yaml."
+            400, "Сначала вставьте api_id и api_hash: Общение → Telegram-парсер → «Подключение аккаунта»."
         )
     if ctx.telegram_login_session is not None:
         ctx.telegram_login_session.close()
@@ -2516,7 +2610,7 @@ def post_telegram_message(
     creds = _telegram_secrets(ctx)
     if creds is None:
         raise HTTPException(
-            400, "Missing telegram.api_id/api_hash in secrets.yaml"
+            400, "Сначала вставьте api_id и api_hash: Общение → Telegram-парсер → «Подключение аккаунта»."
         )
     if not body.text.strip():
         raise HTTPException(400, "Message text is empty")
@@ -2549,7 +2643,7 @@ def post_telegram_send_resume(
     creds = _telegram_secrets(ctx)
     if creds is None:
         raise HTTPException(
-            400, "Missing telegram.api_id/api_hash in secrets.yaml"
+            400, "Сначала вставьте api_id и api_hash: Общение → Telegram-парсер → «Подключение аккаунта»."
         )
     resume_path = ctx.config["dataFolder"] / RESUME_PDF
     if not resume_path.exists():
@@ -2987,8 +3081,7 @@ def post_test_notification(ctx: AppContext = Depends(get_ctx)) -> dict:
     if not bot_token or not chat_id:
         raise HTTPException(
             400,
-            "notifications.telegram_bot_token/telegram_chat_id не "
-            "заданы в secrets.yaml.",
+            "Бот уведомлений не подключён — Настройки → «Уведомления (бот)».",
         )
     try:
         send_notification(

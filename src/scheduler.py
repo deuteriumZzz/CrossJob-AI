@@ -15,6 +15,15 @@ from src.scheduler_state import get_next_run, record_run_result
 DEFAULT_INTERVAL_HOURS = 3
 
 
+# Как часто проверять ответы, если в настройках не задано: команды боту —
+# каждые 3 минуты, ответы HR — чаще, чем поиск вакансий.
+CHECK_INTERVAL_HOURS = {
+    "check_telegram_commands": 0.05,
+    "check_telegram_replies": 0.5,
+    "check_email_replies": 1,
+    "check_hh_replies": 1,
+}
+
 class Scheduler:
     """Встроенный планировщик вместо внешнего cron — сам решает,
     когда запускать каждый источник, по schedule_enabled/
@@ -46,7 +55,15 @@ class Scheduler:
         due = []
         for name in self.source_map:
             source_config = self.parameters.get(name) or {}
-            if not source_config.get("schedule_enabled"):
+            # Проверки ответов (check_*) — не площадки, а часть своих каналов:
+            # включены по умолчанию и сами ничего не делают, пока канал
+            # (Gmail, Telegram, бот) не подключён. Выключить — явным false.
+            # hh открывает браузер — только если сама площадка в расписании.
+            enabled_by_default = name.startswith("check_") and (
+                name != "check_hh_replies"
+                or bool((self.parameters.get("headhunter") or {}).get("schedule_enabled"))
+            )
+            if not source_config.get("schedule_enabled", enabled_by_default):
                 continue
             next_run = get_next_run(self.output_folder, name)
             if next_run is None or next_run <= self.now_fn():
@@ -57,7 +74,7 @@ class Scheduler:
         for name in self.due_sources():
             run_at = self.now_fn()
             interval_hours = (self.parameters.get(name) or {}).get(
-                "interval_hours", DEFAULT_INTERVAL_HOURS
+                "interval_hours", CHECK_INTERVAL_HOURS.get(name, DEFAULT_INTERVAL_HOURS)
             )
             next_run = run_at + timedelta(hours=interval_hours)
             try:
@@ -129,7 +146,7 @@ class Scheduler:
         self.stop_event.set()
 
     def run_forever(self, tick_seconds: int = 30) -> None:
-        from src.job_sources.telegram.watcher import start_telegram_watcher
+        from src.job_sources.telegram.watcher import active_watcher, start_telegram_watcher
 
         logger.info("Scheduler started.")
         # Постоянный шлюз Telegram (telegram.watch_enabled) живёт, пока
@@ -144,6 +161,8 @@ class Scheduler:
                 self.run_once()
                 self.stop_event.wait(tick_seconds)
         finally:
-            if watcher is not None:
-                watcher.stop()
+            # Парсер могли включить/выключить из дашборда на ходу — гасим
+            # тот, что работает сейчас, а не только запущенный здесь.
+            for w in {watcher, active_watcher()} - {None}:
+                w.stop()
             logger.info("Scheduler stopped.")

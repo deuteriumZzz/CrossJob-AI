@@ -65,10 +65,14 @@
         <svg viewBox="0 0 20 20" fill="none"><rect x="2.5" y="5.5" width="15" height="11" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M7 5.5V4a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 13 4v1.5M2.5 10h15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
         <span>Вакансии</span>
       </button>
-      <button data-tab="replies" title="Общение — ответы, черновики, контакты HR и Telegram">
+      <button data-tab="replies" title="Общение — ответы работодателей и Telegram">
         <svg viewBox="0 0 20 20" fill="none"><path d="M3 5.5A2 2 0 0 1 5 3.5h10a2 2 0 0 1 2 2V12a2 2 0 0 1-2 2H8l-3.5 3V14H5a2 2 0 0 1-2-2V5.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
         <span>Общение</span>
         <span id="telegram-unread-badge" class="tab-badge" style="display:none"></span>
+      </button>
+      <button data-tab="outreach" title="Рассылка — письма компаниям из вашей базы через Gmail">
+        <svg viewBox="0 0 20 20" fill="none"><rect x="2.5" y="4.5" width="15" height="11" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="m3 5.5 7 5.5 7-5.5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+        <span>Рассылка</span>
       </button>
       <button data-tab="analytics" title="Аналитика — воронка, рынок, офферы">
         <svg viewBox="0 0 20 20" fill="none"><path d="M3.5 16.5v-5M9 16.5V5.5M14.5 16.5v-8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -81,9 +85,9 @@
     </nav>
 
     <div class="daemon-controls">
-      <span id="daemon-badge" class="badge off"><span class="badge-dot"></span><span class="btn-label">демон остановлен</span></span>
+      <span id="daemon-badge" class="badge off"><span class="badge-dot"></span><span class="btn-label">бот остановлен</span></span>
       <div class="daemon-buttons">
-        <button id="daemon-toggle" class="btn btn-primary" title="Запустить демона">
+        <button id="daemon-toggle" class="btn btn-primary" title="Запустить бота">
           <svg class="icon-play" viewBox="0 0 20 20" fill="none"><path d="M6.5 4.7v10.6a1 1 0 0 0 1.53.85l8.4-5.3a1 1 0 0 0 0-1.7l-8.4-5.3a1 1 0 0 0-1.53.85Z" fill="currentColor"/></svg>
           <svg class="icon-pause" viewBox="0 0 20 20" fill="none"><rect x="5.5" y="4.5" width="3" height="11" rx="1" fill="currentColor"/><rect x="11.5" y="4.5" width="3" height="11" rx="1" fill="currentColor"/></svg>
           <span class="btn-label">Запустить</span>
@@ -112,12 +116,14 @@
             <svg viewBox="0 0 20 20" fill="none"><path d="M10 3.5a6.5 6.5 0 1 0 6.5 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M10 3.5 7.8 5.7M10 3.5l2.2 2.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span class="btn-label">Тестовый прогон</span>
           </button>
-          <span class="muted small">Галочка на карточке площадки = она в расписании демона (кнопка «Запустить» слева)</span>
+          <span class="muted small">Включённые площадки бот проверяет сам по расписанию, пока он запущен (кнопка «▶ Запустить» слева)</span>
         </div>
       </div>
-      <div id="results-panel" class="panel results-panel"></div>
       <div id="todo-panel" class="panel todo-panel"></div>
       <div id="stats-row" class="stats-row"></div>
+
+      <h3 class="section-subheading">📡 Свои каналы</h3>
+      <div id="own-channels" class="source-grid"></div>
 
       <h3 class="section-subheading">🇷🇺 Русские площадки</h3>
       <div id="source-grid-ru" class="source-grid"></div>
@@ -125,11 +131,6 @@
       <h3 class="section-subheading">🌍 Зарубежные площадки</h3>
       <div id="source-grid-intl" class="source-grid"></div>
 
-      <details class="more">
-        <summary>Ещё: расписание проверок ответов</summary>
-        <p class="muted small">Отдельное от поиска/отклика расписание — заходит и проверяет чат/ответы, ничего не ищет. Без своей галочки здесь эти проверки не запускаются сами по себе, даже если площадка выше уже в расписании.</p>
-        <div id="chat-checks-grid" class="source-grid"></div>
-      </details>
     </section>
 
     <section id="view-history" class="view">
@@ -182,32 +183,15 @@
       <div class="view-header">
         <div>
           <h2>Входящие</h2>
-          <p class="muted">Ответы работодателей со всех каналов: статусы hh и сообщения HR в Telegram</p>
+          <p class="muted">Что ответили работодатели — с площадок, в Telegram и на ваши письма. Отклики бот шлёт сам, а здесь то, где нужен человек: интервью, вопросы HR, черновики ответов.</p>
         </div>
       </div>
       <div id="drafts-queue" class="panel" style="display:none"></div>
       <div class="filters">
-        <select id="replies-filter-source">
-          <option value="">Все площадки</option>
-          <option value="headhunter">HeadHunter</option>
-          <option value="geekjob">geekjob.ru</option>
-          <option value="telegram">Telegram</option>
-          <option value="getmatch">GetMatch</option>
-          <option value="linkedin">LinkedIn</option>
-          <option value="habr_career">Habr Career</option>
-          <option value="wellfound">Wellfound</option>
-          <option value="himalayas">Himalayas</option>
-        </select>
-        <input id="replies-filter-query" type="text" placeholder="Поиск по компании/вакансии/статусу" aria-label="Поиск по компании/вакансии/статусу" />
+        <div class="chip-group" id="replies-kind" role="group" aria-label="Что показать"></div>
+        <input id="replies-filter-query" type="text" placeholder="Поиск по компании или вакансии" aria-label="Поиск по компании или вакансии" />
       </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr><th>Дата</th><th>Канал</th><th>Вакансия</th><th>Сообщение / статус</th><th>Этап</th></tr>
-          </thead>
-          <tbody id="replies-rows"></tbody>
-        </table>
-      </div>
+      <div id="replies-rows" class="inbox-list"></div>
     </section>
 
 
@@ -292,6 +276,15 @@
         </div>
       </div>
 
+      <div class="panel tg-howto">
+        <h3 style="margin-top:0">Как это работает</h3>
+        <div class="howto-grid">
+          <div><b>1. Читает каналы</b><p class="muted small">Через ваш личный аккаунт Telegram — как будто вы сами листаете каналы из списка. Если вы не подписаны на канал, парсер подпишется сам.</p></div>
+          <div><b>2. Присылает вакансию</b><p class="muted small">Пост с вашими ключевыми словами за секунды приходит в ваш <b>бот уведомлений</b> с кнопками «Здравствуйте», «+ резюме», «Сопроводительное». Контакты HR из поста — сразу в «Базу компаний».</p></div>
+          <div><b>3. Пишет HR от вашего имени</b><p class="muted small">Когда вы нажимаете кнопку, сообщение уходит <b>с вашего личного аккаунта</b> — HR видит вас, а не бота и не канал. Без вашего нажатия никому ничего не отправляется.</p></div>
+        </div>
+      </div>
+
       <div class="panel parser-panel">
         <div class="parser-head">
           <span id="tg-quick-line-status" class="parser-state">Парсер: …</span>
@@ -305,12 +298,16 @@
 
       <details class="panel more" id="tg-connect-panel" open>
         <summary><strong>Подключение аккаунта</strong></summary>
-        <p class="muted small">
-          Читает каналы и пишет контактам через твой личный аккаунт (не бота) — вход по
-          <code>api_id</code>/<code>api_hash</code> с <a href="https://my.telegram.org/apps" target="_blank" rel="noopener">my.telegram.org</a>
-          в <code>data_folder/secrets.yaml</code> (блок <code>telegram:</code>). При первом запуске поиска по Telegram
-          в консоли попросит номер телефона и код из самого Telegram — дальше сессия сохраняется, повторно вводить не нужно.
-        </p>
+        <ol class="howto small">
+          <li>Откройте <a href="https://my.telegram.org/apps" target="_blank" rel="noopener">my.telegram.org</a> → войдите по номеру → «API development tools» → создайте приложение (название любое). Скопируйте <b>api_id</b> и <b>api_hash</b> сюда:
+            <div class="filters" id="tg-keys-row">
+              <input type="text" id="tg-api-id" inputmode="numeric" placeholder="api_id, например 1234567" aria-label="api_id" />
+              <input type="text" id="tg-api-hash" placeholder="api_hash — 32 символа" aria-label="api_hash" style="flex:1;min-width:220px" />
+              <button type="button" id="tg-keys-save" class="btn btn-secondary">Сохранить</button>
+            </div>
+          </li>
+          <li>Введите номер телефона и код, который пришлёт Telegram. Вход нужен один раз — дальше бот его помнит.</li>
+        </ol>
         <div class="filters">
           <button id="telegram-status-refresh" class="btn btn-secondary">Проверить подключение</button>
           <span id="telegram-status-note" class="muted small"></span>
@@ -501,9 +498,10 @@
       <div class="view-header">
         <div>
           <h2>Аналитика</h2>
-          <p class="muted">Что чаще всего мешает и кого стоит вычеркнуть</p>
+          <p class="muted">Что приносит ответы, что мешает и кого стоит вычеркнуть</p>
         </div>
       </div>
+      <div id="results-panel" class="panel results-panel"></div>
       <div class="panel">
         <h3>Активность за 13 недель</h3>
         <p class="muted small">Количество откликов по дням, как в Истории</p>
@@ -580,7 +578,7 @@
 
       <div class="panel settings-pane active" id="settings-search">
         <h3>Поиск</h3>
-        <p class="muted small">Должности (ключевые слова поиска, они же — ключевые слова для Telegram-каналов) и локации — без правки work_preferences.yaml вручную. Каналы Telegram и диалоги — в «Общение → Telegram-парсер».</p>
+        <p class="muted small">Какую работу искать: должности (по ним же парсер ищет посты в Telegram) и города или «удалённо». Каналы Telegram и диалоги — в «Общение → Telegram-парсер».</p>
         <div class="limits-grid">
           <label class="limit-field">
             <span>Должности (одна на строку)</span>
@@ -805,13 +803,11 @@
       </div>
 
       <div class="panel settings-pane" id="settings-notifications">
-        <h3>Уведомления (Telegram-бот)</h3>
+        <h3>Уведомления (бот)</h3>
         <p class="muted small">
-          Отдельный бот только для уведомлений вам — не путать с вкладкой "Telegram" слева
-          (там про поиск по каналам и переписку с контактами). Присылает статус площадок,
-          исчерпание лимитов, расходы на LLM, подтверждение нестандартных анкет HH — и
-          отвечает на команды <code>/status</code>, <code>/pause &lt;площадка&gt;</code>,
-          <code>/resume &lt;площадка&gt;</code> прямо из чата.
+          Ваш личный бот — через него CrossJob общается с вами: присылает вакансии из Telegram-парсера
+          с кнопками ответа, ответы работодателей, черновики на подтверждение, утреннюю сводку и
+          предупреждения (капча, лимиты). Пишет он только вам — HR его не видят.
         </p>
         <div class="filters" id="telegram-connect-row">
           <input type="text" id="telegram-bot-token" placeholder="Токен бота от @BotFather (/newbot)" style="flex:1;min-width:220px" />
@@ -835,12 +831,21 @@
           </button>
           <span id="notif-test-status" class="muted small"></span>
         </div>
+        <h4>Утренняя сводка</h4>
+        <div class="filters">
+          <label class="checkbox-row"><input id="outreach-digest" type="checkbox" class="switch" /> Каждое утро в</label>
+          <input id="outreach-digest-hour" type="number" min="0" max="23" style="width:70px" aria-label="Час сводки" /> <span class="muted small">часов — что нашлось, кто ответил, что ждёт вас</span>
+        </div>
+        <details class="muted small">
+          <summary>Команды боту</summary>
+          <p>Напишите боту: <code>/status</code> — что происходит сейчас; <code>/pause hh</code> — поставить площадку на паузу; <code>/resume hh</code> — продолжить (например, после капчи).</p>
+        </details>
       </div>
 
       <div class="panel settings-pane" id="settings-autostart">
         <h3>Автозапуск</h3>
         <p class="muted small">
-          Запускать приложение (и демон внутри него) автоматически при входе в систему —
+          Запускать приложение (и бота внутри него) автоматически при входе в систему —
           не нужно вручную открывать CrossJob-AI после перезагрузки. macOS — LaunchAgent,
           Windows — автозапуск через реестр.
         </p>
@@ -853,7 +858,7 @@
         <p class="muted small" id="autostart-status"></p>
         <hr />
         <p class="muted small">
-          Фоновый демон — планировщик отдельным системным сервисом
+          Бот в фоне — работает, даже когда окно закрыто
           (launchd на macOS, Task Scheduler на Windows), с автоперезапуском
           при падении. Не включайте одновременно с кнопкой "Запустить" в
           шапке окна — получится два планировщика разом на одних и тех же
@@ -862,7 +867,7 @@
         <div class="filters">
           <label class="limit-field" style="flex-direction:row;align-items:center;gap:8px">
             <input id="daemon-service-toggle" type="checkbox" class="switch" disabled />
-            <span>Держать демон в фоне как системный сервис</span>
+            <span>Держать бота в фоне, даже когда окно закрыто</span>
           </label>
         </div>
         <p class="muted small" id="daemon-service-status"></p>
@@ -971,11 +976,7 @@
           <span id="outreach-hunter-status" class="muted small"></span>
         </div>
 
-        <h4>Утренняя сводка и фильтры</h4>
-        <div class="filters">
-          <label class="checkbox-row"><input id="outreach-digest" type="checkbox" /> Сводка в Telegram-бот каждый день в</label>
-          <input id="outreach-digest-hour" type="number" min="0" max="23" style="width:70px" aria-label="Час сводки" /> <span class="muted small">часов</span>
-        </div>
+        <h4>Фильтры удалёнки</h4>
         <label class="checkbox-row"><input id="outreach-skip-us" type="checkbox" /> Пропускать удалёнку «только из США»</label>
         <label class="checkbox-row"><input id="outreach-skip-eu" type="checkbox" /> Пропускать удалёнку «только из Европы»</label>
 

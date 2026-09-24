@@ -118,3 +118,13 @@ if __name__ == "__main__":
     test_run_once_records_error_and_does_not_raise()
     test_run_once_notifies_on_failure()
     print("All tests passed.")
+
+
+def test_reply_checks_on_by_default_but_hh_only_with_platform():
+    noop = lambda p, k: None  # noqa: E731
+    checks = {"check_email_replies": noop, "check_telegram_commands": noop, "check_hh_replies": noop}
+    with tempfile.TemporaryDirectory() as tmp:
+        off = _make_scheduler(tmp, {"check_telegram_commands": {"schedule_enabled": False}}, checks)
+        assert off.due_sources() == ["check_email_replies"]  # hh не в расписании — браузер не открываем
+        on = _make_scheduler(tmp, {"headhunter": {"schedule_enabled": True}}, checks)
+        assert sorted(on.due_sources()) == sorted(checks)
