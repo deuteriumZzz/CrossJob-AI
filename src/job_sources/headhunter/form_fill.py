@@ -9,6 +9,7 @@ from selenium.webdriver.common.by import By
 
 from src.job import Job
 from src.job_sources.llm_provider import get_chat_llm
+from src.libs.resume_and_cover_builder.anti_ai_rules import ANTI_AI_STRUCTURE_RU, humanize
 
 PAGE_LOAD_WAIT_SECONDS = 3
 OTHER_OPTION_SENTINEL = "__other_option__"
@@ -152,12 +153,18 @@ def draft_form_answers(
             "вопрос ниже. Для вопросов с вариантами (radio/checkbox) "
             "выбери из предложенного списка options дословно — не "
             "придумывай новый вариант. Для текстовых вопросов пиши "
-            "кратко и по делу, от первого лица.\n\n"
+            "кратко и по делу, от первого лица.\n"
+            f"Для текстовых ответов:{ANTI_AI_STRUCTURE_RU}\n"
             f"## Вакансия: {job.role} в {job.company}\n{job.description}\n\n"
             f"## Резюме кандидата:\n{resume_text}\n\n"
             f"## Вопросы анкеты:\n{questions_block}"
         ),
     )
+    # Текстовые ответы уходят работодателю — вторая проверка по humanizer.
+    # Варианты radio/checkbox не трогаем: они должны совпадать дословно.
+    for a in result.answers:
+        if a.text_answer:
+            a.text_answer = humanize(a.text_answer, llm_api_key)
     return {a.index: a for a in result.answers}
 
 

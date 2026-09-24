@@ -40,3 +40,17 @@ def test_humanize_keeps_text_when_ai_fails_or_bloats(monkeypatch):
 def test_rules_have_no_template_braces():
     # Правила склеиваются в ChatPromptTemplate — фигурные скобки сломали бы его.
     assert "{" not in rules.ANTI_AI_STRUCTURE_RU and "{" not in rules.ANTI_AI_STRUCTURE_EN
+
+
+def test_hh_chat_reply_is_humanized_before_sending(monkeypatch, tmp_path):
+    from src.job_sources import reply_answerer
+
+    monkeypatch.setattr(reply_answerer, "extract_text", lambda path: "Python, 5 лет")
+    # Первый ответ модели — «нейросетевой», вторая проверка его переписывает.
+    monkeypatch.setattr(reply_answerer, "get_chat_llm", lambda *a, **k: FakeListChatModel(
+        responses=["Спасибо! Я не просто разработчик — я решаю задачи. Надеюсь, это поможет."]))
+    monkeypatch.setattr(lp, "get_chat_llm", lambda *a, **k: FakeListChatModel(
+        responses=["Спасибо! Да, я пять лет пишу на Python и готов созвониться."]))
+    reply = reply_answerer.generate_reply(tmp_path / "r.pdf", "Какой у вас опыт?", "Python dev", "Acme", "", "key")
+    assert reply == "Спасибо! Да, я пять лет пишу на Python и готов созвониться."
+    assert rules.ai_tells(reply) == []
