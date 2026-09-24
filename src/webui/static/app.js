@@ -101,8 +101,15 @@ function renderTagChips(textarea) {
       current.splice(parseInt(btn.dataset.i, 10), 1);
       textarea.value = current.join("\n");
       renderTagChips(textarea);
+      tagChanged(textarea);
     });
   });
+}
+
+// Скрытая textarea меняется кодом — сообщаем об этом, как обычное поле
+// (иначе автосохранение настроек не узнает про добавленный тег).
+function tagChanged(textarea) {
+  textarea.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
 function initTagInput(textarea) {
@@ -138,6 +145,7 @@ function initTagInput(textarea) {
       items.push(value);
       textarea.value = items.join("\n");
       renderTagChips(textarea);
+      tagChanged(textarea);
     }
     input.value = "";
   }
@@ -151,6 +159,7 @@ function initTagInput(textarea) {
       items.pop();
       textarea.value = items.join("\n");
       renderTagChips(textarea);
+      tagChanged(textarea);
     }
   });
   input.addEventListener("blur", commit);
@@ -3073,6 +3082,40 @@ function flashSaved(pane, btn) {
   btn.classList.add("save-flash");
 }
 
+// Автосохранение: любое изменение в разделе сохраняется само через
+// секунду — кнопкой «Сохранить» этого раздела. Ключи и пароли (ИИ,
+// Telegram) — с явной кнопкой, их вводят один раз и ждут подтверждения.
+const AUTOSAVE = [
+  ["settings-search", "search-save"],
+  ["settings-limits", "limits-save"],
+  ["settings-tg-quick", "tgq-save"],
+  ["settings-outreach", "outreach-save"],
+  ["tg-rules-panel", "tg-settings-save"],
+];
+
+function initAutosave() {
+  AUTOSAVE.forEach(([paneId, btnId]) => {
+    const pane = document.getElementById(paneId);
+    const btn = document.getElementById(btnId);
+    if (!pane || !btn) return;
+    btn.hidden = true;
+    const note = document.createElement("span");
+    note.className = "muted small autosave-note";
+    note.textContent = "Изменения сохраняются сами";
+    btn.after(note);
+    let timer = null;
+    pane.addEventListener("change", (e) => {
+      if (e.target.type === "file") return;
+      clearTimeout(timer);
+      note.textContent = "Сохраняю…";
+      timer = setTimeout(() => {
+        btn.click();
+        setTimeout(() => (note.textContent = "✓ Сохранено"), 700);
+      }, 900);
+    });
+  });
+}
+
 function initSettingsDirtyTracking() {
   const settingsView = document.getElementById("view-settings");
   if (!settingsView) return;
@@ -4254,6 +4297,7 @@ function initDashboard() {
   updateActivity();
   setInterval(updateActivity, 4000);
   initSettingsDirtyTracking();
+  initAutosave();
   initCommandPalette();
   initKeyboardShortcuts();
   initHistoryViewToggle();
