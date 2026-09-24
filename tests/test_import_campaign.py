@@ -374,3 +374,23 @@ def test_activity_shows_running_work(client):  # noqa: F811
     finally:
         camp.CampaignJob.RUNNING.pop(cid, None)
         api.IMPORT_JOBS.pop("t1", None)
+
+
+def test_quiet_mode_moves_routine_to_digest(tmp_path, monkeypatch):
+    from datetime import datetime as real_dt
+
+    sent = []
+    monkeypatch.setattr(main, "notify_from_secrets", lambda p, t: sent.append(t))
+    params = {"outputFileDirectory": tmp_path, "digest": {"quiet": True, "enabled": False, "hour": 0}}
+    main.notify_routine(params, "Прогон завершён: отправлено 5 откликов")
+    main.notify(params, "✉️ Ответ HR")  # важное — сразу
+    assert sent == ["✉️ Ответ HR"]
+
+    digests = []
+    monkeypatch.setattr(main, "send_notification", lambda token, chat, text: digests.append(text))
+    monkeypatch.setattr(main, "build_digest", lambda *a: "☀️ Сводка")
+    main._maybe_send_daily_digest(params, "tok", "1")
+    assert "Прогон завершён" in digests[0] and "Несрочное" in digests[0]
+    assert not (tmp_path / main.QUIET_QUEUE_FILE).exists()
+    main.notify_routine({**params, "digest": {}}, "без тихого режима")
+    assert sent[-1] == "без тихого режима"

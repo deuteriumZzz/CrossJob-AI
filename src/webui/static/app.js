@@ -3525,6 +3525,7 @@ async function loadOutreachSettings() {
   document.getElementById("outreach-follow-up").value = s.follow_up_days;
   document.getElementById("outreach-digest").checked = s.digest_enabled;
   document.getElementById("outreach-digest-hour").value = s.digest_hour;
+  document.getElementById("digest-quiet").checked = s.digest_quiet;
   document.getElementById("outreach-skip-us").checked = s.skip_us_only;
   document.getElementById("outreach-skip-eu").checked = s.skip_europe_only;
 }
@@ -3652,12 +3653,15 @@ async function loadAccounts() {
 
 // Сводка живёт в «Уведомлениях», сохраняется сразу — без кнопки.
 async function saveDigest() {
+  if (document.getElementById("digest-quiet").checked) document.getElementById("outreach-digest").checked = true;
   try {
     await api("/api/settings/outreach", {
       method: "POST",
       body: JSON.stringify({
-        digest_enabled: document.getElementById("outreach-digest").checked,
+        // Тихий режим без сводки не работает — включаем сводку вместе с ним.
+        digest_enabled: document.getElementById("outreach-digest").checked || document.getElementById("digest-quiet").checked,
         digest_hour: parseInt(document.getElementById("outreach-digest-hour").value, 10) || 9,
+        digest_quiet: document.getElementById("digest-quiet").checked,
       }),
     });
     showToast("Сводка сохранена", "success");
@@ -5384,7 +5388,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   );
   document.getElementById("contacts-filter-query").addEventListener("input", renderContactsList);
   document.getElementById("outreach-email-test").addEventListener("click", testOutreachEmail);
-  ["outreach-digest", "outreach-digest-hour"].forEach((id) => document.getElementById(id).addEventListener("change", saveDigest));
+  ["outreach-digest", "outreach-digest-hour", "digest-quiet"].forEach((id) => document.getElementById(id).addEventListener("change", saveDigest));
   // Фильтры удалёнки — в «Что ищу», сохраняются сразу.
   ["outreach-skip-us", "outreach-skip-eu"].forEach((id) =>
     document.getElementById(id).addEventListener("change", async () => {

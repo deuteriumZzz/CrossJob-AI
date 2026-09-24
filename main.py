@@ -206,6 +206,7 @@ from src.resume_schemas.resume import Resume
 from src.scheduler import DEFAULT_INTERVAL_HOURS, Scheduler
 from src.scheduler_state import load_state, record_run_result
 from src.utils.chrome_utils import HTML_to_PDF, init_browser
+from src.utils.file_lock import state_file_lock
 from src.utils.constants import (
     PLAIN_TEXT_RESUME_YAML,
     RESUME_PDF,
@@ -1166,7 +1167,7 @@ def _total_daily_limit_reached(
             f"Reached total daily application limit ({total_limit}) "
             "across all platforms combined."
         )
-        notify(
+        notify_routine(
             parameters,
             f"Общий дневной лимит откликов ({total_limit}) на все "
             "площадки вместе достигнут.",
@@ -1362,7 +1363,7 @@ def search_and_apply_headhunter(
                     f"Reached daily application limit "
                     f"({daily_limit}) for {job.source} today."
                 )
-                notify(
+                notify_routine(
                     parameters,
                     f"Дневной лимит откликов ({daily_limit}) достигнут "
                     f"для {job.source}.",
@@ -2157,7 +2158,7 @@ def search_and_apply_linkedin(
                     f"Reached daily application limit ({daily_limit}) "
                     "for LinkedIn today."
                 )
-                notify(
+                notify_routine(
                     parameters,
                     f"Дневной лимит откликов ({daily_limit}) достигнут "
                     "для LinkedIn.",
@@ -3094,7 +3095,17 @@ def start_campaign_job(
             store.update_item(campaign_id, email, status="draft", code=code, reason="")
             return None
 
-        job = CampaignJob(campaign_id, "prepare", emails, step, pause=False)
+        def on_prepared(job: CampaignJob) -> None:
+            stats = campaign_stats(store.get(campaign_id) or campaign)
+            if stats["draft"]:
+                _notify_with_buttons(parameters, (
+                    f"✍️ Рассылка «{campaign['name']}»: готово писем — {stats['draft']}"
+                    + (f", не получилось — {stats['failed']}" if stats["failed"] else "")
+                    + ". Отправить через Gmail с резюме?"
+                ), [[{"text": "🚀 Отправить все", "callback_data": f"cs:{campaign_id}"},
+                     {"text": "👀 Показать по одному", "callback_data": f"cv:{campaign_id}:d"}]])
+
+        job = CampaignJob(campaign_id, "prepare", emails, step, pause=False, on_finish=on_prepared)
     elif kind == "followups":
         emails = [
             e for e, item in campaign["items"].items()
@@ -3128,7 +3139,7 @@ def start_campaign_job(
 
         def on_finish(job: CampaignJob) -> None:
             stats = campaign_stats(store.get(campaign_id) or campaign)
-            notify(
+            notify_routine(
                 parameters,
                 f"✉️ Рассылка «{campaign['name']}»: отправлено {stats['sent']} из "
                 f"{stats['total']}, ошибок {stats['failed']}, ждут отправки {stats['draft']}. "
@@ -3171,8 +3182,8 @@ def _draft_campaign_follow_ups(parameters: dict, store: CampaignStore, replied: 
         return
     drafts = DraftStore(parameters["outputFileDirectory"] / HR_DRAFTS_FILE)
     now = datetime.now().astimezone()
-    created = 0
     for cid, campaign in store.all().items():
+        created = 0
         for email, item in campaign["items"].items():
             if (
                 item["status"] != "sent" or email in replied
@@ -3190,8 +3201,25 @@ def _draft_campaign_follow_ups(parameters: dict, store: CampaignStore, replied: 
             )
             store.update_item(cid, email, follow_up_code=code)
             created += 1
-    if created:
-        notify(parameters, f"⏳ {created} компаний молчат {days}+ дн. после письма — напоминания готовы во вкладке «Рассылка».")
+        if created:
+            _notify_with_buttons(parameters, (
+                f"⏳ Рассылка «{campaign['name']}»: {created} — без ответа {days}+ дн. "
+                "Готово короткое напоминание в той же ветке письма."
+            ), [[{"text": "⏳ Напомнить всем", "callback_data": f"cf:{cid}"},
+                 {"text": "👀 Показать по одному", "callback_data": f"cv:{cid}:f"}]])
+
+
+def _notify_with_buttons(parameters: dict, text: str, keyboard: list) -> None:
+    """Уведомление в CrossJob-бот с кнопками; без бота — обычное."""
+    creds = bot_credentials(parameters)
+    if creds is None:
+        notify(parameters, text)
+        return
+    try:
+        bot_request(creds[0], "sendMessage", {"chat_id": creds[1], "text": text, "reply_markup": {"inline_keyboard": keyboard}})
+    except Exception as e:
+        logger.warning(f"Не удалось отправить в бот: {e}")
+        notify(parameters, text)
 
 
 def check_email_replies(parameters: dict, llm_api_key: str) -> None:
@@ -3351,7 +3379,7 @@ def run_selected_sources(
         after = AppliedLog(output_folder / "applied_log.json").count_in_period(
             "day"
         )
-        notify(
+        notify_routine(
             parameters,
             f"Прогон завершён: отправлено {after - before} откликов "
             f"({', '.join(name for name, _ in selected)}).",
@@ -3391,6 +3419,26 @@ def notify(parameters: dict, text: str) -> None:
     (общая с src.scheduler.Scheduler, чтобы не тянуть main.py туда
     циклическим импортом)."""
     notify_from_secrets(parameters, text)
+
+
+QUIET_QUEUE_FILE = ".quiet_queue.json"
+
+
+def notify_routine(parameters: dict, text: str) -> None:
+    """Несрочное (итоги прогонов, лимиты, «анкета отправлена»). В тихом
+    режиме (digest.quiet) не приходит сразу, а копится до утренней сводки —
+    сразу приходит только важное: ответы HR, интервью, капча, черновики."""
+    if not (parameters.get("digest") or {}).get("quiet"):
+        notify(parameters, text)
+        return
+    path = Path(parameters["outputFileDirectory"]) / QUIET_QUEUE_FILE
+    with state_file_lock(path):
+        try:
+            queue = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            queue = []
+        queue.append({"at": datetime.now().astimezone().isoformat(), "text": text})
+        path.write_text(json.dumps(queue[-200:], ensure_ascii=False), encoding="utf-8")
 
 
 def _prepare_external_form(
@@ -3542,7 +3590,7 @@ def _submit_approved_form(
                 f"Submitted external form for {record['company']} — "
                 f"{record['title']} after Telegram approval."
             )
-            notify(
+            notify_routine(
                 parameters,
                 f"Анкета отправлена: {record['company']} — "
                 f"{record['title']}",
@@ -3776,7 +3824,7 @@ def _answer_headhunter_messages(
 
         applied_log.mark_replied("headhunter", external_id, message_id)
         logger.info(f"Auto-replied to {entry['company']} — {entry['title']}")
-        notify(
+        notify_routine(
             parameters,
             f"Автоответ отправлен: {entry['company']} — {entry['title']}",
         )
@@ -3862,7 +3910,7 @@ def _sync_headhunter_negotiation_states(
                 prepare_interview(parameters, llm_api_key, entry)
     if backfilled:
         summary = ", ".join(f"{s} — {n}" for s, n in backfilled.items())
-        notify(
+        notify_routine(
             parameters,
             f"hh: подтянул статусы прошлых откликов ({summary}). "
             "Дальше буду присылать только новые ответы.",
@@ -4051,7 +4099,7 @@ def cleanup_headhunter_negotiations(parameters: dict) -> None:
     finally:
         driver.quit()
 
-    notify(
+    notify_routine(
         parameters,
         f"HeadHunter: отменено {withdrawn} зависших отклик(ов).",
     )
@@ -4288,8 +4336,42 @@ def _handle_vacancy_button(
             result += " + резюме"
         done(("✅ " if result.startswith("Отправлено") else "⚠️ ") + result)
     elif parts[0] == "x":
-        DraftStore(output_folder / HR_DRAFTS_FILE).remove(parts[1])
+        drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
+        draft = drafts.get(parts[1]) or {}
+        if draft.get("campaign") and draft["kind"] != "follow_up":
+            CampaignStore(output_folder).update_item(draft["campaign"], draft["contact"], status="skipped")
+        drafts.remove(parts[1])
         done("✖️ Пропущено")
+    elif parts[0] in ("cs", "cf"):
+        # Рассылка целиком из бота: cs — отправить письма, cf — напоминания.
+        if CampaignJob.RUNNING.get(parts[1]):
+            done("⏳ Уже отправляю")
+            return
+        start_campaign_job(parameters, llm_api_key, parts[1], "send" if parts[0] == "cs" else "followups")
+        done("🚀 Отправляю по одному, пауза 1–2 мин — пришлю итог")
+    elif parts[0] == "cv":
+        # Показать письма по одному — у каждого свои «Отправить / Пропустить».
+        campaign = CampaignStore(output_folder).get(parts[1]) or {"items": {}}
+        drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
+        field = "code" if parts[2] == "d" else "follow_up_code"
+        shown = 0
+        for email, item in campaign["items"].items():
+            draft = drafts.get(item.get(field) or "")
+            if draft is None or (parts[2] == "f" and item.get("followed_up_at")):
+                continue
+            if shown == 10:
+                bot_request(bot_token, "sendMessage", {"chat_id": message["chat"]["id"], "text": "Остальные — в дашборде: Компании → Рассылки."})
+                break
+            bot_request(bot_token, "sendMessage", {
+                "chat_id": message["chat"]["id"],
+                "text": f"✉️ {item['company']} — {email}\nТема: {draft.get('subject', '')}\n\n{draft['text']}"[:4000],
+                "reply_markup": {"inline_keyboard": [[
+                    {"text": "✅ Отправить", "callback_data": f"d:{item[field]}:-1"},
+                    {"text": "✖️ Пропустить", "callback_data": f"x:{item[field]}"},
+                ]]},
+            })
+            shown += 1
+        done(f"👀 Показал: {shown}")
     else:
         bot_request(bot_token, "answerCallbackQuery", answer)
 
@@ -4542,8 +4624,11 @@ def _send_email_draft(
         return f"Не удалось отправить письмо {draft['contact']}: {e}"
     if draft.get("campaign"):
         # Для напоминания в той же ветке письма рассылки.
-        fields = {"followed_up_at": datetime.now().astimezone().isoformat()} if draft["kind"] == "follow_up" \
-            else {"message_id": message_id, "subject": draft.get("subject", "")}
+        now_iso = datetime.now().astimezone().isoformat()
+        fields = {"followed_up_at": now_iso} if draft["kind"] == "follow_up" else {
+            "message_id": message_id, "subject": draft.get("subject", ""),
+            "status": "sent", "sent_at": now_iso, "reason": "",
+        }
         CampaignStore(output_folder).update_item(draft["campaign"], draft["contact"], **fields)
     entry = next((e for e in entries if e["link"] == draft["job_link"]), None)
     if entry is not None and draft["kind"] != "follow_up":
@@ -4565,7 +4650,8 @@ def _maybe_send_daily_digest(
     false — выключить) — сводка за сутки. Вызывается из частой
     check_telegram_commands, поэтому помнит дату последней отправки."""
     digest = parameters.get("digest") or {}
-    if digest.get("enabled", True) is False:
+    # Тихий режим без сводки не имеет смысла — несрочное приходит в ней.
+    if digest.get("enabled", True) is False and not digest.get("quiet"):
         return
     now = datetime.now().astimezone()
     if now.hour < int(digest.get("hour", 9)):
@@ -4589,11 +4675,21 @@ def _maybe_send_daily_digest(
         DraftStore(output_folder / HR_DRAFTS_FILE).all(),
         now,
     )
+    queue_path = output_folder / QUIET_QUEUE_FILE
     try:
-        send_notification(bot_token, chat_id, text)
+        queued = json.loads(queue_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        queued = []
+    if queued:
+        lines = [f"• {q['text'].splitlines()[0][:200]}" for q in queued[-30:]]
+        more = f"\n…и ещё {len(queued) - 30}" if len(queued) > 30 else ""
+        text += "\n\n🔕 Несрочное за сутки:\n" + "\n".join(lines) + more
+    try:
+        send_notification(bot_token, chat_id, text[:4000])
     except Exception as e:
         logger.warning(f"Не удалось отправить утреннюю сводку: {e}")
         return
+    queue_path.unlink(missing_ok=True)
     state_path.write_text(json.dumps({"last_sent": today}), encoding="utf-8")
 
 

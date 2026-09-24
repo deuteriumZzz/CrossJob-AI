@@ -809,6 +809,7 @@ class OutreachSettings(BaseModel):
     follow_up_days: Optional[int] = None
     digest_enabled: Optional[bool] = None
     digest_hour: Optional[int] = None
+    digest_quiet: Optional[bool] = None
     skip_us_only: Optional[bool] = None
     skip_europe_only: Optional[bool] = None
 
@@ -835,6 +836,7 @@ def get_outreach_settings(ctx: AppContext = Depends(get_ctx)) -> dict:
         ),
         "digest_enabled": digest.get("enabled", True) is not False,
         "digest_hour": int(digest.get("hour", 9)),
+        "digest_quiet": bool(digest.get("quiet")),
         "skip_us_only": "us_only" in (excluded or []),
         "skip_europe_only": "europe_only" in (excluded or []),
     }
@@ -870,6 +872,8 @@ def post_outreach_settings(
         set_source_field(prefs, "digest", "enabled", body.digest_enabled)
     if body.digest_hour is not None:
         set_source_field(prefs, "digest", "hour", min(23, max(0, body.digest_hour)))
+    if body.digest_quiet is not None:
+        set_source_field(prefs, "digest", "quiet", body.digest_quiet)
     if body.skip_us_only is not None or body.skip_europe_only is not None:
         current = get_outreach_settings(ctx)
         regions = [
