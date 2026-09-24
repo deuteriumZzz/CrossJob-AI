@@ -3341,19 +3341,13 @@ def search_and_apply_djinni(
                 logger.info(f"Reached daily application limit ({daily_limit}) for djinni.co today.")
                 break
 
-            fit = score_job_fit(resume_pdf_path, job, llm_api_key)
-            tier = classify_fit(fit.score, _job_min_score(parameters), _job_suitability_score(parameters))
-            if tier == "skip":
-                logger.info(f"Skipping {job.role} at {job.company}: fit score {fit.score}/10 below minimum.")
-                applied_log.record(job, "", "", "skipped_low_fit", fit.score, fit.gaps)
-                continue
-
             if auto_apply:
                 if session is None:
                     session = DjinniSession(output_folder / ".chrome_profile_djinni")
                     session.ensure_logged_in(parameters)
                 # Djinni сам не пускает, если профиль не проходит требования
-                # (стаж, страна, английский, зарплата) — проверяем до письма.
+                # (стаж, страна, английский, зарплата) — проверяем первым:
+                # это бесплатно, а оценка ИИ и письмо стоят денег.
                 try:
                     unmet = djinni_unmet_requirements(session.driver, job.link)
                 except DjinniProfileRequired as e:
@@ -3362,8 +3356,15 @@ def search_and_apply_djinni(
                     break
                 if unmet:
                     logger.info(f"Skipping {job.role} at {job.company}: Djinni не пустит — {'; '.join(unmet[:3])}")
-                    applied_log.record(job, "", "", "skipped_requirements", fit.score, unmet)
+                    applied_log.record(job, "", "", "skipped_requirements", None, unmet)
                     continue
+
+            fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+            tier = classify_fit(fit.score, _job_min_score(parameters), _job_suitability_score(parameters))
+            if tier == "skip":
+                logger.info(f"Skipping {job.role} at {job.company}: fit score {fit.score}/10 below minimum.")
+                applied_log.record(job, "", "", "skipped_low_fit", fit.score, fit.gaps)
+                continue
 
             try:
                 # Язык письма — по вакансии (на Djinni бывают и английские, и

@@ -326,7 +326,7 @@ class AppliedLog:
         cover_letter: str,
         resume_id: str,
         status: Status,
-        score: int,
+        score: int | None,  # None — не оценивали (например, Djinni не пустил)
         gaps: list[str],
         contacts: list[str] | None = None,
     ) -> None:
