@@ -131,6 +131,9 @@ from src.job_sources.himalayas.apply import (
     apply_to_job as apply_to_himalayas_job,
 )
 from src.job_sources.himalayas.auth import HimalayasSession
+from src.job_sources.djinni.apply import DjinniSession
+from src.job_sources.djinni.apply import apply_to_job as apply_to_djinni_job
+from src.job_sources.djinni.search import search as search_djinni_jobs
 from src.job_sources.himalayas.source import HimalayasSource
 from src.job_sources.job_fit import classify_fit, score_job_fit
 from src.job_sources.linkedin.answerer import EasyApplyAnswerer
@@ -3280,6 +3283,110 @@ def check_email_replies(parameters: dict, llm_api_key: str) -> None:
             )
 
 
+def search_and_apply_djinni(
+    parameters: dict,
+    llm_api_key: str,
+    stop_event: Optional[threading.Event] = None,
+):
+    """djinni.co: поиск — HTTP по JSON-LD выдачи (src/job_sources/djinni/
+    search.py, подтверждён вживую), отклик — браузер с вашим входом:
+    сообщение рекрутеру с сопроводительным письмом (оно действительно
+    уходит — поэтому язык по вакансии и проверка «как человек»).
+    auto_apply: false — только ищет: вакансии видны в «Вакансиях»,
+    откликаетесь вы. Отклик не подтвердился — пишется dry_run."""
+    data_folder: Path = parameters["dataFolder"]
+    resume_pdf_path = data_folder / RESUME_PDF_LINKEDIN
+    if not resume_pdf_path.exists():
+        resume_pdf_path = data_folder / RESUME_PDF
+    if not resume_pdf_path.exists():
+        raise FileNotFoundError(f"Resume PDF not found: {resume_pdf_path}.")
+
+    auto_apply = bool((parameters.get("djinni") or {}).get("auto_apply", False))
+    output_folder: Path = parameters["outputFileDirectory"]
+    applied_log = AppliedLog(output_folder / "applied_log.json")
+    if is_still_blocked(output_folder, "djinni"):
+        logger.warning("djinni.co is cooling down after a block — skipping.")
+        return
+
+    try:
+        jobs = search_djinni_jobs(parameters)
+    except PlatformBlockedError as e:
+        logger.error(f"djinni.co appears to have blocked us: {e}")
+        mark_blocked(output_folder, "djinni")
+        notify(parameters, f"djinni.co: похоже на блокировку ({e}). Площадка поставлена на паузу на 24ч.")
+        return
+    logger.info(f"Found {len(jobs)} matching djinni.co vacancies.")
+    already_seen = sum(1 for job in jobs if applied_log.already_applied(job))
+    run_start = datetime.now().astimezone()
+    job_max_applications = _job_max_applications(parameters, "djinni")
+    daily_limit = randomized_daily_limit(_daily_limit(parameters, "djinni"))
+
+    # Браузер нужен только для отклика — в режиме «Только ищет» не открываем.
+    session: Optional[DjinniSession] = None
+    sent_count = 0
+    try:
+        for job in jobs:
+            if stop_event is not None and stop_event.is_set():
+                logger.info("Stop requested — прерываю перед следующей вакансией.")
+                break
+            if sent_count >= job_max_applications:
+                logger.info(f"Reached JOB_MAX_APPLICATIONS ({job_max_applications}) for this run.")
+                break
+            if _total_daily_limit_reached(parameters, applied_log):
+                break
+            if applied_log.already_applied(job):
+                continue
+            if auto_apply and applied_log.applied_today_count("djinni") >= daily_limit:
+                logger.info(f"Reached daily application limit ({daily_limit}) for djinni.co today.")
+                break
+
+            fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+            tier = classify_fit(fit.score, _job_min_score(parameters), _job_suitability_score(parameters))
+            if tier == "skip":
+                logger.info(f"Skipping {job.role} at {job.company}: fit score {fit.score}/10 below minimum.")
+                applied_log.record(job, "", "", "skipped_low_fit", fit.score, fit.gaps)
+                continue
+
+            try:
+                # Язык письма — по вакансии (на Djinni бывают и английские, и
+                # украинские/русские тексты); humanizer внутри.
+                cover_letter = generate_cover_letter_for_job(
+                    resume_pdf_path, job, llm_api_key, template="auto_plain"
+                )
+            except Exception as e:
+                logger.exception(f"Failed to generate cover letter for {job.role} at {job.company}, skipping: {e}")
+                continue
+
+            status: Literal["applied", "dry_run"] = "dry_run"
+            if auto_apply:
+                if session is None:
+                    session = DjinniSession(output_folder / ".chrome_profile_djinni")
+                    session.ensure_logged_in(parameters)
+                wait_before_apply()
+                try:
+                    applied = apply_to_djinni_job(session.driver, job.link, cover_letter)
+                except PlatformBlockedError as e:
+                    logger.error(f"djinni.co appears to have blocked us: {e}")
+                    mark_blocked(output_folder, "djinni")
+                    notify(parameters, f"djinni.co: похоже на блокировку ({e}). Площадка поставлена на паузу на 24ч.")
+                    break
+                if applied:
+                    status = "applied"
+                    logger.info(f"Applied to {job.role} at {job.company} ({job.link})")
+                else:
+                    logger.warning(f"Не удалось подтверждённо откликнуться на {job.link} — записано как dry-run.")
+            else:
+                logger.info(f"[manual apply needed] {job.role} at {job.company} ({job.link})")
+
+            applied_log.record(job, cover_letter, resume_id="", status=status, score=fit.score, gaps=fit.gaps)
+            sent_count += 1
+
+        _log_funnel_summary("djinni", applied_log, len(jobs), already_seen, run_start)
+    finally:
+        if session is not None:
+            session.quit()
+
+
 ALL_SOURCES: list[Tuple[str, Callable[..., Any]]] = [
     ("headhunter", search_and_apply_headhunter),
     ("geekjob", search_geekjob),
@@ -3289,6 +3396,7 @@ ALL_SOURCES: list[Tuple[str, Callable[..., Any]]] = [
     ("habr_career", search_and_apply_habr_career),
     ("wellfound", search_and_apply_wellfound),
     ("himalayas", search_and_apply_himalayas),
+    ("djinni", search_and_apply_djinni),
     ("direct", search_direct),
 ]
 
@@ -4861,6 +4969,10 @@ def handle_inquiries(
                 logger.info("Searching himalayas.app...")
                 search_and_apply_himalayas(parameters, llm_api_key)
 
+            if "Search & Apply on Djinni" == selected_actions:
+                logger.info("Searching djinni.co...")
+                search_and_apply_djinni(parameters, llm_api_key)
+
             if "Search selected sources" == selected_actions:
                 names = prompt_selected_sources()
                 if names:
@@ -4910,6 +5022,7 @@ def prompt_user_action() -> str:
                     "Search & Apply on Habr Career",
                     "Search & Apply on Wellfound",
                     "Search & Apply on Himalayas",
+                    "Search & Apply on Djinni",
                     "Search selected sources",
                     "Check HeadHunter replies",
                     "Clean up stale HeadHunter negotiations",
@@ -4959,6 +5072,10 @@ def prompt_selected_sources() -> list[str]:
                     "Himalayas (experimental, not verified live)",
                     "himalayas",
                 ),
+                (
+                    "Djinni (apply not verified live yet)",
+                    "djinni",
+                ),
             ],
         ),
     ]
@@ -4974,7 +5091,7 @@ def prompt_selected_sources() -> list[str]:
     help=(
         "Run non-interactively (for cron) instead of showing the menu: "
         "one of headhunter/geekjob/telegram/"
-        "getmatch/linkedin/habr_career/wellfound/himalayas/all/"
+        "getmatch/linkedin/habr_career/wellfound/himalayas/djinni/all/"
         "check_hh_replies/"
         "check_telegram_replies/"
         "cleanup_hh_negotiations, or "
@@ -5106,6 +5223,10 @@ def main(auto: Optional[str], daemon: bool):
 
         if auto == "himalayas":
             search_and_apply_himalayas(config, llm_api_key)
+            return
+
+        if auto == "djinni":
+            search_and_apply_djinni(config, llm_api_key)
             return
 
         if auto == "all":

@@ -343,6 +343,7 @@ _CREDENTIAL_REQUIREMENTS: dict = {
     "habr_career": None,
     "wellfound": None,
     "himalayas": None,
+    "djinni": None,
 }
 
 
@@ -356,6 +357,7 @@ _RESUME_FILENAME_BY_SOURCE = {
     "linkedin": RESUME_PDF_LINKEDIN,
     "wellfound": RESUME_PDF_LINKEDIN,
     "himalayas": RESUME_PDF_LINKEDIN,
+    "djinni": RESUME_PDF_LINKEDIN,
 }
 
 
@@ -370,7 +372,7 @@ def _resume_readiness(data_folder: Path, source: str) -> Optional[dict]:
     # тревога, если общий файл всё же есть, просто предупреждаем про
     # язык/локацию.
     if (
-        source in ("linkedin", "wellfound", "himalayas")
+        source in ("linkedin", "wellfound", "himalayas", "djinni")
         and (data_folder / RESUME_PDF).exists()
     ):
         return {

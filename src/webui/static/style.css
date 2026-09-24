@@ -1920,6 +1920,10 @@ nav.tabs button.active,
   border-left-color: #5b7fd6;
 }
 
+.source-card[data-source="djinni"] {
+  border-left-color: #2f9e6e;
+}
+
 .source-card[data-source="linkedin"] {
   border-left-color: #0a66c2;
 }

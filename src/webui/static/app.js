@@ -17,6 +17,7 @@ const SOURCE_LABELS = {
   habr_career: "Habr Career",
   wellfound: "Wellfound",
   himalayas: "Himalayas",
+  djinni: "Djinni",
   direct: "Прямой поиск",
 };
 
@@ -32,11 +33,12 @@ const SOURCE_ICON = {
   habr_career: { text: "HC", color: "#e0954a" },
   wellfound: { text: "WF", color: "#c23b6b" },
   himalayas: { text: "HM", color: "#5b7fd6" },
+  djinni: { text: "DJ", color: "#2f9e6e" },
   direct: { text: "→", color: "#4f9d8f" },
 };
 
 // Площадки, нацеленные на зарубежный рынок — остальные площадки RU.
-const INTL_SOURCES = new Set(["linkedin", "wellfound", "himalayas", "direct"]);
+const INTL_SOURCES = new Set(["linkedin", "wellfound", "himalayas", "djinni", "direct"]);
 
 const STATUS_DOT = {
   ok: "ok",
