@@ -72,6 +72,10 @@ FOLLOW_UP_TEXT = (
     "Здравствуйте! Хотел уточнить, актуальна ли ещё вакансия — "
     "буду рад обсудить детали, если есть интерес."
 )
+FOLLOW_UP_TEXT_EN = (
+    "Hello! I wanted to follow up on my previous email — I'd be glad to "
+    "discuss how I could help your team. Happy to jump on a short call."
+)
 
 
 class DraftStore:
@@ -300,4 +304,72 @@ def generate_first_message(
     subject = f"{job_title} — {'отклик' if russian else 'Application'}"
     if candidate_name:
         subject += f" — {candidate_name}"
+    return {"subject": subject, "text": text}
+
+
+# --- Письмо компании из рассылки (вкладка «Контакты HR» → «Рассылка») -----
+
+_COMPANY_EMAIL_PROMPT = ChatPromptTemplate.from_template(
+    """
+    Напиши короткое персонализированное сопроводительное письмо от имени
+    кандидата. Язык: {language}.
+    - Обращение по имени контакта ({contact_name}), если оно есть; иначе
+      нейтральное приветствие.
+    - Первый абзац: кто я и что ищу (позиция: {target_position}).
+    - Второй абзац: почему именно эта компания — сошлись на сферу её
+      деятельности или на вакансию, если она указана. Не выдумывай факты
+      о компании, которых нет в данных ниже.
+    - Третий абзац: два-три наиболее релевантных достижения из резюме,
+      подобранных под профиль компании.
+    - Завершение: готов обсудить на звонке, контакты.
+    - Тон деловой и сжатый, без клише и без воды. Максимум 150–180 слов.
+
+    Кандидат: {candidate_name}
+    Компания: {company}
+    Сайт: {website}
+    Вакансия: {vacancy}
+    На что сделать упор: {emphasis}
+
+    Резюме:
+    {resume_text}
+
+    Верни только текст письма, без темы.
+    """
+)
+
+
+def generate_company_email(
+    resume_pdf_path: Path,
+    candidate_name: str,
+    target_position: str,
+    card: dict,
+    contact_name: str,
+    llm_api_key: str,
+) -> dict:
+    """{"subject", "text"} письма компании из базы контактов. Английский
+    по умолчанию (как в промте), русский — если компания/упор по-русски."""
+    from langchain_core.output_parsers import StrOutputParser
+    from pdfminer.high_level import extract_text
+
+    vacancy = (card.get("vacancies") or [{}])[-1]
+    sample = " ".join([card.get("company", ""), card.get("emphasis", ""), vacancy.get("title", "")])
+    russian = _looks_russian(sample)
+    chain = _COMPANY_EMAIL_PROMPT | get_chat_llm(llm_api_key, temperature=0.4) | StrOutputParser()
+    text = chain.invoke(
+        {
+            "language": "русский" if russian else "English",
+            "contact_name": contact_name or "не указано",
+            "target_position": target_position,
+            "candidate_name": candidate_name or "кандидат",
+            "company": card.get("company") or "не указана",
+            "website": card.get("website") or "не указан",
+            "vacancy": vacancy.get("title") or "не указана",
+            "emphasis": card.get("emphasis") or "не указано",
+            "resume_text": extract_text(str(resume_pdf_path)),
+        }
+    ).strip()
+    subject = (
+        f"{target_position} — отклик — {candidate_name}" if russian
+        else f"{target_position} Application — {candidate_name}"
+    ).strip(" —")
     return {"subject": subject, "text": text}

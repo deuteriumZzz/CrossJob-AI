@@ -115,8 +115,8 @@
           <span class="muted small">Галочка на карточке площадки = она в расписании демона (кнопка «Запустить» слева)</span>
         </div>
       </div>
+      <div id="results-panel" class="panel results-panel"></div>
       <div id="todo-panel" class="panel todo-panel"></div>
-      <div id="onboarding-checklist" class="panel" style="display:none"></div>
       <div id="stats-row" class="stats-row"></div>
 
       <h3 class="section-subheading">🇷🇺 Русские площадки</h3>
@@ -125,9 +125,11 @@
       <h3 class="section-subheading">🌍 Зарубежные площадки</h3>
       <div id="source-grid-intl" class="source-grid"></div>
 
-      <h3 class="section-subheading">Проверки ответов</h3>
-      <p class="muted small">Отдельное от поиска/отклика расписание — заходит и проверяет чат/ответы, ничего не ищет. Без своей галочки здесь эти проверки не запускаются сами по себе, даже если площадка выше уже в расписании.</p>
-      <div id="chat-checks-grid" class="source-grid"></div>
+      <details class="more">
+        <summary>Ещё: расписание проверок ответов</summary>
+        <p class="muted small">Отдельное от поиска/отклика расписание — заходит и проверяет чат/ответы, ничего не ищет. Без своей галочки здесь эти проверки не запускаются сами по себе, даже если площадка выше уже в расписании.</p>
+        <div id="chat-checks-grid" class="source-grid"></div>
+      </details>
     </section>
 
     <section id="view-history" class="view">
@@ -212,10 +214,17 @@
     <section id="view-contacts" class="view">
       <div class="view-header">
         <div>
-          <h2>Контакты</h2>
-          <p class="muted">Компании и HR, которым можно написать напрямую. Собирается из текста вакансий, Telegram-каналов и сайтов компаний — у каждого контакта указано, где он найден. Написать — значит подготовить черновик: он ждёт вашего «Отправить» во «Входящих».</p>
+          <h2>База компаний</h2>
+          <p class="muted">Всё, что собрано: компании и HR из вашего файла, Telegram-каналов, текстов вакансий и сайтов компаний — у каждого контакта указано, откуда он.</p>
+        </div>
+        <div>
+          <input type="file" id="import-file" accept=".csv,.tsv,.xlsx,.txt,.pdf,.docx" style="display:none" />
+          <button type="button" id="import-btn" class="btn btn-secondary">📥 Загрузить свой файл</button>
         </div>
       </div>
+      <div id="import-preview"></div>
+      <div class="base-summary panel" id="contacts-summary"></div>
+
       <div class="filters">
         <select id="contacts-filter-status" aria-label="Статус">
           <option value="">Любой статус</option>
@@ -223,6 +232,13 @@
           <option value="draft">Черновик</option>
           <option value="written">Написали</option>
           <option value="replied">Ответили</option>
+        </select>
+        <select id="contacts-filter-source" aria-label="Источник">
+          <option value="">Любой источник</option>
+          <option value="file">Из моего файла</option>
+          <option value="telegram">Telegram</option>
+          <option value="dossier">Сайты компаний</option>
+          <option value="vacancy">Вакансии</option>
         </select>
         <select id="contacts-filter-kind" aria-label="Тип контакта">
           <option value="">Любой контакт</option>
@@ -251,24 +267,44 @@
       </details>
     </section>
 
+    <section id="view-outreach" class="view">
+      <div class="view-header">
+        <div>
+          <h2>Рассылка</h2>
+          <p class="muted">Персональное письмо каждой компании из базы, которой вы ещё не писали — по вашему промту, с резюме во вложении, через Gmail.</p>
+        </div>
+      </div>
+      <ol class="steps">
+        <li class="panel step" id="step-base"></li>
+        <li class="panel step" id="step-letters"></li>
+        <li class="panel step" id="step-send"></li>
+      </ol>
+    </section>
+
     <section id="view-telegram" class="view">
       <div class="view-header">
         <div>
-          <h2>Telegram</h2>
-          <p class="muted">Каналы вакансий, автосообщения контактам из постов и переписка</p>
+          <h2>Telegram-парсер</h2>
+          <p class="muted">Слушает каналы с вакансиями в реальном времени: пост с вашими ключевыми словами за секунды приходит в бота с кнопками ответа, а контакты HR из поста сами попадают в «Базу компаний».</p>
         </div>
         <div class="toolbar">
           <span id="telegram-status-badge" class="badge off"><span class="badge-dot"></span>проверка…</span>
         </div>
       </div>
 
-      <div class="panel tg-quick-line">
-        <span id="tg-quick-line-status" class="muted">⚡ Быстрый отклик: …</span>
-        <button type="button" class="btn btn-secondary btn-small" data-goto-settings="settings-tg-quick">Настроить</button>
+      <div class="panel parser-panel">
+        <div class="parser-head">
+          <span id="tg-quick-line-status" class="parser-state">Парсер: …</span>
+          <span class="step-actions" style="margin:0">
+            <button type="button" class="btn btn-ghost btn-small" id="parser-open-base">Контакты из Telegram →</button>
+            <button type="button" class="btn btn-secondary btn-small" data-goto-settings="settings-tg-quick">Настроить</button>
+          </span>
+        </div>
+        <div class="results-numbers" id="parser-numbers"></div>
       </div>
 
-      <div class="panel">
-        <h3>Подключение</h3>
+      <details class="panel more" id="tg-connect-panel" open>
+        <summary><strong>Подключение аккаунта</strong></summary>
         <p class="muted small">
           Читает каналы и пишет контактам через твой личный аккаунт (не бота) — вход по
           <code>api_id</code>/<code>api_hash</code> с <a href="https://my.telegram.org/apps" target="_blank" rel="noopener">my.telegram.org</a>
@@ -292,7 +328,7 @@
           <button id="telegram-login-submit-password" class="btn btn-primary">Войти</button>
         </div>
         <p class="muted small" id="telegram-login-status"></p>
-      </div>
+      </details>
 
       <div class="panel">
         <h3>Каналы и правила поиска</h3>
@@ -445,8 +481,8 @@
         </div>
       </div>
 
-      <div class="panel">
-        <h3>🧪 Резюме на hh.ru <span class="muted small">— экспериментально</span></h3>
+      <details class="panel more">
+        <summary><strong>🧪 Резюме на hh.ru</strong> <span class="muted small">— экспериментально</span></summary>
         <p class="muted small">
           Ручные действия (открывают реальный браузер) — не часть
           автоматического цикла. Клонирование и создание — best-effort
@@ -458,7 +494,7 @@
           <button id="hh-resume-create-draft" class="btn btn-secondary">Начать новое резюме (черновик)</button>
         </div>
         <span id="hh-resume-status" class="muted small"></span>
-      </div>
+      </details>
     </section>
 
     <section id="view-analytics" class="view">
@@ -490,8 +526,8 @@
           <div id="salary-stats"></div>
         </div>
       </div>
-      <div class="panel">
-        <h3>Сравнение офферов</h3>
+      <details class="panel more">
+        <summary><strong>Сравнение офферов</strong> <span class="muted small">— когда придут предложения</span></summary>
         <p class="muted small">Сумма в месяц. «К рынку» — насколько оффер выше или ниже медианы «до» по собранным вакансиям в той же валюте (без пересчёта валют и налогов)</p>
         <div class="filters">
           <input id="offer-company" type="text" placeholder="Компания" aria-label="Компания" />
@@ -502,7 +538,7 @@
           <button id="offer-add" class="btn btn-primary" type="button">Добавить</button>
         </div>
         <div id="offers"></div>
-      </div>
+      </details>
       <div class="analytics-grid">
         <div class="panel">
           <h3>Чаще всего не хватает</h3>
@@ -527,19 +563,24 @@
       <nav class="settings-jump" id="settings-jump">
         <div class="tab-indicator" id="settings-tab-indicator"></div>
         <button type="button" class="active" data-settings-tab="settings-search">Поиск</button>
-        <button type="button" data-settings-tab="settings-llm">Провайдер LLM</button>
-        <button type="button" data-settings-tab="settings-limits">Лимиты откликов</button>
-        <button type="button" data-settings-tab="settings-notifications" title="Не путать с вкладкой «Telegram» слева — там поиск по каналам">Уведомления (Telegram-бот)</button>
-        <button type="button" data-settings-tab="settings-autostart">Автозапуск</button>
-        <button type="button" data-settings-tab="settings-usage">Расходы на LLM</button>
         <button type="button" data-settings-tab="settings-table">Площадки</button>
-        <button type="button" data-settings-tab="settings-tg-quick">⚡ Быстрый отклик в Telegram</button>
-        <button type="button" data-settings-tab="settings-outreach">Контакты и письма</button>
+        <button type="button" data-settings-tab="settings-limits">Лимиты откликов</button>
+        <button type="button" data-settings-tab="settings-tg-quick">⚡ Telegram-парсер</button>
+        <button type="button" data-settings-tab="settings-outreach">Почта и письма</button>
+        <button type="button" data-settings-tab="settings-notifications" title="Не путать с Telegram-парсером — это бот, который присылает вам уведомления">Уведомления (бот)</button>
+        <button type="button" data-settings-tab="settings-llm">Провайдер LLM</button>
+        <details class="settings-more">
+          <summary>Ещё ▾</summary>
+          <div class="settings-more-menu">
+            <button type="button" data-settings-tab="settings-autostart">Автозапуск</button>
+            <button type="button" data-settings-tab="settings-usage">Расходы на LLM</button>
+          </div>
+        </details>
       </nav>
 
       <div class="panel settings-pane active" id="settings-search">
         <h3>Поиск</h3>
-        <p class="muted small">Должности (ключевые слова поиска, они же — ключевые слова для Telegram-каналов) и локации — без правки work_preferences.yaml вручную. Настройки самого Telegram (каналы, автосообщения, диалоги) — на вкладке «Telegram» слева.</p>
+        <p class="muted small">Должности (ключевые слова поиска, они же — ключевые слова для Telegram-каналов) и локации — без правки work_preferences.yaml вручную. Каналы Telegram и диалоги — в «Общение → Telegram-парсер».</p>
         <div class="limits-grid">
           <label class="limit-field">
             <span>Должности (одна на строку)</span>
@@ -845,7 +886,7 @@
       <div class="panel settings-pane" id="settings-tg-quick">
         <div class="tgq-head">
           <div>
-            <h3 style="margin:0">⚡ Быстрый отклик в Telegram</h3>
+            <h3 style="margin:0">⚡ Telegram-парсер</h3>
             <p class="muted small" style="margin:4px 0 0">Новый пост в ваших каналах с нужным словом — через секунды в вашем боте, с кнопками «Здравствуйте», «+ резюме» и «сопроводительное под вакансию».</p>
           </div>
           <label style="display:flex;align-items:center;gap:8px;white-space:nowrap"><input id="tgq-enabled" type="checkbox" class="switch" />Включить</label>

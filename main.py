@@ -54,7 +54,13 @@ from src.job_sources.getmatch.client import GetMatchClient
 from src.job_sources.getmatch.source import GetMatchSource
 from src.direct.companies import all_companies
 from src.direct.contacts import extract_emails, hunter_hr_contacts
-from src.direct.email_channel import build_message, send_email, senders_replied
+from src.direct.campaign import CampaignJob, CampaignStore, campaign_stats
+from src.direct.email_channel import (
+    bounced_addresses,
+    build_message,
+    send_email,
+    senders_replied,
+)
 from src.direct.form_fill import prefill_application
 from src.direct.source import DirectSource
 from src.job_sources.contact_book import ContactBook, contacts_from_text
@@ -73,8 +79,11 @@ from src.job_sources.hr_replies import (
     CATEGORY_LABELS,
     CATEGORY_STAGE,
     FOLLOW_UP_TEXT,
+    FOLLOW_UP_TEXT_EN,
     DraftStore,
+    _looks_russian,
     build_digest,
+    generate_company_email,
     generate_first_message,
     classify_reply,
     due_follow_ups,
@@ -3003,6 +3012,157 @@ def prefill_direct_application(
     )
 
 
+def start_campaign_job(
+    parameters: dict,
+    llm_api_key: str,
+    campaign_id: str,
+    kind: str,
+    resume_path: Optional[Path] = None,
+) -> CampaignJob:
+    """kind="prepare" — письмо по промту для каждого адреса «pending»
+    (черновик во «Входящих»); kind="send" — отправка черновиков по одному
+    через Gmail с паузой 1–2 мин, резюме во вложении, до дневного лимита;
+    kind="followups" — отправка готовых напоминаний (в той же ветке)."""
+    output_folder: Path = parameters["outputFileDirectory"]
+    data_folder: Path = parameters["dataFolder"]
+    store = CampaignStore(output_folder)
+    drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
+    book = ContactBook(output_folder)
+    campaign = store.get(campaign_id)
+    if campaign is None:
+        raise ValueError("Рассылка не найдена")
+
+    if kind == "prepare":
+        resume_yaml = Path(parameters.get("plainTextResumeFile") or data_folder / PLAIN_TEXT_RESUME_YAML)
+        # Нет текстовой версии резюме — имя пустое, но не падаем.
+        person = ((yaml.safe_load(resume_yaml.read_text(encoding="utf-8")) or {}) if resume_yaml.exists() else {}).get("personal_information") or {}
+        name = f"{person.get('name', '')} {person.get('surname', '')}".strip()
+        positions = parameters.get("positions") or []
+        resume_pdf = data_folder / RESUME_PDF_LINKEDIN
+        if not resume_pdf.exists():
+            resume_pdf = data_folder / RESUME_PDF
+        emails = [e for e, item in campaign["items"].items() if item["status"] == "pending"]
+
+        def step(email: str) -> Optional[str]:
+            item = campaign["items"][email]
+            card = book.get(item["key"]) or {"company": item["company"]}
+            contact = next((c for c in card.get("contacts", []) if c["value"].lower() == email), {})
+            vacancy = (card.get("vacancies") or [{}])[-1]
+            try:
+                letter = generate_company_email(
+                    resume_pdf, name, vacancy.get("title") or (positions[0] if positions else "Python Developer"),
+                    card, contact.get("name", ""), llm_api_key,
+                )
+            except Exception as e:
+                store.update_item(campaign_id, email, status="failed", reason=f"LLM: {e}"[:200])
+                return None
+            code = drafts.add(
+                email, letter["text"], "email", vacancy.get("link", ""),
+                channel="email", subject=letter["subject"], campaign=campaign_id,
+            )
+            store.update_item(campaign_id, email, status="draft", code=code, reason="")
+            return None
+
+        job = CampaignJob(campaign_id, "prepare", emails, step, pause=False)
+    elif kind == "followups":
+        emails = [
+            e for e, item in campaign["items"].items()
+            if item.get("follow_up_code") and not item.get("followed_up_at")
+            and drafts.get(item["follow_up_code"]) is not None
+        ]
+
+        def step(email: str) -> Optional[str]:
+            result = send_hr_draft(parameters, campaign["items"][email]["follow_up_code"])
+            if not result.startswith("Отправлено"):
+                logger.warning(f"Напоминание {email}: {result}")
+            return None
+
+        job = CampaignJob(campaign_id, "followups", emails, step, pause=True)
+    else:
+        emails = [e for e, item in campaign["items"].items() if item["status"] == "draft"]
+
+        def step(email: str) -> Optional[str]:
+            code = campaign["items"][email]["code"]
+            if drafts.get(code) is None:
+                store.update_item(campaign_id, email, status="skipped", reason="черновик удалён во «Входящих»")
+                return None
+            result = send_hr_draft(parameters, code, attachment=resume_path)
+            if result.startswith("Отправлено"):
+                store.update_item(campaign_id, email, status="sent", sent_at=datetime.now().astimezone().isoformat(), reason="")
+                return None
+            if "лимит" in result:
+                return result  # остальные останутся черновиками до завтра
+            store.update_item(campaign_id, email, status="failed", reason=result[:200])
+            return None
+
+        def on_finish(job: CampaignJob) -> None:
+            stats = campaign_stats(store.get(campaign_id) or campaign)
+            notify(
+                parameters,
+                f"✉️ Рассылка «{campaign['name']}»: отправлено {stats['sent']} из "
+                f"{stats['total']}, ошибок {stats['failed']}, ждут отправки {stats['draft']}. "
+                f"{job.message}",
+            )
+
+        job = CampaignJob(campaign_id, "send", emails, step, pause=True, on_finish=on_finish)
+    job.start()
+    return job
+
+
+def _check_campaign_mail(parameters: dict, credentials: dict) -> None:
+    """Ответы и возвраты по письмам из рассылок."""
+    output_folder: Path = parameters["outputFileDirectory"]
+    store = CampaignStore(output_folder)
+    sent = {
+        email: (cid, c["name"], item["company"])
+        for cid, c in store.all().items()
+        for email, item in c["items"].items()
+        if item["status"] == "sent"
+    }
+    if not sent:
+        return
+    for email in bounced_addresses(credentials, list(sent)):
+        store.update_item(sent[email][0], email, status="bounced", reason="адрес не существует (возврат)")
+    replied = senders_replied(credentials, [e for e in sent])
+    for email in replied:
+        cid, name, company = sent[email]
+        store.update_item(cid, email, status="replied", replied_at=datetime.now().astimezone().isoformat())
+        notify(parameters, f"✉️ Ответ на письмо из рассылки «{name}»: {company} ({email}). Проверьте почту.")
+    _draft_campaign_follow_ups(parameters, store, set(replied))
+
+
+def _draft_campaign_follow_ups(parameters: dict, store: CampaignStore, replied: set) -> None:
+    """Кто молчит direct.follow_up_days (7) дней после письма рассылки —
+    одно короткое напоминание в той же ветке, черновиком на просмотр
+    (вкладка «Рассылка»). Язык — как у исходного письма."""
+    days = int((parameters.get("direct") or {}).get("follow_up_days", 7))
+    if days <= 0:
+        return
+    drafts = DraftStore(parameters["outputFileDirectory"] / HR_DRAFTS_FILE)
+    now = datetime.now().astimezone()
+    created = 0
+    for cid, campaign in store.all().items():
+        for email, item in campaign["items"].items():
+            if (
+                item["status"] != "sent" or email in replied
+                or item.get("follow_up_code") or item.get("followed_up_at")
+                or not item.get("sent_at")
+                or now - datetime.fromisoformat(item["sent_at"]) < timedelta(days=days)
+            ):
+                continue
+            subject = item.get("subject") or ""
+            code = drafts.add(
+                email, FOLLOW_UP_TEXT if _looks_russian(subject) else FOLLOW_UP_TEXT_EN,
+                "follow_up", "", channel="email", campaign=cid,
+                subject=subject if subject.startswith("Re:") else f"Re: {subject}",
+                in_reply_to=item.get("message_id", ""),
+            )
+            store.update_item(cid, email, follow_up_code=code)
+            created += 1
+    if created:
+        notify(parameters, f"⏳ {created} компаний молчат {days}+ дн. после письма — напоминания готовы во вкладке «Рассылка».")
+
+
 def check_email_replies(parameters: dict, llm_api_key: str) -> None:
     """Кто из HR, которым ушло письмо, ответил (IMAP, только чтение) —
     этап "ответили" + уведомление. Кто молчит direct.follow_up_days
@@ -3012,6 +3172,10 @@ def check_email_replies(parameters: dict, llm_api_key: str) -> None:
     if not credentials.get("address") or not credentials.get("app_password"):
         return
     output_folder: Path = parameters["outputFileDirectory"]
+    try:
+        _check_campaign_mail(parameters, credentials)
+    except Exception as e:
+        logger.warning(f"Не удалось проверить ответы по рассылкам: {e}")
     applied_log = AppliedLog(output_folder / "applied_log.json")
     waiting = [
         e
@@ -4051,7 +4215,9 @@ def _handle_vacancy_button(
     elif parts[0] == "l":
         bot_request(bot_token, "answerCallbackQuery", {**answer, "text": "Пишу письмо под вакансию…"})
         resume_pdf = resumes[0] if resumes else data_folder / RESUME_PDF
-        person = (yaml.safe_load(Path(parameters.get("plainTextResumeFile") or data_folder / PLAIN_TEXT_RESUME_YAML).read_text(encoding="utf-8")) or {}).get("personal_information") or {}
+        resume_yaml = Path(parameters.get("plainTextResumeFile") or data_folder / PLAIN_TEXT_RESUME_YAML)
+        # Нет текстовой версии резюме — имя пустое, но не падаем.
+        person = ((yaml.safe_load(resume_yaml.read_text(encoding="utf-8")) or {}) if resume_yaml.exists() else {}).get("personal_information") or {}
         name = f"{person.get('name', '')} {person.get('surname', '')}".strip()
         channel_kind = "email" if contact["kind"] == "email" else "telegram"
         letter = generate_first_message(
@@ -4322,6 +4488,12 @@ def _send_email_draft(
         for e in entries
         if e.get("outreach_sent_at")
         and datetime.fromisoformat(e["outreach_sent_at"]).date() == today
+    ) + sum(
+        1
+        for c in CampaignStore(output_folder).all().values()
+        for item in c["items"].values()
+        if item.get("sent_at")
+        and datetime.fromisoformat(item["sent_at"]).date() == today
     )
     if draft["kind"] != "follow_up" and sent_today >= limit:
         return f"Дневной лимит писем ({limit}) исчерпан — отправлю завтра."
@@ -4340,6 +4512,11 @@ def _send_email_draft(
         message_id = send_email(credentials, email_message)
     except Exception as e:
         return f"Не удалось отправить письмо {draft['contact']}: {e}"
+    if draft.get("campaign"):
+        # Для напоминания в той же ветке письма рассылки.
+        fields = {"followed_up_at": datetime.now().astimezone().isoformat()} if draft["kind"] == "follow_up" \
+            else {"message_id": message_id, "subject": draft.get("subject", "")}
+        CampaignStore(output_folder).update_item(draft["campaign"], draft["contact"], **fields)
     entry = next((e for e in entries if e["link"] == draft["job_link"]), None)
     if entry is not None and draft["kind"] != "follow_up":
         applied_log.update_fields(

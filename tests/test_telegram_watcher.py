@@ -222,3 +222,26 @@ def test_email_letter_sent_via_gmail_with_chosen_resume(monkeypatch):
         [mail] = mails
         assert mail["To"] == "jobs@acme.io"
         assert mail.get_payload()[1].get_filename() == "cv_ru.pdf"
+
+
+def test_new_channels_picked_up_without_restart(tmp_path, monkeypatch):
+    (tmp_path / "work_preferences.yaml").write_text(
+        "telegram:\n  channels:\n    - 'old'\n    - 'https://t.me/new_one'\n  watch_keywords: ['go']\n",
+        encoding="utf-8",
+    )
+    tw = w.TelegramWatcher(1, "h", tmp_path / "s", ["old"], ["python"], [], "me",
+                           {"outputFileDirectory": tmp_path, "dataFolder": tmp_path, "secretsFile": tmp_path / "x"})
+    connected = iter([True, False])
+    tw.client = SimpleNamespace(is_connected=lambda: next(connected))
+    subscribed = []
+
+    async def fake_subscribe():
+        subscribed.append(list(tw.channels))
+
+    async def no_sleep(_):
+        pass
+
+    monkeypatch.setattr(tw, "_subscribe", fake_subscribe)
+    monkeypatch.setattr(w.asyncio, "sleep", no_sleep)
+    asyncio.run(tw._watch_settings())
+    assert subscribed == [["old", "new_one"]] and tw.keywords == ["go"]

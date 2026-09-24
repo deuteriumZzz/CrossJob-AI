@@ -70,3 +70,27 @@ def senders_replied(credentials: dict, addresses: list[str], days: int = 60) -> 
             if status == "OK" and data and data[0].split():
                 replied.add(address)
     return replied
+
+
+def bounced_addresses(credentials: dict, addresses: list[str], days: int = 30) -> set[str]:
+    """Какие из addresses вернулись с ошибкой доставки: ищем в ящике
+    письма от mailer-daemon/postmaster и адрес внутри их текста."""
+    if not addresses:
+        return set()
+    since = (datetime.now() - timedelta(days=days)).strftime("%d-%b-%Y")
+    wanted = {a.lower() for a in addresses}
+    bounced: set[str] = set()
+    with imaplib.IMAP4_SSL(IMAP_HOST) as imap:
+        imap.login(credentials["address"], credentials["app_password"])
+        imap.select("INBOX", readonly=True)
+        for sender in ("mailer-daemon", "postmaster"):
+            status, data = imap.search(None, f'(FROM "{sender}" SINCE {since})')
+            if status != "OK" or not data or not data[0]:
+                continue
+            for num in data[0].split()[-200:]:
+                status, parts = imap.fetch(num, "(BODY.PEEK[TEXT])")
+                if status != "OK":
+                    continue
+                body = b"".join(p[1] for p in parts if isinstance(p, tuple)).decode("utf-8", "ignore").lower()
+                bounced |= {a for a in wanted if a in body}
+    return bounced

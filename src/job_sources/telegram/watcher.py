@@ -15,7 +15,6 @@ import asyncio
 import hashlib
 import re
 import threading
-import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
@@ -96,7 +95,7 @@ class TelegramWatcher(threading.Thread):
         self.client: Any = None
         self.connected = False
         self.matched_count = 0
-        self._settings_checked_at = time.monotonic()
+        self._settings_task: Optional[asyncio.Task] = None
         self._stopping = threading.Event()
         self._seen: OrderedDict[str, None] = OrderedDict()
 
@@ -178,47 +177,65 @@ class TelegramWatcher(threading.Thread):
             )
             self._stopping.set()
             return
-        chats = []
-        for channel in self.channels:
-            try:
-                chats.append(await self.client.get_input_entity(channel))
-            except Exception as e:
-                logger.warning(f"Telegram-шлюз: канал @{channel} недоступен: {e}")
-        self.client.add_event_handler(self._on_channel_post, events.NewMessage(chats=chats))
+        await self._subscribe()
         self.client.add_event_handler(
             self._on_private_message,
             events.NewMessage(incoming=True, func=lambda e: e.is_private),
         )
         self.connected = True
+        if self._settings_task is not None:
+            self._settings_task.cancel()
+        self._settings_task = asyncio.ensure_future(self._watch_settings())
+        await self.client.run_until_disconnected()
+
+    async def _subscribe(self) -> None:
+        """Слушаем self.channels. Новые посты Telegram присылает только из
+        каналов, где аккаунт состоит, — поэтому в новые каналы вступаем."""
+        from telethon import events
+        from telethon.tl.functions.channels import JoinChannelRequest
+
+        chats = []
+        for channel in self.channels:
+            try:
+                entity = await self.client.get_entity(channel)
+                if getattr(entity, "left", False):
+                    await self.client(JoinChannelRequest(entity))
+                    logger.info(f"Telegram-шлюз: вступил в @{channel}, чтобы получать посты")
+                chats.append(entity)
+            except Exception as e:
+                logger.warning(f"Telegram-шлюз: канал @{channel} недоступен: {e}")
+        self.client.remove_event_handler(self._on_channel_post)
+        self.client.add_event_handler(self._on_channel_post, events.NewMessage(chats=chats))
         logger.info(
             f"Telegram-шлюз: слушаю {len(chats)} каналов, слова: "
             f"{', '.join(self.keywords) or '—'}"
         )
-        await self.client.run_until_disconnected()
 
-    def _refresh_settings(self) -> None:
-        """Ключевые и стоп-слова меняются в дашборде на ходу — перечитываем
-        их из work_preferences.yaml не чаще раза в минуту, без перезапуска."""
-        if time.monotonic() - self._settings_checked_at < 60:
-            return
-        self._settings_checked_at = time.monotonic()
+    async def _watch_settings(self) -> None:
+        """Каналы, ключевые и стоп-слова меняются в дашборде на ходу —
+        раз в минуту перечитываем work_preferences.yaml, без перезапуска."""
         import yaml
 
-        try:
-            prefs = yaml.safe_load(
-                (Path(self.parameters["dataFolder"]) / "work_preferences.yaml").read_text(encoding="utf-8")
-            ) or {}
-        except (OSError, KeyError, yaml.YAMLError):
-            return
-        telegram = prefs.get("telegram") or {}
-        self.keywords = telegram.get("watch_keywords") or self.keywords
-        self.stop_words = telegram.get("watch_stop_words") or []
+        while self.client.is_connected():
+            await asyncio.sleep(60)
+            try:
+                prefs = yaml.safe_load(
+                    (Path(self.parameters["dataFolder"]) / "work_preferences.yaml").read_text(encoding="utf-8")
+                ) or {}
+            except (OSError, KeyError, yaml.YAMLError):
+                continue
+            telegram = prefs.get("telegram") or {}
+            self.keywords = telegram.get("watch_keywords") or self.keywords
+            self.stop_words = telegram.get("watch_stop_words") or []
+            channels = [normalize_channel(c) for c in telegram.get("channels") or [] if str(c).strip()]
+            if channels and channels != self.channels:
+                self.channels = channels
+                await self._subscribe()
 
     async def _on_channel_post(self, event) -> None:
         text = (event.message.message or "").strip()
         if not text:
             return
-        self._refresh_settings()
         matched = match_keywords(text, self.keywords, self.stop_words)
         if not matched:
             return

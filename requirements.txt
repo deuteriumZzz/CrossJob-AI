@@ -34,3 +34,4 @@ pytest
 pytest-mock
 pytest-cov
 undetected-chromedriver==3.5.5
+dnspython

@@ -87,6 +87,7 @@ class ContactBook:
         contacts: list[dict],
         vacancy: dict | None = None,
         website: str = "",
+        emphasis: str = "",
     ) -> str:
         """contacts: [{kind, value, source, source_url, name?, position?}].
         Компания без названия (пост в Telegram без компании) заводится
@@ -114,6 +115,9 @@ class ContactBook:
                 card["company"] = company
             if website and not card["website"]:
                 card["website"] = website
+            if emphasis and not card.get("emphasis"):
+                # «На что сделать упор» из вашего файла — для письма.
+                card["emphasis"] = emphasis
             if vacancy and vacancy.get("link") and all(
                 v["link"] != vacancy["link"] for v in card["vacancies"]
             ):
