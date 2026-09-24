@@ -23,7 +23,7 @@ from src.logging import logger
 from src.utils.chrome_utils import get_with_retry, init_browser
 
 BASE = "https://djinni.co"
-LOGIN_TIMEOUT_SECONDS = 300
+LOGIN_TIMEOUT_SECONDS = 600
 PAGE_LOAD_WAIT_SECONDS = 3
 
 _APPLY_MARKERS = (
@@ -42,22 +42,48 @@ class DjinniSession:
         self.driver = init_browser(profile_dir)
 
     def ensure_logged_in(self, parameters: dict) -> None:
-        """Личный кабинет без входа перекидывает на /login — тогда ждём,
+        """Вошли — личный кабинет /my/ открывается. Без входа Djinni
+        перекидывает на /continue/ (не на /login — подтверждено вживую
+        2026-09-25, из-за этого первая проверка ошибочно считала гостя
+        вошедшим). Тогда открываем вход с возвратом в кабинет и ждём,
         пока человек войдёт сам (email или Google)."""
         get_with_retry(self.driver, f"{BASE}/my/profile/")
         time.sleep(PAGE_LOAD_WAIT_SECONDS)
-        if "/login" not in self.driver.current_url:
+        if _in_cabinet(self.driver):
             return
+        get_with_retry(self.driver, f"{BASE}/login?lang=en&next=/my/profile/")
         logger.info(f"Djinni: войдите вручную в открывшемся браузере (до {LOGIN_TIMEOUT_SECONDS}с).")
         notify_manual_login_required(parameters, "Djinni", LOGIN_TIMEOUT_SECONDS)
         deadline = time.monotonic() + LOGIN_TIMEOUT_SECONDS
-        while "/login" in self.driver.current_url:
+        # После входа через Google Djinni может открыть не кабинет, а любую
+        # свою страницу — ждём ухода со страниц входа, потом сверяем кабинет.
+        while not _left_login(self.driver):
             if time.monotonic() > deadline:
                 raise RuntimeError("Timed out waiting for Djinni login.")
             time.sleep(2)
+        get_with_retry(self.driver, f"{BASE}/my/profile/")
+        time.sleep(PAGE_LOAD_WAIT_SECONDS)
+        if not _in_cabinet(self.driver):
+            raise RuntimeError("Djinni: вход не подтвердился — кабинет /my/ не открывается.")
 
     def quit(self) -> None:
         self.driver.quit()
+
+
+def _in_cabinet(driver) -> bool:
+    """Личный кабинет /my/... открыт — значит, вход выполнен."""
+    return "djinni.co/my/" in driver.current_url
+
+
+def _left_login(driver) -> bool:
+    """Вернулись на Djinni и уже не на странице входа/регистрации."""
+    url = driver.current_url
+    return "djinni.co/" in url and not _guest_redirect(driver)
+
+
+def _guest_redirect(driver) -> bool:
+    """Перекинуло на вход — значит, сессия слетела."""
+    return any(p in driver.current_url for p in ("/login", "/continue", "/signup"))
 
 
 def _visible_by_text(root, markers: tuple[str, ...]):
@@ -86,7 +112,7 @@ def apply_to_job(driver, job_link: str, message: str) -> bool:
     driver.get(job_link)
     time.sleep(PAGE_LOAD_WAIT_SECONDS)
     raise_if_blocked(visible_text(driver))
-    if "/login" in driver.current_url:
+    if _guest_redirect(driver):
         return False
     if _already_applied(driver):
         return True
@@ -97,7 +123,7 @@ def apply_to_job(driver, job_link: str, message: str) -> bool:
         return False
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'}); arguments[0].click();", button)
     time.sleep(2)
-    if "/login" in driver.current_url:
+    if _guest_redirect(driver):
         return False
 
     fields = [t for t in driver.find_elements(By.TAG_NAME, "textarea") if t.is_displayed()]
