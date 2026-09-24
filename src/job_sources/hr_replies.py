@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from src.job_sources.applied_log import AppliedLog, effective_stage
 from src.job_sources.llm_provider import get_chat_llm
+from src.libs.resume_and_cover_builder.anti_ai_rules import ANTI_AI_STRUCTURE_RU, humanize
 from src.utils.file_lock import state_file_lock
 
 Category = Literal["interest", "question", "rejection", "other"]
@@ -69,13 +70,14 @@ def classify_reply(message_text: str, llm_api_key: str) -> Category:
     return result.category
 
 
+# Без тире и дежурных фраз — по правилам humanizer (anti_ai_rules.py).
 FOLLOW_UP_TEXT = (
-    "Здравствуйте! Хотел уточнить, актуальна ли ещё вакансия — "
-    "буду рад обсудить детали, если есть интерес."
+    "Здравствуйте! Хотел уточнить, актуальна ли ещё вакансия. "
+    "Если да, с удовольствием созвонюсь и отвечу на вопросы."
 )
 FOLLOW_UP_TEXT_EN = (
-    "Hello! I wanted to follow up on my previous email — I'd be glad to "
-    "discuss how I could help your team. Happy to jump on a short call."
+    "Hello, I'm following up on my previous email. Is the role still open? "
+    "If so, I'd be glad to have a short call."
 )
 
 
@@ -233,8 +235,9 @@ _FIRST_MESSAGE_PROMPT = ChatPromptTemplate.from_template(
     Язык: {language}. Канал: {channel}.
 
     Правила:
-    - Возьми из вакансии три главных требования и на каждое дай
-      конкретный пример из резюме, по возможности с цифрами.
+    - Возьми из вакансии главные требования (сколько реально важно,
+      обычно два-три) и на каждое дай конкретный пример из резюме, по
+      возможности с цифрами.
     - Только факты из резюме — не придумывай опыт, цифры и факты о
       компании, которых нет в тексте вакансии.
     - Без клише ("внимательно изучив вашу вакансию", "с большим
@@ -252,6 +255,9 @@ _FIRST_MESSAGE_PROMPT = ChatPromptTemplate.from_template(
 
     Верни только текст сообщения, без темы и подписи-шаблона.
     """
+    # Правила «как человек» (humanizer) — и для русского, и для английского
+    # текста: в них есть списки слов-маркеров на обоих языках.
+    + ANTI_AI_STRUCTURE_RU
 )
 
 _LENGTH_RULES = {
@@ -302,6 +308,7 @@ def generate_first_message(
             "resume_text": extract_text(str(resume_pdf_path)),
         }
     ).strip()
+    text = humanize(text, llm_api_key)
     subject = f"{job_title} — {'отклик' if russian else 'Application'}"
     if candidate_name:
         subject += f" — {candidate_name}"
@@ -336,6 +343,7 @@ _COMPANY_EMAIL_PROMPT = ChatPromptTemplate.from_template(
 
     Верни только текст письма, без темы.
     """
+    + ANTI_AI_STRUCTURE_RU
 )
 
 
@@ -371,6 +379,8 @@ def generate_company_email(
     ).strip()
     # Модель иногда оставляет заготовки вида «[Your Name]» — не отправляем их.
     text = re.sub(r"\[(?:Your|Ваш[аеи]?)[^\]]*\]", candidate_name, text).strip()
+    # Вторая проверка по скиллу humanizer: остались признаки — одна правка.
+    text = humanize(text, llm_api_key)
     subject = (
         f"{target_position} — отклик — {candidate_name}" if russian
         else f"{target_position} Application — {candidate_name}"

@@ -5,6 +5,7 @@ from typing import Literal
 from pdfminer.high_level import extract_text
 
 from src.job import Job
+from src.libs.resume_and_cover_builder.anti_ai_rules import humanize
 from src.libs.resume_and_cover_builder.config import global_config
 from src.libs.resume_and_cover_builder.llm import (
     llm_generate_cover_letter_from_job as _llm_clj,
@@ -109,4 +110,6 @@ def generate_cover_letter_for_job(
     # площадки — добавляем их как минимальный сигнал.
     job_description_text = f"{job.role} — {job.company}\n\n{job.description}"
     answerer.set_job_description_from_text(job_description_text)
-    return answerer.generate_cover_letter()
+    letter = answerer.generate_cover_letter()
+    # Текстовые письма (не HTML-бланк) — вторая проверка «как человек».
+    return letter if template == "html" else humanize(letter, llm_api_key)

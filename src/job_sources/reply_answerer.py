@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from src.job_sources.llm_provider import get_chat_llm
 from src.libs.resume_and_cover_builder.anti_ai_rules import (
     ANTI_AI_STRUCTURE_RU,
+    humanize,
 )
 
 _NEEDS_REPLY_PROMPT = ChatPromptTemplate.from_template(
@@ -147,7 +148,8 @@ def generate_reply(
             "message_text": message_text,
         }
     )
-    return output.strip()
+    # Вторая проверка по скиллу humanizer: остались признаки — одна правка.
+    return humanize(output.strip(), llm_api_key)
 
 
 def message_needs_reply(message_text: str, llm_api_key: str) -> bool:
