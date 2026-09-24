@@ -3657,32 +3657,21 @@ details.panel.more[open] > summary {
   }
 }
 
-/* Режим площадки: «Откликается сам | Только ищет» */
-.segmented {
-  display: flex;
-  margin: 8px 0 4px;
-  padding: 3px;
-  border-radius: 999px;
-  background: var(--panel-2);
-}
-.segmented button {
-  flex: 1;
+/* Режим площадки на карточке — спокойная метка, по клику окно площадки */
+.mode-chip {
   font: inherit;
-  font-size: 12.5px;
-  font-weight: 550;
-  padding: 5px 8px;
-  border: 0;
+  font-size: 12px;
+  padding: 2px 9px;
   border-radius: 999px;
+  border: 1px solid var(--border);
   background: none;
   color: var(--muted);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
 }
-.segmented button:hover {
+.mode-chip.is-apply {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.mode-chip:hover {
   color: var(--text);
-}
-.segmented button.active {
-  background: var(--accent);
-  color: #0b1520;
-  cursor: default;
 }

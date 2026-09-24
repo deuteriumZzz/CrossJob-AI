@@ -409,6 +409,7 @@ function switchTab(name) {
 
 let overviewLoaded = false;
 let lastOverviewSnapshot = null;
+let pendingPlatformDrawer = null;
 let historyLoaded = false;
 let lastHistorySnapshot = null;
 let lastHistoryEntries = [];
@@ -1700,12 +1701,13 @@ const render = {
           // Один понятный выбор вместо «расписание» + «автоотклик» + «только поиск».
           // Вкл/выкл — переключатель, как у Telegram-парсера; что делать, когда
           // включена, — две кнопки: откликаться самому или только искать.
-          const modeRow = s.schedule_enabled
-            ? `<div class="segmented" role="group" aria-label="Режим ${sourceLabel(s.name)}">
-                <button type="button" class="${isSearchOnly ? "" : "active"}" data-mode="apply" data-source="${s.name}" aria-pressed="${!isSearchOnly}">Откликается сам</button>
-                <button type="button" class="${isSearchOnly ? "active" : ""}" data-mode="search" data-source="${s.name}" aria-pressed="${isSearchOnly}">Только ищет</button>
-              </div>`
-            : `<div class="row"><span>Выключена</span><span class="muted">включите переключателем</span></div>`;
+          // Режим меняют редко — на карточке спокойная метка, по клику
+          // окно площадки с пояснением (случайно включить автоотклик нельзя).
+          const modeRow = `<div class="row"><span>Режим</span>${
+            s.schedule_enabled
+              ? `<button type="button" class="mode-chip${isSearchOnly ? "" : " is-apply"}" data-open-platform="${s.name}" title="Изменить режим и фильтры">${isSearchOnly ? "🔍 только ищет" : "✉️ откликается сам"}</button>`
+              : `<span class="muted">выключена</span>`
+          }</div>`;
           const responseRow = `<div class="row"><span>Откликов сегодня</span>
               <span class="limit-ring-wrap">
                 <svg width="18" height="18" viewBox="0 0 32 32">
@@ -1788,11 +1790,10 @@ const render = {
           savePlatform(box.dataset.source, { schedule_enabled: box.checked }, box.checked ? "включена" : "выключена");
         })
       );
-      document.querySelectorAll(".segmented [data-mode]").forEach((btn) =>
+      document.querySelectorAll("[data-open-platform]").forEach((btn) =>
         btn.addEventListener("click", () => {
-          if (btn.classList.contains("active")) return;
-          const apply = btn.dataset.mode === "apply";
-          savePlatform(btn.dataset.source, { auto_apply: apply }, apply ? "откликается сам" : "только ищет");
+          pendingPlatformDrawer = btn.dataset.openPlatform;
+          switchTab("settings");
         })
       );
       document.querySelectorAll(".schedule-toggle").forEach((box) => {
@@ -2040,6 +2041,7 @@ const render = {
       api("/api/settings/salary"),
       api("/api/settings/limits"),
     ]);
+    renderAutoAll(status);
 
     api("/api/settings/search").then((search) => {
       const fields = [
@@ -2191,14 +2193,15 @@ const render = {
           <h4>Расписание и отклик</h4>
           <div class="limits-grid">
             <label class="limit-field" style="justify-content:flex-end">
-              <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-schedule switch" ${s.schedule_enabled ? "checked" : ""} />В расписании</span>
+              <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-schedule switch" ${s.schedule_enabled ? "checked" : ""} />Включена</span>
             </label>
             <label class="limit-field">
               <span>Интервал, ч</span>
               <input type="number" class="d-interval" min="1" value="${s.interval_hours ?? 3}" />
             </label>
             <label class="limit-field" style="justify-content:flex-end">
-              <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto switch" ${s.auto_apply ? "checked" : ""} />Автоотклик</span>
+              <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto switch" ${s.auto_apply ? "checked" : ""} />Откликается сам</span>
+              <span class="muted small">Включено — бот сам отправляет отклики, до дневного лимита. Выключено — только ищет: вакансии появляются в «Вакансиях», откликаетесь вы.</span>
             </label>
             <label class="limit-field">
               <span>Resume ID</span>
@@ -2235,11 +2238,11 @@ const render = {
           <h4>Фильтры</h4>
           <div class="limits-grid">
             <label class="limit-field">
-              <span>Свои должности (пусто — общие из "Поиск")</span>
+              <span>Свои должности (пусто — общие из «Что ищу»)</span>
               <textarea class="d-positions" rows="2" placeholder="оставить пустым — использовать общие">${(s.positions_override || []).join("\n")}</textarea>
             </label>
             <label class="limit-field">
-              <span>Свои локации (пусто — общие из "Поиск")</span>
+              <span>Свои локации (пусто — общие из «Что ищу»)</span>
               <textarea class="d-locations" rows="2" placeholder="оставить пустым — использовать общие">${(s.locations_override || []).join("\n")}</textarea>
             </label>
             ${
@@ -2278,6 +2281,13 @@ const render = {
         </div>`;
     }
 
+    // Пришли с карточки на Главной (метка режима) — сразу открываем окно площадки.
+    if (pendingPlatformDrawer) {
+      const source = pendingPlatformDrawer;
+      pendingPlatformDrawer = null;
+      switchSettingsTab("settings-table");
+      setTimeout(() => openPlatformDrawer(source));
+    }
     function openPlatformDrawer(sourceName) {
       const s = status.sources.find((x) => x.name === sourceName);
       if (!s) return;
@@ -3522,6 +3532,39 @@ async function updateActivity() {
     )
     .join("");
   el.querySelectorAll("[data-activity-view]").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.activityView)));
+}
+
+// «Откликаться автоматически» разом для всех включённых площадок —
+// большинству не нужно настраивать режим каждой отдельно.
+function renderAutoAll(status) {
+  const on = status.sources.filter((s) => s.schedule_enabled && s.name !== "telegram");
+  const auto = on.filter((s) => s.auto_apply);
+  const box = document.getElementById("search-auto-all");
+  box.checked = on.length > 0 && auto.length === on.length;
+  box.indeterminate = auto.length > 0 && auto.length < on.length;
+  document.getElementById("search-auto-note").textContent = on.length
+    ? `сейчас сами откликаются: ${auto.length} из ${on.length}`
+    : "ни одна площадка не включена";
+  box.onchange = async () => {
+    const enable = box.checked;
+    if (enable && !confirm(`Бот начнёт сам отправлять отклики на ${on.length} ${plural(on.length, "площадке", "площадках", "площадках")} — до дневного лимита каждой. Включить?`)) {
+      renderAutoAll(status);
+      return;
+    }
+    box.disabled = true;
+    try {
+      for (const s of on) {
+        await api("/api/settings", { method: "POST", body: JSON.stringify({ source: s.name, auto_apply: enable }) });
+      }
+      showToast(enable ? "Автоотклик включён на всех площадках" : "Площадки только ищут, откликаетесь вы", "success");
+    } catch (err) {
+      showToast(err.message.replace(/^\d+: /, ""), "error");
+    } finally {
+      box.disabled = false;
+      renderAutoAll(await api("/api/status"));
+      lastOverviewSnapshot = "";
+    }
+  };
 }
 
 // «Подключения»: сервисы (то же, что «Готовность» на Главной) и
