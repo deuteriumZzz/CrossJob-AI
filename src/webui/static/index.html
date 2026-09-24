@@ -65,9 +65,9 @@
         <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.6"/><path d="M10 5.8V10l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
         <span>История</span>
       </button>
-      <button data-tab="replies" title="Ответы">
+      <button data-tab="replies" title="Входящие">
         <svg viewBox="0 0 20 20" fill="none"><path d="M3 5.5A2 2 0 0 1 5 3.5h10a2 2 0 0 1 2 2V12a2 2 0 0 1-2 2H8l-3.5 3V14H5a2 2 0 0 1-2-2V5.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-        <span>Ответы</span>
+        <span>Входящие</span>
       </button>
       <button data-tab="telegram" title="Telegram">
         <svg viewBox="0 0 20 20" fill="none"><path d="m2.5 10.3 14.6-6c.7-.3 1.4.3 1.1 1l-2.5 12.4c-.2.9-1.2 1.2-1.9.6l-3.4-2.7-2 1.9c-.3.3-.7.2-.8-.2l-.6-3.3 8.1-7.6c.3-.3-.1-.5-.4-.3L6 11.4l-3.3-1c-.7-.2-.7-1 -.2-1.1Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
@@ -163,6 +163,7 @@
           <option value="habr_career">Habr Career</option>
           <option value="wellfound">Wellfound</option>
           <option value="himalayas">Himalayas</option>
+          <option value="direct">Прямой поиск</option>
         </select>
         <select id="filter-status">
           <option value="">Любой статус</option>
@@ -177,7 +178,7 @@
       <div class="table-wrap" id="history-table-wrap">
         <table>
           <thead>
-            <tr><th>Дата</th><th>Площадка</th><th>Компания</th><th>Вакансия</th><th>Статус</th><th>Балл</th><th>Письмо</th></tr>
+            <tr><th>Дата</th><th>Площадка</th><th>Компания</th><th>Вакансия</th><th>Статус</th><th>Этап</th><th>Балл</th><th>Письмо</th></tr>
           </thead>
           <tbody id="history-rows"></tbody>
         </table>
@@ -188,8 +189,8 @@
     <section id="view-replies" class="view">
       <div class="view-header">
         <div>
-          <h2>Ответы работодателей</h2>
-          <p class="muted">Изменения статуса переговоров</p>
+          <h2>Входящие</h2>
+          <p class="muted">Ответы работодателей со всех каналов: статусы hh и сообщения HR в Telegram</p>
         </div>
       </div>
       <div class="filters">
@@ -209,7 +210,7 @@
       <div class="table-wrap">
         <table>
           <thead>
-            <tr><th>Дата</th><th>Площадка</th><th>Вакансия</th><th>Статус переговоров</th></tr>
+            <tr><th>Дата</th><th>Канал</th><th>Вакансия</th><th>Сообщение / статус</th><th>Этап</th></tr>
           </thead>
           <tbody id="replies-rows"></tbody>
         </table>
@@ -433,6 +434,36 @@
         <p class="muted small">Количество откликов по дням, как в Истории</p>
         <div id="activity-heatmap" class="heatmap"></div>
       </div>
+      <div class="panel">
+        <h3>Воронка после отклика</h3>
+        <p class="muted small">Сколько реальных откликов дошло до каждого этапа. Этап ставится сам по ответу hh или вручную в «Истории» и «Входящих»</p>
+        <div id="funnel" class="funnel"></div>
+      </div>
+      <div class="analytics-grid">
+        <div class="panel">
+          <h3>Спрос на навыки</h3>
+          <p class="muted small">Доля вакансий, где навык упоминается (по откликам, собранным после обновления). ✗ — в резюме не найден</p>
+          <div id="skill-demand" class="funnel"></div>
+        </div>
+        <div class="panel">
+          <h3>Зарплаты на рынке</h3>
+          <p class="muted small">Медиана «от» и «до» в месяц по всем собранным вакансиям с указанной зарплатой</p>
+          <div id="salary-stats"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Сравнение офферов</h3>
+        <p class="muted small">Сумма в месяц. «К рынку» — насколько оффер выше или ниже медианы «до» по собранным вакансиям в той же валюте (без пересчёта валют и налогов)</p>
+        <div class="filters">
+          <input id="offer-company" type="text" placeholder="Компания" aria-label="Компания" />
+          <input id="offer-amount" type="number" min="0" placeholder="Сумма в месяц" aria-label="Сумма в месяц" />
+          <select id="offer-currency" aria-label="Валюта"><option>RUB</option><option>USD</option><option>EUR</option><option>KZT</option></select>
+          <label class="muted small"><input id="offer-remote" type="checkbox" checked /> удалённо</label>
+          <input id="offer-notes" type="text" placeholder="Заметки: бонусы, ДМС, оформление" aria-label="Заметки" />
+          <button id="offer-add" class="btn btn-primary" type="button">Добавить</button>
+        </div>
+        <div id="offers"></div>
+      </div>
       <div class="analytics-grid">
         <div class="panel">
           <h3>Чаще всего не хватает</h3>
@@ -463,6 +494,7 @@
         <button type="button" data-settings-tab="settings-autostart">Автозапуск</button>
         <button type="button" data-settings-tab="settings-usage">Расходы на LLM</button>
         <button type="button" data-settings-tab="settings-table">Площадки</button>
+        <button type="button" data-settings-tab="settings-companies">Компании</button>
       </nav>
 
       <div class="panel settings-pane active" id="settings-search">
@@ -769,6 +801,18 @@
         <p class="muted small">Клик по «⚙ Настроить» открывает расписание, лимиты и фильтры для площадки.</p>
         <div class="source-grid" id="platform-cards"></div>
       </div>
+
+      <div class="panel settings-pane" id="settings-companies">
+        <h3>Компании для прямого поиска</h3>
+        <p class="muted small">Вакансии этих компаний площадка «Прямой поиск» берёт прямо с их сайта (Greenhouse, Lever, Ashby, Workable). Введите адрес сайта — система найма определится сама. Плюс к ним площадка смотрит We Work Remotely и Hacker News «Who is hiring».</p>
+        <div class="filters">
+          <input id="direct-company-website" type="text" placeholder="Сайт, например linear.app" aria-label="Сайт компании" />
+          <input id="direct-company-name" type="text" placeholder="Название (необязательно)" aria-label="Название компании" />
+          <button id="direct-company-add" class="btn btn-primary" type="button">Найти и добавить</button>
+        </div>
+        <p id="direct-company-status" class="muted small" role="status"></p>
+        <div id="direct-companies"></div>
+      </div>
     </section>
 
     <section id="view-logs" class="view">
@@ -836,6 +880,34 @@
     <p id="cover-letter-meta" class="muted small" style="margin:0 0 14px"></p>
     <div id="cover-letter-body" style="white-space:pre-wrap;word-break:break-word;line-height:1.55;font-size:13.5px;max-height:55vh;overflow-y:auto;padding-right:4px"></div>
     <button type="button" class="btn btn-secondary" id="cover-letter-close" style="width:100%;justify-content:center;margin-top:16px">Закрыть</button>
+  </div>
+</div>
+
+<div id="calendar-overlay" class="command-overlay" style="display:none">
+  <div class="command-palette" style="padding:18px 20px;max-width:420px;width:90vw">
+    <h3 style="margin:0 0 2px">Интервью в календарь</h3>
+    <p id="calendar-meta" class="muted small" style="margin:0 0 14px"></p>
+    <label class="muted small" for="calendar-start">Дата и время</label>
+    <input id="calendar-start" type="datetime-local" style="width:100%;margin:6px 0 10px" />
+    <label class="muted small" for="calendar-duration">Длительность, минут</label>
+    <input id="calendar-duration" type="number" min="15" step="15" value="60" style="width:100%;margin:6px 0 14px" />
+    <a id="calendar-download" class="btn btn-primary" style="width:100%;justify-content:center" download="interview.ics">Скачать .ics</a>
+    <button type="button" class="btn btn-secondary" data-close-overlay style="width:100%;justify-content:center;margin-top:8px">Закрыть</button>
+  </div>
+</div>
+
+<div id="trainer-overlay" class="command-overlay" style="display:none">
+  <div class="command-palette" style="padding:18px 20px;max-width:680px;width:92vw">
+    <h3 id="trainer-title" style="margin:0 0 2px">Тренажёр интервью</h3>
+    <p id="trainer-progress" class="muted small" style="margin:0 0 12px"></p>
+    <p id="trainer-question" style="font-weight:600;line-height:1.5;margin:0 0 10px"></p>
+    <textarea id="trainer-answer" rows="5" aria-label="Ваш ответ" placeholder="Ответьте так, как ответили бы на интервью" style="width:100%"></textarea>
+    <div style="display:flex;gap:8px;margin:10px 0">
+      <button type="button" class="btn btn-primary" id="trainer-check">Оценить ответ</button>
+      <button type="button" class="btn btn-secondary" id="trainer-next">Следующий вопрос</button>
+    </div>
+    <div id="trainer-feedback" style="white-space:pre-wrap;line-height:1.55;font-size:13.5px;max-height:35vh;overflow-y:auto"></div>
+    <button type="button" class="btn btn-secondary" data-close-overlay style="width:100%;justify-content:center;margin-top:12px">Закрыть</button>
   </div>
 </div>
 

@@ -14,12 +14,19 @@ _STATUS_RE = re.compile(r"^/status\s*$", re.IGNORECASE)
 _PAUSE_RE = re.compile(r"^/pause\s+(\w+)\s*$", re.IGNORECASE)
 _RESUME_RE = re.compile(r"^/resume\s+(\w+)\s*$", re.IGNORECASE)
 _HELP_RE = re.compile(r"^/(help|start)\s*$", re.IGNORECASE)
+_SEND_DRAFT_RE = re.compile(
+    r"^(?:отправить|send)\s+([a-f0-9]{4})\s*$", re.IGNORECASE
+)
+_SKIP_DRAFT_RE = re.compile(
+    r"^(?:пропустить|skip)\s+([a-f0-9]{4})\s*$", re.IGNORECASE
+)
 
 HELP_TEXT = (
     "Команды:\n"
     "/status — статус всех площадок за сегодня\n"
     "/pause <площадка> — снять площадку с расписания демона\n"
-    "/resume <площадка> — вернуть площадку в расписание"
+    "/resume <площадка> — вернуть площадку в расписание\n"
+    "отправить <код> / пропустить <код> — черновик ответа HR"
 )
 
 
@@ -69,6 +76,18 @@ def poll_control_commands(
             continue
         if _HELP_RE.match(text):
             commands.append({"action": "help"})
+            continue
+        match = _SEND_DRAFT_RE.match(text)
+        if match:
+            commands.append(
+                {"action": "send_draft", "code": match.group(1).lower()}
+            )
+            continue
+        match = _SKIP_DRAFT_RE.match(text)
+        if match:
+            commands.append(
+                {"action": "skip_draft", "code": match.group(1).lower()}
+            )
             continue
         match = _PAUSE_RE.match(text)
         if match:

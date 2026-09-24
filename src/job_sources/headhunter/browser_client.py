@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 from typing import Callable, Optional
@@ -26,6 +27,7 @@ HH_BASE = "https://hh.ru"
 # и город не должен ограничивать поиск.
 HH_AREA_RUSSIA = "113"
 PAGE_LOAD_WAIT_SECONDS = 4
+_RESUME_LINK_RE = re.compile(r"/resume/([a-f0-9]{20,})")
 
 
 def _wait_for_any(
@@ -246,14 +248,11 @@ class HeadHunterBrowserClient:
         резюме в поиске" на HH), но через клик в браузере вместо их
         захардкоженного Android-клиента API — см. обоснование в
         HeadHunterSession, почему этот проект вообще не использует
-        официальный/эмулированный API HH. Селектор кнопки ("Обновить")
-        НЕ подтверждён прямым просмотром живой страницы (нет доступа к
-        залогиненному аккаунту с резюме) — в отличие от остальных data-qa
-        в этом файле/browser_mapping.py. Проверить на реальном аккаунте
-        перед тем как включать headhunter.auto_bump_resume: true;
-        HH сам показывает кнопку недоступной, если обновлять ещё рано
-        (обычно раз в ~4ч на резюме) — это не ошибка, просто bump_resume
-        вернёт False."""
+        официальный/эмулированный API HH. Селектор кнопки ("Поднять в
+        поиске", data-qa="resume-update-button") подтверждён на живой
+        странице резюме 2026-09-24. HH сам показывает кнопку
+        недоступной, если поднимать ещё рано (обычно раз в ~4ч на
+        резюме) — это не ошибка, просто bump_resume вернёт False."""
         driver, owns_it = self._acquire_driver()
         try:
             driver.get(f"{HH_BASE}/resume/{resume_id}")
@@ -271,6 +270,21 @@ class HeadHunterBrowserClient:
             buttons[0].click()
             time.sleep(1.5)
             return True
+        finally:
+            if owns_it:
+                driver.quit()
+
+    def resume_ids(self) -> list[str]:
+        """id всех резюме аккаунта — со страницы "Мои резюме" (ссылки
+        /resume/<id>, подтверждено на живом аккаунте 2026-09-24). Нужен
+        для auto_bump_resume без заполненного headhunter.resume_id —
+        иначе поднятие молча не запускалось вообще."""
+        driver, owns_it = self._acquire_driver()
+        try:
+            driver.get(f"{HH_BASE}/applicant/resumes")
+            time.sleep(PAGE_LOAD_WAIT_SECONDS)
+            raise_if_blocked(visible_text(driver))
+            return sorted(set(_RESUME_LINK_RE.findall(driver.page_source)))
         finally:
             if owns_it:
                 driver.quit()

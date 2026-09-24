@@ -161,6 +161,10 @@ telegram:
   # ручного ответа, как раньше.
   auto_message: false
   daily_message_limit: 15
+  # HR не ответил за столько дней — бот предложит одно напоминание
+  # (черновиком на подтверждение: "отправить <код>" в Telegram-боте или
+  # кнопка во "Входящих"). 0 — выключено.
+  follow_up_days: 7
   # Слать сообщения только в эти часы (по времени машины) — иначе
   # холодное сообщение в 4 утра выглядит совсем не по-человечески.
   # Не заданы — шлёт в любое время.
@@ -219,3 +223,41 @@ wellfound:
 himalayas:
   auto_apply: false
 
+
+# Утренняя сводка в Telegram-бот: отклики и ответы за сутки, что ждёт
+# подтверждения. Раз в день после hour (по времени машины); отправляется
+# из check_telegram_commands, поэтому то расписание должно быть включено.
+digest:
+  enabled: true
+  hour: 9
+
+# Удалёнка с явным ограничением по стране ("US only", "must be located in
+# the US", "EU only"…) — такие вакансии пропускаются до оценки и отклика.
+# Варианты: us_only, europe_only. [] — ничего не отсекать.
+excluded_remote_regions:
+  - us_only
+
+# Модуль «Прямой поиск»: вакансии прямо с сайтов компаний (Greenhouse,
+# Lever, Ashby, Workable), We Work Remotely и Hacker News «Who is hiring».
+# Компании удобнее добавлять в дашборде: Настройки → Компании (ATS
+# определится по сайту). Автоотклика через формы нет — вакансии попадают
+# в «Историю» как «нужен ручной отклик» с письмом и контактами.
+direct:
+  schedule_enabled: false
+  interval_hours: 12
+  wwr: true
+  hn: true
+  # Есть email в вакансии → черновик письма HR на подтверждение
+  # («отправить <код>» в Telegram-боте или кнопка во «Входящих»).
+  # Нужен блок email: в secrets.yaml.
+  email_outreach: false
+  email_daily_limit: 20
+  follow_up_days: 7
+  # Можно и вручную, в дополнение к списку из дашборда:
+  # companies:
+  #   - {name: GitLab, ats: greenhouse, slug: gitlab}
+
+# Проверка ответов на письма HR (IMAP, только чтение).
+check_email_replies:
+  schedule_enabled: false
+  interval_hours: 3

@@ -116,6 +116,17 @@ class TelegramConversations:
 
         self._write_locked(_mutate)
 
+    def set_field(self, contact: str, key: str, value) -> None:
+        """Служебные поля диалога: label (интерес/вопрос/отказ по
+        последнему ответу HR), followed_up (напоминание уже было)."""
+
+        def _mutate(data: dict) -> None:
+            conv = self._find(data, contact)
+            if conv is not None:
+                conv[key] = value
+
+        self._write_locked(_mutate)
+
     def already_contacted(self, contact: str) -> bool:
         return self.get(contact) is not None
 

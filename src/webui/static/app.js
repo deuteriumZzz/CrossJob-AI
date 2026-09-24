@@ -17,6 +17,7 @@ const SOURCE_LABELS = {
   habr_career: "Habr Career",
   wellfound: "Wellfound",
   himalayas: "Himalayas",
+  direct: "Прямой поиск",
 };
 
 // ponytail: настоящие логотипы площадок — товарные знаки, тащить их к себе
@@ -31,10 +32,11 @@ const SOURCE_ICON = {
   habr_career: { text: "HC", color: "#e0954a" },
   wellfound: { text: "WF", color: "#c23b6b" },
   himalayas: { text: "HM", color: "#5b7fd6" },
+  direct: { text: "→", color: "#4f9d8f" },
 };
 
 // Площадки, нацеленные на зарубежный рынок — остальные площадки RU.
-const INTL_SOURCES = new Set(["linkedin", "wellfound", "himalayas"]);
+const INTL_SOURCES = new Set(["linkedin", "wellfound", "himalayas", "direct"]);
 
 const STATUS_DOT = {
   ok: "ok",
@@ -174,7 +176,56 @@ const STATUS_LABELS = {
   dry_run: "тестовый прогон",
   skipped_low_fit: "пропущено (слабое совпадение)",
   skipped_easy_apply_failed: "пропущено (форма Easy Apply)",
+  skipped_closed_posting: "пропущено (вакансия закрыта)",
 };
+
+const REGION_LABELS = {
+  us_only: "🇺🇸 только США",
+  europe_only: "🇪🇺 только Европа",
+  global: "🌍 откуда угодно",
+};
+
+const STAGE_LABELS = {
+  replied: "ответили",
+  interview: "интервью",
+  test_task: "тестовое",
+  offer: "оффер",
+  rejected: "отказ",
+};
+
+// Этап — выпадающий список прямо в строке: ставится вручную, пустое
+// значение снимает ручную отметку (этап снова считается по ответу hh).
+function stageSelectHtml(e) {
+  if (!e.external_id) return `<span class="muted small">—</span>`;
+  const current = e.effective_stage ?? e.stage ?? "";
+  const options = [["", "—"], ...Object.entries(STAGE_LABELS)]
+    .map(
+      ([value, label]) =>
+        `<option value="${value}"${value === current ? " selected" : ""}>${label}</option>`
+    )
+    .join("");
+  return `<select class="stage-select" data-stage-source="${escapeHtml(e.source)}" data-stage-id="${escapeHtml(e.external_id)}" aria-label="Этап">${options}</select>`;
+}
+
+function bindStageSelects(container) {
+  container.querySelectorAll("[data-stage-id]").forEach((select) => {
+    select.addEventListener("change", async () => {
+      try {
+        await api("/api/applications/stage", {
+          method: "POST",
+          body: JSON.stringify({
+            source: select.dataset.stageSource,
+            external_id: select.dataset.stageId,
+            stage: select.value,
+          }),
+        });
+        showToast("Этап сохранён", "success");
+      } catch (err) {
+        showToast(`Не удалось сохранить этап: ${err.message}`, "error");
+      }
+    });
+  });
+}
 
 function statusLabel(status) {
   return STATUS_LABELS[status] || status;
@@ -787,7 +838,7 @@ const render = {
 
     lastHistoryEntries = entries;
     if (!entries.length) {
-      tbody.innerHTML = `<tr><td colspan="7">${emptyStateHtml("Ничего не найдено.")}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8">${emptyStateHtml("Ничего не найдено.")}</td></tr>`;
       document.getElementById("history-timeline").innerHTML = emptyStateHtml("Ничего не найдено.");
       return;
     }
@@ -800,7 +851,8 @@ const render = {
         <td>${sourceIconHtml(e.source)}${sourceLabel(e.source)}</td>
         <td>${escapeHtml(e.company)}</td>
         <td><a href="${escapeHtml(e.link)}" target="_blank" rel="noopener">${escapeHtml(e.title)}</a></td>
-        <td>${statusLabel(e.status)}</td>
+        <td>${statusLabel(e.status)}${e.remote_region ? `<div class="muted small">${REGION_LABELS[e.remote_region] || ""}</div>` : ""}</td>
+        <td>${e.status === "applied" ? stageSelectHtml(e) : `<span class="muted small">—</span>`}</td>
         <td title="${e.gaps && e.gaps.length ? escapeHtml(e.gaps.join("; ")) : ""}">
           ${e.score ?? ""}
           ${
@@ -815,6 +867,18 @@ const render = {
               ? `<button type="button" class="btn btn-secondary btn-small" data-cover-letter-btn data-row-index="${i}">📄 Читать письмо</button>`
               : `<span class="muted small">—</span>`
           }
+          ${
+            e.effective_stage === "interview"
+              ? `<button type="button" class="btn btn-secondary btn-small" data-prep-btn data-row-index="${i}">🎯 Подготовка</button>
+                 <button type="button" class="btn btn-secondary btn-small" data-trainer-btn data-row-index="${i}">🎤 Тренажёр</button>
+                 <button type="button" class="btn btn-secondary btn-small" data-calendar-btn data-row-index="${i}">📅 В календарь</button>`
+              : ""
+          }
+          ${
+            e.source === "direct" && e.status === "dry_run" && /greenhouse\.io|lever\.co/.test(e.link)
+              ? `<button type="button" class="btn btn-secondary btn-small" data-prefill-btn data-row-index="${i}">✍️ Заполнить форму</button>`
+              : ""
+          }
         </td>
       </tr>`
       )
@@ -824,6 +888,59 @@ const render = {
         openCoverLetterModal(reversed[parseInt(btn.dataset.rowIndex, 10)]);
       });
     });
+    tbody.querySelectorAll("[data-prep-btn]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const e = reversed[parseInt(btn.dataset.rowIndex, 10)];
+        btn.disabled = true;
+        btn.textContent = "Готовлю…";
+        try {
+          const { prep } = await api("/api/applications/prep", {
+            method: "POST",
+            body: JSON.stringify({ source: e.source, external_id: e.external_id }),
+          });
+          openTextModal(`Подготовка: ${e.company} — ${e.title}`, "Справка к интервью", prep.replace(/\*\*/g, ""));
+        } catch (err) {
+          showToast(err.message, "error");
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "🎯 Подготовка";
+        }
+      });
+    });
+    tbody.querySelectorAll("[data-calendar-btn]").forEach((btn) => {
+      btn.addEventListener("click", () =>
+        openCalendarOverlay(reversed[parseInt(btn.dataset.rowIndex, 10)])
+      );
+    });
+    tbody.querySelectorAll("[data-trainer-btn]").forEach((btn) => {
+      btn.addEventListener("click", () =>
+        openTrainer(reversed[parseInt(btn.dataset.rowIndex, 10)])
+      );
+    });
+    tbody.querySelectorAll("[data-prefill-btn]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const e = reversed[parseInt(btn.dataset.rowIndex, 10)];
+        btn.disabled = true;
+        try {
+          const { filled } = await api("/api/direct/prefill", {
+            method: "POST",
+            body: JSON.stringify({ source: e.source, external_id: e.external_id }),
+          });
+          showToast(
+            filled.length
+              ? `Форма открыта в Chrome, заполнено: ${filled.join(", ")}. Ответьте на вопросы компании и нажмите Submit.`
+              : "Форма открыта в Chrome — эту разметку заполнить не удалось, заполните вручную.",
+            "success",
+            8000
+          );
+        } catch (err) {
+          showToast(err.message, "error");
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+    bindStageSelects(tbody);
     observeReveal(tbody);
     renderHistoryTimeline(reversed);
   },
@@ -832,7 +949,7 @@ const render = {
     const tbody = document.getElementById("replies-rows");
     if (!repliesLoaded) tbody.innerHTML = skeletonRows(3, 4);
 
-    const entries = await api("/api/replies");
+    const entries = await api("/api/inbox");
     // Конфетти — только на реально новый ответ, появившийся после
     // первой загрузки за сессию, не на каждое открытие вкладки с уже
     // существующими данными.
@@ -857,10 +974,15 @@ const render = {
     gapsEl.innerHTML = Array.from({ length: 3 }, () => `<li><div class="skeleton" style="height:14px"></div></li>`).join("");
     candidatesEl.innerHTML = Array.from({ length: 2 }, () => `<div class="skeleton" style="height:20px;margin-bottom:6px"></div>`).join("");
 
-    const [gaps, candidates] = await Promise.all([
+    const [gaps, candidates, funnel, market] = await Promise.all([
       api("/api/analytics/gaps"),
       api("/api/analytics/blacklist-candidates"),
+      api("/api/analytics/funnel"),
+      api("/api/analytics/market"),
     ]);
+    renderFunnel(funnel);
+    renderMarket(market);
+    renderOffers();
 
     gapsEl.innerHTML = gaps.length
       ? gaps
@@ -1384,32 +1506,70 @@ function renderRepliesRows() {
   const entries = lastRepliesEntries.filter((e) => {
     if (source && e.source !== source) return false;
     if (!query) return true;
-    return (
-      e.company.toLowerCase().includes(query) ||
-      e.title.toLowerCase().includes(query) ||
-      (e.last_known_state || "").toLowerCase().includes(query)
-    );
+    return [e.company, e.title, e.text, e.contact]
+      .filter(Boolean)
+      .some((v) => v.toLowerCase().includes(query));
   });
 
   if (!lastRepliesEntries.length) {
-    tbody.innerHTML = `<tr><td colspan="4">${emptyStateHtml("Пока нет ответов.")}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5">${emptyStateHtml("Пока нет ответов.")}</td></tr>`;
     return;
   }
   if (!entries.length) {
-    tbody.innerHTML = `<tr><td colspan="4">${emptyStateHtml("Ничего не найдено.")}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5">${emptyStateHtml("Ничего не найдено.")}</td></tr>`;
     return;
   }
   tbody.innerHTML = entries
     .map(
       (e, i) => `
     <tr class="reveal" style="transition-delay:${staggerDelay(i, 25)}">
-      <td>${fmtTime(e.applied_at)}</td>
-      <td>${sourceIconHtml(e.source)}${sourceLabel(e.source)}</td>
-      <td><a href="${escapeHtml(e.link)}" target="_blank" rel="noopener">${escapeHtml(e.company)} — ${escapeHtml(e.title)}</a></td>
-      <td>${escapeHtml(e.last_known_state)}</td>
+      <td>${fmtTime(e.at)}${e.unread ? ` <span class="tab-badge">new</span>` : ""}</td>
+      <td>${sourceIconHtml(e.source)}${e.channel === "telegram_dm" ? `@${escapeHtml(e.contact)}` : sourceLabel(e.source)}</td>
+      <td>${e.link ? `<a href="${escapeHtml(e.link)}" target="_blank" rel="noopener">${escapeHtml([e.company, e.title].filter(Boolean).join(" — ") || e.link)}</a>` : `<span class="muted small">—</span>`}</td>
+      <td>
+        ${e.label ? `<span class="muted small">${escapeHtml(e.label)}</span><br>` : ""}
+        ${escapeHtml(truncate(e.text || "", 160))}${e.channel === "telegram_dm" ? ` <button type="button" class="btn btn-ghost btn-small" data-open-dialog="${escapeHtml(e.contact)}">Открыть диалог</button>` : ""}
+        ${
+          e.draft
+            ? `<div class="hr-draft" data-draft-code="${escapeHtml(e.draft.code)}">
+                <div class="muted small">${e.draft.kind === "follow_up" ? "Напоминание" : "Черновик ответа"} · код ${escapeHtml(e.draft.code)}</div>
+                <textarea rows="3" aria-label="Текст черновика">${escapeHtml(e.draft.text)}</textarea>
+                <button type="button" class="btn btn-primary btn-small" data-draft-send>Отправить</button>
+                <button type="button" class="btn btn-ghost btn-small" data-draft-skip>Пропустить</button>
+              </div>`
+            : ""
+        }
+      </td>
+      <td>${stageSelectHtml({ ...e, effective_stage: e.stage })}</td>
     </tr>`
     )
     .join("");
+  tbody.querySelectorAll("[data-draft-code]").forEach((box) => {
+    const code = box.dataset.draftCode;
+    box.querySelector("[data-draft-send]").addEventListener("click", async () => {
+      try {
+        const res = await api(`/api/hr-drafts/${code}/send`, {
+          method: "POST",
+          body: JSON.stringify({ text: box.querySelector("textarea").value }),
+        });
+        showToast(res.message, "success");
+        box.remove();
+      } catch (err) {
+        showToast(err.message, "error");
+      }
+    });
+    box.querySelector("[data-draft-skip]").addEventListener("click", async () => {
+      await api(`/api/hr-drafts/${code}/skip`, { method: "POST" });
+      box.remove();
+    });
+  });
+  tbody.querySelectorAll("[data-open-dialog]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      switchTab("telegram");
+      openTelegramConversation(btn.dataset.openDialog);
+    });
+  });
+  bindStageSelects(tbody);
   observeReveal(tbody);
 }
 
@@ -1659,6 +1819,49 @@ function closeResumeAuditModal() {
 
 function isResumeAuditModalOpen() {
   return document.getElementById("resume-audit-overlay").style.display !== "none";
+}
+
+// Настройки → Компании: целевые компании модуля «Прямой поиск».
+async function loadDirectCompanies() {
+  const list = document.getElementById("direct-companies");
+  const companies = await api("/api/direct/companies");
+  list.innerHTML = companies.length
+    ? companies
+        .map(
+          (c) => `
+      <div class="company-row">
+        <span><strong>${escapeHtml(c.name)}</strong> <span class="muted small">${escapeHtml(c.ats)} / ${escapeHtml(c.slug)}</span></span>
+        <button type="button" class="btn btn-ghost btn-small" data-company-delete="${escapeHtml(c.slug)}">Удалить</button>
+      </div>`
+        )
+        .join("")
+    : emptyStateHtml("Пока нет компаний — добавьте сайт компании выше.");
+  list.querySelectorAll("[data-company-delete]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      await api(`/api/direct/companies/${encodeURIComponent(btn.dataset.companyDelete)}`, { method: "DELETE" });
+      loadDirectCompanies();
+    });
+  });
+}
+
+async function addDirectCompany() {
+  const status = document.getElementById("direct-company-status");
+  const website = document.getElementById("direct-company-website").value.trim();
+  const name = document.getElementById("direct-company-name").value.trim();
+  if (!website) return;
+  status.textContent = "Ищу систему найма на сайте…";
+  try {
+    const c = await api("/api/direct/companies", {
+      method: "POST",
+      body: JSON.stringify({ website, name }),
+    });
+    status.textContent = `✓ ${c.name}: ${c.ats}, открытых вакансий ${c.jobs}`;
+    document.getElementById("direct-company-website").value = "";
+    document.getElementById("direct-company-name").value = "";
+    loadDirectCompanies();
+  } catch (err) {
+    status.textContent = err.message.replace(/^\d+: /, "");
+  }
 }
 
 function switchSettingsTab(paneId) {
@@ -2103,6 +2306,156 @@ function isPlatformDrawerOpen() {
   return document.getElementById("platform-drawer-overlay").style.display !== "none";
 }
 
+function showOverlay(id) {
+  const overlay = document.getElementById(id);
+  overlay.style.display = "flex";
+  trapFocus(overlay);
+}
+
+function hideOverlay(overlay) {
+  overlay.style.display = "none";
+  releaseFocusTrap(overlay);
+}
+
+// .ics собирается на сервере по введённому времени — ссылка на скачивание
+// обновляется при каждом изменении полей.
+function openCalendarOverlay(e) {
+  document.getElementById("calendar-meta").textContent = `${e.company} — ${e.title}`;
+  const start = document.getElementById("calendar-start");
+  const duration = document.getElementById("calendar-duration");
+  const link = document.getElementById("calendar-download");
+  const update = () => {
+    const params = new URLSearchParams({
+      source: e.source,
+      external_id: e.external_id,
+      start: start.value,
+      duration: duration.value || "60",
+    });
+    link.href = start.value ? `/api/applications/ics?${params}` : "#";
+    link.classList.toggle("disabled", !start.value);
+  };
+  start.oninput = update;
+  duration.oninput = update;
+  update();
+  showOverlay("calendar-overlay");
+  start.focus();
+}
+
+let trainer = null;
+
+async function openTrainer(e) {
+  trainer = { entry: e, questions: [], index: 0 };
+  document.getElementById("trainer-title").textContent = `Тренажёр: ${e.company} — ${e.title}`;
+  document.getElementById("trainer-question").textContent = "Готовлю вопросы…";
+  document.getElementById("trainer-progress").textContent = "";
+  document.getElementById("trainer-answer").value = "";
+  document.getElementById("trainer-feedback").textContent = "";
+  showOverlay("trainer-overlay");
+  try {
+    const { questions } = await api("/api/interview/questions", {
+      method: "POST",
+      body: JSON.stringify({ source: e.source, external_id: e.external_id }),
+    });
+    trainer.questions = questions;
+    showTrainerQuestion();
+  } catch (err) {
+    document.getElementById("trainer-question").textContent = err.message;
+  }
+}
+
+function showTrainerQuestion() {
+  const { questions, index } = trainer;
+  document.getElementById("trainer-progress").textContent = `Вопрос ${index + 1} из ${questions.length}`;
+  document.getElementById("trainer-question").textContent = questions[index];
+  document.getElementById("trainer-answer").value = "";
+  document.getElementById("trainer-feedback").textContent = "";
+  document.getElementById("trainer-answer").focus();
+}
+
+async function checkTrainerAnswer() {
+  const btn = document.getElementById("trainer-check");
+  const feedback = document.getElementById("trainer-feedback");
+  btn.disabled = true;
+  feedback.textContent = "Оцениваю…";
+  try {
+    const res = await api("/api/interview/feedback", {
+      method: "POST",
+      body: JSON.stringify({
+        source: trainer.entry.source,
+        external_id: trainer.entry.external_id,
+        question: trainer.questions[trainer.index],
+        answer: document.getElementById("trainer-answer").value,
+      }),
+    });
+    feedback.textContent = res.feedback.replace(/\*\*/g, "");
+  } catch (err) {
+    feedback.textContent = err.message.replace(/^\d+: /, "");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function openTextModal(title, meta, body) {
+  document.getElementById("cover-letter-title").textContent = title;
+  document.getElementById("cover-letter-meta").textContent = meta;
+  document.getElementById("cover-letter-body").textContent = body;
+  const overlay = document.getElementById("cover-letter-overlay");
+  overlay.style.display = "flex";
+  trapFocus(overlay);
+}
+
+async function renderOffers() {
+  const el = document.getElementById("offers");
+  const offers = await api("/api/offers");
+  const fmt = (n) => n.toLocaleString("ru-RU");
+  el.innerHTML = offers.length
+    ? `<table>
+        <thead><tr><th>Компания</th><th>В месяц</th><th>К рынку</th><th>Удалённо</th><th>Заметки</th><th></th></tr></thead>
+        <tbody>${offers
+          .map(
+            (o) => `<tr>
+              <td>${escapeHtml(o.company)}</td>
+              <td>${fmt(o.amount)} ${escapeHtml(o.currency)}</td>
+              <td>${o.vs_market === null ? "—" : `${o.vs_market > 0 ? "+" : ""}${o.vs_market}%`}</td>
+              <td>${o.remote ? "да" : "нет"}</td>
+              <td>${escapeHtml(o.notes || "")}</td>
+              <td><button type="button" class="btn btn-ghost btn-small" data-offer-delete="${escapeHtml(o.id)}">Удалить</button></td>
+            </tr>`
+          )
+          .join("")}</tbody>
+      </table>`
+    : emptyStateHtml("Офферов пока нет — добавьте, когда появятся.");
+  el.querySelectorAll("[data-offer-delete]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      await api(`/api/offers/${btn.dataset.offerDelete}`, { method: "DELETE" });
+      renderOffers();
+    });
+  });
+}
+
+async function addOffer() {
+  const company = document.getElementById("offer-company").value.trim();
+  const amount = parseInt(document.getElementById("offer-amount").value, 10);
+  if (!company || !amount) {
+    showToast("Укажите компанию и сумму", "error");
+    return;
+  }
+  await api("/api/offers", {
+    method: "POST",
+    body: JSON.stringify({
+      company,
+      amount,
+      currency: document.getElementById("offer-currency").value,
+      remote: document.getElementById("offer-remote").checked,
+      notes: document.getElementById("offer-notes").value.trim(),
+    }),
+  });
+  ["offer-company", "offer-amount", "offer-notes"].forEach((id) => {
+    document.getElementById(id).value = "";
+  });
+  renderOffers();
+}
+
 function openCoverLetterModal(entry) {
   document.getElementById("cover-letter-title").textContent =
     `${entry.company} — ${entry.title}`;
@@ -2415,6 +2768,63 @@ function initHistoryViewToggle() {
 // 13 недель x 7 дней, как в GitHub contributions — считаем прямо на
 // клиенте по уже существующему /api/applications, отдельного
 // backend-эндпоинта для этого заводить незачем.
+// Воронка — один ряд величин по этапам: горизонтальные полосы одного
+// цвета (--accent), число подписано у каждой полосы, ширина — доля от
+// числа реальных откликов; подсказка при наведении — title.
+function renderFunnel(funnel) {
+  const el = document.getElementById("funnel");
+  if (!funnel.applied) {
+    el.innerHTML = emptyStateHtml("Пока нет реальных откликов.");
+    return;
+  }
+  const rows = [["applied", "Отклики"], ...Object.entries(STAGE_LABELS).map(([k, v]) => [k, v[0].toUpperCase() + v.slice(1)])];
+  el.innerHTML = rows
+    .map(([key, label]) => {
+      const value = funnel[key] ?? 0;
+      const pct = (value / funnel.applied) * 100;
+      const share = key === "applied" ? "" : ` · ${pct.toFixed(1)}%`;
+      return `
+      <div class="funnel-row" title="${label}: ${value}${share}">
+        <span class="funnel-label">${label}</span>
+        <span class="funnel-track"><span class="funnel-bar" style="width:${Math.max(pct, value ? 1 : 0)}%"></span></span>
+        <span class="funnel-value">${value}<span class="muted small">${share}</span></span>
+      </div>`;
+    })
+    .join("");
+}
+
+// Спрос на навыки — тот же вид, что воронка (одна величина, один цвет),
+// плюс отметка "есть в резюме"; зарплаты — таблица по валютам.
+function renderMarket(market) {
+  const skillsEl = document.getElementById("skill-demand");
+  skillsEl.innerHTML = market.skills.length
+    ? market.skills
+        .map(
+          (s) => `
+      <div class="funnel-row" title="${escapeHtml(s.skill)}: ${s.count} вакансий, ${s.share}%${s.in_resume ? "" : " — нет в резюме"}">
+        <span class="funnel-label">${escapeHtml(s.skill)}</span>
+        <span class="funnel-track"><span class="funnel-bar" style="width:${s.share}%"></span></span>
+        <span class="funnel-value">${s.share}% ${s.in_resume ? "✓" : "✗"}</span>
+      </div>`
+        )
+        .join("")
+    : emptyStateHtml("Появится после новых откликов — навыки извлекаются из текста вакансий с этого обновления.");
+
+  const fmt = (n) => n.toLocaleString("ru-RU");
+  const salaryEl = document.getElementById("salary-stats");
+  salaryEl.innerHTML = market.salaries.length
+    ? `<table>
+        <thead><tr><th>Валюта</th><th>Вакансий</th><th>Медиана «от»</th><th>Медиана «до»</th></tr></thead>
+        <tbody>${market.salaries
+          .map(
+            (r) =>
+              `<tr><td>${escapeHtml(r.currency)}</td><td>${r.count}</td><td>${fmt(r.median_min)}</td><td>${fmt(r.median_max)}</td></tr>`
+          )
+          .join("")}</tbody>
+      </table>`
+    : emptyStateHtml("Пока нет вакансий с указанной зарплатой.");
+}
+
 async function renderActivityHeatmap() {
   const el = document.getElementById("activity-heatmap");
   if (!el) return;
@@ -3595,4 +4005,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   document.getElementById("app-shell").style.display = "";
   initDashboard();
+  document
+    .getElementById("direct-company-add")
+    .addEventListener("click", addDirectCompany);
+  document.getElementById("offer-add").addEventListener("click", addOffer);
+  document.getElementById("trainer-check").addEventListener("click", checkTrainerAnswer);
+  document.getElementById("trainer-next").addEventListener("click", () => {
+    if (!trainer || !trainer.questions.length) return;
+    trainer.index = (trainer.index + 1) % trainer.questions.length;
+    showTrainerQuestion();
+  });
+  document.querySelectorAll("[data-close-overlay]").forEach((btn) => {
+    btn.addEventListener("click", () => hideOverlay(btn.closest(".command-overlay")));
+  });
+  document
+    .querySelector('[data-settings-tab="settings-companies"]')
+    .addEventListener("click", loadDirectCompanies);
 });

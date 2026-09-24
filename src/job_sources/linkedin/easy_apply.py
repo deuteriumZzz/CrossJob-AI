@@ -54,11 +54,16 @@ def run_easy_apply(
     cover_letter: str,
     llm_api_key: str,
     dry_run: bool,
-) -> bool:
+) -> tuple[bool, str]:
     """Проводит кандидата через многошаговую форму Easy Apply. Возвращает
-    True, если отклик отправлен (или был бы отправлен, в dry-run режиме);
-    False — если форма упёрлась в то, что нельзя безопасно обработать:
-    вакансия пропускается, а не обрабатывается наугад.
+    (True, "") если отклик отправлен (или был бы отправлен, в dry-run
+    режиме); (False, reason) — если форма упёрлась в то, что нельзя
+    безопасно обработать: вакансия пропускается, а не обрабатывается
+    наугад. reason разделяет "closed" (вакансию закрыли между поиском
+    и откликом — нормальный race condition, не баг) от "no_button"/
+    "stuck"/"exceeded_steps" (форма действительно не прошла) — вызывающий
+    код в main.py пишет их в applied_log разными статусами, чтобы
+    закрытые вакансии не раздували метрику реальных сломанных форм.
 
     ponytail: раньше вопросы разбирались жёстко прописанными паттернами
     (componentkey, конкретные атрибуты) — LinkedIn поменял разметку
@@ -97,9 +102,9 @@ def run_easy_apply(
             logger.info(
                 f"{job.link} is no longer accepting applications, skipping."
             )
-        else:
-            logger.warning(f"No Easy Apply button on {job.link}, skipping.")
-        return False
+            return False, "closed"
+        logger.warning(f"No Easy Apply button on {job.link}, skipping.")
+        return False, "no_button"
     time.sleep(2)
 
     fields: list = []
@@ -142,7 +147,7 @@ def run_easy_apply(
                 _dismiss(driver)
             else:
                 time.sleep(1)
-            return True
+            return True, ""
 
         if not _click(driver, NEXT_OR_REVIEW_XPATH):
             logger.warning(
@@ -151,7 +156,7 @@ def run_easy_apply(
                 f"{[(f.kind, f.text) for f in fields]}"
             )
             _dismiss(driver)
-            return False
+            return False, "stuck"
         # ponytail: 1.5с изначально — недостаточно, живой прогон
         # несколько раз подряд зависал на шаге "Resume" сразу после
         # перехода; похоже на гонку между переходом шага и следующей
@@ -164,7 +169,7 @@ def run_easy_apply(
         f"Fields on last step: {[(f.kind, f.text) for f in fields]}"
     )
     _dismiss(driver)
-    return False
+    return False, "exceeded_steps"
 
 
 def _click(driver, xpath: str) -> bool:

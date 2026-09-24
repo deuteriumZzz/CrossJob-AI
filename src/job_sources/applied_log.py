@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -8,12 +9,60 @@ from typing import Callable, Literal
 
 from src.job import Job
 from src.job_sources.html_report import render_applications_html
+from src.job_sources.market_stats import extract_skills, remote_region
 from src.utils.file_lock import state_file_lock
 
 Status = Literal[
-    "applied", "dry_run", "skipped_low_fit", "skipped_easy_apply_failed"
+    "applied",
+    "dry_run",
+    "skipped_low_fit",
+    "skipped_easy_apply_failed",
+    "skipped_closed_posting",
 ]
 Period = Literal["day", "week", "month"]
+
+# Организационно-правовые формы, из-за которых одна компания на разных
+# площадках пишется по-разному ("ООО Яндекс" / "Яндекс", "Acme Inc." /
+# "Acme").
+_LEGAL_FORMS_RE = re.compile(
+    r"\b(ооо|оао|зао|пао|ао|ип|llc|inc|ltd|gmbh|corp|co|plc|bv|ag|sa)\b"
+)
+_NON_WORD_RE = re.compile(r"[\W_]+")
+
+
+Stage = Literal["replied", "interview", "test_task", "offer", "rejected"]
+STAGES: tuple[Stage, ...] = (
+    "replied",
+    "interview",
+    "test_task",
+    "offer",
+    "rejected",
+)
+
+# Статусы переговоров hh (last_known_state), которые означают не ответ
+# работодателя, а просто движение отклика по воронке самой площадки.
+_NO_REPLY_STATES = ("не просмотрен", "просмотрен", "отклик", "не найден")
+
+
+def effective_stage(entry: dict) -> Stage | None:
+    """Этап заявки: ручная/автоматическая отметка (stage) важнее, иначе
+    выводится из статуса переговоров hh. ponytail: разбор по ключевым
+    словам статуса — если hh переименует статусы, добавить слова сюда."""
+    if entry.get("stage"):
+        return entry["stage"]
+    state = (entry.get("last_known_state") or "").casefold()
+    if not state or any(state.startswith(s) for s in _NO_REPLY_STATES):
+        return None
+    if "отказ" in state:
+        return "rejected"
+    if "приглаш" in state or "интервью" in state or "собесед" in state:
+        return "interview"
+    return "replied"
+
+
+def _normalize(text: str) -> str:
+    text = _LEGAL_FORMS_RE.sub(" ", text.casefold())
+    return _NON_WORD_RE.sub(" ", text).strip()
 
 
 class AppliedLog:
@@ -55,11 +104,29 @@ class AppliedLog:
             )
 
     def already_applied(self, job: Job) -> bool:
+        """Та же вакансия на этой площадке (любой статус) — или та же
+        компания+должность, на которую уже реально откликнулись с
+        другой площадки: одна вакансия часто висит и на hh, и на Хабре,
+        и на LinkedIn, и без этой проверки получала бы отклик с каждой.
+        Вакансии без названия компании (посты Telegram) по второму
+        правилу не сверяются — пустая компания совпала бы со всеми.
+        ponytail: точное совпадение после нормализации; разные
+        формулировки одной должности ("Python Dev" / "Python
+        Developer") не ловятся — нечёткое сравнение, если понадобится."""
         key = self._key(job)
-        return any(
-            (e["source"], e["external_id"]) == key
-            for e in self._data["applications"]
-        )
+        company = _normalize(job.company)
+        role = _normalize(job.role)
+        for e in self._data["applications"]:
+            if (e["source"], e["external_id"]) == key:
+                return True
+            if (
+                company
+                and e["status"] == "applied"
+                and _normalize(e["company"]) == company
+                and _normalize(e["title"]) == role
+            ):
+                return True
+        return False
 
     def already_applied_to_company(self, job: Job) -> bool:
         """Только реальные (не dry-run) отклики — используется для
@@ -163,11 +230,71 @@ class AppliedLog:
                     if entry.get("last_known_state") == state:
                         return
                     entry["last_known_state"] = state
+                    entry["state_at"] = (
+                        datetime.now().astimezone().isoformat()
+                    )
                     changed = True
                     return
 
         self._write_locked(_mutate)
         return changed
+
+    def set_stage(
+        self, source: str, external_id: str, stage: Stage | None
+    ) -> bool:
+        """Ручная (из дашборда) или автоматическая (по ответу HR)
+        отметка этапа после отклика. None снимает ручную отметку —
+        дальше этап снова выводится из last_known_state
+        (effective_stage). False — такой заявки нет."""
+        found = False
+
+        def _mutate(data: dict) -> None:
+            nonlocal found
+            for entry in data["applications"]:
+                if (
+                    entry["source"] == source
+                    and entry["external_id"] == external_id
+                ):
+                    found = True
+                    if stage is None:
+                        entry.pop("stage", None)
+                        entry.pop("stage_at", None)
+                    else:
+                        entry["stage"] = stage
+                        entry["stage_at"] = (
+                            datetime.now().astimezone().isoformat()
+                        )
+                    return
+
+        self._write_locked(_mutate)
+        return found
+
+    def update_fields(self, source: str, external_id: str, **fields) -> None:
+        """Служебные поля заявки (письмо HR: outreach_email,
+        outreach_sent_at, outreach_message_id, email_replied…)."""
+
+        def _mutate(data: dict) -> None:
+            for entry in data["applications"]:
+                if (
+                    entry["source"] == source
+                    and entry["external_id"] == external_id
+                ):
+                    entry.update(fields)
+                    return
+
+        self._write_locked(_mutate)
+
+    def funnel(self) -> dict[str, int]:
+        """Воронка после отклика: сколько реальных откликов дошло до
+        каждого этапа (по effective_stage)."""
+        applied = [
+            e for e in self._data["applications"] if e["status"] == "applied"
+        ]
+        counts = Counter(effective_stage(e) for e in applied)
+        return {
+            "applied": len(applied),
+            **{stage: counts.get(stage, 0) for stage in STAGES},
+        }
 
     def count_in_period(
         self, period: Period, source: str | None = None
@@ -200,6 +327,7 @@ class AppliedLog:
         status: Status,
         score: int,
         gaps: list[str],
+        contacts: list[str] | None = None,
     ) -> None:
         entry = {
             "source": job.source,
@@ -215,7 +343,16 @@ class AppliedLog:
             "score": score,
             "gaps": gaps,
             "applied_at": datetime.now().astimezone().isoformat(),
+            # Для аналитики "спрос на навыки" и метки региона —
+            # описание вакансии целиком в журнал не пишется.
+            "skills": extract_skills(job.description),
+            "remote_region": remote_region(
+                f"{job.location}\n{job.description}"
+            ),
         }
+        if contacts:
+            # Контакты HR, найденные в самой вакансии (email и т.п.).
+            entry["contacts"] = contacts
 
         def _mutate(data: dict) -> None:
             data["applications"].append(entry)

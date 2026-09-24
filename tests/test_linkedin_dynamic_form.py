@@ -521,3 +521,14 @@ if __name__ == "__main__":
     test_apply_answers_clicks_matching_radio()
     test_apply_answers_skips_field_with_no_answer()
     print("All tests passed.")
+
+
+def test_coerce_years_answer_makes_experience_answers_whole_numbers():
+    from src.job_sources.linkedin.dynamic_form import _coerce_years_answer
+
+    q = "How many years of work experience do you have with Python?"
+    assert _coerce_years_answer(q, "1.5") == "1"
+    assert _coerce_years_answer(q, "3 years") == "3"
+    assert _coerce_years_answer(q, "0") == "0"
+    other = "What is your expected salary?"
+    assert _coerce_years_answer(other, "1.5") == "1.5"

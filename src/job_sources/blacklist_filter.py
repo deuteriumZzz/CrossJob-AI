@@ -1,4 +1,5 @@
 from src.job import Job
+from src.job_sources.market_stats import remote_region
 from src.job_sources.preferences import effective_list
 
 # ponytail: подстрочный маркер "удал" вместо точного списка меток —
@@ -24,6 +25,14 @@ def passes_blacklists(job: Job, preferences: dict) -> bool:
     if matches_any(job.role, preferences.get("title_blacklist", [])):
         return False
     if matches_any(job.location, preferences.get("location_blacklist", [])):
+        return False
+    # Удалёнка "только из США" и т.п. — по умолчанию отсекается us_only,
+    # иначе отклики уходят туда, где кандидата не возьмут по географии.
+    # excluded_remote_regions: [] — ничего не отсекать.
+    excluded = preferences.get("excluded_remote_regions", ["us_only"])
+    if excluded and remote_region(
+        f"{job.location}\n{job.description}"
+    ) in excluded:
         return False
 
     # locations — общий allowlist для площадок, которые ищут широко

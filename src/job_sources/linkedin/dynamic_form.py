@@ -177,6 +177,27 @@ def _field_max_length(field) -> Optional[int]:
     return None
 
 
+_YEARS_QUESTION_RE = re.compile(
+    r"how many years|years of (work )?experience|number of years",
+    re.IGNORECASE,
+)
+_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
+
+
+def _coerce_years_answer(question: str, answer: str) -> str:
+    """Подтверждено живьём 2026-09-19: LLM вписывал "1.5" в поле "How many
+    years of work experience…" — LinkedIn принимает только целое ("Invalid
+    input"), "Next" не проходил, а уже заполненное поле повторно не
+    скрейпится, и форма крутилась до лимита шагов (exceeded_steps). Целое
+    отбрасывает дробную часть (округление вниз — честнее вверх)."""
+    if not _YEARS_QUESTION_RE.search(question):
+        return answer
+    match = _NUMBER_RE.search(answer)
+    if not match:
+        return answer
+    return str(int(float(match.group().replace(",", "."))))
+
+
 def _fill_text_field(driver, field, value: str) -> None:
     """ponytail: некоторые текстовые поля (например "Location (city)")
     на деле автокомплит — LinkedIn считает поле пустым/невалидным, пока
@@ -439,7 +460,9 @@ def draft_answers(
             "fields, pick exactly one option from the given list, written "
             "exactly as shown — never invent a new option. For text "
             "fields, respect any character limit shown — be extremely "
-            "brief when a limit is given. If a field asks for a cover "
+            "brief when a limit is given. For 'how many years of "
+            "experience' questions answer with a single whole number "
+            "(digits only, no decimals, no words). If a field asks for a cover "
             "letter, a motivation statement, or 'why are you interested "
             "in this role' — reuse the pre-written cover letter below "
             "(trimmed to fit any limit) instead of writing a new one.\n\n"
@@ -535,6 +558,10 @@ def apply_answers(
             if not answer.text_answer:
                 continue
             try:
-                _fill_text_field(driver, f.element, answer.text_answer)
+                _fill_text_field(
+                    driver,
+                    f.element,
+                    _coerce_years_answer(f.text, answer.text_answer),
+                )
             except Exception as e:
                 logger.debug(f"apply_answers text fill failed: {e}")

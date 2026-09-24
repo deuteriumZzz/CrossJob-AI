@@ -80,6 +80,16 @@ def init_linkedin_browser(profile_dir: Path) -> uc.Chrome:
         # ever balloons again, as a backstop regardless of root cause.
         options.add_argument("--no-first-run")
         options.add_argument("--no-default-browser-check")
+        # ponytail: подтверждено живьём 2026-09-19 — без закрепления языка
+        # LinkedIn то отдаёт русский UI ("Простая подача заявки"), то
+        # английский; все XPath кнопок в easy_apply.py матчатся по
+        # английскому тексту (Easy Apply/Next/Review/Submit application),
+        # поэтому на русском UI кнопок "нет" и вакансия уходит в скип
+        # (no_button/stuck/exceeded_steps — по-разному от запуска к запуску).
+        options.add_argument("--lang=en-US")
+        options.add_experimental_option(
+            "prefs", {"intl.accept_languages": "en-US,en"}
+        )
         return uc.Chrome(options=options, version_main=version_main)
 
     return launch_chrome_with_retry(_build, profile_dir)

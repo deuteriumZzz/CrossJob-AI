@@ -1,10 +1,13 @@
 import base64
 import binascii
+import json
+from urllib.parse import urlparse
 import re
 import shutil
 import sys
 import threading
 import time
+from collections import Counter
 import traceback
 from contextlib import nullcontext
 from datetime import datetime, timedelta
@@ -27,7 +30,7 @@ from config import (
 )
 from src.config_patch import set_source_field, set_top_level_field
 from src.job import Job
-from src.job_sources.applied_log import AppliedLog
+from src.job_sources.applied_log import AppliedLog, effective_stage
 from src.job_sources.apply_pacing import (
     randomized_daily_limit,
     wait_before_apply,
@@ -49,11 +52,32 @@ from src.job_sources.geekjob.source import GeekjobSource
 from src.job_sources.getmatch.auth import GetMatchSession
 from src.job_sources.getmatch.client import GetMatchClient
 from src.job_sources.getmatch.source import GetMatchSource
+from src.direct.companies import all_companies
+from src.direct.contacts import extract_emails, hunter_hr_contacts
+from src.direct.email_channel import build_message, send_email, senders_replied
+from src.direct.form_fill import prefill_application
+from src.direct.source import DirectSource
 from src.job_sources.github_context import fetch_github_summary
+from src.job_sources.interview_calendar import build_ics, extract_interview_time
+from src.job_sources.interview_prep import generate_interview_prep
+from src.job_sources.telegram_notify import send_document_from_secrets
+from src.job_sources.hr_replies import (
+    CATEGORY_LABELS,
+    CATEGORY_STAGE,
+    FOLLOW_UP_TEXT,
+    DraftStore,
+    build_digest,
+    classify_reply,
+    due_follow_ups,
+    format_draft_notification,
+)
 from src.job_sources.habr_career.auth import HabrCareerSession
 from src.job_sources.habr_career.client import HabrCareerClient
 from src.job_sources.habr_career.source import HabrCareerSource
 from src.job_sources.headhunter.browser_client import HeadHunterBrowserClient
+from src.job_sources.headhunter.browser_negotiation_states import (
+    list_negotiation_states,
+)
 from src.job_sources.headhunter.browser_negotiations import (
     list_withdrawable_negotiations,
     withdraw_negotiation,
@@ -1195,17 +1219,28 @@ def search_and_apply_headhunter(
         # HeadHunterBrowserClient.bump_resume про непроверенный селектор.
         # Best-effort: сбой поднятия резюме не должен останавливать поиск
         # и отклики ниже.
-        if hh_preferences.get("auto_bump_resume") and hh_preferences.get(
-            "resume_id"
-        ):
+        # Без resume_id поднимаем все резюме аккаунта — раньше пустой
+        # resume_id (значение по умолчанию) молча отключал поднятие.
+        if hh_preferences.get("auto_bump_resume"):
             try:
-                bumped = client.bump_resume(hh_preferences["resume_id"])
-                logger.info(
-                    "Резюме поднято в поиске HH."
-                    if bumped
-                    else "Поднять резюме пока нельзя (недавно уже поднимали) "
-                    "или кнопка не найдена."
+                resume_ids = (
+                    [hh_preferences["resume_id"]]
+                    if hh_preferences.get("resume_id")
+                    else client.resume_ids()
                 )
+                if not resume_ids:
+                    logger.warning(
+                        "auto_bump_resume: не нашли ни одного резюме на "
+                        "hh.ru/applicant/resumes — поднимать нечего."
+                    )
+                for resume_id in resume_ids:
+                    bumped = client.bump_resume(resume_id)
+                    logger.info(
+                        f"Резюме {resume_id[:8]}… поднято в поиске HH."
+                        if bumped
+                        else f"Резюме {resume_id[:8]}…: поднять пока нельзя "
+                        "(недавно уже поднимали) или кнопка не найдена."
+                    )
             except Exception as e:
                 logger.warning(f"Не удалось поднять резюме на HH: {e}")
 
@@ -2094,7 +2129,7 @@ def search_and_apply_linkedin(
                 # все следующие вакансии в этом заходе просто не
                 # обрабатывались. Одна сломанная форма не должна ронять
                 # весь прогон.
-                submitted = run_easy_apply(
+                submitted, skip_reason = run_easy_apply(
                     session.driver,
                     job,
                     resume_pdf_path,
@@ -2123,11 +2158,22 @@ def search_and_apply_linkedin(
                 # поле, зависший Easy Apply и т.п.) пыталась бы
                 # откликаться заново на каждом плановом прогоне —
                 # already_applied() смотрит именно в applied_log.
+                # "closed" (вакансию закрыли между поиском и откликом)
+                # пишется отдельным статусом от реальных сломанных
+                # форм — иначе нормальный race condition неотличим в
+                # дашборде/логах от бага разбора формы.
+                status_reason: Literal[
+                    "skipped_easy_apply_failed", "skipped_closed_posting"
+                ] = (
+                    "skipped_closed_posting"
+                    if skip_reason == "closed"
+                    else "skipped_easy_apply_failed"
+                )
                 applied_log.record(
                     job,
                     "",
                     "",
-                    "skipped_easy_apply_failed",
+                    status_reason,
                     fit.score,
                     fit.gaps,
                 )
@@ -2164,9 +2210,12 @@ def search_and_apply_habr_career(
     habr_career.auto_apply выставлен в true, кликает
     "Откликнуться" — для вошедшего пользователя это мгновенная отправка
     одним кликом (подтверждено на живом аккаунте 2026-08-28, см.
-    docstring HabrCareerClient.apply), без формы и без сопроводительного
-    письма — cover_letter ниже только пишется в историю (applied_log),
-    как и у LinkedIn.
+    docstring HabrCareerClient.apply). Сопроводительное письмо в саму
+    форму отклика не входит, но сразу после отправки дописывается
+    отдельным шагом через "Посмотреть отклик" → "Редактировать" (см.
+    HabrCareerClient._attach_cover_letter, подтверждено вживую
+    2026-09-18) — best-effort, неудача этого шага не отменяет уже
+    отправленный отклик.
 
     Официального API для личных ботов у Хабра нет (доступ — по ручному
     одобрению, не для этого сценария) — вход вручную в открывшемся
@@ -2297,7 +2346,7 @@ def search_and_apply_habr_career(
 
             if auto_apply:
                 try:
-                    applied = client.apply(job.link)
+                    applied = client.apply(job.link, cover_letter)
                 except Exception as e:
                     logger.exception(
                         f"habr.career apply form crashed for {job.role} at "
@@ -2752,6 +2801,197 @@ def search_and_apply_himalayas(
         session.quit()
 
 
+def search_direct(
+    parameters: dict,
+    llm_api_key: str,
+    stop_event: Optional[threading.Event] = None,
+):
+    """Модуль «Прямой поиск» (direct: в work_preferences.yaml): вакансии
+    с сайтов компаний (Greenhouse/Lever/Ashby/Workable), We Work
+    Remotely и HN «Who is hiring». Автоотклика через формы нет —
+    каждая подходящая вакансия записывается как "нужен ручной отклик"
+    с письмом и контактами из текста вакансии. Если direct.email_outreach
+    включён и в вакансии есть email — готовит письмо HR черновиком на
+    подтверждение ("отправить <код>" или кнопка во "Входящих")."""
+    config = parameters.get("direct") or {}
+    data_folder: Path = parameters["dataFolder"]
+    resume_pdf_path = data_folder / RESUME_PDF_LINKEDIN
+    if not resume_pdf_path.exists():
+        resume_pdf_path = data_folder / RESUME_PDF
+    if not resume_pdf_path.exists():
+        raise FileNotFoundError(f"Resume PDF not found in {data_folder}.")
+
+    output_folder: Path = parameters["outputFileDirectory"]
+    applied_log = AppliedLog(output_folder / "applied_log.json")
+    secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
+    hunter_key = secrets.get("hunter_api_key")
+    drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
+
+    jobs = DirectSource().search(
+        {**parameters, "direct": {**config, "companies": all_companies(parameters)}}
+    )
+    logger.info(f"Found {len(jobs)} matching direct vacancies.")
+    already_seen = sum(1 for job in jobs if applied_log.already_applied(job))
+    run_start = datetime.now().astimezone()
+    job_max_applications = _job_max_applications(parameters, "direct")
+    processed = 0
+    for job in jobs:
+        if stop_event is not None and stop_event.is_set():
+            break
+        if processed >= job_max_applications:
+            break
+        if applied_log.already_applied(job):
+            continue
+        fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+        tier = classify_fit(
+            fit.score,
+            _job_min_score(parameters),
+            _job_suitability_score(parameters),
+        )
+        if tier == "skip":
+            applied_log.record(
+                job, "", "", "skipped_low_fit", fit.score, fit.gaps
+            )
+            continue
+        try:
+            cover_letter = generate_cover_letter_for_job(
+                resume_pdf_path, job, llm_api_key, template="en_plain"
+            )
+        except Exception as e:
+            logger.exception(f"Cover letter failed for {job.link}: {e}")
+            continue
+
+        contacts = extract_emails(job.description)
+        domain = urlparse(job.company_url).netloc.removeprefix("www.")
+        if not contacts and hunter_key and domain:
+            try:
+                contacts = [
+                    c["email"] for c in hunter_hr_contacts(domain, hunter_key)
+                ][:1]
+            except Exception as e:
+                logger.warning(f"Hunter: {domain}: {e}")
+
+        applied_log.record(
+            job, cover_letter, "", "dry_run", fit.score, fit.gaps,
+            contacts=contacts,
+        )
+        processed += 1
+        logger.info(
+            f"[manual apply needed] {job.role} at {job.company} ({job.link})"
+            + (f" — контакт: {contacts[0]}" if contacts else "")
+        )
+        if contacts and config.get("email_outreach"):
+            code = drafts.add(
+                contacts[0],
+                cover_letter,
+                "email",
+                job.link,
+                channel="email",
+                subject=f"{job.role} — отклик",
+            )
+            notify(
+                parameters,
+                f"✉️ {job.company} — {job.role}\nКому: {contacts[0]}\n"
+                f"«отправить {code}» — отправить письмо с резюме, "
+                f"«пропустить {code}» — нет. Текст можно поправить во "
+                "«Входящих».",
+            )
+
+    _log_funnel_summary("direct", applied_log, len(jobs), already_seen, run_start)
+
+
+# Окна с предзаполненной формой должны жить, пока человек дозаполняет
+# и отправляет — держим ссылки, иначе сборщик мусора закроет драйвер.
+_PREFILL_BROWSERS: list = []
+
+
+def prefill_direct_application(
+    parameters: dict, source: str, external_id: str
+) -> list[str]:
+    """Открывает окно Chrome с формой отклика на сайте компании и
+    заполняет стандартные поля, резюме и письмо (Greenhouse, Lever).
+    Вопросы компании и отправку делает человек — на отправке капча.
+    Возвращает заполненные поля."""
+    output_folder: Path = parameters["outputFileDirectory"]
+    entry = AppliedLog(
+        output_folder / "applied_log.json"
+    ).find_by_source_and_external_id(source, external_id)
+    if entry is None:
+        raise ValueError("Заявка не найдена")
+    resume_yaml = parameters.get("plainTextResumeFile") or (
+        parameters["dataFolder"] / PLAIN_TEXT_RESUME_YAML
+    )
+    person = (
+        yaml.safe_load(Path(resume_yaml).read_text(encoding="utf-8")) or {}
+    ).get("personal_information") or {}
+    resume_pdf = parameters["dataFolder"] / RESUME_PDF_LINKEDIN
+    if not resume_pdf.exists():
+        resume_pdf = parameters["dataFolder"] / RESUME_PDF
+    driver = init_browser(output_folder / ".chrome_profile_direct")
+    _PREFILL_BROWSERS.append(driver)
+    return prefill_application(
+        driver, entry["link"], person, resume_pdf, entry.get("cover_letter", "")
+    )
+
+
+def check_email_replies(parameters: dict, llm_api_key: str) -> None:
+    """Кто из HR, которым ушло письмо, ответил (IMAP, только чтение) —
+    этап "ответили" + уведомление. Кто молчит direct.follow_up_days
+    (по умолчанию 7) — одно напоминание в той же ветке черновиком."""
+    secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
+    credentials = secrets.get("email") or {}
+    if not credentials.get("address") or not credentials.get("app_password"):
+        return
+    output_folder: Path = parameters["outputFileDirectory"]
+    applied_log = AppliedLog(output_folder / "applied_log.json")
+    waiting = [
+        e
+        for e in applied_log.find_by_company("")
+        if e.get("outreach_email") and not e.get("email_replied")
+    ]
+    replied = senders_replied(
+        credentials, sorted({e["outreach_email"] for e in waiting})
+    )
+    days = int((parameters.get("direct") or {}).get("follow_up_days", 7))
+    drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
+    now = datetime.now().astimezone()
+    for e in waiting:
+        if e["outreach_email"] in replied:
+            applied_log.update_fields(
+                e["source"], e["external_id"], email_replied=True
+            )
+            if not e.get("stage"):
+                applied_log.set_stage(e["source"], e["external_id"], "replied")
+            notify(
+                parameters,
+                f"✉️ Ответ на письмо: {e['company']} — {e['title']} "
+                f"({e['outreach_email']}). Проверьте почту.",
+            )
+        elif (
+            days > 0
+            and not e.get("email_followed_up")
+            and now - datetime.fromisoformat(e["outreach_sent_at"])
+            >= timedelta(days=days)
+        ):
+            code = drafts.add(
+                e["outreach_email"],
+                FOLLOW_UP_TEXT,
+                "follow_up",
+                e["link"],
+                channel="email",
+                subject=f"Re: {e['title']} — отклик",
+                in_reply_to=e.get("outreach_message_id", ""),
+            )
+            applied_log.update_fields(
+                e["source"], e["external_id"], email_followed_up=True
+            )
+            notify(
+                parameters,
+                f"⏳ {e['company']} не ответили на письмо {days}+ дн. "
+                f"Напоминание: «отправить {code}» / «пропустить {code}».",
+            )
+
+
 ALL_SOURCES: list[Tuple[str, Callable[..., Any]]] = [
     ("headhunter", search_and_apply_headhunter),
     ("geekjob", search_geekjob),
@@ -2761,6 +3001,7 @@ ALL_SOURCES: list[Tuple[str, Callable[..., Any]]] = [
     ("habr_career", search_and_apply_habr_career),
     ("wellfound", search_and_apply_wellfound),
     ("himalayas", search_and_apply_himalayas),
+    ("direct", search_direct),
 ]
 
 
@@ -3278,26 +3519,86 @@ def check_headhunter_replies(parameters: dict, llm_api_key: str):
     статусов переговоров (viewed/invited/...) — это требует парсинга
     ещё и списка /applicant/negotiations поверх чатов, не запрошено
     явно и не проверено на живом аккаунте; добавить при необходимости.
-    Ничего не делает, если headhunter.auto_reply выключен (по
-    умолчанию) — не открывает браузер зря.
+    Статусы переговоров (просмотрен / приглашение / отказ) теперь
+    сверяются всегда — отдельно от auto_reply: без них "Входящие" и
+    воронка в дашборде пустые при сотнях реальных откликов.
     """
     hh_preferences = parameters.get("headhunter") or {}
-    if not hh_preferences.get("auto_reply"):
-        return
-
     output_folder: Path = parameters["outputFileDirectory"]
+    if is_still_blocked(output_folder, "headhunter"):
+        return
     profile_dir = output_folder / ".chrome_profile_headhunter"
     applied_log = AppliedLog(output_folder / "applied_log.json")
 
     driver = init_browser(profile_dir)
     try:
-        _answer_headhunter_messages(
-            parameters, driver, applied_log, llm_api_key
-        )
+        try:
+            _sync_headhunter_negotiation_states(
+                parameters, driver, applied_log, llm_api_key
+            )
+        except PlatformBlockedError as e:
+            logger.error(f"hh.ru appears to have blocked us: {e}")
+            mark_blocked(output_folder, "headhunter")
+            return
+        except Exception as e:
+            logger.warning(f"Не удалось сверить статусы откликов hh: {e}")
+        if hh_preferences.get("auto_reply"):
+            _answer_headhunter_messages(
+                parameters, driver, applied_log, llm_api_key
+            )
     finally:
         driver.quit()
 
-    _process_pending_form_approvals(parameters, llm_api_key)
+    if hh_preferences.get("auto_reply"):
+        _process_pending_form_approvals(parameters, llm_api_key)
+
+
+def _sync_headhunter_negotiation_states(
+    parameters: dict, driver, applied_log: AppliedLog, llm_api_key: str = ""
+) -> None:
+    """Пишет статус каждого отклика hh в applied_log (last_known_state)
+    и шлёт в Telegram только новые настоящие ответы — отказ,
+    приглашение и т.п., а не "просмотрен"."""
+    states = list_negotiation_states(driver)
+    entries = applied_log.entries_by_source_and_status("headhunter", "applied")
+    # Первая сверка подтягивает всю историю разом — вместо десятков
+    # уведомлений о давних ответах одна сводка в конце.
+    backfill = not any(e.get("last_known_state") for e in entries)
+    updated = 0
+    backfilled = Counter()
+    for entry in entries:
+        state = states.get(entry["external_id"])
+        if not state:
+            continue
+        if not applied_log.update_reply_state(
+            "headhunter", entry["external_id"], state
+        ):
+            continue
+        updated += 1
+        stage = effective_stage({"last_known_state": state})
+        if stage is None:
+            continue
+        if backfill:
+            backfilled[state] += 1
+        else:
+            notify(
+                parameters,
+                f"hh: {entry['company']} — {entry['title']}: {state}\n"
+                f"{entry['link']}",
+            )
+            if stage == "interview":
+                prepare_interview(parameters, llm_api_key, entry)
+    if backfilled:
+        summary = ", ".join(f"{s} — {n}" for s, n in backfilled.items())
+        notify(
+            parameters,
+            f"hh: подтянул статусы прошлых откликов ({summary}). "
+            "Дальше буду присылать только новые ответы.",
+        )
+    logger.info(
+        f"Статусы откликов hh: {len(states)} на площадке, "
+        f"обновлено {updated}."
+    )
 
 
 def _format_telegram_status(parameters: dict, applied_log: AppliedLog) -> str:
@@ -3337,6 +3638,7 @@ def check_telegram_commands(parameters: dict, llm_api_key: str) -> None:
         return
 
     output_folder: Path = parameters["outputFileDirectory"]
+    _maybe_send_daily_digest(parameters, bot_token, chat_id)
     try:
         commands = poll_control_commands(bot_token, chat_id, output_folder)
     except Exception as e:
@@ -3350,6 +3652,19 @@ def check_telegram_commands(parameters: dict, llm_api_key: str) -> None:
         action = cmd["action"]
         if action == "help":
             send_notification(bot_token, chat_id, _TELEGRAM_HELP_TEXT)
+        elif action == "send_draft":
+            send_notification(
+                bot_token, chat_id, send_hr_draft(parameters, cmd["code"])
+            )
+        elif action == "skip_draft":
+            drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
+            known = drafts.get(cmd["code"]) is not None
+            drafts.remove(cmd["code"])
+            send_notification(
+                bot_token,
+                chat_id,
+                "Пропущено." if known else f"Черновик {cmd['code']} не найден.",
+            )
         elif action == "status":
             send_notification(
                 bot_token,
@@ -3567,10 +3882,297 @@ def check_telegram_replies(parameters: dict, llm_api_key: str) -> None:
                 conversations.record_inbound(
                     contact, text, message.id, message.date
                 )
-                notify(
-                    parameters,
-                    f"Новый ответ в Telegram от @{contact}: {text}",
-                )
+                _react_to_hr_reply(parameters, llm_api_key, conv, text)
+
+    _draft_follow_ups(parameters, conversations)
+
+
+HR_DRAFTS_FILE = ".hr_reply_drafts.json"
+
+
+def _conversation_job(conv: dict, applied_log: AppliedLog) -> dict:
+    """Запись applied_log вакансии, по которой завязан диалог (по
+    ссылке на пост из первого исходящего сообщения), или {}."""
+    job_link = next(
+        (m.get("job_link") for m in conv["messages"] if m.get("job_link")),
+        "",
+    )
+    if not job_link:
+        return {}
+    return next(
+        (e for e in applied_log.find_by_company("") if e["link"] == job_link),
+        {"link": job_link},
+    )
+
+
+def _react_to_hr_reply(
+    parameters: dict, llm_api_key: str, conv: dict, text: str
+) -> None:
+    """Новый ответ HR в Telegram: разбирает его (интерес/вопрос/отказ),
+    ставит этап отклика и метку диалога, на вопрос готовит черновик
+    ответа на подтверждение. Без LLM-ключа или при сбое LLM — просто
+    уведомление, как раньше."""
+    contact = conv["contact"]
+    output_folder: Path = parameters["outputFileDirectory"]
+    applied_log = AppliedLog(output_folder / "applied_log.json")
+    job = _conversation_job(conv, applied_log)
+    company_title = " — ".join(
+        filter(None, [job.get("company"), job.get("title")])
+    )
+    try:
+        category = classify_reply(text, llm_api_key) if llm_api_key else "other"
+    except Exception as e:
+        logger.warning(f"Не удалось разобрать ответ @{contact}: {e}")
+        category = "other"
+
+    TelegramConversations(
+        output_folder / "telegram_conversations.json"
+    ).set_field(contact, "label", category)
+    stage = CATEGORY_STAGE[category]
+    if stage and job.get("external_id"):
+        applied_log.set_stage(job["source"], job["external_id"], stage)
+        if stage == "interview":
+            prepare_interview(parameters, llm_api_key, job)
+    if category == "interest" and llm_api_key:
+        _send_interview_invite(parameters, llm_api_key, job, text)
+
+    if category == "question" and llm_api_key:
+        try:
+            draft = generate_reply(
+                parameters["dataFolder"] / RESUME_PDF,
+                text,
+                job.get("title", ""),
+                job.get("company", ""),
+                build_preferences_summary(parameters),
+                llm_api_key,
+            )
+            code = DraftStore(output_folder / HR_DRAFTS_FILE).add(
+                contact, draft, "reply", job.get("link", "")
+            )
+            notify(
+                parameters,
+                format_draft_notification(
+                    contact, company_title, text, code, draft
+                ),
+            )
+            return
+        except Exception as e:
+            logger.warning(f"Не удалось подготовить ответ @{contact}: {e}")
+
+    where = f" ({company_title})" if company_title else ""
+    notify(
+        parameters,
+        f"{CATEGORY_LABELS[category]} — @{contact}{where}: {text}",
+    )
+
+
+def _send_interview_invite(
+    parameters: dict, llm_api_key: str, job: dict, text: str
+) -> None:
+    """Если HR назвал точные дату и время — .ics в Telegram-бот: одно
+    нажатие добавляет интервью в календарь (напоминание за 30 минут)."""
+    try:
+        start = extract_interview_time(text, llm_api_key)
+    except Exception as e:
+        logger.warning(f"Не удалось извлечь время интервью: {e}")
+        return
+    if start is None:
+        return
+    title = " — ".join(
+        filter(None, ["Интервью", job.get("company"), job.get("title")])
+    )
+    send_document_from_secrets(
+        parameters,
+        "interview.ics",
+        build_ics(start, title, text, job.get("link", "")).encode("utf-8"),
+        f"📅 {title}, {start.strftime('%d.%m %H:%M')} — нажмите, чтобы "
+        "добавить в календарь.",
+    )
+
+
+def prepare_interview(parameters: dict, llm_api_key: str, entry: dict) -> str:
+    """Справка к интервью по заявке: генерирует (или берёт уже готовую),
+    сохраняет в applied_log (interview_prep) и шлёт начало в Telegram.
+    Сбой LLM не мешает остальной обработке ответа — пустая строка."""
+    if entry.get("interview_prep"):
+        return entry["interview_prep"]
+    if not llm_api_key:
+        return ""
+    data_folder: Path = parameters["dataFolder"]
+    resume = data_folder / RESUME_PDF
+    try:
+        prep = generate_interview_prep(
+            resume,
+            entry.get("title", ""),
+            entry.get("company", ""),
+            entry.get("link", ""),
+            entry.get("gaps") or [],
+            llm_api_key,
+        )
+    except Exception as e:
+        logger.warning(f"Не удалось подготовить справку к интервью: {e}")
+        return ""
+    output_folder: Path = parameters["outputFileDirectory"]
+    AppliedLog(output_folder / "applied_log.json").update_fields(
+        entry["source"], entry["external_id"], interview_prep=prep
+    )
+    notify(
+        parameters,
+        f"🎯 Подготовка к интервью: {entry.get('company')} — "
+        f"{entry.get('title')}\n\n{prep[:1500]}"
+        + ("\n\n…полностью — в «Истории» в дашборде." if len(prep) > 1500 else ""),
+    )
+    return prep
+
+
+def _draft_follow_ups(
+    parameters: dict, conversations: TelegramConversations
+) -> None:
+    """Одно напоминание HR, который не ответил за
+    telegram.follow_up_days дней (по умолчанию 7, 0 — выключено), —
+    тоже только черновиком на подтверждение."""
+    days = int((parameters.get("telegram") or {}).get("follow_up_days", 7))
+    output_folder: Path = parameters["outputFileDirectory"]
+    drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
+    for conv in due_follow_ups(conversations.all(), days):
+        contact = conv["contact"]
+        job_link = next(
+            (m.get("job_link") for m in conv["messages"] if m.get("job_link")),
+            "",
+        )
+        code = drafts.add(contact, FOLLOW_UP_TEXT, "follow_up", job_link)
+        conversations.set_field(contact, "followed_up", True)
+        notify(
+            parameters,
+            f"⏳ @{contact} не отвечает {days}+ дн. Напоминание:\n"
+            f"{FOLLOW_UP_TEXT}\n\n«отправить {code}» / «пропустить {code}»",
+        )
+
+
+def send_hr_draft(parameters: dict, code: str, text: str = "") -> str:
+    """Отправляет подтверждённый черновик (из Telegram-команды или
+    дашборда); text — отредактированный текст, если правили. Возвращает
+    фразу для пользователя."""
+    output_folder: Path = parameters["outputFileDirectory"]
+    drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
+    draft = drafts.get(code)
+    if draft is None:
+        return f"Черновик {code} не найден (уже отправлен или пропущен)."
+    message = text.strip() or draft["text"]
+    secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
+    if draft.get("channel") == "email":
+        return _send_email_draft(parameters, secrets, drafts, code, draft, message)
+    tg_secrets = secrets.get("telegram") or {}
+    if not tg_secrets.get("api_id") or not tg_secrets.get("api_hash"):
+        return "Нет telegram.api_id/api_hash в secrets.yaml — не могу отправить."
+    try:
+        with TelegramSourceClient(
+            int(tg_secrets["api_id"]),
+            tg_secrets["api_hash"],
+            output_folder / ".telegram_session",
+        ) as client:
+            client.send_message(draft["contact"], message)
+    except Exception as e:
+        return f"Не удалось отправить @{draft['contact']}: {e}"
+    TelegramConversations(
+        output_folder / "telegram_conversations.json"
+    ).record_outbound(draft["contact"], message)
+    drafts.remove(code)
+    return f"Отправлено @{draft['contact']}."
+
+
+def _send_email_draft(
+    parameters: dict,
+    secrets: dict,
+    drafts: DraftStore,
+    code: str,
+    draft: dict,
+    message: str,
+) -> str:
+    credentials = secrets.get("email") or {}
+    if not credentials.get("address") or not credentials.get("app_password"):
+        return (
+            "Нет email.address/app_password в secrets.yaml — не могу "
+            "отправить письмо."
+        )
+    output_folder: Path = parameters["outputFileDirectory"]
+    applied_log = AppliedLog(output_folder / "applied_log.json")
+    limit = int((parameters.get("direct") or {}).get("email_daily_limit", 20))
+    today = datetime.now().astimezone().date()
+    entries = applied_log.find_by_company("")
+    sent_today = sum(
+        1
+        for e in entries
+        if e.get("outreach_sent_at")
+        and datetime.fromisoformat(e["outreach_sent_at"]).date() == today
+    )
+    if draft["kind"] != "follow_up" and sent_today >= limit:
+        return f"Дневной лимит писем ({limit}) исчерпан — отправлю завтра."
+    resume = parameters["dataFolder"] / RESUME_PDF_LINKEDIN
+    if not resume.exists():
+        resume = parameters["dataFolder"] / RESUME_PDF
+    email_message = build_message(
+        credentials["address"],
+        draft["contact"],
+        draft.get("subject", "Отклик на вакансию"),
+        message,
+        attachment=None if draft["kind"] == "follow_up" else resume,
+        in_reply_to=draft.get("in_reply_to", ""),
+    )
+    try:
+        message_id = send_email(credentials, email_message)
+    except Exception as e:
+        return f"Не удалось отправить письмо {draft['contact']}: {e}"
+    entry = next((e for e in entries if e["link"] == draft["job_link"]), None)
+    if entry is not None and draft["kind"] != "follow_up":
+        applied_log.update_fields(
+            entry["source"],
+            entry["external_id"],
+            outreach_email=draft["contact"],
+            outreach_sent_at=datetime.now().astimezone().isoformat(),
+            outreach_message_id=message_id,
+        )
+    drafts.remove(code)
+    return f"Отправлено {draft['contact']}."
+
+
+def _maybe_send_daily_digest(
+    parameters: dict, bot_token: str, chat_id: str
+) -> None:
+    """Раз в день после digest.hour (по умолчанию 9:00, digest.enabled:
+    false — выключить) — сводка за сутки. Вызывается из частой
+    check_telegram_commands, поэтому помнит дату последней отправки."""
+    digest = parameters.get("digest") or {}
+    if digest.get("enabled", True) is False:
+        return
+    now = datetime.now().astimezone()
+    if now.hour < int(digest.get("hour", 9)):
+        return
+    output_folder: Path = parameters["outputFileDirectory"]
+    state_path = output_folder / ".digest_state.json"
+    today = now.date().isoformat()
+    try:
+        last_sent = json.loads(state_path.read_text(encoding="utf-8")).get(
+            "last_sent"
+        )
+    except (OSError, json.JSONDecodeError):
+        last_sent = None
+    if last_sent == today:
+        return
+    text = build_digest(
+        AppliedLog(output_folder / "applied_log.json"),
+        TelegramConversations(
+            output_folder / "telegram_conversations.json"
+        ).all(),
+        DraftStore(output_folder / HR_DRAFTS_FILE).all(),
+        now,
+    )
+    try:
+        send_notification(bot_token, chat_id, text)
+    except Exception as e:
+        logger.warning(f"Не удалось отправить утреннюю сводку: {e}")
+        return
+    state_path.write_text(json.dumps({"last_sent": today}), encoding="utf-8")
 
 
 # ponytail: check_*_replies не входят в ALL_SOURCES (это не
@@ -3586,6 +4188,7 @@ SCHEDULER_SOURCES: dict[str, Callable[..., Any]] = {
     "check_hh_replies": check_headhunter_replies,
     "check_telegram_replies": check_telegram_replies,
     "check_telegram_commands": check_telegram_commands,
+    "check_email_replies": check_email_replies,
 }
 
 

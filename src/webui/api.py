@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -40,7 +40,11 @@ from main import (
     apply_llm_provider_override,
     block_headhunter_employer,
 )
+from main import HR_DRAFTS_FILE
 from main import bootstrap_data_folder as _bootstrap_data_folder
+from main import prefill_direct_application as _prefill_direct_application
+from main import prepare_interview as _prepare_interview
+from main import send_hr_draft as _send_hr_draft
 from main import (
     clone_headhunter_resume,
 )
@@ -63,7 +67,11 @@ from src.config_patch import (
     set_top_level_field,
     unset_source_field,
 )
-from src.job_sources.applied_log import AppliedLog
+from src.job_sources.applied_log import (
+    STAGES,
+    AppliedLog,
+    effective_stage,
+)
 from src.job_sources.llm_provider import (
     PROVIDER_MODELS,
 )
@@ -92,6 +100,22 @@ from src.job_sources.telegram.client import (
 )
 from src.job_sources.telegram_connect import get_bot_username, wait_for_start
 from src.job_sources.telegram_control import HELP_TEXT as _TELEGRAM_HELP_TEXT
+from src.direct.ats import discover_ats, fetch_jobs
+from src.direct.companies import load_companies, save_companies
+from src.job_sources.hr_replies import CATEGORY_LABELS, DraftStore
+from src.job_sources.interview_calendar import build_ics
+from src.job_sources.interview_prep import evaluate_answer, generate_questions
+from src.job_sources.offers import (
+    add_offer,
+    compare_with_market,
+    load_offers,
+    save_offers,
+)
+from src.job_sources.market_stats import (
+    REGION_LABELS,
+    salary_stats,
+    skill_demand,
+)
 from src.job_sources.telegram_conversations import TelegramConversations
 from src.job_sources.telegram_notify import send_notification
 from src.libs.resume_and_cover_builder import StyleManager
@@ -576,7 +600,27 @@ def get_applications(
         entries = [e for e in entries if e["source"] == source]
     if status:
         entries = [e for e in entries if e["status"] == status]
-    return entries
+    return [{**e, "effective_stage": effective_stage(e)} for e in entries]
+
+
+class StageUpdate(BaseModel):
+    source: str
+    external_id: str
+    stage: str = ""  # "" — снять ручную отметку
+
+
+@app.post("/api/applications/stage")
+def post_application_stage(
+    body: StageUpdate, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    if body.stage and body.stage not in STAGES:
+        raise HTTPException(status_code=400, detail="Неизвестный этап")
+    found = ctx.applied_log.set_stage(
+        body.source, body.external_id, body.stage or None
+    )
+    if not found:
+        raise HTTPException(status_code=404, detail="Заявка не найдена")
+    return {"ok": True}
 
 
 @app.get("/api/replies")
@@ -587,6 +631,319 @@ def get_replies(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
         if e.get("last_known_state")
     ]
     return sorted(entries, key=lambda e: e["applied_at"], reverse=True)
+
+
+@app.get("/api/inbox")
+def get_inbox(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
+    """Единые "Входящие": ответы hh (статус переговоров) и Telegram-
+    диалоги, где HR хоть раз ответил, — одним списком, новые сверху."""
+    applications = ctx.applied_log.find_by_company("")
+    by_link = {e["link"]: e for e in applications}
+    items = [
+        {
+            "channel": e["source"],
+            "source": e["source"],
+            "external_id": e["external_id"],
+            "company": e["company"],
+            "title": e["title"],
+            "link": e["link"],
+            "text": e["last_known_state"],
+            "at": e.get("state_at") or e.get("stage_at") or e["applied_at"],
+            "unread": False,
+            "contact": None,
+            "stage": effective_stage(e),
+        }
+        for e in applications
+        # "Просмотрен"/"не просмотрен" — не ответ, во "Входящие" не идёт.
+        if effective_stage(e) is not None
+    ]
+    conversations = TelegramConversations(
+        ctx.output_folder / "telegram_conversations.json"
+    )
+    draft_by_contact = {
+        d["contact"]: {"code": code, **d}
+        for code, d in DraftStore(ctx.output_folder / HR_DRAFTS_FILE)
+        .all()
+        .items()
+    }
+    for conv in conversations.all():
+        inbound = [m for m in conv["messages"] if m["direction"] == "in"]
+        draft = draft_by_contact.get(conv["contact"])
+        if not inbound and not draft:
+            continue
+        job_link = next(
+            (m.get("job_link") for m in conv["messages"] if m.get("job_link")),
+            "",
+        )
+        entry = by_link.get(job_link) or {}
+        items.append(
+            {
+                "channel": "telegram_dm",
+                "source": entry.get("source", "telegram"),
+                "external_id": entry.get("external_id"),
+                "company": entry.get("company", ""),
+                "title": entry.get("title", ""),
+                "link": job_link,
+                "text": (
+                    inbound[-1]["text"]
+                    if inbound
+                    else "Нет ответа — предлагаю напоминание"
+                ),
+                "at": (inbound or conv["messages"])[-1]["at"],
+                "unread": conv.get("unread", False),
+                "contact": conv["contact"],
+                "stage": effective_stage(entry) if entry else None,
+                "label": CATEGORY_LABELS.get(conv.get("label", ""), ""),
+                "draft": draft,
+            }
+        )
+    return sorted(items, key=lambda i: i["at"], reverse=True)
+
+
+class DraftSend(BaseModel):
+    text: str = ""
+
+
+@app.post("/api/hr-drafts/{code}/send")
+def post_send_hr_draft(
+    code: str, body: DraftSend, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    result = _send_hr_draft(ctx.config, code, body.text)
+    if not result.startswith("Отправлено"):
+        raise HTTPException(status_code=400, detail=result)
+    return {"message": result}
+
+
+@app.post("/api/hr-drafts/{code}/skip")
+def post_skip_hr_draft(code: str, ctx: AppContext = Depends(get_ctx)) -> dict:
+    DraftStore(ctx.output_folder / HR_DRAFTS_FILE).remove(code)
+    return {"ok": True}
+
+
+class CompanyAdd(BaseModel):
+    name: str = ""
+    website: str = ""
+    ats: str = ""
+    slug: str = ""
+
+
+@app.get("/api/direct/companies")
+def get_direct_companies(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
+    return load_companies(ctx.config["dataFolder"])
+
+
+@app.post("/api/direct/companies")
+def post_direct_company(
+    body: CompanyAdd, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Добавляет компанию: ATS определяется по сайту (или задаётся
+    явно), сразу считаем её открытые вакансии — видно, что доска
+    найдена и работает."""
+    ats, slug = body.ats, body.slug
+    if not (ats and slug):
+        if not body.website:
+            raise HTTPException(400, "Укажите сайт компании или ATS+slug")
+        found = discover_ats(body.website)
+        if found is None:
+            raise HTTPException(
+                404,
+                "Не нашли систему найма (Greenhouse/Lever/Ashby/Workable) на "
+                "сайте — укажите ATS и slug вручную или откликайтесь на сайте.",
+            )
+        ats, slug = found
+    company = {
+        "name": body.name or slug,
+        "website": body.website,
+        "ats": ats,
+        "slug": slug,
+    }
+    try:
+        count = len(fetch_jobs(company))
+    except Exception as e:
+        raise HTTPException(502, f"Доска {ats}/{slug} не отвечает: {e}")
+    data_folder = ctx.config["dataFolder"]
+    companies = [
+        c for c in load_companies(data_folder) if c["slug"] != slug
+    ] + [company]
+    save_companies(data_folder, companies)
+    return {**company, "jobs": count}
+
+
+@app.delete("/api/direct/companies/{slug}")
+def delete_direct_company(slug: str, ctx: AppContext = Depends(get_ctx)) -> dict:
+    data_folder = ctx.config["dataFolder"]
+    save_companies(
+        data_folder,
+        [c for c in load_companies(data_folder) if c["slug"] != slug],
+    )
+    return {"ok": True}
+
+
+class PrepRequest(BaseModel):
+    source: str
+    external_id: str
+
+
+@app.post("/api/applications/prep")
+def post_interview_prep(
+    body: PrepRequest, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Справка к интервью: готовая из журнала или новая (~20 с на LLM)."""
+    entry = ctx.applied_log.find_by_source_and_external_id(
+        body.source, body.external_id
+    )
+    if entry is None:
+        raise HTTPException(404, "Заявка не найдена")
+    prep = _prepare_interview(ctx.config, ctx.llm_api_key, entry)
+    if not prep:
+        raise HTTPException(502, "Не удалось подготовить справку (LLM)")
+    return {"prep": prep}
+
+
+@app.post("/api/direct/prefill")
+def post_direct_prefill(
+    body: PrepRequest, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Открывает окно с формой отклика и заполняет, что можно."""
+    try:
+        filled = _prefill_direct_application(
+            ctx.config, body.source, body.external_id
+        )
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    return {"filled": filled}
+
+
+def _entry_or_404(ctx: AppContext, source: str, external_id: str) -> dict:
+    entry = ctx.applied_log.find_by_source_and_external_id(source, external_id)
+    if entry is None:
+        raise HTTPException(404, "Заявка не найдена")
+    return entry
+
+
+@app.get("/api/applications/ics")
+def get_interview_ics(
+    source: str,
+    external_id: str,
+    start: str,
+    duration: int = 60,
+    ctx: AppContext = Depends(get_ctx),
+) -> Response:
+    """.ics для интервью — время вводится в дашборде (datetime-local,
+    локальное время машины)."""
+    entry = _entry_or_404(ctx, source, external_id)
+    try:
+        moment = datetime.fromisoformat(start)
+    except ValueError:
+        raise HTTPException(400, "Неверная дата")
+    if moment.tzinfo is None:
+        moment = moment.astimezone()
+    title = f"Интервью — {entry['company']} — {entry['title']}"
+    return Response(
+        build_ics(moment, title, entry["link"], entry["link"], duration),
+        media_type="text/calendar",
+        headers={"Content-Disposition": 'attachment; filename="interview.ics"'},
+    )
+
+
+@app.post("/api/interview/questions")
+def post_interview_questions(
+    body: PrepRequest, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Вопросы тренажёра — один раз генерируются и сохраняются."""
+    entry = _entry_or_404(ctx, body.source, body.external_id)
+    questions = entry.get("interview_questions")
+    if not questions:
+        try:
+            questions = generate_questions(
+                entry["title"], entry["company"], entry.get("gaps") or [],
+                ctx.llm_api_key,
+            )
+        except Exception as e:
+            raise HTTPException(502, f"LLM: {e}")
+        ctx.applied_log.update_fields(
+            body.source, body.external_id, interview_questions=questions
+        )
+    return {"questions": questions}
+
+
+class AnswerCheck(BaseModel):
+    source: str
+    external_id: str
+    question: str
+    answer: str
+
+
+@app.post("/api/interview/feedback")
+def post_interview_feedback(
+    body: AnswerCheck, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    entry = _entry_or_404(ctx, body.source, body.external_id)
+    if not body.answer.strip():
+        raise HTTPException(400, "Пустой ответ")
+    data_folder = ctx.config["dataFolder"]
+    resume = data_folder / "resume.pdf"
+    try:
+        feedback = evaluate_answer(
+            resume, entry["title"], body.question, body.answer, ctx.llm_api_key
+        )
+    except Exception as e:
+        raise HTTPException(502, f"LLM: {e}")
+    return {"feedback": feedback}
+
+
+class OfferAdd(BaseModel):
+    company: str
+    amount: int
+    currency: str = "RUB"
+    remote: bool = True
+    notes: str = ""
+
+
+@app.get("/api/offers")
+def get_offers(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
+    market = salary_stats(ctx.applied_log.find_by_company(""))
+    return compare_with_market(load_offers(ctx.output_folder), market)
+
+
+@app.post("/api/offers")
+def post_offer(body: OfferAdd, ctx: AppContext = Depends(get_ctx)) -> dict:
+    return add_offer(ctx.output_folder, body.dict())
+
+
+@app.delete("/api/offers/{offer_id}")
+def delete_offer(offer_id: str, ctx: AppContext = Depends(get_ctx)) -> dict:
+    save_offers(
+        ctx.output_folder,
+        [o for o in load_offers(ctx.output_folder) if o["id"] != offer_id],
+    )
+    return {"ok": True}
+
+
+@app.get("/api/analytics/market")
+def get_market(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Срез рынка по собранным вакансиям: зарплаты (все записи) и спрос
+    на навыки (записи, где навыки уже извлечены) против резюме."""
+    entries = ctx.applied_log.find_by_company("")
+    resume_path = ctx.plain_text_resume_file
+    resume_text = (
+        resume_path.read_text(encoding="utf-8") if resume_path.exists() else ""
+    )
+    regions: dict[str, int] = {}
+    for e in entries:
+        if e.get("remote_region"):
+            label = REGION_LABELS[e["remote_region"]]
+            regions[label] = regions.get(label, 0) + 1
+    return {
+        "salaries": salary_stats(entries),
+        "skills": skill_demand(entries, resume_text)[:20],
+        "regions": regions,
+    }
+
+
+@app.get("/api/analytics/funnel")
+def get_funnel(ctx: AppContext = Depends(get_ctx)) -> dict:
+    return ctx.applied_log.funnel()
 
 
 @app.get("/api/usage")

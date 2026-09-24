@@ -41,6 +41,31 @@ def notify_from_secrets(parameters: dict, text: str) -> None:
         logger.warning(f"Failed to send Telegram notification: {e}")
 
 
+def send_document_from_secrets(
+    parameters: dict, filename: str, content: bytes, caption: str
+) -> None:
+    """Файл в тот же Telegram-бот (например .ics приглашения на
+    интервью — одно нажатие добавляет событие в календарь). Best-effort,
+    как notify_from_secrets."""
+    try:
+        with open(parameters["secretsFile"], "r") as stream:
+            secrets = yaml.safe_load(stream) or {}
+        notifications = secrets.get("notifications") or {}
+        bot_token = notifications.get("telegram_bot_token")
+        chat_id = notifications.get("telegram_chat_id")
+        if not bot_token or not chat_id:
+            return
+        response = httpx.post(
+            f"{TELEGRAM_API_BASE}/bot{bot_token}/sendDocument",
+            data={"chat_id": chat_id, "caption": caption},
+            files={"document": (filename, content)},
+            timeout=20,
+        )
+        response.raise_for_status()
+    except Exception as e:
+        logger.warning(f"Failed to send Telegram document: {e}")
+
+
 def send_notification(bot_token: str, chat_id: str, text: str) -> None:
     """Прямой httpx.post вместо Telethon (юзер-сессия, нужна для
     чтения каналов в TelegramSourceClient) — для простого "уведомить

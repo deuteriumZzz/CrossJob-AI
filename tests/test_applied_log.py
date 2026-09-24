@@ -487,3 +487,41 @@ if __name__ == "__main__":
     test_count_in_period_week_never_exceeds_month()
     test_purge_old_applications_removes_entire_entry()
     print("All tests passed.")
+
+
+def test_already_applied_across_sources():
+    with tempfile.TemporaryDirectory() as tmp:
+        applied_log = AppliedLog(Path(tmp) / "applied_log.json")
+        hh_job = Job(
+            role="Python-разработчик",
+            company="ООО «Яндекс»",
+            source="headhunter",
+            external_id="1",
+        )
+        habr_job = Job(
+            role="Python разработчик",
+            company="Яндекс",
+            source="habr_career",
+            external_id="77",
+        )
+
+        applied_log.record(hh_job, "", "", "dry_run", 8, [])
+        # dry_run на другой площадке не мешает реальному отклику.
+        assert applied_log.already_applied(habr_job) is False
+
+        applied_log.record(hh_job, "", "", "applied", 8, [])
+        assert applied_log.already_applied(habr_job) is True
+
+        other_role = Job(
+            role="Go-разработчик",
+            company="Яндекс",
+            source="habr_career",
+            external_id="78",
+        )
+        assert applied_log.already_applied(other_role) is False
+
+        # Посты Telegram без компании не должны совпадать между собой.
+        tg_a = Job(role="", company="", source="telegram", external_id="a")
+        tg_b = Job(role="", company="", source="telegram", external_id="b")
+        applied_log.record(tg_a, "", "", "applied", 7, [])
+        assert applied_log.already_applied(tg_b) is False

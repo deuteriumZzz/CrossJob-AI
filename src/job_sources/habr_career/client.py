@@ -9,6 +9,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 
 from src.job_sources.block_detection import raise_if_blocked, visible_text
+from src.job_sources.html_text import html_letter_to_plain_text
 from src.job_sources.user_agents import random_user_agent
 from src.utils.chrome_utils import init_browser, is_driver_dead
 
@@ -84,13 +85,16 @@ class HabrCareerClient:
         raise_if_blocked(response)
         return response.text
 
-    def apply(self, vacancy_url: str) -> bool:
+    def apply(self, vacancy_url: str, cover_letter: str = "") -> bool:
         """Подтверждено на живом залогиненном аккаунте (2026-08-28):
         для вошедшего пользователя "Откликнуться" — мгновенная
         отправка ОДНИМ кликом, без модалки, без поля под письмо, без
-        кнопки подтверждения (сопроводительное письмо сюда прикрепить
-        нельзя — ponytail: если понадобится, у Хабра есть отдельное
-        "Дополнить отклик" уже ПОСЛЕ отправки, не реализовано).
+        кнопки подтверждения. Сопроводительное письмо прикладывается
+        отдельным шагом ПОСЛЕ отправки через _attach_cover_letter —
+        подтверждено вживую 2026-09-18: "Посмотреть отклик" →
+        "Редактировать" на карточке своего резюме открывает секцию
+        "Сопроводительное письмо" с textarea[name=body] и кнопкой
+        "Сохранить".
         Анонимная форма ("Откликнуться без регистрации") — под
         reCAPTCHA, которую бот не проходит принципиально, поэтому сюда
         не заходим вообще: если после клика не появились маркеры уже
@@ -120,11 +124,66 @@ class HabrCareerClient:
                 for el in driver.find_elements(By.CSS_SELECTOR, "button, a")
                 if el.is_displayed()
             ]
-            return any(
+            applied = any(
                 marker in text
                 for text in texts
                 for marker in _ALREADY_APPLIED_MARKERS
             )
+            if applied and cover_letter:
+                self._attach_cover_letter(driver, cover_letter)
+            return applied
         finally:
             if owns_it:
                 driver.quit()
+
+    def _attach_cover_letter(self, driver, cover_letter: str) -> None:
+        """Best-effort: отклик уже отправлен (applied=True в apply()
+        выше) независимо от того, получится ли дописать письмо здесь
+        — поэтому любая непройденная стадия просто return, без
+        исключения наружу."""
+        view_buttons = [
+            el
+            for el in driver.find_elements(By.CSS_SELECTOR, "button, a")
+            if el.is_displayed()
+            and (el.text or "").strip().lower() == "посмотреть отклик"
+        ]
+        if not view_buttons:
+            return
+        view_buttons[0].click()
+        time.sleep(1.5)
+
+        edit_buttons = [
+            el
+            for el in driver.find_elements(
+                By.CSS_SELECTOR, ".create-vacancy-response__button"
+            )
+            if el.is_displayed()
+            and "редактировать" in (el.text or "").strip().lower()
+        ]
+        if not edit_buttons:
+            return
+        edit_buttons[0].click()
+        time.sleep(1)
+
+        textareas = [
+            t
+            for t in driver.find_elements(
+                By.CSS_SELECTOR, "textarea[name='body']"
+            )
+            if t.is_displayed()
+        ]
+        if not textareas:
+            return
+        textareas[0].send_keys(html_letter_to_plain_text(cover_letter))
+
+        save_buttons = [
+            el
+            for el in driver.find_elements(
+                By.CSS_SELECTOR, "button[type='submit']"
+            )
+            if el.is_displayed()
+            and "сохранить" in (el.text or "").strip().lower()
+        ]
+        if save_buttons:
+            save_buttons[0].click()
+            time.sleep(1.5)
