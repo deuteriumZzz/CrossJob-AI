@@ -23,7 +23,8 @@ _HEADER_SYNONYMS = {
     "company": ("компания", "company", "организация", "работодатель", "employer", "название"),
     "email": ("email", "e-mail", "почта", "mail", "электронная"),
     "name": ("имя", "name", "контакт", "contact", "hr", "рекрутер", "recruiter", "фио"),
-    "position": ("должность контакта", "position", "роль", "role"),
+    # «Должность» рядом с именем — должность человека; вакансия — «Вакансия».
+    "position": ("должность контакта", "должность", "position", "роль", "role"),
     "website": ("сайт", "website", "site", "домен", "domain"),
     "title": ("вакансия", "vacancy", "job", "позиция", "title"),
     # Где адрес опубликован (например, «Source URL» в careerLauncher) — это

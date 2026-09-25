@@ -860,7 +860,6 @@ def get_outreach_settings(ctx: AppContext = Depends(get_ctx)) -> dict:
     отдаются, только маска."""
     secrets = ConfigValidator.load_yaml(ctx.secrets_file)
     email = secrets.get("email") or {}
-    direct = ctx.config.get("direct") or {}
     digest = ctx.config.get("digest") or {}
     excluded = ctx.config.get("excluded_remote_regions", ["us_only"])
     hunter = secrets.get("hunter_api_key") or ""
@@ -1308,14 +1307,8 @@ def get_todo(ctx: AppContext = Depends(get_ctx)) -> dict:
             "id": "interviews", "count": len(interviews), "view": "replies",
             "text": _plural(len(interviews), "интервью", "интервью", "интервью") + " — «Подготовиться» у каждого во «Входящих»",
         })
-    new_contacts = [
-        c for c in get_contacts(ctx) if c["status"] == "new" and c["contacts"]
-    ]
-    if new_contacts:
-        items.append({
-            "id": "contacts", "count": len(new_contacts), "view": "contacts",
-            "text": _plural(len(new_contacts), "компания с контактом HR, которой", "компании с контактом HR, которым", "компаний с контактом HR, которым") + " вы ещё не писали",
-        })
+    # «Кому ещё не писали» — в карточке «Компании и рассылка» с кнопкой
+    # «Написать письма»; второй раз в «Что сделать сейчас» не дублируем.
     paused = [
         name for name, _ in ALL_SOURCES
         if is_still_blocked(ctx.output_folder, name)
@@ -1560,6 +1553,18 @@ def post_import_commit(body: ImportCommit, ctx: AppContext = Depends(get_ctx)) -
     return {"companies": len(companies), "contacts": contacts, "filename": filename}
 
 
+def _drop_lost_drafts(ctx: AppContext) -> None:
+    """Письмо рассылки удалили в обход неё (во «Входящих», чисткой
+    черновиков) — адрес остался «черновиком» без текста: карточка обещала
+    «готово 1 письмо», а показать нечего. Такие — «пропущено»."""
+    store = CampaignStore(ctx.output_folder)
+    drafts = DraftStore(ctx.output_folder / HR_DRAFTS_FILE).all()
+    for cid, campaign in store.all().items():
+        for email, item in campaign["items"].items():
+            if item["status"] == "draft" and item.get("code") not in drafts:
+                store.update_item(cid, email, status="skipped", reason="письмо удалено")
+
+
 def _campaign_view(ctx: AppContext, campaign: dict) -> dict:
     # Текст готовых писем — чтобы прочитать их прямо в рассылке.
     drafts = DraftStore(ctx.output_folder / HR_DRAFTS_FILE).all()
@@ -1605,6 +1610,7 @@ def get_campaigns(ctx: AppContext = Depends(get_ctx)) -> dict:
             available += 1
             label = _source_group(email.get("source", ""))
             sources[label] = sources.get(label, 0) + 1
+    _drop_lost_drafts(ctx)
     campaigns = sorted(
         CampaignStore(ctx.output_folder).all().values(), key=lambda c: c["created_at"], reverse=True
     )
@@ -1804,6 +1810,53 @@ class CompanyAdd(BaseModel):
     website: str = ""
     ats: str = ""
     slug: str = ""
+
+
+@app.get("/api/outreach/summary")
+def get_outreach_summary(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Карточка «🏢 Компании и рассылка» на Главной — весь путь одним
+    запросом: откуда пришли компании, скольким можно написать, текущая
+    рассылка и состояние отправки. Следующий шаг выбирает интерфейс."""
+    from datetime import timedelta
+
+    campaigns = get_campaigns(ctx)
+    cards = get_contacts(ctx)
+    week_ago = (datetime.now().astimezone() - timedelta(days=7)).isoformat()
+    added_week = {kind: 0 for kind in ("sites", "telegram", "file", "vacancy", "dossier")}
+    added_week_total = 0
+    for card in cards:
+        if card.get("created_at", "") >= week_ago:
+            added_week_total += 1
+            for kind in card["source_kinds"]:
+                added_week[kind] = added_week.get(kind, 0) + 1
+    # Текущая рассылка — самая свежая, где ещё есть что писать или отправлять.
+    current = next(
+        (c for c in campaigns["campaigns"] if c["progress"] or c["stats"]["pending"] or c["stats"]["draft"]),
+        None,
+    )
+    totals = {k: sum(c["stats"].get(k, 0) for c in campaigns["campaigns"]) for k in ("sent", "replied", "bounced")}
+    return {
+        "base_total": len(cards),
+        "available": campaigns["available"],
+        "added_week": added_week,
+        "added_week_total": added_week_total,
+        "sites_enabled": bool((ctx.config.get("direct") or {}).get("schedule_enabled")),
+        "email_connected": campaigns["email_connected"],
+        "current": {
+            "id": current["id"], "name": current["name"], "pending": current["stats"]["pending"],
+            "draft": current["stats"]["draft"], "progress": current["progress"],
+            "drafts": [
+                {"code": i["code"], "company": i.get("company") or i["email"], "email": i["email"],
+                 "subject": i.get("subject", ""), "text": i.get("text", "")}
+                for i in current["items"] if i["status"] == "draft"
+            ],
+        } if current else None,
+        "mail_status": campaigns["mail_status"],
+        "plan": campaigns["mail_plan"],
+        "days_needed": campaigns["days_needed"],
+        **totals,
+        "followups": sum(1 for c in campaigns["campaigns"] for i in c["items"] if i.get("follow_up_text")),
+    }
 
 
 @app.get("/api/direct/summary")

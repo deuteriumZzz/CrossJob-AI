@@ -541,7 +541,8 @@ def test_mail_status_waiting_stopped_and_gmail_auth(client, monkeypatch):  # noq
     ctx = api.get_ctx()
     store = camp.CampaignStore(ctx.output_folder)
     cid = store.create("t", [{"key": "a", "email": "a@x.io", "company": "A"}])
-    store.update_item(cid, "a@x.io", status="draft", code="c1")
+    code = DraftStore(ctx.output_folder / main.HR_DRAFTS_FILE).add("a@x.io", "Hi", "email", "", channel="email")
+    store.update_item(cid, "a@x.io", status="draft", code=code)
     assert not any(a.get("state") for a in client.get("/api/activity").json())  # не включена
 
     store.update(cid, sending=True)
@@ -558,3 +559,42 @@ def test_mail_status_waiting_stopped_and_gmail_auth(client, monkeypatch):  # noq
 
     client.post("/api/settings/outreach", json={"email_app_password": "abcd efgh ijkl mnop"})
     assert store.get(cid)["error"] == ""
+
+
+def test_ai_prompt_table_columns_map_to_fields():
+    """Столбцы из промта «Где взять список компаний?» раскладываются по
+    полям импорта: должность — человека, ссылка — вакансия, источник —
+    где опубликован email."""
+    header = ["Компания", "Сайт", "Email", "Имя", "Должность", "Вакансия", "Ссылка", "Источник"]
+    row = ["Acme", "acme.io", "hr@acme.io", "Анна", "HR-директор", "Python Dev", "https://acme.io/jobs/1", "https://acme.io/careers"]
+    [item] = importer.rows_from_table([header, row])
+    assert (item["company"], item["website"], item["email"], item["name"]) == ("Acme", "acme.io", "hr@acme.io", "Анна")
+    assert (item["position"], item["title"], item["link"], item["source_url"]) == (
+        "HR-директор", "Python Dev", "https://acme.io/jobs/1", "https://acme.io/careers")
+    # Тот же промт по-английски (README.en.md).
+    [en] = importer.rows_from_table([
+        ["Company", "Website", "Email", "Name", "Position", "Vacancy", "Link", "Source"], row])
+    assert (en["position"], en["title"], en["link"], en["source_url"]) == (
+        item["position"], item["title"], item["link"], item["source_url"])
+
+
+def test_outreach_summary_for_home_card(client):  # noqa: F811
+    """Карточка «Компании и рассылка»: пустая база → 0; компания с email →
+    «можно написать», новая за неделю; рассылка с черновиком — текущая."""
+    s = client.get("/api/outreach/summary").json()
+    assert (s["base_total"], s["available"], s["current"]) == (0, 0, None)
+
+    ctx = api.get_ctx()
+    ContactBook(ctx.output_folder).add("Acme", [{"kind": "email", "value": "hr@acme.io", "source": "файл a.csv, строка 2"}])
+    s = client.get("/api/outreach/summary").json()
+    assert (s["base_total"], s["available"], s["added_week_total"], s["added_week"]["file"]) == (1, 1, 1, 1)
+
+    cid = client.post("/api/campaigns", json={}).json()["id"]
+    code = DraftStore(ctx.output_folder / main.HR_DRAFTS_FILE).add("hr@acme.io", "Hello Acme", "email", "", channel="email")
+    camp.CampaignStore(ctx.output_folder).update_item(cid, "hr@acme.io", status="draft", code=code)
+    cur = client.get("/api/outreach/summary").json()["current"]
+    assert (cur["id"], cur["draft"], cur["drafts"][0]["text"]) == (cid, 1, "Hello Acme")
+
+    # Письмо удалили в обход рассылки — «черновик» без текста не висит.
+    DraftStore(ctx.output_folder / main.HR_DRAFTS_FILE).remove(code)
+    assert client.get("/api/outreach/summary").json()["current"] is None

@@ -3858,3 +3858,106 @@ input.num-input {
     animation: none;
   }
 }
+
+.import-help > summary {
+  cursor: pointer;
+}
+.import-help textarea {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+/* «🏢 Компании и рассылка» — главная карточка своих каналов: крупно одна
+   кнопка следующего шага, цифры мелко, детали — по «Подробнее». */
+@media (min-width: 900px) {
+  .pipeline-card {
+    grid-column: span 2;
+  }
+}
+.pipeline-card h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pipeline-card h3 [data-own-settings] {
+  margin-left: auto;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.pipeline-card.is-alert {
+  border-color: var(--err);
+}
+.pipeline-status {
+  margin: 4px 0 10px;
+  line-height: 1.5;
+}
+.pipeline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 12px;
+}
+.pipeline-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.pipeline-steps > div {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-soft);
+}
+.pipeline-steps b {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.pipeline-intro {
+  margin: 4px 0 12px;
+  padding-left: 18px;
+  line-height: 1.6;
+}
+.pipeline-more {
+  margin-top: 8px;
+}
+.pipeline-more > summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.pipeline-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.review-head {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.letter-first {
+  margin-top: 2px;
+  font-weight: normal;
+}
+#drawer-prompt {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.review-about {
+  margin: 0 0 10px;
+  line-height: 1.5;
+}

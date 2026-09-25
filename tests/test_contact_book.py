@@ -145,8 +145,7 @@ def test_todo_and_find_hr(client, monkeypatch):  # noqa: F811
     card = ContactBook(ctx.output_folder).get("acme")
     assert card["website"] == "https://acme.io"
     assert card["vacancies"][0]["source"] == "headhunter"
-    ids = {i["id"]: i for i in client.get("/api/todo").json()["items"]}
-    assert ids["contacts"]["count"] == 1
+    assert client.get("/api/outreach/summary").json()["available"] == 1
 
     monkeypatch.setattr(api, "collect_dossier", lambda card, key: {"website": "", "contacts": []})
     ctx.applied_log.record(Job(role="Dev", company="NoSite", link="https://hh.ru/vacancy/2",
