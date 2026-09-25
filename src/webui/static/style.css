@@ -3998,3 +3998,11 @@ input.num-input {
   cursor: pointer;
   padding: 0 4px;
 }
+.auto-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+}

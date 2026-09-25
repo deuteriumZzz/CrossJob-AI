@@ -464,9 +464,16 @@ def test_campaign_prepares_in_daily_batches(monkeypatch):
         assert stats()["pending"] == 1
         for email in ("a@x.io", "b@x.io"):
             store.update_item(cid, email, status="sent")
-        store.update(cid, batch_day="2000-01-01")  # «вчера»
+        store.update(cid, batch_day="2000-01-01", sending=True)  # «вчера» нажали «Начать отправку»
         main._prepare_campaign_batches(params, "key")
         assert (stats()["draft"], stats()["pending"]) == (1, 0)
+        # Новая порция не уходит сама — ждёт «Отправить все».
+        assert store.get(cid)["sending"] is False
+        started = []
+        monkeypatch.setattr(main.mail_guard, "plan", lambda *a, **k: {"can_send": True})
+        monkeypatch.setattr(main, "start_campaign_job", lambda *a, **k: started.append(a[3]))
+        main.check_campaign_sending(params, "key")
+        assert started == []
 
 
 def test_markdown_table_import_skips_non_application_inboxes():
@@ -533,6 +540,9 @@ def test_mail_guard_warmup_window_and_bounces(tmp_path):
     (tmp_path / "campaigns.json").write_text(json.dumps({"c": {"items": {**sent, **bounced}}}))
     p = g.plan(params, tmp_path, monday_noon)
     assert not p["can_send"] and "Возвратов" in p["reason"]
+    # Порог настраивается: 5 — трёх возвратов уже мало для стопа.
+    assert g.plan({"direct": {"email_daily_limit": 50, "bounce_stop": 5}}, tmp_path, monday_noon)["can_send"]
+    assert g.settings({"direct": {"bounce_stop": 999}})["bounce_stop"] == g.BOUNCE_STOP_MAX  # выключить нельзя
     assert g.days_needed({"limit": 15, "daily_limit": 30, "warmup": True}, 100) == 5  # 15+20+25+30+30
 
 
@@ -599,3 +609,38 @@ def test_outreach_summary_for_home_card(client):  # noqa: F811
     # Письмо удалили в обход рассылки — «черновик» без текста не висит.
     DraftStore(ctx.output_folder / main.HR_DRAFTS_FILE).remove(code)
     assert client.get("/api/outreach/summary").json()["current"] is None
+
+
+def test_new_companies_join_queue_first_and_auto_send(client, monkeypatch):  # noqa: F811
+    """Новые компании Базы встают в очередь идущей рассылки «всем» и
+    пишутся первыми; с «отправлять самому» новая порция уходит без
+    просмотра — но первую порцию рассылки человек смотрит всегда."""
+    ctx = api.get_ctx()
+    book = ContactBook(ctx.output_folder)
+    book.add("Old Co", [{"kind": "email", "value": "hr@old.io", "source": "файл a.csv, строка 2"}])
+    cid = client.post("/api/campaigns", json={}).json()["id"]
+    store = camp.CampaignStore(ctx.output_folder)
+    assert store.get(cid)["scope"] == "all"
+    assert api._absorb_new_companies(ctx) == 0  # рассылка ещё не начата
+
+    monkeypatch.setattr(camp.CampaignJob, "start", lambda self: self.run())
+    monkeypatch.setattr(main, "candidate_name", lambda *a: "Ann")
+    monkeypatch.setattr(main, "generate_company_email", lambda *a: {"subject": "s", "text": "t"})
+    monkeypatch.setattr(main, "_notify_with_buttons", lambda *a: None)
+    (ctx.config["dataFolder"] / "resume.pdf").write_bytes(b"%PDF")
+    params = {**ctx.config, "direct": {"email_daily_limit": 1, "warmup": False, "auto_send": True}}
+
+    main.start_campaign_job(params, "key", cid, "prepare")  # первая порция
+    assert store.get(cid)["sending"] is False  # первую — всегда на просмотр
+    store.update_item(cid, "hr@old.io", status="sent", sent_at="2026-01-01T10:00:00+03:00")
+
+    # Позже в Базу пришли две компании — встают в очередь, свежая первой.
+    book.add("Mid Co", [{"kind": "email", "value": "hr@mid.io", "source": "файл b.csv, строка 2"}])
+    book.add("New Co", [{"kind": "email", "value": "hr@new.io", "source": "файл b.csv, строка 3"}])
+    book.update_contact("hr@mid.io", found_at="2026-01-01T10:00:00+03:00")  # добавлена раньше
+    assert api._absorb_new_companies(ctx) == 2
+
+    main.start_campaign_job(params, "key", cid, "prepare")
+    items = store.get(cid)["items"]
+    assert items["hr@new.io"]["status"] == "draft" and items["hr@mid.io"]["status"] == "pending"
+    assert store.get(cid)["sending"] is True  # уйдёт сама

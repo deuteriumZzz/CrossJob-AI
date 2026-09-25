@@ -303,6 +303,7 @@ def _start_mail_ticker() -> None:
         while True:
             try:
                 ctx = get_ctx()
+                _absorb_new_companies(ctx)
                 _check_campaign_sending(ctx.config, ctx.llm_api_key)
             except Exception as e:  # noqa: BLE001 — тикер не должен падать
                 logger.warning(f"Рассылка: проверка продолжения не удалась: {e}")
@@ -842,6 +843,8 @@ class OutreachSettings(BaseModel):
     hunter_api_key: Optional[str] = None
     email_daily_limit: Optional[int] = None
     warmup: Optional[bool] = None
+    auto_send: Optional[bool] = None
+    bounce_stop: Optional[int] = None
     send_from: Optional[int] = None
     send_to: Optional[int] = None
     weekdays_only: Optional[bool] = None
@@ -870,6 +873,7 @@ def get_outreach_settings(ctx: AppContext = Depends(get_ctx)) -> dict:
         **{k: v for k, v in mail_guard.settings(ctx.config).items() if k != "daily_limit"},
         "email_daily_limit": mail_guard.settings(ctx.config)["daily_limit"],
         "mail_plan": mail_guard.plan(ctx.config, ctx.output_folder),
+        "auto_send": bool((ctx.config.get("direct") or {}).get("auto_send")),
         "follow_up_days": int(
             (ctx.config.get("telegram") or {}).get("follow_up_days", 7)
         ),
@@ -907,6 +911,10 @@ def post_outreach_settings(
         set_source_field(prefs, "direct", "email_daily_limit", min(300, max(1, body.email_daily_limit)))
     if body.warmup is not None:
         set_source_field(prefs, "direct", "warmup", body.warmup)
+    if body.auto_send is not None:
+        set_source_field(prefs, "direct", "auto_send", body.auto_send)
+    if body.bounce_stop is not None:
+        set_source_field(prefs, "direct", "bounce_stop", min(mail_guard.BOUNCE_STOP_MAX, max(1, body.bounce_stop)))
     if body.weekdays_only is not None:
         set_source_field(prefs, "direct", "weekdays_only", body.weekdays_only)
     if body.send_from is not None and body.send_to is not None and 0 <= body.send_from < body.send_to <= 24:
@@ -1663,9 +1671,9 @@ class CampaignCreate(BaseModel):
     keys: list[str] = []  # выбранные в базе компании; пусто — все подходящие
 
 
-@app.post("/api/campaigns")
-def post_campaign(body: CampaignCreate, ctx: AppContext = Depends(get_ctx)) -> dict:
-    """Новая рассылка: по одному адресу на компанию, кому ещё не писали."""
+def _campaign_targets(ctx: AppContext, source: str = "", keys: list[str] | None = None) -> list[dict]:
+    """Кому можно написать: по одному новому email на компанию, которой ещё
+    нет ни в одной рассылке и которую не отметили «не писать»."""
     store = CampaignStore(ctx.output_folder)
     in_campaigns = set().union(*[set(c["items"]) for c in store.all().values()]) if store.all() else set()
     targets = []
@@ -1675,17 +1683,41 @@ def post_campaign(body: CampaignCreate, ctx: AppContext = Depends(get_ctx)) -> d
         email = next(
             (c for c in card["contacts"] if c["kind"] == "email" and c["status"] == "new"
              and c["value"].lower() not in in_campaigns
-             and (not body.source or _source_group(c.get("source", "")) == body.source)),
+             and (not source or _source_group(c.get("source", "")) == source)),
             None,
         )
-        if email and (not body.keys or card["key"] in body.keys):
+        if email and (not keys or card["key"] in keys):
             targets.append({"key": card["key"], "email": email["value"], "company": card["company"] or email["value"]})
+    return targets
+
+
+def _absorb_new_companies(ctx: AppContext) -> int:
+    """Новые компании Базы — в очередь идущей рассылки «всем» (не для
+    выбранных вручную и не по одному источнику). Письма им пишутся первыми
+    — см. сортировку по свежести в start_campaign_job."""
+    store = CampaignStore(ctx.output_folder)
+    started = [c for c in store.all().values() if c.get("batch_day") and c.get("scope") == "all"]
+    if not started:
+        return 0
+    latest = max(started, key=lambda c: c["created_at"])
+    targets = _campaign_targets(ctx)
+    return store.add_items(latest["id"], targets) if targets else 0
+
+
+@app.post("/api/campaigns")
+def post_campaign(body: CampaignCreate, ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Новая рассылка: по одному адресу на компанию, кому ещё не писали."""
+    store = CampaignStore(ctx.output_folder)
+    targets = _campaign_targets(ctx, body.source, body.keys)
     if not targets:
         raise HTTPException(400, "Среди выбранных нет компаний с email, которым вы ещё не писали" if body.keys
                             else "Нет компаний с email, которым вы ещё не писали")
     label = f"Выбранные ({len(targets)})" if body.keys else body.source or "Все источники"
     name = body.name.strip() or f"{label} — {datetime.now().strftime('%d.%m %H:%M')}"
-    return _campaign_view(ctx, store.get(store.create(name, targets)))
+    campaign_id = store.create(name, targets)
+    if not body.source and not body.keys:
+        store.update(campaign_id, scope="all")  # сюда же пойдут новые компании Базы
+    return _campaign_view(ctx, store.get(campaign_id))
 
 
 class CampaignRun(BaseModel):
@@ -1711,6 +1743,7 @@ def post_campaign_action(
     if action == "prepare":
         if not ctx.llm_api_key:
             raise HTTPException(400, "Нужен ключ ИИ (Настройки → Провайдер ИИ)")
+        _absorb_new_companies(ctx)
         _start_campaign_job(ctx.config, ctx.llm_api_key, campaign_id, "prepare")
     elif action == "followups":
         if not (ConfigValidator.load_yaml(ctx.secrets_file).get("email") or {}).get("app_password"):
@@ -1857,10 +1890,15 @@ def get_outreach_summary(ctx: AppContext = Depends(get_ctx)) -> dict:
         "added_week": added_week,
         "added_week_total": added_week_total,
         "sites_enabled": bool((ctx.config.get("direct") or {}).get("schedule_enabled")),
+        "auto_send": bool((ctx.config.get("direct") or {}).get("auto_send")),
         "email_connected": campaigns["email_connected"],
         "current": {
             "id": current["id"], "name": current["name"], "pending": current["stats"]["pending"],
             "draft": current["stats"]["draft"], "progress": current["progress"],
+            # Для авторежима: сегодняшняя порция уже была? первую уже смотрели?
+            "batch_day": (CampaignStore(ctx.output_folder).get(current["id"]) or {}).get("batch_day", ""),
+            "reviewed": any(current["stats"].get(k) for k in ("sent", "replied", "bounced")),
+            "sending": current["sending"],
             "drafts": [
                 {"code": i["code"], "company": i.get("company") or i["email"], "email": i["email"],
                  "subject": i.get("subject", ""), "text": i.get("text", "")}
@@ -3422,7 +3460,7 @@ def _mail_status(ctx: AppContext) -> Optional[dict]:
     error = next((c["error"] for _, c in sending if c.get("error")), "")
     if error:
         return {**base, "state": "stopped", "text": f"Отправка остановлена: {error}", "goto": "settings-outreach"}
-    if plan["recent_bounces"] >= mail_guard.BOUNCE_STOP:
+    if plan["bounce_stopped"]:
         return {**base, "state": "stopped", "text": f"Отправка остановлена: {plan['reason']}. Проверьте адреса в Базе", "goto": "contacts"}
     job = next((CampaignJob.RUNNING[cid] for cid, _ in sending if cid in CampaignJob.RUNNING), None)
     if job is not None and job.kind == "send":

@@ -85,7 +85,7 @@ The third way end to end: **companies land in the Base → "Outreach" writes the
 - 🏢 "Company sites" collects companies with matching vacancies (Greenhouse, Lever, Ashby, Workable, We Work Remotely, HN "Who is hiring") into the base and looks for an HR email: in the vacancy text, on the company website, via Hunter.
 - 📥 Import your own list: Excel, CSV, Markdown, PDF, Word, TXT. Tables are read by column headers, a table in a PDF — by cell positions, without an LLM; free text is split by an LLM, but an email is taken only if it's literally in the file. Domains are checked for MX, complaint and accessibility inboxes (accessibility@, fraud@…) are dropped, and everything is shown in a preview before saving. Where to get a list — [a prompt for AI](#building-a-company-base-with-ai).
 - 📚 Thousands of companies: pages of 50/100/200, "Select all matching the filter", filters by status, source, a specific file and whether there's an email, search.
-- ✉️ Outreach: a personal email for every company (who I am → why you → 2–3 achievements → a call, 150–180 words), addressing HR by name. Companies in Russia and the CIS (a .ru/.by/.kz… domain or a Russian vacancy) get Russian, everyone else gets English. Emails are written in batches sized to the daily limit; the next batch is prepared automatically.
+- ✉️ Outreach: a personal email for every company (who I am → why you → 2–3 achievements → a call, 150–180 words), addressing HR by name. Companies in Russia and the CIS (a .ru/.by/.kz… domain or a Russian vacancy) get Russian, everyone else gets English. Emails are written in batches sized to the daily limit; the next batch is prepared automatically. New companies in the Base join the running campaign's queue and get their email first — they're the most current. Each new batch waits for your "🚀 Send all" — or turn on "The bot sends new batches by itself" (you always review a campaign's first batch).
 - 🛡 Sending without getting Gmail blocked: mailbox warm-up, working hours, random pauses, a stop on bounces — [details](#outreach-without-getting-gmail-blocked). A follow-up in the same thread to anyone silent for 7+ days.
 - 🧹 Duplicate companies are merged by website or email domain (several HR people at one company — one card and one email), Excel export, a daily backup.
 
@@ -188,7 +188,7 @@ Your personal notification bot (created in a minute via @BotFather). It writes o
 - Outreach emails and follow-ups: "🚀 Send all" or "👀 Show one by one" with "Send / Skip / 🚫 Do not contact" under each email.
 - "🚫 Do not contact this company" under a vacancy or an email — the company gets the "do not contact" status in the Base and drops out of outreach.
 - Employer replies, invitations, drafts for approval, warnings (captcha, login, limits).
-- ⛔ An outreach stop that needs you (Gmail rejected the password, 3 bounces in a day) — immediately and only once; routine pauses go into the digest.
+- ⛔ An outreach stop that needs you (Gmail rejected the password, a wave of bounces) — immediately and only once; routine pauses go into the digest.
 - A morning digest; 🔕 quiet mode — non-urgent things only in the digest, HR replies and interviews arrive immediately.
 - Commands: `/status`, `/pause hh`, `/resume hh` (after a captcha).
 
@@ -230,7 +230,7 @@ Outreach goes out through your personal Gmail, so it's built to look like emails
 | **Mailbox warm-up** | Day one — 15 emails, then +5 for every day emails went out, until it reaches your limit. A sudden jump from zero to hundreds of emails is the main spam signal | on |
 | **Sending hours** | Only during the set hours; in the evening and on weekends the bot waits and resumes by itself | weekdays, 9:00–19:00 |
 | **Human-like pauses** | The day's remaining emails are spread across the remaining working time, ±50% at random, sometimes with a 10–25 minute break | — |
-| **Stop on bounces** | 3 bounces in a day (addresses that don't exist) — sending stops until tomorrow and the bot messages you | — |
+| **Stop on bounces** | N bounces in a day (addresses that don't exist) — sending stops until tomorrow and the bot messages you. N is configurable (1–30); keep bounces under 3–5% of the day's emails | 3 |
 | **Gmail rejected the password** | Outreach stops right away instead of wasting the remaining emails; a new password in settings lifts the stop | — |
 
 **How many emails a day is safe.** A regular Gmail account technically allows about 500 emails a day, but for emails to strangers 30–50 is reasonable. Go to 80–100 only on a mailbox that has been sending and getting replies for several weeks. Warm-up gets you to your limit gradually — don't turn it off on a new mailbox.
@@ -294,7 +294,7 @@ These limits are our own pacing settings, not official platform numbers. They ch
 | Habr Career, Wellfound, Himalayas, Djinni | the shared daily limit or the platform's own | 5 | 24h pause on a captcha or ban |
 | geekjob, GetMatch | none of their own — the per-run limit | 5 | 24h pause on a captcha or ban |
 | Telegram | 15 cold messages a day (if auto-messages are on) | — | Personal account |
-| Email outreach | `email_daily_limit` (30 by default) with warm-up from 15 a day | one by one, random pauses across the working day | Sending hours, stop at 3 bounces a day — see [Outreach without getting Gmail blocked](#outreach-without-getting-gmail-blocked) |
+| Email outreach | `email_daily_limit` (30 by default) with warm-up from 15 a day | one by one, random pauses across the working day | Sending hours, stop on bounces (3 a day by default) — see [Outreach without getting Gmail blocked](#outreach-without-getting-gmail-blocked) |
 
 Plus `apply_once_at_company` (never apply to the same company twice) and a shared ceiling `limits.total_daily_application_limit`.
 

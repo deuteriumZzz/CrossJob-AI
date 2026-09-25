@@ -19,7 +19,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 WARMUP_START, WARMUP_STEP = 15, 5
-BOUNCE_STOP = 3  # возвратов за сутки — и отправка встаёт до завтра
+BOUNCE_STOP = 3  # по умолчанию: столько возвратов за сутки — и отправка встаёт до завтра
+BOUNCE_STOP_MAX = 30
 MIN_PAUSE, MAX_PAUSE = 120, 40 * 60
 
 
@@ -57,6 +58,9 @@ def settings(parameters: dict) -> dict:
         "send_from": int(direct.get("send_from", 9)),
         "send_to": int(direct.get("send_to", 19)),
         "weekdays_only": direct.get("weekdays_only", True) is not False,
+        # Возвратов за сутки до стопа — настраивается (Защита почты), но не
+        # выключается: волна возвратов уводит в спам письма и живым HR.
+        "bounce_stop": min(BOUNCE_STOP_MAX, max(1, int(direct.get("bounce_stop", BOUNCE_STOP)))),
     }
 
 
@@ -92,7 +96,7 @@ def plan(parameters: dict, output_folder: Path, now: datetime | None = None) -> 
     recent_bounces = sum(1 for d in bounced if now - d < timedelta(hours=24))
     in_window = _in_window(now, s)
     reason = ""
-    if recent_bounces >= BOUNCE_STOP:
+    if recent_bounces >= s["bounce_stop"]:
         reason = f"Возвратов за сутки: {recent_bounces} — пауза до завтра, чтобы Gmail не счёл это спамом"
     elif sent_today >= limit:
         reason = f"Дневной лимит писем ({limit}) исчерпан — продолжу завтра"
@@ -106,6 +110,7 @@ def plan(parameters: dict, output_folder: Path, now: datetime | None = None) -> 
         "left_today": max(0, limit - sent_today),
         "in_window": in_window,
         "recent_bounces": recent_bounces,
+        "bounce_stopped": recent_bounces >= s["bounce_stop"],
         "can_send": not reason,
         "reason": reason,
     }

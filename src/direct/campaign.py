@@ -71,6 +71,24 @@ class CampaignStore:
                 item.update(fields)
                 self._save(data)
 
+    def add_items(self, campaign_id: str, targets: list[dict]) -> int:
+        """Дописать адреса в очередь идущей рассылки (новые компании Базы).
+        Возвращает, сколько добавлено."""
+        added = 0
+        with state_file_lock(self.path):
+            data = self._load()
+            items = data.get(campaign_id, {}).get("items")
+            if items is None:
+                return 0
+            for t in targets:
+                email = t["email"].lower()
+                if email not in items:
+                    items[email] = {"key": t["key"], "company": t["company"],
+                                    "status": "pending", "reason": "", "code": "", "sent_at": ""}
+                    added += 1
+            self._save(data)
+        return added
+
     def update(self, campaign_id: str, **fields) -> None:
         """Поля самой рассылки (например, день последней порции писем)."""
         with state_file_lock(self.path):

@@ -1210,9 +1210,26 @@ function pipelineNext(o) {
       ? { label: "Что делать", attrs: `data-own-settings="${ms.goto}"`, primary: true }
       : { label: "Проверить адреса в Базе", attrs: `data-own-go="${ms.goto}"`, primary: true } };
   }
+  // Автоматический режим: первую порцию вы уже смотрели — дальше бот сам
+  // пишет и отправляет, поэтому кнопок «Написать»/«Отправить» нет.
+  const autoOn = o.auto_send && cur?.reviewed;
+  const autoOff = { label: "Выключить автоматический режим", attrs: `data-pipeline="auto-off"` };
   if (ms?.state === "active" || ms?.state === "waiting") {
     return { tone: ms.state, status: `${ms.state === "active" ? "🔄" : "⏸"} ${ms.text}`,
-      small: { label: "Остановить рассылку", attrs: `data-pipeline="stop" data-id="${ms.campaign}"` } };
+      small: { label: "Остановить рассылку", attrs: `data-pipeline="stop" data-id="${ms.campaign}"` },
+      extra: autoOn ? autoOff : null };
+  }
+  if (autoOn && cur?.progress?.kind === "prepare") {
+    const pr = cur.progress;
+    return { tone: "active", status: `🤖 Пишу сегодняшнюю порцию: ${pr.done} из ${pr.total} — отправлю сам в рабочее время`,
+      progress: pr.done / Math.max(1, pr.total), small: autoOff };
+  }
+  if (autoOn && cur?.pending && !cur.draft) {
+    const today = new Date().toLocaleDateString("sv-SE"); // ГГГГ-ММ-ДД по вашему поясу, как batch_day
+    const when = cur.batch_day === today ? "завтра" : "в ближайшие минуты";
+    return { tone: "waiting",
+      status: `🤖 Автоматический режим: каждый день бот сам пишет и отправляет порцию. Следующая — ${when}; в очереди ${cur.pending.toLocaleString("ru-RU")}.`,
+      small: autoOff };
   }
   if (cur?.progress?.kind === "prepare") {
     const pr = cur.progress;
@@ -1224,17 +1241,17 @@ function pipelineNext(o) {
       return { status: `Готово ${cur.draft} ${plural(cur.draft, "письмо", "письма", "писем")} — осталось подключить Gmail, чтобы отправить.`,
         action: { label: "Подключить Gmail", attrs: `data-own-settings="settings-outreach"`, primary: true } };
     }
-    return { status: `Готово ${cur.draft} ${plural(cur.draft, "письмо", "письма", "писем")}. Просмотрите — можно поправить или убрать — и отправьте.`,
+    return { status: `Готово ${cur.draft} ${plural(cur.draft, "письмо", "письма", "писем")}. Просмотрите — можно поправить или убрать — и отправьте.${o.auto_send && !cur.reviewed ? " Это первая порция: дальше в автоматическом режиме бот будет писать и отправлять сам." : ""}`,
       action: { label: `👀 Просмотреть и отправить (${cur.draft})`, attrs: `data-pipeline="review"`, primary: true } };
   }
   if (cur?.pending) {
     const n = Math.min(cur.pending, p.limit);
-    return { status: `В очереди рассылки ${cur.pending} ${plural(cur.pending, "компания", "компании", "компаний")}. ${todayText(n)}`,
+    return { status: `В очереди рассылки ${cur.pending} ${plural(cur.pending, "компания", "компании", "компаний")}. ${todayText(n)}${o.auto_send ? " Автоматический режим включён: первую порцию проверьте сами, дальше бот будет писать и отправлять сам." : ""}`,
       action: { label: `✍️ Написать ${n} ${plural(n, "письмо", "письма", "писем")}`, attrs: `data-pipeline="prepare" data-id="${cur.id}"`, primary: true } };
   }
   if (o.available) {
     const n = Math.min(o.available, p.limit);
-    return { status: `Можно написать ${o.available.toLocaleString("ru-RU")} ${plural(o.available, "компании", "компаниям", "компаниям")}. ${todayText(n)}`,
+    return { status: `Можно написать ${o.available.toLocaleString("ru-RU")} ${plural(o.available, "компании", "компаниям", "компаниям")}. ${todayText(n)}${o.auto_send ? " Автоматический режим включён: первую порцию проверьте сами, дальше бот будет писать и отправлять сам." : ""}`,
       action: { label: `✍️ Написать ${n} ${plural(n, "письмо", "письма", "писем")}`, attrs: `data-pipeline="create"`, primary: true } };
   }
   return { status: "Всем компаниям из Базы уже написали. Загрузите новый список — бот напишет и им.",
@@ -1263,10 +1280,11 @@ function pipelineCardHtml(o) {
   const btn = (x) => x ? `<button type="button" class="btn ${x.primary ? "btn-primary" : "btn-ghost btn-small"}" ${x.attrs}>${escapeHtml(x.label)}</button>` : "";
   const ms = o.mail_status;
   return `<div class="source-card own-card pipeline-card${next.tone === "alert" ? " is-alert" : ""}">
-    <h3><span class="dot ${next.tone === "alert" ? "error" : next.tone === "active" ? "ok running" : next.tone === "waiting" ? "never_run" : "ok"}"></span> 🏢 Компании и рассылка ${settingsBtn}</h3>
+    <h3><span class="dot ${next.tone === "alert" ? "error" : next.tone === "active" ? "ok running" : next.tone === "waiting" ? "never_run" : "ok"}"></span> 🏢 Компании и рассылка
+      ${o.auto_send ? `<span class="auto-badge" title="Бот сам пишет и отправляет новые порции писем">🤖 авто</span>` : ""}${settingsBtn}</h3>
     <p class="pipeline-status${next.tone === "alert" ? " err-text" : ""}">${escapeHtml(next.status)}</p>
     ${next.progress !== undefined ? `<div class="progress"><div style="width:${Math.round(next.progress * 100)}%"></div></div>` : ""}
-    <div class="pipeline-actions">${btn(next.action)}${btn(next.small)}</div>
+    <div class="pipeline-actions">${btn(next.action)}${btn(next.small)}${btn(next.extra)}</div>
     <div class="pipeline-steps">
       <div><span class="muted small">Новых за неделю</span><b data-count="pl-new">${o.added_week_total}</b></div>
       <div><span class="muted small">Можно написать</span><b data-count="pl-available">${o.available}</b></div>
@@ -1311,6 +1329,16 @@ function bindPipelineCard(el, o) {
       }
       if (action === "prompt") return openPromptDrawer();
       if (action === "review") return openReviewDrawer();
+      if (action === "auto-off") {
+        b.disabled = true;
+        try {
+          await api("/api/settings/outreach", { method: "POST", body: JSON.stringify({ auto_send: false }) });
+          showToast("Автоматический режим выключен — каждую новую порцию бот пришлёт вам на просмотр", "success");
+        } catch (err) {
+          showToast(err.message.replace(/^\d+: /, ""), "error");
+        }
+        return refreshOwnChannels();
+      }
       if (action === "stop" && !confirm("Остановить рассылку? Неотправленные письма останутся — продолжить можно в любой момент.")) return;
       b.disabled = true;
       try {
@@ -1376,6 +1404,8 @@ function openReviewDrawer() {
         </select>
       </label>
       <button type="button" class="btn btn-primary" id="review-send">🚀 Начать отправку (${cur.draft})</button>
+      <label class="checkbox-row small"><input type="checkbox" class="switch" id="review-auto" ${lastOutreach.auto_send ? "checked" : ""} />
+        Дальше бот отправляет новые порции сам, без моего просмотра</label>
       <p class="muted small">${escapeHtml(mailPlanText(lastOutreach.plan))}. По одному, со случайными паузами — как человек; что не уйдёт сегодня, отправлю в следующие дни сам.</p>
     </div>
     <p class="small review-about">✍️ Письма написаны по вашему резюме: обращение по имени, почему именно эта компания, 2–3 ваших достижения, 150–180 слов. Резюме — во вложении. Любое письмо можно поправить или убрать.</p>
@@ -1407,6 +1437,17 @@ function openReviewDrawer() {
       refreshOwnChannels();
     })
   );
+  body.querySelector("#review-auto").addEventListener("change", async (e) => {
+    try {
+      await api("/api/settings/outreach", { method: "POST", body: JSON.stringify({ auto_send: e.target.checked }) });
+      showToast(e.target.checked
+        ? "Новые порции бот будет писать и отправлять сам — в рабочее время, с защитой почты"
+        : "Каждую новую порцию бот пришлёт вам на просмотр", "success");
+    } catch (err) {
+      e.target.checked = !e.target.checked;
+      showToast(err.message.replace(/^\d+: /, ""), "error");
+    }
+  });
   body.querySelector("#review-send").addEventListener("click", async (e) => {
     e.target.disabled = true;
     try {
@@ -3969,6 +4010,8 @@ async function loadOutreachSettings() {
   document.getElementById("outreach-send-to").value = s.send_to;
   document.getElementById("outreach-weekdays").checked = s.weekdays_only;
   document.getElementById("outreach-warmup").checked = s.warmup;
+  document.getElementById("outreach-auto-send").checked = s.auto_send;
+  document.getElementById("outreach-bounce-stop").value = s.bounce_stop;
   document.getElementById("outreach-guard-status").textContent = mailPlanText(s.mail_plan);
   document.getElementById("outreach-follow-up").value = s.follow_up_days;
   document.getElementById("outreach-digest").checked = s.digest_enabled;
@@ -3988,6 +4031,8 @@ async function saveOutreachSettings() {
     send_to: num("outreach-send-to"),
     weekdays_only: document.getElementById("outreach-weekdays").checked,
     warmup: document.getElementById("outreach-warmup").checked,
+    auto_send: document.getElementById("outreach-auto-send").checked,
+    bounce_stop: num("outreach-bounce-stop"),
     follow_up_days: num("outreach-follow-up"),
     digest_enabled: document.getElementById("outreach-digest").checked,
     digest_hour: num("outreach-digest-hour"),

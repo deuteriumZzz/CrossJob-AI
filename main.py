@@ -3059,8 +3059,22 @@ def start_campaign_job(
         # готовит _prepare_campaign_batches на следующий день.
         limit = mail_guard.plan(parameters, output_folder)["limit"]
         ready = sum(1 for item in campaign["items"].values() if item["status"] == "draft")
-        emails = [e for e, item in campaign["items"].items() if item["status"] == "pending"][: max(0, limit - ready)]
-        store.update(campaign_id, batch_day=datetime.now().astimezone().date().isoformat())
+
+        def freshness(email: str) -> str:
+            # Свежие компании Базы — первыми: они актуальнее.
+            card = book.get(campaign["items"][email]["key"]) or {}
+            found = next((c.get("found_at", "") for c in card.get("contacts", []) if c["value"].lower() == email), "")
+            return found or card.get("created_at", "")
+
+        pending = [e for e, item in campaign["items"].items() if item["status"] == "pending"]
+        emails = sorted(pending, key=freshness, reverse=True)[: max(0, limit - ready)]
+        # Новая порция ждёт вашего «Отправить все» (бот / Главная) — если
+        # только вы не включили «отправлять новые порции сам» и эта
+        # рассылка уже отправляла (первую порцию вы смотрите всегда).
+        auto_send = bool((parameters.get("direct") or {}).get("auto_send")) and any(
+            item["status"] in ("sent", "replied", "bounced") for item in campaign["items"].values()
+        )
+        store.update(campaign_id, batch_day=datetime.now().astimezone().date().isoformat(), sending=auto_send)
 
         def step(email: str) -> Optional[str]:
             item = campaign["items"][email]
@@ -3084,7 +3098,14 @@ def start_campaign_job(
 
         def on_prepared(job: CampaignJob) -> None:
             stats = campaign_stats(store.get(campaign_id) or campaign)
-            if stats["draft"]:
+            if stats["draft"] and auto_send:
+                _notify_with_buttons(parameters, (
+                    f"✍️ Рассылка «{campaign['name']}»: готово писем — {stats['draft']}. "
+                    "Отправлю сам в рабочее время, по одному."
+                    + (f" Ещё в очереди — {stats['pending']}." if stats["pending"] else "")
+                ), [[{"text": "👀 Показать по одному", "callback_data": f"cv:{campaign_id}:d"},
+                     {"text": "⏸ Не отправлять", "callback_data": f"cx:{campaign_id}"}]])
+            elif stats["draft"]:
                 _notify_with_buttons(parameters, (
                     f"✍️ Рассылка «{campaign['name']}»: готово писем — {stats['draft']}"
                     + (f", не получилось — {stats['failed']}" if stats["failed"] else "")
@@ -4592,6 +4613,13 @@ def _handle_vacancy_button(
             return
         start_campaign_job(parameters, llm_api_key, parts[1], "send" if parts[0] == "cs" else "followups")
         done("🚀 Отправляю по одному, пауза 1–2 мин — пришлю итог")
+    elif parts[0] == "cx":
+        # «⏸ Не отправлять»: рассылка ждёт, письма остаются черновиками.
+        job = CampaignJob.RUNNING.get(parts[1])
+        if job is not None and job.kind == "send":
+            job.stop()
+        CampaignStore(output_folder).update(parts[1], sending=False)
+        done("⏸ Не отправляю — письма ждут на Главной")
     elif parts[0] == "cv":
         # Показать письма по одному — у каждого свои «Отправить / Пропустить».
         campaign = CampaignStore(output_folder).get(parts[1]) or {"items": {}}
@@ -4838,8 +4866,8 @@ def _send_email_draft(
     # Лимит с разогревом и стоп при возвратах — для любых писем HR; время
     # отправки проверяет только рассылка (вручную вы отправляете сами).
     guard = mail_guard.plan(parameters, output_folder)
-    if draft["kind"] != "follow_up" and (guard["left_today"] <= 0 or guard["recent_bounces"] >= mail_guard.BOUNCE_STOP):
-        return "⏸ " + (guard["reason"] if guard["recent_bounces"] >= mail_guard.BOUNCE_STOP
+    if draft["kind"] != "follow_up" and (guard["left_today"] <= 0 or guard["bounce_stopped"]):
+        return "⏸ " + (guard["reason"] if guard["bounce_stopped"]
                        else f"Дневной лимит писем ({guard['limit']}) исчерпан — отправлю завтра")
     resume = attachment or parameters["dataFolder"] / RESUME_PDF_LINKEDIN
     if not resume.exists():
