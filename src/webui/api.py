@@ -291,6 +291,17 @@ def get_ctx() -> AppContext:
 app = FastAPI(title="CrossJob-AI")
 
 
+@app.middleware("http")
+async def _no_stale_ui(request, call_next):
+    """Файлы интерфейса (HTML/JS/CSS) браузер обязан сверять при каждой
+    загрузке — иначе после обновления бота он показывал старую
+    сохранённую копию стилей/скриптов (найдено вживую: style.css?v=15)."""
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 @app.get("/api/setup/status")
 def get_setup_status() -> dict:
     """Не зависит от get_ctx()/AppContext — им ещё нечего строить,
@@ -1214,9 +1225,11 @@ def get_todo(ctx: AppContext = Depends(get_ctx)) -> dict:
         })
     since = datetime.now().astimezone() - timedelta(days=3)
     entries = ctx.applied_log.find_by_company("")
+    # Интервью и офферы — своей строкой ниже, здесь только «просто ответили»:
+    # иначе одни и те же приглашения считались дважды.
     fresh = [
         e for e in entries
-        if effective_stage(e) in ("replied", "interview", "offer")
+        if effective_stage(e) == "replied"
         and datetime.fromisoformat(e.get("state_at") or e.get("stage_at") or e["applied_at"]) >= since
     ]
     unread = [

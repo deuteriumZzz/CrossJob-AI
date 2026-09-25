@@ -10,7 +10,7 @@
   href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&display=swap"
   rel="stylesheet"
 />
-<link rel="stylesheet" href="/style.css?v=15" />
+<link rel="stylesheet" href="/style.css?v=17" />
 </head>
 <body>
 <div id="setup-screen" class="setup-screen" style="display:none">
@@ -90,12 +90,8 @@
       <div class="daemon-buttons">
         <button id="daemon-toggle" class="btn btn-primary" title="Запустить бота">
           <svg class="icon-play" viewBox="0 0 20 20" fill="none"><path d="M6.5 4.7v10.6a1 1 0 0 0 1.53.85l8.4-5.3a1 1 0 0 0 0-1.7l-8.4-5.3a1 1 0 0 0-1.53.85Z" fill="currentColor"/></svg>
-          <svg class="icon-pause" viewBox="0 0 20 20" fill="none"><rect x="5.5" y="4.5" width="3" height="11" rx="1" fill="currentColor"/><rect x="11.5" y="4.5" width="3" height="11" rx="1" fill="currentColor"/></svg>
+          <svg class="icon-pause" viewBox="0 0 20 20" fill="none"><rect x="5" y="5" width="10" height="10" rx="1.5" fill="currentColor"/></svg>
           <span class="btn-label">Запустить</span>
-        </button>
-        <button id="daemon-stop" class="btn btn-ghost" disabled>
-          <svg viewBox="0 0 20 20" fill="none"><rect x="5" y="5" width="10" height="10" rx="1.5" fill="currentColor"/></svg>
-          <span class="btn-label">Стоп</span>
         </button>
       </div>
     </div>
@@ -174,11 +170,6 @@
           <h2>Вакансии</h2>
           <p class="muted">Всё, что бот нашёл: куда откликнулся, что пропустил и почему, этап по каждой. У вакансии — «Действия»: найти HR, подготовка к интервью</p>
         </div>
-        <div class="toolbar">
-          <button id="history-view-table" class="btn btn-secondary btn-small active" type="button">☰ Таблица</button>
-          <button id="history-view-timeline" class="btn btn-secondary btn-small" type="button">◷ Таймлайн</button>
-          <a id="export-applied-log" class="btn btn-secondary" href="/api/export/applied-log" download>Скачать бэкап (JSON)</a>
-        </div>
       </div>
       <div class="filters">
         <select id="filter-source">
@@ -214,7 +205,6 @@
           <tbody id="history-rows"></tbody>
         </table>
       </div>
-      <div id="history-timeline" class="timeline" style="display:none"></div>
     </section>
 
     <section id="view-replies" class="view">
@@ -366,53 +356,9 @@
         <p class="muted small" id="telegram-login-status"></p>
       </details>
 
-      <div class="panel" id="tg-rules-panel">
-        <h3>Каналы</h3>
-        <div class="limits-grid">
-          <label class="limit-field">
-            <span>Каналы (username или ссылка t.me/..., один на строку)</span>
-            <textarea id="tg-channels" rows="3" placeholder="some_public_job_channel&#10;https://t.me/another_channel"></textarea>
-          </label>
-          <label class="limit-field">
-            <span>Не старше скольких дней (иначе можно написать по давно закрытой вакансии)</span>
-            <input id="tg-max-age" type="number" min="1" placeholder="7" />
-          </label>
-          <label class="limit-field">
-            <span>Дневной лимит холодных сообщений</span>
-            <input id="tg-daily-limit" type="number" min="1" placeholder="15" />
-          </label>
-        </div>
-        <details class="more">
-          <summary>Ещё: писать всем из постов автоматически, без кнопки (рискованно)</summary>
-        <div class="limits-grid">
-          <label class="limit-field" style="justify-content:flex-end">
-            <span style="display:flex;align-items:center;gap:8px"><input id="tg-auto-message" type="checkbox" class="switch" />Автоматически писать найденному в посте контакту первым</span>
-          </label>
-          <label class="limit-field">
-            <span>Активные часы — с</span>
-            <input id="tg-hours-start" type="number" min="0" max="23" placeholder="9" />
-          </label>
-          <label class="limit-field">
-            <span>Активные часы — до</span>
-            <input id="tg-hours-end" type="number" min="0" max="23" placeholder="21" />
-          </label>
-        </div>
-        <label class="limit-field">
-          <span>Текст первого сообщения ({role} — вакансия, {link} — ссылка на пост)</span>
-          <textarea id="tg-intro-template" rows="2"></textarea>
-        </label>
-        <div class="risk-banner">
-          ⚠️ Даже с паузами и лимитом это холодные сообщения незнакомым людям с твоего личного
-          аккаунта — Telegram может ограничить аккаунт при слишком активной рассылке. Первое
-          сообщение — только короткое приветствие с интересом к вакансии, без резюме и без
-          автоответа на входящие: продолжать разговор (в т.ч. присылать резюме, если попросят) —
-          вручную, из диалогов ниже.
-        </div>
-        </details>
-        <div class="filters">
-          <button id="tg-settings-save" class="btn btn-primary">Сохранить</button>
-          <span id="tg-settings-status" class="muted small"></span>
-        </div>
+      <div class="panel parser-settings-link">
+        <span>Каналы, ключевые слова, текст «Здравствуйте» и резюме для кнопок — в одном месте.</span>
+        <button type="button" class="btn btn-secondary btn-small" data-goto-settings="settings-tg-quick">⚙ Настройки парсера</button>
       </div>
 
       <div class="panel">
@@ -516,11 +462,10 @@
         </div>
       </div>
       <div id="results-panel" class="panel results-panel"></div>
-      <div class="panel">
-        <h3>Активность за 13 недель</h3>
-        <p class="muted small">Количество откликов по дням, как в Истории</p>
+      <details class="panel more">
+        <summary><strong>Активность по дням</strong> <span class="muted small">— отклики за 13 недель</span></summary>
         <div id="activity-heatmap" class="heatmap"></div>
-      </div>
+      </details>
       <div class="panel">
         <h3>Воронка после отклика</h3>
         <p class="muted small">Сколько реальных откликов дошло до каждого этапа. Этап ставится сам по ответу hh или вручную в «Истории» и «Входящих»</p>
@@ -937,6 +882,45 @@
         <div id="tgq-status" class="tgq-status" role="status"></div>
 
         <div class="tgq-grid">
+          <section class="tgq-block" id="tg-rules-panel" data-needs-load="1">
+            <h4>0. Каналы</h4>
+            <p class="muted small">Username или ссылка t.me/…, по одному на строку. Новые каналы бот подхватывает за минуту, в закрытые для вас — вступает сам.</p>
+            <textarea id="tg-channels" rows="4" placeholder="some_public_job_channel&#10;https://t.me/another_channel"></textarea>
+            <label class="limit-field" style="max-width:260px;margin-top:8px">
+              <span>Не старше, дней (старые вакансии обычно уже закрыты)</span>
+              <input id="tg-max-age" type="number" min="1" placeholder="7" />
+            </label>
+            <details class="more">
+              <summary>Ещё: писать всем из постов автоматически, без кнопки (рискованно)</summary>
+              <div class="limits-grid">
+                <label class="limit-field" style="justify-content:flex-end">
+                  <span style="display:flex;align-items:center;gap:8px"><input id="tg-auto-message" type="checkbox" class="switch" />Писать найденному в посте контакту первым</span>
+                </label>
+                <label class="limit-field">
+                  <span>Не больше сообщений в день</span>
+                  <input id="tg-daily-limit" type="number" min="1" placeholder="15" />
+                </label>
+                <label class="limit-field">
+                  <span>Активные часы — с</span>
+                  <input id="tg-hours-start" type="number" min="0" max="23" placeholder="9" />
+                </label>
+                <label class="limit-field">
+                  <span>Активные часы — до</span>
+                  <input id="tg-hours-end" type="number" min="0" max="23" placeholder="21" />
+                </label>
+              </div>
+              <p class="muted small">Текст сообщения — из пункта 3 «Текст „Здравствуйте“».</p>
+              <div class="risk-banner">
+                ⚠️ Это холодные сообщения незнакомым людям с вашего личного аккаунта: при слишком
+                активной рассылке Telegram может его ограничить. Надёжнее — кнопки под вакансией в боте.
+              </div>
+            </details>
+            <div class="filters">
+              <button id="tg-settings-save" class="btn btn-primary">Сохранить</button>
+              <span id="tg-settings-status" class="muted small"></span>
+            </div>
+          </section>
+
           <section class="tgq-block">
             <h4>1. Что искать</h4>
             <label class="limit-field">
@@ -948,7 +932,6 @@
               <span>Стоп-слова — такие посты не присылать</span>
               <textarea id="tgq-stop" rows="2"></textarea>
             </label>
-            <p class="muted small">Каналы для поиска — в «Общение → Telegram-парсер».</p>
           </section>
 
           <section class="tgq-block">
@@ -1188,6 +1171,6 @@
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=20"></script>
+<script src="/app.js?v=21"></script>
 </body>
 </html>

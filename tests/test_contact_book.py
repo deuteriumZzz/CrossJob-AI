@@ -132,7 +132,7 @@ def test_todo_and_find_hr(client, monkeypatch):  # noqa: F811
     ids = {i["id"]: i for i in todo["items"]}
     assert ids["drafts"]["count"] == 1 and ids["drafts"]["view"] == "replies"
     assert ids["interviews"]["count"] == 1
-    assert ids["replies"]["count"] == 1
+    assert "replies" not in ids  # интервью — своей строкой, не «новый ответ»
     assert todo["badges"]["replies"] == 1
 
     monkeypatch.setattr(api, "collect_dossier", lambda card, key: {

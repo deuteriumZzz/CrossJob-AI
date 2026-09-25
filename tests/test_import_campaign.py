@@ -413,3 +413,7 @@ def test_resumes_overview(client):  # noqa: F811
     assert r["primary"]["exists"] and r["primary"]["name"] == "resume.pdf"
     assert r["linkedin"] == {"exists": False}
     assert [f["name"] for f in r["extra"]] == ["Very_Long_Name_Backend_Developer_CV.pdf"]
+
+
+def test_ui_files_are_not_served_stale(client):  # noqa: F811
+    assert client.get("/style.css").headers.get("cache-control") == "no-cache"

@@ -1453,7 +1453,8 @@ pre.logs {
 .limit-field input[type="text"],
 .limit-field input[type="password"],
 .limit-field select,
-.limit-field textarea {
+.limit-field textarea,
+#tg-channels {
   width: 100%;
   background: var(--panel-2);
   color: var(--text);
@@ -1464,7 +1465,8 @@ pre.logs {
   font-family: inherit;
 }
 
-.limit-field textarea {
+.limit-field textarea,
+#tg-channels {
   resize: vertical;
   min-height: 64px;
 }
@@ -2225,60 +2227,14 @@ kbd {
 
 /* ---------- History timeline ---------- */
 
-.timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding-left: 8px;
-}
 
-.timeline-item {
-  position: relative;
-  padding: 0 0 18px 22px;
-  border-left: 2px solid var(--border-soft);
-}
 
-.timeline-item:last-child {
-  border-left-color: transparent;
-}
 
-.timeline-item::before {
-  content: "";
-  position: absolute;
-  left: -5px;
-  top: 3px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent);
-}
 
-.timeline-date {
-  font-size: 11px;
-  color: var(--muted-2);
-  font-family: var(--font-mono);
-  margin-bottom: 2px;
-}
 
-.timeline-title {
-  font-size: 13.5px;
-  font-weight: 600;
-}
 
-.timeline-title a {
-  color: var(--text);
-  text-decoration: none;
-}
 
-.timeline-title a:hover {
-  color: var(--accent);
-}
 
-.timeline-meta {
-  font-size: 12px;
-  color: var(--muted);
-  margin-top: 2px;
-}
 
 /* ---------- Source card hover actions ---------- */
 
@@ -3802,4 +3758,17 @@ details.panel.more[open] > summary {
     grid-row: 1;
     grid-column: 2;
   }
+}
+
+/* Кнопки, скрытые автосохранением: display у .btn перебивал [hidden]. */
+.btn[hidden] {
+  display: none !important;
+}
+
+.parser-settings-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }

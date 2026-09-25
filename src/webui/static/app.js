@@ -1134,12 +1134,14 @@ async function renderTodo() {
         </div>
         <div class="setup-next">
           <div><span class="muted small">Следующий шаг</span><div><b>${escapeHtml(next.label)}</b> — ${escapeHtml(next.hint)}</div></div>
-          ${next.goto ? `<button type="button" class="btn btn-primary" data-setup-goto="${escapeHtml(next.goto)}">${next.goto === "start-bot" ? "▶ Запустить" : "Сделать →"}</button>` : ""}
+          ${next.goto === "start-bot"
+            ? `<span class="muted small">Кнопка «▶ Запустить» — в меню слева</span>`
+            : next.goto ? `<button type="button" class="btn btn-primary" data-setup-goto="${escapeHtml(next.goto)}">Сделать →</button>` : ""}
         </div>
         <ol class="setup-steps">${setup
           .map(
             (c, i) => `<li class="${c.ok ? "is-done" : c === next ? "is-next" : ""}">
-              <button type="button" class="setup-step" data-setup-goto="${escapeHtml(c.goto)}" ${c.goto && !c.ok ? "" : "disabled"}>
+              <button type="button" class="setup-step" data-setup-goto="${escapeHtml(c.goto)}" ${c.goto && !c.ok && c.goto !== "start-bot" ? "" : "disabled"}>
                 <span class="setup-step-mark">${c.ok ? "✓" : i + 1}</span>${escapeHtml(c.label)}
               </button></li>`
           )
@@ -1190,7 +1192,21 @@ function applySubnavBadges() {
   });
 }
 
+// Каналы и правила Telegram — в Настройках → Telegram-парсер. Пока поля
+// не заполнены с сервера, автосохранение этого блока выключено: иначе
+// пустое поле могло бы затереть ваши каналы.
+function fillTelegramRules(settings) {
+  document.getElementById("tg-channels").value = (settings.channels || []).join("\n");
+  document.getElementById("tg-max-age").value = settings.max_post_age_days ?? "";
+  document.getElementById("tg-daily-limit").value = settings.daily_message_limit ?? "";
+  document.getElementById("tg-auto-message").checked = !!settings.auto_message;
+  document.getElementById("tg-hours-start").value = settings.active_hours_start ?? "";
+  document.getElementById("tg-hours-end").value = settings.active_hours_end ?? "";
+  document.getElementById("tg-rules-panel").dataset.loaded = "1";
+}
+
 async function loadTelegramWatch() {
+  api("/api/settings/telegram").then(fillTelegramRules).catch(() => {});
   const w = await api("/api/settings/telegram-watch");
   // Строка статуса во вкладке «Общение → Telegram».
   const line = document.getElementById("tg-quick-line-status");
@@ -1457,14 +1473,9 @@ async function loadCampaigns() {
         : `<p class="muted">${cur ? "Все новые адреса уже в текущей рассылке." : "Пока некому писать — загрузите свой список или подождите, пока бот соберёт контакты из Telegram и вакансий."}</p>`
     }
     <div class="step-actions">
-      <button type="button" class="btn btn-secondary btn-small" data-base-import>📥 Загрузить свой файл</button>
-      <button type="button" class="btn btn-ghost btn-small" data-base-open>Посмотреть базу →</button>
+      <button type="button" class="btn btn-ghost btn-small" data-base-open>Открыть базу и загрузить свой файл →</button>
     </div>`;
   base.querySelector("[data-base-open]").addEventListener("click", () => switchTab("contacts"));
-  base.querySelector("[data-base-import]").addEventListener("click", () => {
-    switchTab("contacts");
-    document.getElementById("import-file").click();
-  });
 
   // ② Письма
   const letters = document.getElementById("step-letters");
@@ -1678,7 +1689,6 @@ const render = {
     }</span>`;
     badge.classList.toggle("on", status.daemon_running);
     badge.classList.toggle("off", !status.daemon_running);
-    document.getElementById("daemon-stop").disabled = !status.daemon_running;
     // Одна кнопка вместо двух (Старт/Пауза): демон не запущен — это
     // "Запустить"; запущен и активен — "Пауза"; запущен и на паузе —
     // "Возобновить". is-pause-action переключает play/pause-иконку
@@ -1688,16 +1698,18 @@ const render = {
     const isPauseAction = status.daemon_running && !status.daemon_paused;
     toggleBtn.classList.toggle("is-pause-action", isPauseAction);
     toggleBtn.classList.toggle("is-paused", !!status.daemon_paused);
+    // Одна кнопка: «Запустить» ↔ «Остановить». Пауза и отдельный «Стоп»
+    // для человека — одно и то же, лишний выбор только путал.
     toggleBtn.querySelector(".btn-label").textContent = !status.daemon_running
       ? "Запустить"
       : status.daemon_paused
         ? "Возобновить"
-        : "Пауза";
+        : "Остановить";
     toggleBtn.title = !status.daemon_running
-      ? "Запустить бота"
+      ? "Запустить бота: площадки по расписанию, Telegram-парсер, проверка ответов"
       : status.daemon_paused
-        ? "Возобновить плановые запуски по расписанию"
-        : "Пауза — не запускать новые задачи по расписанию, текущие не трогать";
+        ? "Возобновить работу бота"
+        : "Остановить бота";
 
     // Проблемные площадки видно только зайдя на "Обзор" — бейдж на
     // самой вкладке (как непрочитанные в Telegram) сигналит о них,
@@ -1907,7 +1919,6 @@ const render = {
     lastHistoryEntries = entries;
     if (!entries.length) {
       tbody.innerHTML = `<tr><td colspan="8">${emptyStateHtml("Ничего не найдено.")}</td></tr>`;
-      document.getElementById("history-timeline").innerHTML = emptyStateHtml("Ничего не найдено.");
       return;
     }
     const reversed = entries.slice().reverse();
@@ -2024,7 +2035,6 @@ const render = {
     });
     bindStageSelects(tbody);
     observeReveal(tbody);
-    renderHistoryTimeline(reversed);
   },
 
   async replies() {
@@ -2504,20 +2514,7 @@ const render = {
       document.getElementById("telegram-login-status").textContent = "";
     }
 
-    document.getElementById("tg-channels").value = (
-      settings.channels || []
-    ).join("\n");
-    document.getElementById("tg-max-age").value =
-      settings.max_post_age_days ?? "";
-    document.getElementById("tg-daily-limit").value =
-      settings.daily_message_limit ?? "";
-    document.getElementById("tg-auto-message").checked = !!settings.auto_message;
-    document.getElementById("tg-hours-start").value =
-      settings.active_hours_start ?? "";
-    document.getElementById("tg-hours-end").value =
-      settings.active_hours_end ?? "";
-    document.getElementById("tg-intro-template").value =
-      settings.intro_message_template || "";
+    fillTelegramRules(settings);
 
     const unreadCount = conversations.filter((c) => c.unread).length;
     const navBadge = document.getElementById("telegram-unread-badge");
@@ -3162,6 +3159,7 @@ function initAutosave() {
     let timer = null;
     pane.addEventListener("change", (e) => {
       if (e.target.type === "file") return;
+      if (pane.dataset.needsLoad && pane.dataset.loaded !== "1") return; // ещё не загрузили
       clearTimeout(timer);
       note.textContent = "Сохраняю…";
       timer = setTimeout(() => {
@@ -4107,41 +4105,6 @@ function initOnboardingTour() {
   renderStep();
 }
 
-function renderHistoryTimeline(reversedEntries) {
-  const el = document.getElementById("history-timeline");
-  if (!reversedEntries.length) return;
-  el.innerHTML = reversedEntries
-    .map(
-      (e, i) => `
-    <div class="timeline-item reveal" style="transition-delay:${staggerDelay(i, 20)}">
-      <div class="timeline-date">${fmtTime(e.applied_at)}</div>
-      <div class="timeline-title"><a href="${escapeHtml(e.link)}" target="_blank" rel="noopener">${escapeHtml(e.company)} — ${escapeHtml(e.title)}</a></div>
-      <div class="timeline-meta">${sourceIconHtml(e.source)}${sourceLabel(e.source)} · ${statusLabel(e.status)}${e.score != null ? ` · балл ${e.score}` : ""}</div>
-      ${e.gaps && e.gaps.length ? `<div class="readiness-note" title="${escapeHtml(e.gaps.join("; "))}">${escapeHtml(truncate(e.gaps[0], 90))}${e.gaps.length > 1 ? ` (+${e.gaps.length - 1})` : ""}</div>` : ""}
-    </div>`
-    )
-    .join("");
-  observeReveal(el);
-}
-
-function initHistoryViewToggle() {
-  const tableBtn = document.getElementById("history-view-table");
-  const timelineBtn = document.getElementById("history-view-timeline");
-  const tableWrap = document.getElementById("history-table-wrap");
-  const timelineWrap = document.getElementById("history-timeline");
-  tableBtn.addEventListener("click", () => {
-    tableBtn.classList.add("active");
-    timelineBtn.classList.remove("active");
-    tableWrap.style.display = "";
-    timelineWrap.style.display = "none";
-  });
-  timelineBtn.addEventListener("click", () => {
-    timelineBtn.classList.add("active");
-    tableBtn.classList.remove("active");
-    tableWrap.style.display = "none";
-    timelineWrap.style.display = "";
-  });
-}
 
 // 13 недель x 7 дней, как в GitHub contributions — считаем прямо на
 // клиенте по уже существующему /api/applications, отдельного
@@ -4367,7 +4330,6 @@ function initDashboard() {
   initAutosave();
   initCommandPalette();
   initKeyboardShortcuts();
-  initHistoryViewToggle();
 
   document.getElementById("llm-key-toggle").addEventListener("click", () => {
     const input = document.getElementById("llm-key-input");
@@ -4591,19 +4553,14 @@ function initDashboard() {
       ? "start"
       : btn.classList.contains("is-paused")
         ? "resume"
-        : "pause";
+        : "stop";
     const messages = {
       start: ["Бот запущен", "success"],
-      pause: ["Бот на паузе", "info"],
+      stop: ["Бот остановлен", "info"],
       resume: ["Бот продолжает работу", "info"],
     };
     await withButtonLoading(btn, () => api(`/api/daemon/${endpoint}`, { method: "POST" }));
     showToast(...messages[endpoint]);
-    render.overview();
-  });
-  document.getElementById("daemon-stop").addEventListener("click", async (ev) => {
-    await withButtonLoading(ev.currentTarget, () => api("/api/daemon/stop", { method: "POST" }));
-    showToast("Бот остановлен", "info");
     render.overview();
   });
 
@@ -5089,9 +5046,6 @@ function initDashboard() {
             auto_message: document.getElementById("tg-auto-message").checked,
             active_hours_start: numOrNull("tg-hours-start"),
             active_hours_end: numOrNull("tg-hours-end"),
-            intro_message_template: document
-              .getElementById("tg-intro-template")
-              .value.trim(),
           }),
         });
         status.textContent = "Сохранено.";
