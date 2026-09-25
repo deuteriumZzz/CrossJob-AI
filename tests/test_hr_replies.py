@@ -226,14 +226,12 @@ def test_outreach_settings_roundtrip(client):  # noqa: F811
         "email_address": "me@gmail.com",
         "email_app_password": "abcd efgh ijkl mnop",
         "hunter_api_key": "hunter-key-123456",
-        "email_outreach": True,
         "follow_up_days": 5,
         "digest_hour": 8,
         "skip_us_only": False,
         "skip_europe_only": True,
     }).json()
     assert s["email_connected"] is True
-    assert s["email_outreach"] is True
     assert s["follow_up_days"] == 5
     assert s["digest_hour"] == 8
     assert (s["skip_us_only"], s["skip_europe_only"]) == (False, True)
@@ -262,3 +260,15 @@ def test_hr_drafts_queue_endpoint(client):  # noqa: F811
     }
     names = [c["name"] for c in client.get("/api/status").json()["chat_checks"]]
     assert "check_email_replies" in names and "check_telegram_commands" in names
+
+
+def test_company_email_language_by_domain_and_text():
+    """Русское письмо — компаниям из России/СНГ, даже с латинским
+    названием (домен .ru/.kz/.by, текст вакансии по-русски); остальным —
+    английское."""
+    from src.job_sources.hr_replies import _cis_company, _looks_russian
+
+    assert _cis_company({"website": "https://kaspi.kz/", "contacts": []})
+    assert _cis_company({"website": "", "contacts": [{"kind": "email", "value": "hr@ozon.ru"}]})
+    assert not _cis_company({"website": "nvidia.com", "contacts": [{"kind": "email", "value": "hr@nvidia.com"}]})
+    assert _looks_russian("Ищем Python-разработчика в команду")

@@ -2759,8 +2759,10 @@ kbd {
   padding: 6px 0;
   border-top: 1px solid var(--border-soft);
 }
-#direct-companies-panel > summary {
-  cursor: pointer;
+.plain-steps {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  line-height: 1.55;
 }
 
 .dossier-site {
@@ -3487,6 +3489,9 @@ details.panel.more[open] > summary {
 .account-row.is-missing .account-mark {
   color: var(--err);
 }
+.account-row.is-optional .account-mark {
+  color: var(--muted);
+}
 .account-text {
   flex: 1;
   display: grid;
@@ -3771,4 +3776,85 @@ details.panel.more[open] > summary {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.base-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 4px;
+  font-variant-numeric: tabular-nums;
+}
+.base-pager select {
+  width: auto;
+}
+.link-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Короткие числовые поля в строке с подписью — не растягиваются. */
+input.num-input {
+  width: 72px !important;
+  min-width: 0 !important;
+  flex: none !important;
+  display: inline-block;
+  margin: 0 4px;
+}
+
+/* Строка «Сейчас»: ждёт — спокойно, остановлено — красным. */
+.activity-icon {
+  flex: none;
+  width: 14px;
+  text-align: center;
+  font-size: 11px;
+}
+.activity-item.is-waiting {
+  color: var(--muted);
+}
+.activity-item.is-stopped {
+  border-color: var(--err);
+  color: var(--err);
+}
+.own-card .row-alert span:last-child {
+  color: var(--err);
+}
+.dot.running {
+  animation: dot-pulse 1.6s ease-in-out infinite;
+}
+@keyframes dot-pulse {
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--ok) 25%, transparent);
+  }
+}
+
+/* Изменилось — мягкая подсветка на пару секунд. */
+.count-changed {
+  color: var(--ok);
+  transition: color 1.2s ease;
+}
+.base-row.row-fresh td {
+  animation: row-fresh 2.6s ease-out;
+}
+@keyframes row-fresh {
+  0%,
+  35% {
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dot.running,
+  .base-row.row-fresh td {
+    animation: none;
+  }
 }

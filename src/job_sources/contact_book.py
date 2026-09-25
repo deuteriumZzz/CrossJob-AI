@@ -188,5 +188,26 @@ class ContactBook:
                 data["companies"][card.pop("key")] = card
             self._save(data)
 
+    def keys_with(self, value: str) -> list[str]:
+        """Компании, у которых есть этот контакт (email или @ник)."""
+        value = value.lower()
+        return [k for k, c in self.all().items() if any(x["value"].lower() == value for x in c["contacts"])]
+
+    def update_contact(self, value: str, **fields) -> bool:
+        """Поля контакта во всех компаниях, где он есть (отметки «письмо
+        отправлено / ответили / возврат»). False — такого контакта нет."""
+        value = value.lower()
+        found = False
+        with state_file_lock(self.path):
+            data = self._load()
+            for card in data["companies"].values():
+                for contact in card["contacts"]:
+                    if contact["value"].lower() == value:
+                        contact.update(fields)
+                        found = True
+            if found:
+                self._save(data)
+        return found
+
     def get(self, key: str) -> dict | None:
         return self.all().get(key)

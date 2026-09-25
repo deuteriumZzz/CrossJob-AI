@@ -5,6 +5,7 @@ import re
 import sys
 import threading
 import zipfile
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -46,6 +47,7 @@ from main import HR_DRAFTS_FILE
 from main import bootstrap_data_folder as _bootstrap_data_folder
 from main import prefill_direct_application as _prefill_direct_application
 from main import prepare_interview as _prepare_interview
+from main import check_campaign_sending as _check_campaign_sending
 from main import start_campaign_job as _start_campaign_job
 from main import send_hr_draft as _send_hr_draft
 from main import create_cover_letter as _create_cover_letter
@@ -101,6 +103,7 @@ from src.direct.ats import discover_ats, fetch_jobs
 from src.direct.email_channel import build_message, send_email
 from src.direct.companies import load_companies, save_companies
 from src.direct.campaign import CAMPAIGNS_FILE, CampaignJob, CampaignStore, campaign_stats
+from src.direct import mail_guard
 from src.direct.dossier import collect_dossier
 from src.direct.importer import preview as import_preview
 from src.direct.importer import read_file, rows_from_table, rows_from_text
@@ -288,7 +291,33 @@ def get_ctx() -> AppContext:
     return _ctx
 
 
-app = FastAPI(title="CrossJob-AI")
+def _start_mail_ticker() -> None:
+    """Рассылка идёт, пока открыт дашборд, — независимо от «▶ Запустить»
+    (он про поиск вакансий): раз в 5 минут продолжаем начатые рассылки,
+    когда снова можно отправлять. Один владелец — без двойной отправки."""
+    import threading
+    import time
+
+    def loop() -> None:
+        time.sleep(30)
+        while True:
+            try:
+                ctx = get_ctx()
+                _check_campaign_sending(ctx.config, ctx.llm_api_key)
+            except Exception as e:  # noqa: BLE001 — тикер не должен падать
+                logger.warning(f"Рассылка: проверка продолжения не удалась: {e}")
+            time.sleep(300)
+
+    threading.Thread(target=loop, name="mail-ticker", daemon=True).start()
+
+
+@asynccontextmanager
+async def _lifespan(_app):
+    _start_mail_ticker()
+    yield
+
+
+app = FastAPI(title="CrossJob-AI", lifespan=_lifespan)
 
 
 @app.middleware("http")
@@ -811,8 +840,11 @@ class OutreachSettings(BaseModel):
     email_address: Optional[str] = None
     email_app_password: Optional[str] = None
     hunter_api_key: Optional[str] = None
-    email_outreach: Optional[bool] = None
     email_daily_limit: Optional[int] = None
+    warmup: Optional[bool] = None
+    send_from: Optional[int] = None
+    send_to: Optional[int] = None
+    weekdays_only: Optional[bool] = None
     follow_up_days: Optional[int] = None
     digest_enabled: Optional[bool] = None
     digest_hour: Optional[int] = None
@@ -836,8 +868,9 @@ def get_outreach_settings(ctx: AppContext = Depends(get_ctx)) -> dict:
         "email_address": email.get("address") or "",
         "email_connected": bool(email.get("address") and email.get("app_password")),
         "hunter_preview": _mask_api_key(hunter) if hunter else "",
-        "email_outreach": bool(direct.get("email_outreach")),
-        "email_daily_limit": int(direct.get("email_daily_limit", 20)),
+        **{k: v for k, v in mail_guard.settings(ctx.config).items() if k != "daily_limit"},
+        "email_daily_limit": mail_guard.settings(ctx.config)["daily_limit"],
+        "mail_plan": mail_guard.plan(ctx.config, ctx.output_folder),
         "follow_up_days": int(
             (ctx.config.get("telegram") or {}).get("follow_up_days", 7)
         ),
@@ -864,12 +897,22 @@ def post_outreach_settings(
             ctx.secrets_file, "email", "app_password",
             body.email_app_password.replace(" ", ""), quote=True,
         )
+        # Новый пароль — снимаем стоп «Gmail не принял пароль» с рассылок.
+        store = CampaignStore(ctx.output_folder)
+        for cid, campaign in store.all().items():
+            if campaign.get("error"):
+                store.update(cid, error="", alerted="")
     if body.hunter_api_key:
         set_top_level_field(ctx.secrets_file, "hunter_api_key", body.hunter_api_key.strip())
-    if body.email_outreach is not None:
-        set_source_field(prefs, "direct", "email_outreach", body.email_outreach)
     if body.email_daily_limit is not None:
-        set_source_field(prefs, "direct", "email_daily_limit", max(1, body.email_daily_limit))
+        set_source_field(prefs, "direct", "email_daily_limit", min(300, max(1, body.email_daily_limit)))
+    if body.warmup is not None:
+        set_source_field(prefs, "direct", "warmup", body.warmup)
+    if body.weekdays_only is not None:
+        set_source_field(prefs, "direct", "weekdays_only", body.weekdays_only)
+    if body.send_from is not None and body.send_to is not None and 0 <= body.send_from < body.send_to <= 24:
+        set_source_field(prefs, "direct", "send_from", body.send_from)
+        set_source_field(prefs, "direct", "send_to", body.send_to)
     if body.follow_up_days is not None:
         # Одна настройка на оба канала: Telegram-диалоги и письма.
         days = max(0, body.follow_up_days)
@@ -966,13 +1009,18 @@ def _contact_status(contact: dict, conversations, sent_by_email: dict, draft_con
     кому есть черновик (оба — заранее, иначе на тысячах компаний это
     перебор всех откликов для каждого контакта)."""
     value = contact["value"].lower()
+    # Отметки на самом контакте — письма из Telegram-парсера и «Входящих».
+    if contact.get("replied_at"):
+        return "replied"
+    if contact.get("bounced_at"):
+        return "bounced"
     if campaign and value in campaign.get("replied", ()):
         return "replied"
     if campaign and value in campaign.get("bounced", ()):
         return "bounced"
     if value in draft_contacts:
         return "draft"
-    if campaign and value in campaign.get("sent", ()):
+    if contact.get("sent_at") or (campaign and value in campaign.get("sent", ())):
         return "written"
     if contact["kind"] == "telegram":
         conv = conversations.get(contact["value"])
@@ -1021,9 +1069,10 @@ def _contact_events(ctx: AppContext, conversations, entries, drafts) -> dict[str
 
 
 def _source_kind(source: str) -> str:
-    """Для фильтра и значка в базе: file / telegram / dossier / vacancy."""
+    """Для фильтра и значка в базе: file / telegram / sites / dossier / vacancy."""
     group = _source_group(source)
-    return {"Telegram-каналы": "telegram", "Досье компаний": "dossier", "Тексты вакансий": "vacancy"}.get(group, "file")
+    return {"Telegram-каналы": "telegram", "Сайты компаний": "sites", "Досье компаний": "dossier",
+            "Тексты вакансий": "vacancy"}.get(group, "file")
 
 
 @app.get("/api/contacts")
@@ -1088,15 +1137,25 @@ def _build_contacts(ctx: AppContext, book: ContactBook) -> list[dict]:
             status = "skip"
         history = sorted(
             [{"at": c.get("found_at", ""), "text": f"добавлен {c['value']} — {c.get('source') or 'источник не указан'}"} for c in card["contacts"]]
-            + [ev for c in card["contacts"] for ev in events.get(c["value"].lower(), [])],
+            + [ev for c in card["contacts"] for ev in events.get(c["value"].lower(), [])]
+            + [{"at": c[f], "text": f"{text} {c['value']}"} for c in card["contacts"]
+               for f, text in (("sent_at", "письмо отправлено"), ("followed_up_at", "напоминание отправлено"),
+                               ("replied_at", "ответили"), ("bounced_at", "возврат письма")) if c.get(f)],
             key=lambda ev: ev["at"],
         )
         primary = next((c for c in contacts if c["kind"] == "email"), contacts[0] if contacts else None)
         cards.append({
             "key": key, **card, "contacts": contacts, "status": status,
+            # Текст вакансии (до 4000 символов) интерфейсу не нужен — на
+            # тысячах компаний это мегабайты на каждое открытие Базы.
+            "vacancies": [{k: v for k, v in vac.items() if k != "text"} for vac in card["vacancies"]],
             "primary": primary,
             "hr": next((c["name"] for c in contacts if c.get("name")), ""),
-            "source_kinds": sorted({c["source_kind"] for c in contacts}),
+            # Компания из «Сайтов компаний» без найденного email — тоже «sites».
+            "files": sorted({_source_group(c.get("source", ""))[len("файл "):] for c in card["contacts"]
+                             if c.get("source", "").startswith("файл ")}),
+            "source_kinds": sorted({c["source_kind"] for c in contacts}
+                                   | ({"sites"} if any(v.get("source") == "direct" for v in card["vacancies"]) else set())),
             "history": history,
             "last": history[-1] if history else None,
         })
@@ -1270,9 +1329,10 @@ def get_todo(ctx: AppContext = Depends(get_ctx)) -> dict:
     return {
         "items": items,
         "setup": _setup_checklist(ctx),
+        # Счётчик — только там, где ждёт действие: черновики на подтверждение.
+        # «Не писали» в Базе на тысячах компаний — шум, а не сигнал.
         "badges": {
             "replies": len(drafts),
-            "contacts": len(new_contacts),
         },
     }
 
@@ -1479,9 +1539,11 @@ def post_import_commit(body: ImportCommit, ctx: AppContext = Depends(get_ctx)) -
         source = f"файл {filename}, строка {item['row']}"
         if take_email:
             found.append({"kind": "email", "value": item["email"], "name": item.get("name", ""),
-                          "position": item.get("position", ""), "source": source})
+                          "position": item.get("position", ""), "source": source,
+                          "source_url": item.get("source_url", "")})
         if item.get("telegram"):
-            found.append({"kind": "telegram", "value": item["telegram"], "name": item.get("name", ""), "source": source})
+            found.append({"kind": "telegram", "value": item["telegram"], "name": item.get("name", ""), "source": source,
+                          "source_url": item.get("source_url", "")})
         if not item.get("company") and not found:
             continue
         key = book.add(
@@ -1508,6 +1570,7 @@ def _campaign_view(ctx: AppContext, campaign: dict) -> dict:
             "followed_up": sum(1 for i in campaign["items"].values() if i.get("followed_up_at")),
         },
         "progress": CampaignJob.progress(campaign["id"]),
+        "sending": bool(campaign.get("sending")),
         "items": [
             {
                 "email": email, **item,
@@ -1545,16 +1608,24 @@ def get_campaigns(ctx: AppContext = Depends(get_ctx)) -> dict:
     campaigns = sorted(
         CampaignStore(ctx.output_folder).all().values(), key=lambda c: c["created_at"], reverse=True
     )
+    plan = mail_guard.plan(ctx.config, ctx.output_folder)
     return {
         "available": available,
         "sources": sources,
         "campaigns": [_campaign_view(ctx, c) for c in campaigns],
+        "daily_limit": plan["limit"],
+        "mail_plan": plan,
+        "mail_status": _mail_status(ctx),
+        # Сколько дней отправки займёт всё, что можно написать, — с разогревом.
+        "days_needed": mail_guard.days_needed(plan, available),
         "email_connected": bool((ConfigValidator.load_yaml(ctx.secrets_file).get("email") or {}).get("app_password")),
     }
 
 
 def _source_group(source: str) -> str:
     """Группа источника для фильтра рассылки."""
+    if source.startswith("Сайты компаний"):
+        return "Сайты компаний"
     if source.startswith("файл "):
         return source.split(",")[0]
     if source.startswith("пост в @"):
@@ -1611,6 +1682,7 @@ def post_campaign_action(
         job = CampaignJob.RUNNING.get(campaign_id)
         if job:
             job.stop()
+        store.update(campaign_id, sending=False)  # и не продолжать завтра
         return _campaign_view(ctx, store.get(campaign_id))
     if CampaignJob.RUNNING.get(campaign_id):
         raise HTTPException(409, "По этой рассылке уже идёт работа")
@@ -1732,6 +1804,47 @@ class CompanyAdd(BaseModel):
     website: str = ""
     ats: str = ""
     slug: str = ""
+
+
+@app.get("/api/direct/summary")
+def get_direct_summary(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Карточка «Сайты компаний» на Главной: сколько компаний канал
+    положил в Базу и скольким из них можно разослать письмо."""
+    from datetime import timedelta
+
+    from src.direct.companies import all_companies
+
+    direct = ctx.config.get("direct") or {}
+    week_ago = (datetime.now().astimezone() - timedelta(days=7)).isoformat()
+    cards = [c for c in get_contacts(ctx) if "sites" in c["source_kinds"]]
+    return {
+        "enabled": bool(direct.get("schedule_enabled")),
+        "companies": len(all_companies(ctx.config)),
+        "wwr": direct.get("wwr", True) is not False,
+        "hn": direct.get("hn", True) is not False,
+        "in_base": len(cards),
+        "added_week": sum(1 for c in cards if c.get("created_at", "") >= week_ago),
+        "ready": sum(
+            1 for c in cards
+            if c["status"] != "skip" and any(x["kind"] == "email" and x["status"] == "new" for x in c["contacts"])
+        ),
+    }
+
+
+class DirectSettings(BaseModel):
+    wwr: Optional[bool] = None
+    hn: Optional[bool] = None
+
+
+@app.post("/api/direct/settings")
+def post_direct_settings(body: DirectSettings, ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Доски удалёнки «Сайтов компаний»: We Work Remotely, HN «Who is hiring»."""
+    for field in ("wwr", "hn"):
+        value = getattr(body, field)
+        if value is not None:
+            set_source_field(ctx.config_file, "direct", field, value)
+    ctx.reload_config()
+    return get_direct_summary(ctx)
 
 
 @app.get("/api/direct/companies")
@@ -3218,14 +3331,56 @@ def get_run_now_status(ctx: AppContext = Depends(get_ctx)) -> dict:
     }
 
 
+def _mail_status(ctx: AppContext) -> Optional[dict]:
+    """Одно состояние отправки писем для строки «Сейчас» и карточки на
+    Главной: active — отправляю, waiting — ждёт (вечер/выходные/лимит),
+    stopped — нужны вы (пароль Gmail, волна возвратов). None — рассылка
+    не включена."""
+    campaigns = CampaignStore(ctx.output_folder).all()
+    sending = [
+        (cid, c) for cid, c in campaigns.items()
+        if c.get("sending") and any(i["status"] == "draft" for i in c["items"].values())
+    ]
+    if not sending:
+        return None
+    plan = mail_guard.plan(ctx.config, ctx.output_folder)
+    sent = [(i.get("sent_at"), i.get("company") or e) for c in campaigns.values()
+            for e, i in c["items"].items() if i.get("sent_at")]
+    last = max(sent) if sent else None
+    waiting = sum(1 for _, c in sending for i in c["items"].values() if i["status"] == "draft")
+    base = {"campaign": sending[0][0], "sent_today": plan["sent_today"], "limit": plan["limit"],
+            "waiting": waiting, "last": {"at": last[0], "company": last[1]} if last else None}
+    error = next((c["error"] for _, c in sending if c.get("error")), "")
+    if error:
+        return {**base, "state": "stopped", "text": f"Отправка остановлена: {error}", "goto": "settings-outreach"}
+    if plan["recent_bounces"] >= mail_guard.BOUNCE_STOP:
+        return {**base, "state": "stopped", "text": f"Отправка остановлена: {plan['reason']}. Проверьте адреса в Базе", "goto": "contacts"}
+    job = next((CampaignJob.RUNNING[cid] for cid, _ in sending if cid in CampaignJob.RUNNING), None)
+    if job is not None and job.kind == "send":
+        progress = CampaignJob.progress(job.campaign_id) or {}
+        minutes = round(progress.get("next_in", 0) / 60)
+        return {**base, "state": "active", "goto": "outreach",
+                "text": f"Отправляю письма: {plan['sent_today']} из {plan['limit']} сегодня"
+                        + (f" · следующее через ~{minutes} мин" if minutes else "")}
+    reason = plan["reason"] or "продолжу в ближайшие минуты"
+    return {**base, "state": "waiting", "goto": "outreach",
+            "text": f"Рассылка ждёт ({waiting}): {reason[0].lower() + reason[1:]}"}
+
+
 @app.get("/api/activity")
 def get_activity(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
     """Что бот делает прямо сейчас — для индикатора в меню (лёгкий опрос,
     без чтения базы): рассылки, разбор файла, «Запустить сейчас»."""
     items = []
+    mail = _mail_status(ctx)
+    if mail:
+        items.append({"text": mail["text"], "state": mail["state"], "view": "outreach",
+                      "goto": mail["goto"], "done": 0, "total": 0})
     campaigns = CampaignStore(ctx.output_folder).all()
     kind_text = {"prepare": "Пишу письма", "send": "Отправляю письма", "followups": "Отправляю напоминания"}
     for cid, job in list(CampaignJob.RUNNING.items()):
+        if mail and job.kind == "send":
+            continue  # уже в строке состояния отправки
         name = (campaigns.get(cid) or {}).get("name", "")
         items.append({"text": f"{kind_text.get(job.kind, job.kind)} — {name}", "done": job.done,
                       "total": len(job.emails), "view": "outreach"})

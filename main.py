@@ -1,7 +1,6 @@
 import base64
 import binascii
 import json
-from urllib.parse import urlparse
 import re
 import shutil
 import sys
@@ -53,7 +52,9 @@ from src.job_sources.getmatch.auth import GetMatchSession
 from src.job_sources.getmatch.client import GetMatchClient
 from src.job_sources.getmatch.source import GetMatchSource
 from src.direct.companies import all_companies
-from src.direct.contacts import extract_emails, hunter_hr_contacts
+from src.direct.contacts import extract_emails
+from src.direct import mail_guard
+from src.direct.dossier import collect_dossier
 from src.direct.campaign import CampaignJob, CampaignStore, campaign_stats
 from src.direct.email_channel import (
     bounced_addresses,
@@ -2908,13 +2909,14 @@ def search_direct(
     llm_api_key: str,
     stop_event: Optional[threading.Event] = None,
 ):
-    """Модуль «Прямой поиск» (direct: в work_preferences.yaml): вакансии
-    с сайтов компаний (Greenhouse/Lever/Ashby/Workable), We Work
-    Remotely и HN «Who is hiring». Автоотклика через формы нет —
-    каждая подходящая вакансия записывается как "нужен ручной отклик"
-    с письмом и контактами из текста вакансии. Если direct.email_outreach
-    включён и в вакансии есть email — готовит письмо HR черновиком на
-    подтверждение ("отправить <код>" или кнопка во "Входящих")."""
+    """Канал «Сайты компаний» (direct: в work_preferences.yaml) — сборщик
+    для Базы. Берёт вакансии с сайтов компаний (Greenhouse/Lever/Ashby/
+    Workable), We Work Remotely и HN «Who is hiring»; подходящие по резюме
+    кладёт в Базу компанией с вакансией и контактом HR: email из текста
+    вакансии, иначе со страниц сайта компании, иначе из Hunter (если есть
+    ключ). Писем тут не пишет — письмо один раз готовит «Рассылка» по
+    промту пользователя. Слабые совпадения пишутся в applied_log как
+    skipped_low_fit, чтобы не оценивать их повторно."""
     config = parameters.get("direct") or {}
     data_folder: Path = parameters["dataFolder"]
     resume_pdf_path = data_folder / RESUME_PDF_LINKEDIN
@@ -2925,25 +2927,25 @@ def search_direct(
 
     output_folder: Path = parameters["outputFileDirectory"]
     applied_log = AppliedLog(output_folder / "applied_log.json")
+    book = ContactBook(output_folder)
     secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
-    hunter_key = secrets.get("hunter_api_key")
-    drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
+    hunter_key = secrets.get("hunter_api_key") or ""
 
     jobs = DirectSource().search(
         {**parameters, "direct": {**config, "companies": all_companies(parameters)}}
     )
     logger.info(f"Found {len(jobs)} matching direct vacancies.")
-    already_seen = sum(1 for job in jobs if applied_log.already_applied(job))
-    run_start = datetime.now().astimezone()
+    in_book = {v["link"] for card in book.all().values() for v in card["vacancies"]}
     job_max_applications = _job_max_applications(parameters, "direct")
-    processed = 0
+    added = with_email = processed = 0
     for job in jobs:
         if stop_event is not None and stop_event.is_set():
             break
         if processed >= job_max_applications:
             break
-        if applied_log.already_applied(job):
+        if job.link in in_book or applied_log.already_applied(job):
             continue
+        processed += 1
         fit = score_job_fit(resume_pdf_path, job, llm_api_key)
         tier = classify_fit(
             fit.score,
@@ -2955,63 +2957,41 @@ def search_direct(
                 job, "", "", "skipped_low_fit", fit.score, fit.gaps
             )
             continue
-        try:
-            cover_letter = generate_cover_letter_for_job(
-                resume_pdf_path, job, llm_api_key, template="en_plain"
-            )
-        except Exception as e:
-            logger.exception(f"Cover letter failed for {job.link}: {e}")
-            continue
 
-        contacts = extract_emails(job.description)
-        domain = urlparse(job.company_url).netloc.removeprefix("www.")
-        if not contacts and hunter_key and domain:
+        vacancy = {"title": job.role, "link": job.link, "source": "direct",
+                   "text": job.description[:4000], "score": fit.score}
+        contacts = [
+            {"kind": "email", "value": email, "source": "Сайты компаний: текст вакансии",
+             "source_url": job.link}
+            for email in extract_emails(job.description)
+        ]
+        if not contacts:
             try:
-                contacts = [
-                    c["email"] for c in hunter_hr_contacts(domain, hunter_key)
-                ][:1]
+                found = collect_dossier(
+                    {"website": job.company_url, "vacancies": [vacancy]}, hunter_key
+                )["contacts"]
             except Exception as e:
-                logger.warning(f"Hunter: {domain}: {e}")
-
-        applied_log.record(
-            job, cover_letter, "", "dry_run", fit.score, fit.gaps,
-            contacts=contacts,
-        )
-        if contacts:
-            ContactBook(output_folder).add(
-                job.company,
-                [
-                    {"kind": "email", "value": c, "source": "текст вакансии",
-                     "source_url": job.link}
-                    for c in contacts
-                ],
-                vacancy={"title": job.role, "link": job.link,
-                         "source": "direct", "text": job.description[:4000]},
-                website=job.company_url,
-            )
-        processed += 1
+                logger.warning(f"Сайты компаний: контакты {job.company}: {e}")
+                found = []
+            contacts = [
+                {**c, "source": f"Сайты компаний: {c['source']}"}
+                for c in found if c["kind"] == "email"
+            ]
+        book.add(job.company, contacts, vacancy=vacancy, website=job.company_url)
+        in_book.add(job.link)
+        added += 1
+        with_email += bool(contacts)
         logger.info(
-            f"[manual apply needed] {job.role} at {job.company} ({job.link})"
-            + (f" — контакт: {contacts[0]}" if contacts else "")
+            f"[в Базу] {job.role} at {job.company}"
+            + (f" — {contacts[0]['value']}" if contacts else " — email не найден")
         )
-        if contacts and config.get("email_outreach"):
-            code = drafts.add(
-                contacts[0],
-                cover_letter,
-                "email",
-                job.link,
-                channel="email",
-                subject=f"{job.role} — отклик",
-            )
-            notify(
-                parameters,
-                f"✉️ {job.company} — {job.role}\nКому: {contacts[0]}\n"
-                f"«отправить {code}» — отправить письмо с резюме, "
-                f"«пропустить {code}» — нет. Текст можно поправить во "
-                "«Входящих».",
-            )
 
-    _log_funnel_summary("direct", applied_log, len(jobs), already_seen, run_start)
+    if added:
+        notify_routine(
+            parameters,
+            f"🏢 Сайты компаний: +{added} в Базе, с email — {with_email}. "
+            "Разослать письма — «Компании» → «Рассылки».",
+        )
 
 
 # Окна с предзаполненной формой должны жить, пока человек дозаполняет
@@ -3074,7 +3054,13 @@ def start_campaign_job(
         if not resume_pdf.exists():
             resume_pdf = data_folder / RESUME_PDF
         name = candidate_name(parameters, resume_pdf)
-        emails = [e for e, item in campaign["items"].items() if item["status"] == "pending"]
+        # Порциями по дневному лимиту: 3000 писем разом — 3000 запросов к
+        # ИИ и письма, которые уйдут через месяцы. Следующую порцию
+        # готовит _prepare_campaign_batches на следующий день.
+        limit = mail_guard.plan(parameters, output_folder)["limit"]
+        ready = sum(1 for item in campaign["items"].values() if item["status"] == "draft")
+        emails = [e for e, item in campaign["items"].items() if item["status"] == "pending"][: max(0, limit - ready)]
+        store.update(campaign_id, batch_day=datetime.now().astimezone().date().isoformat())
 
         def step(email: str) -> Optional[str]:
             item = campaign["items"][email]
@@ -3102,6 +3088,7 @@ def start_campaign_job(
                 _notify_with_buttons(parameters, (
                     f"✍️ Рассылка «{campaign['name']}»: готово писем — {stats['draft']}"
                     + (f", не получилось — {stats['failed']}" if stats["failed"] else "")
+                    + (f", ещё в очереди — {stats['pending']}" if stats["pending"] else "")
                     + ". Отправить через Gmail с резюме?"
                 ), [[{"text": "🚀 Отправить все", "callback_data": f"cs:{campaign_id}"},
                      {"text": "👀 Показать по одному", "callback_data": f"cv:{campaign_id}:d"}]])
@@ -3123,31 +3110,55 @@ def start_campaign_job(
         job = CampaignJob(campaign_id, "followups", emails, step, pause=True)
     else:
         emails = [e for e, item in campaign["items"].items() if item["status"] == "draft"]
+        # «Отправлять» — режим рассылки, а не разовый прогон: что не ушло
+        # сегодня (лимит, вечер, выходные), check_campaign_sending
+        # продолжит в следующее время отправки.
+        store.update(campaign_id, sending=True, resume=str(resume_path or ""), alerted="")
 
         def step(email: str) -> Optional[str]:
+            guard = mail_guard.plan(parameters, output_folder)
+            if not guard["can_send"]:
+                return guard["reason"]
             code = campaign["items"][email]["code"]
             if drafts.get(code) is None:
                 store.update_item(campaign_id, email, status="skipped", reason="черновик удалён во «Входящих»")
                 return None
             result = send_hr_draft(parameters, code, attachment=resume_path)
+            if _gmail_auth_failed(result):
+                # Пароль приложения отозван/сменён — все письма упадут так же.
+                # Стоп и один сигнал; снимется, когда сохраните новый пароль.
+                store.update(campaign_id, error="Gmail не принял пароль приложения — создайте новый в Настройках → Почта и письма")
+                return "Gmail не принял пароль приложения"
             if result.startswith("Отправлено"):
                 store.update_item(campaign_id, email, status="sent", sent_at=datetime.now().astimezone().isoformat(), reason="")
                 return None
-            if "лимит" in result:
-                return result  # остальные останутся черновиками до завтра
+            if result.startswith("⏸"):
+                return result[2:]  # остальные останутся черновиками до завтра
             store.update_item(campaign_id, email, status="failed", reason=result[:200])
             return None
 
         def on_finish(job: CampaignJob) -> None:
-            stats = campaign_stats(store.get(campaign_id) or campaign)
-            notify_routine(
-                parameters,
+            current = store.get(campaign_id) or campaign
+            stats = campaign_stats(current)
+            text = (
                 f"✉️ Рассылка «{campaign['name']}»: отправлено {stats['sent']} из "
                 f"{stats['total']}, ошибок {stats['failed']}, ждут отправки {stats['draft']}. "
-                f"{job.message}",
+                f"{job.message}"
             )
+            # Остановка, где нужны вы (пароль Gmail, волна возвратов), — сразу
+            # и один раз; обычные паузы (вечер, лимит) — в сводку.
+            stopped = current.get("error") or ("Возвратов" in job.message and job.message)
+            if stopped and current.get("alerted") != stopped:
+                store.update(campaign_id, alerted=stopped)
+                notify(parameters, f"⛔ {text}")
+            elif not stopped:
+                notify_routine(parameters, text)
 
-        job = CampaignJob(campaign_id, "send", emails, step, pause=True, on_finish=on_finish)
+        job = CampaignJob(
+            campaign_id, "send", emails, step,
+            pause=lambda: mail_guard.human_pause(mail_guard.plan(parameters, output_folder)),
+            on_finish=on_finish,
+        )
     job.start()
     return job
 
@@ -3165,13 +3176,111 @@ def _check_campaign_mail(parameters: dict, credentials: dict) -> None:
     if not sent:
         return
     for email in bounced_addresses(credentials, list(sent)):
-        store.update_item(sent[email][0], email, status="bounced", reason="адрес не существует (возврат)")
+        store.update_item(sent[email][0], email, status="bounced", reason="адрес не существует (возврат)",
+                          bounced_at=datetime.now().astimezone().isoformat())
     replied = senders_replied(credentials, [e for e in sent])
     for email in replied:
         cid, name, company = sent[email]
         store.update_item(cid, email, status="replied", replied_at=datetime.now().astimezone().isoformat())
         notify(parameters, f"✉️ Ответ на письмо из рассылки «{name}»: {company} ({email}). Проверьте почту.")
     _draft_campaign_follow_ups(parameters, store, set(replied))
+
+
+def _mark_contact_mail(output_folder: Path, draft: dict, message_id: str) -> None:
+    now_iso = datetime.now().astimezone().isoformat()
+    fields = {"followed_up_at": now_iso} if draft["kind"] == "follow_up" else {
+        "sent_at": now_iso, "message_id": message_id,
+        "subject": draft.get("subject", ""), "job_link": draft.get("job_link", ""),
+    }
+    book = ContactBook(output_folder)
+    if not book.update_contact(draft["contact"], **fields):
+        book.add("", [{"kind": "email", "value": draft["contact"], "source": "письмо HR", **fields}])
+
+
+def _check_contact_book_mail(parameters: dict, credentials: dict) -> None:
+    """Ответы, возвраты и напоминания по письмам, отмеченным на контактах
+    Базы (не из рассылок и не к откликам) — так же, как у рассылок."""
+    output_folder: Path = parameters["outputFileDirectory"]
+    book = ContactBook(output_folder)
+    sent = {
+        c["value"].lower(): (card.get("company") or c["value"], c)
+        for card in book.all().values()
+        for c in card["contacts"]
+        if c["kind"] == "email" and c.get("sent_at") and not c.get("replied_at") and not c.get("bounced_at")
+    }
+    if not sent:
+        return
+    now = datetime.now().astimezone()
+    bounced = {a.lower() for a in bounced_addresses(credentials, list(sent))}
+    for email in bounced:
+        book.update_contact(email, bounced_at=now.isoformat())
+    replied = {a.lower() for a in senders_replied(credentials, list(sent))} - bounced
+    for email in replied:
+        book.update_contact(email, replied_at=now.isoformat())
+        notify(parameters, f"✉️ Ответ на письмо: {sent[email][0]} ({email}). Проверьте почту.")
+    days = int((parameters.get("direct") or {}).get("follow_up_days", 7))
+    if days <= 0:
+        return
+    drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
+    for email, (company, c) in sent.items():
+        if (
+            email in bounced or email in replied or c.get("follow_up_code") or c.get("followed_up_at")
+            or now - datetime.fromisoformat(c["sent_at"]) < timedelta(days=days)
+        ):
+            continue
+        subject = c.get("subject") or ""
+        code = drafts.add(
+            c["value"], FOLLOW_UP_TEXT if _looks_russian(subject) else FOLLOW_UP_TEXT_EN,
+            "follow_up", c.get("job_link", ""), channel="email",
+            subject=subject if subject.startswith("Re:") else f"Re: {subject}",
+            in_reply_to=c.get("message_id", ""),
+        )
+        book.update_contact(email, follow_up_code=code)
+        notify(
+            parameters,
+            f"⏳ {company} не ответили на письмо {days}+ дн. "
+            f"Напоминание: «отправить {code}» / «пропустить {code}».",
+        )
+
+
+def _gmail_auth_failed(result: str) -> bool:
+    return result.startswith("Не удалось отправить") and any(
+        m in result for m in ("535", "Username and Password", "Authentication", "BadCredentials")
+    )
+
+
+def check_campaign_sending(parameters: dict, llm_api_key: str) -> None:
+    """Раз в 5 минут, пока открыт дашборд (не зависит от «▶ Запустить»):
+    следующая порция писем (раз в день) и продолжение начатых рассылок,
+    когда снова можно — время отправки, лимит, нет волны возвратов."""
+    _prepare_campaign_batches(parameters, llm_api_key)
+    output_folder: Path = parameters["outputFileDirectory"]
+    if not mail_guard.plan(parameters, output_folder)["can_send"]:
+        return
+    for cid, campaign in CampaignStore(output_folder).all().items():
+        if (
+            campaign.get("sending") and not campaign.get("error") and not CampaignJob.RUNNING.get(cid)
+            and any(item["status"] == "draft" for item in campaign["items"].values())
+        ):
+            resume = Path(campaign["resume"]) if campaign.get("resume") else None
+            start_campaign_job(parameters, llm_api_key, cid, "send", resume)
+            return  # по одной рассылке за раз — лимит общий
+
+
+def _prepare_campaign_batches(parameters: dict, llm_api_key: str) -> None:
+    """Раз в день — следующая порция писем начатой рассылки: когда прошлая
+    порция отправлена (черновиков нет), а в очереди ещё есть адреса.
+    Готовые письма приходят в бот с кнопкой «Отправить все»."""
+    store = CampaignStore(parameters["outputFileDirectory"])
+    today = datetime.now().astimezone().date().isoformat()
+    for cid, campaign in store.all().items():
+        statuses = [item["status"] for item in campaign["items"].values()]
+        if (
+            campaign.get("batch_day") and campaign["batch_day"] != today
+            and "pending" in statuses and "draft" not in statuses
+            and not CampaignJob.RUNNING.get(cid)
+        ):
+            start_campaign_job(parameters, llm_api_key, cid, "prepare")
 
 
 def _draft_campaign_follow_ups(parameters: dict, store: CampaignStore, replied: set) -> None:
@@ -3236,6 +3345,10 @@ def check_email_replies(parameters: dict, llm_api_key: str) -> None:
         _check_campaign_mail(parameters, credentials)
     except Exception as e:
         logger.warning(f"Не удалось проверить ответы по рассылкам: {e}")
+    try:
+        _check_contact_book_mail(parameters, credentials)
+    except Exception as e:
+        logger.warning(f"Не удалось проверить ответы на письма из Базы: {e}")
     applied_log = AppliedLog(output_folder / "applied_log.json")
     waiting = [
         e
@@ -4428,7 +4541,10 @@ def _handle_vacancy_button(
             "chat_id": message["chat"]["id"],
             "reply_to_message_id": message["message_id"],
             "text": f"✍️ Письмо для {contact['value']} (сохранено: telegram/letters/{path.name}):\n\n{letter['text']}",
-            "reply_markup": {"inline_keyboard": [send_row, [{"text": "✖️ Пропустить", "callback_data": f"x:{code}"}]]},
+            "reply_markup": {"inline_keyboard": [send_row, [
+                {"text": "✖️ Пропустить", "callback_data": f"x:{code}"},
+                {"text": "🚫 Не писать компании", "callback_data": f"nd:{code}"},
+            ]]},
         })
     elif parts[0] == "d":
         draft = DraftStore(output_folder / HR_DRAFTS_FILE).get(parts[1])
@@ -4450,6 +4566,25 @@ def _handle_vacancy_button(
             CampaignStore(output_folder).update_item(draft["campaign"], draft["contact"], status="skipped")
         drafts.remove(parts[1])
         done("✖️ Пропущено")
+    elif parts[0] in ("n", "nd"):
+        # «Не писать компании»: в Базе — «не писать», из рассылок выпадает.
+        # Снять можно в Базе («Можно писать»).
+        drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
+        if parts[0] == "n":
+            post = get_watch_post(output_folder, parts[1])
+            if post is None:
+                raise ValueError("пост устарел — отметьте компанию в Базе")
+            values = [c["value"] for c in post["contacts"]]
+        else:
+            draft = drafts.get(parts[1]) or {}
+            values = [draft["contact"]] if draft else []
+            if draft.get("campaign"):
+                CampaignStore(output_folder).update_item(draft["campaign"], draft["contact"], status="skipped")
+            drafts.remove(parts[1])
+        book = ContactBook(output_folder)
+        keys = sorted({k for v in values for k in book.keys_with(v)})
+        book.update(keys, do_not_contact=True)
+        done("🚫 Больше не пишем этой компании" if keys else "⚠️ Компании нет в Базе")
     elif parts[0] in ("cs", "cf"):
         # Рассылка целиком из бота: cs — отправить письма, cf — напоминания.
         if CampaignJob.RUNNING.get(parts[1]):
@@ -4476,6 +4611,7 @@ def _handle_vacancy_button(
                 "reply_markup": {"inline_keyboard": [[
                     {"text": "✅ Отправить", "callback_data": f"d:{item[field]}:-1"},
                     {"text": "✖️ Пропустить", "callback_data": f"x:{item[field]}"},
+                    {"text": "🚫 Не писать", "callback_data": f"nd:{item[field]}"},
                 ]]},
             })
             shown += 1
@@ -4698,23 +4834,13 @@ def _send_email_draft(
         )
     output_folder: Path = parameters["outputFileDirectory"]
     applied_log = AppliedLog(output_folder / "applied_log.json")
-    limit = int((parameters.get("direct") or {}).get("email_daily_limit", 20))
-    today = datetime.now().astimezone().date()
     entries = applied_log.find_by_company("")
-    sent_today = sum(
-        1
-        for e in entries
-        if e.get("outreach_sent_at")
-        and datetime.fromisoformat(e["outreach_sent_at"]).date() == today
-    ) + sum(
-        1
-        for c in CampaignStore(output_folder).all().values()
-        for item in c["items"].values()
-        if item.get("sent_at")
-        and datetime.fromisoformat(item["sent_at"]).date() == today
-    )
-    if draft["kind"] != "follow_up" and sent_today >= limit:
-        return f"Дневной лимит писем ({limit}) исчерпан — отправлю завтра."
+    # Лимит с разогревом и стоп при возвратах — для любых писем HR; время
+    # отправки проверяет только рассылка (вручную вы отправляете сами).
+    guard = mail_guard.plan(parameters, output_folder)
+    if draft["kind"] != "follow_up" and (guard["left_today"] <= 0 or guard["recent_bounces"] >= mail_guard.BOUNCE_STOP):
+        return "⏸ " + (guard["reason"] if guard["recent_bounces"] >= mail_guard.BOUNCE_STOP
+                       else f"Дневной лимит писем ({guard['limit']}) исчерпан — отправлю завтра")
     resume = attachment or parameters["dataFolder"] / RESUME_PDF_LINKEDIN
     if not resume.exists():
         resume = parameters["dataFolder"] / RESUME_PDF
@@ -4747,6 +4873,11 @@ def _send_email_draft(
             outreach_sent_at=datetime.now().astimezone().isoformat(),
             outreach_message_id=message_id,
         )
+    elif entry is None and not draft.get("campaign"):
+        # Письмо не к рассылке и не к отклику (пост Telegram-парсера,
+        # «Входящие») — отмечаем на контакте в Базе: статус «написали»,
+        # рассылка ему второй раз не напишет, ответ/возврат ловится.
+        _mark_contact_mail(output_folder, draft, message_id)
     drafts.remove(code)
     return f"Отправлено {draft['contact']}."
 

@@ -10,7 +10,7 @@
   href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&display=swap"
   rel="stylesheet"
 />
-<link rel="stylesheet" href="/style.css?v=17" />
+<link rel="stylesheet" href="/style.css?v=24" />
 </head>
 <body>
 <div id="setup-screen" class="setup-screen" style="display:none">
@@ -183,7 +183,7 @@
           <option value="wellfound">Wellfound</option>
           <option value="himalayas">Himalayas</option>
           <option value="djinni">Djinni</option>
-          <option value="direct">Прямой поиск</option>
+          <option value="direct">Сайты компаний</option>
         </select>
         <select id="filter-status">
           <option value="">Любой статус</option>
@@ -227,10 +227,10 @@
       <div class="view-header">
         <div>
           <h2>База компаний</h2>
-          <p class="muted">Все компании и HR, которых вы собрали: из своего файла, Telegram-каналов и вакансий. Нажмите на строку — контакты и история.</p>
+          <p class="muted">Все компании и HR, которых вы собрали: из своего файла, Telegram-каналов, сайтов компаний и вакансий. Нажмите на строку — контакты и история.</p>
         </div>
         <div class="toolbar">
-          <input type="file" id="import-file" accept=".csv,.tsv,.xlsx,.txt,.pdf,.docx" style="display:none" />
+          <input type="file" id="import-file" accept=".csv,.tsv,.xlsx,.md,.txt,.pdf,.docx" style="display:none" />
           <button type="button" id="import-btn" class="btn btn-secondary">📥 Загрузить файл</button>
           <a class="btn btn-ghost" href="/api/contacts/export" download title="Таблица для Excel или Google Таблиц — можно поправить и загрузить обратно">⬇ Скачать в Excel</a>
         </div>
@@ -245,7 +245,13 @@
           <option value="file">📄 Мой файл</option>
           <option value="telegram">✈️ Telegram</option>
           <option value="vacancy">💼 Вакансии</option>
-          <option value="dossier">🔎 Сайты компаний</option>
+          <option value="sites">🏢 Сайты компаний</option>
+          <option value="dossier">🔎 Найдено кнопкой «Найти ещё контакты»</option>
+        </select>
+        <select id="contacts-filter-contact" aria-label="Контакт">
+          <option value="">Любой контакт</option>
+          <option value="email">✉️ Есть email</option>
+          <option value="none">Нет контакта</option>
         </select>
       </div>
       <div class="base-bulk" id="base-bulk" hidden></div>
@@ -265,19 +271,8 @@
           <tbody id="contacts-list"></tbody>
         </table>
       </div>
-      <p class="muted small">Резервная копия базы делается сама раз в день (хранятся 7 последних).</p>
-
-      <details class="panel" id="direct-companies-panel">
-        <summary><strong>Отслеживаемые компании</strong> <span class="muted small">— вакансии прямо с их сайтов (площадка «Прямой поиск»)</span></summary>
-        <p class="muted small">Вакансии этих компаний площадка «Прямой поиск» берёт прямо с их сайта (Greenhouse, Lever, Ashby, Workable). Введите адрес сайта — система найма определится сама. Плюс к ним площадка смотрит We Work Remotely и Hacker News «Who is hiring».</p>
-        <div class="filters">
-          <input id="direct-company-website" type="text" placeholder="Сайт, например linear.app" aria-label="Сайт компании" />
-          <input id="direct-company-name" type="text" placeholder="Название (необязательно)" aria-label="Название компании" />
-          <button id="direct-company-add" class="btn btn-primary" type="button">Найти и добавить</button>
-        </div>
-        <p id="direct-company-status" class="muted small" role="status"></p>
-        <div id="direct-companies"></div>
-      </details>
+      <nav class="base-pager" id="base-pager" aria-label="Страницы базы"></nav>
+      <p class="muted small">База только пополняется — компании и контакты сами не удаляются, только вручную. Плюс раз в день бот сохраняет запасную копию всей Базы на случай ошибки (копии за последние 7 дней).</p>
     </section>
 
     <section id="view-outreach" class="view">
@@ -524,6 +519,7 @@
         <button type="button" data-settings-tab="settings-table">Площадки</button>
         <button type="button" data-settings-tab="settings-limits">Лимиты откликов</button>
         <button type="button" data-settings-tab="settings-tg-quick">✈️ Telegram-парсер</button>
+        <button type="button" data-settings-tab="settings-direct">🏢 Сайты компаний</button>
         <button type="button" data-settings-tab="settings-outreach">Почта и письма</button>
         <button type="button" data-settings-tab="settings-notifications" title="Не путать с Telegram-парсером — это бот, который присылает вам уведомления">🤖 CrossJob-бот</button>
         <button type="button" data-settings-tab="settings-llm">Провайдер ИИ</button>
@@ -871,6 +867,29 @@
         <div class="source-grid" id="platform-cards"></div>
       </div>
 
+      <div class="panel settings-pane" id="settings-direct">
+        <h3>🏢 Сайты компаний</h3>
+        <ul class="muted small plain-steps">
+          <li>Бот сам смотрит вакансии на сайтах компаний из списка ниже и на досках удалёнки We Work Remotely и Hacker News.</li>
+          <li>Компании с подходящими по резюме вакансиями попадают в «Базу» вместе с email HR — из текста вакансии, с сайта компании или через Hunter.</li>
+          <li>Писем бот здесь не пишет: разошлите всем новым компаниям одной кнопкой в «Рассылках» — по вашему промту, с резюме во вложении.</li>
+        </ul>
+
+        <h4>Где искать</h4>
+        <label class="checkbox-row"><input id="direct-wwr" type="checkbox" /> We Work Remotely — доска удалённых вакансий</label>
+        <label class="checkbox-row"><input id="direct-hn" type="checkbox" /> Hacker News «Who is hiring» — ежемесячная ветка с вакансиями</label>
+
+        <h4>Отслеживаемые компании</h4>
+        <p class="muted small">Введите адрес сайта — бот сам найдёт, где компания публикует вакансии (Greenhouse, Lever, Ashby, Workable).</p>
+        <div class="filters">
+          <input id="direct-company-website" type="text" placeholder="Сайт, например linear.app" aria-label="Сайт компании" />
+          <input id="direct-company-name" type="text" placeholder="Название (необязательно)" aria-label="Название компании" />
+          <button id="direct-company-add" class="btn btn-primary" type="button">Найти и добавить</button>
+        </div>
+        <p id="direct-company-status" class="muted small" role="status"></p>
+        <div id="direct-companies"></div>
+      </div>
+
       <div class="panel settings-pane" id="settings-tg-quick">
         <div class="tgq-head">
           <div>
@@ -980,14 +999,26 @@
             <li>Вставьте 16 символов в поле выше — это не пароль от почты, его можно отозвать в любой момент.</li>
           </ol>
         </details>
-        <label class="checkbox-row"><input id="outreach-email-enabled" type="checkbox" /> Готовить письма HR, если в вакансии есть email</label>
         <div class="filters">
-          <label class="muted small">Не больше писем в день <input id="outreach-email-limit" type="number" min="1" max="100" style="width:80px" /></label>
-          <label class="muted small">Напоминание, если HR молчит, через (дней, 0 — не напоминать) <input id="outreach-follow-up" type="number" min="0" max="60" style="width:80px" /></label>
+          <label class="muted small">Напоминание, если HR молчит, через (дней, 0 — не напоминать) <input id="outreach-follow-up" class="num-input" type="number" min="0" max="60" style="width:80px" /></label>
         </div>
 
-        <h4>Проверенные email через Hunter</h4>
-        <p class="muted small">Необязательно. Если в вакансии нет контакта, бот ищет проверенный адрес HR компании на hunter.io (бесплатно ~50 проверок в месяц).</p>
+        <h4>🛡 Защита почты от блокировки</h4>
+        <p class="muted small">Письма уходят как у живого человека: по одному, со случайными паузами, растянутыми на весь рабочий день, иногда с перерывом подольше. Если за сутки вернулось 3 письма (адреса не существуют), отправка сама встаёт до завтра.</p>
+        <p class="small" id="outreach-guard-status" role="status"></p>
+        <div class="filters">
+          <label class="muted small">Писем в день, не больше <input id="outreach-email-limit" class="num-input" type="number" min="1" max="300" style="width:80px" /></label>
+          <label class="muted small">Отправлять с <input id="outreach-send-from" class="num-input" type="number" min="0" max="23" style="width:64px" /> до <input id="outreach-send-to" class="num-input" type="number" min="1" max="24" style="width:64px" /> ч</label>
+        </div>
+        <label class="checkbox-row"><input id="outreach-weekdays" type="checkbox" /> Только по будням</label>
+        <label class="checkbox-row"><input id="outreach-warmup" type="checkbox" /> Разогрев ящика: начать с 15 писем в день и прибавлять по 5 за каждый день отправки, пока не дойдёт до лимита</label>
+        <details class="muted small">
+          <summary>Сколько писем в день безопасно?</summary>
+          <p>Обычный Gmail технически позволяет около 500 писем в день, но для писем незнакомым людям это верный путь в спам. Для рассылки по HR разумно 30–50 в день, до 80–100 — только на ящике, который уже несколько недель отправляет письма и получает ответы. Разогрев доводит до вашего лимита постепенно — не выключайте его на новом ящике.</p>
+        </details>
+
+        <h4 id="hunter-block">Hunter — поиск email HR <span class="muted small">(необязательно)</span></h4>
+        <p class="muted small">Hunter.io — сервис, который знает рабочие адреса сотрудников компаний. Бот спрашивает у него email HR, когда в вакансии с сайта компании нет контакта, и по кнопке «🔎 Найти ещё контакты» в Базе. Без ключа всё работает, но контакты ищутся только на самом сайте компании. Ключ бесплатный (небольшой лимит проверок в месяц): зарегистрируйтесь на <a href="https://hunter.io/users/sign_up" target="_blank" rel="noopener">hunter.io</a> → <a href="https://hunter.io/api-keys" target="_blank" rel="noopener">API keys</a> → скопируйте ключ сюда.</p>
         <div class="filters">
           <input id="outreach-hunter" type="password" placeholder="API-ключ hunter.io" aria-label="API-ключ Hunter" autocomplete="off" />
           <span id="outreach-hunter-status" class="muted small"></span>
@@ -1171,6 +1202,6 @@
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=21"></script>
+<script src="/app.js?v=26"></script>
 </body>
 </html>

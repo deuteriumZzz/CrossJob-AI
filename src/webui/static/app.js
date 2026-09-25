@@ -18,7 +18,7 @@ const SOURCE_LABELS = {
   wellfound: "Wellfound",
   himalayas: "Himalayas",
   djinni: "Djinni",
-  direct: "Прямой поиск",
+  direct: "Сайты компаний",
 };
 
 // ponytail: настоящие логотипы площадок — товарные знаки, тащить их к себе
@@ -38,7 +38,8 @@ const SOURCE_ICON = {
 };
 
 // Площадки, нацеленные на зарубежный рынок — остальные площадки RU.
-const INTL_SOURCES = new Set(["linkedin", "wellfound", "himalayas", "djinni", "direct"]);
+const OWN_CHANNELS = new Set(["telegram", "direct"]);
+const INTL_SOURCES = new Set(["linkedin", "wellfound", "himalayas", "djinni"]);
 
 const STATUS_DOT = {
   ok: "ok",
@@ -253,12 +254,11 @@ const REDUCE_MOTION = window.matchMedia(
   "(prefers-reduced-motion: reduce)"
 ).matches;
 
-function countUp(el, target, duration = 700) {
+function countUp(el, target, duration = 700, start = 0) {
   if (REDUCE_MOTION) {
     el.textContent = target;
     return;
   }
-  const start = 0;
   const startTime = performance.now();
   const ease = (t) => 1 - Math.pow(1 - t, 3);
   function tick(now) {
@@ -268,6 +268,23 @@ function countUp(el, target, duration = 700) {
     if (progress < 1) requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
+}
+
+// Цифры на карточках плавно досчитываются с прошлого значения до нового —
+// видно, что изменилось. Первый показ — без анимации.
+const shownCounts = {};
+function animateCounts(root) {
+  root.querySelectorAll("[data-count]").forEach((el) => {
+    const id = el.dataset.count;
+    const value = parseInt(el.textContent, 10) || 0;
+    const before = shownCounts[id];
+    shownCounts[id] = value;
+    if (before !== undefined && before !== value) {
+      countUp(el, value, 700, before);
+      el.classList.add("count-changed");
+      setTimeout(() => el.classList.remove("count-changed"), 1600);
+    }
+  });
 }
 
 const revealObserver = new IntersectionObserver(
@@ -691,13 +708,15 @@ const CONTACT_STATUS = {
 const SOURCE_KIND = {
   file: "📄 мой файл",
   telegram: "✈️ Telegram",
-  dossier: "🔎 сайт компании",
+  sites: "🏢 сайты компаний",
+  dossier: "🔎 найден кнопкой",
   vacancy: "💼 вакансия",
 };
 let lastContacts = [];
 let focusContactKey = null;
-let contactsShown = 50;
-const baseState = { status: "", sort: "last", dir: -1, selected: new Set(), open: new Set() };
+const baseState = { status: "", sort: "last", dir: -1, selected: new Set(), open: new Set(), page: 0, size: 50 };
+let baseFiltered = [];
+let baseSeen = new Map(); // ключ → updated_at с прошлого показа — что подсветить // ключи всех компаний под текущим фильтром — для «Выбрать все по фильтру»
 
 function contactHref(c) {
   if (c.kind === "telegram") return `https://t.me/${encodeURIComponent(c.value)}`;
@@ -723,7 +742,9 @@ function statusPill(status) {
 function renderContactsList() {
   const el = document.getElementById("contacts-list");
   const source = document.getElementById("contacts-filter-source").value;
+  const contactFilter = document.getElementById("contacts-filter-contact").value;
   const query = document.getElementById("contacts-filter-query").value.trim().toLowerCase();
+  fillFileOptions();
 
   // Счётчики — они же фильтры по статусу.
   const counts = {};
@@ -737,6 +758,7 @@ function renderContactsList() {
   chipBox.querySelectorAll("[data-status]").forEach((b) =>
     b.addEventListener("click", () => {
       baseState.status = b.dataset.status;
+      baseState.page = 0;
       renderContactsList();
     })
   );
@@ -748,7 +770,9 @@ function renderContactsList() {
   }
   const filtered = lastContacts.filter((card) => {
     if (baseState.status && card.status !== baseState.status) return false;
-    if (source && !card.source_kinds.includes(source)) return false;
+    if (source.startsWith("file:") ? !card.files.includes(source.slice(5)) : source && !card.source_kinds.includes(source)) return false;
+    if (contactFilter === "email" && !card.contacts.some((c) => c.kind === "email")) return false;
+    if (contactFilter === "none" && card.contacts.length) return false;
     if (!query) return true;
     return [card.company, card.hr, card.website, ...card.contacts.map((c) => c.value), ...card.vacancies.map((v) => v.title)]
       .filter(Boolean)
@@ -765,12 +789,26 @@ function renderContactsList() {
     th.classList.toggle("sorted", th.dataset.sort === baseState.sort);
     th.dataset.dir = th.dataset.sort === baseState.sort ? (baseState.dir > 0 ? "↑" : "↓") : "";
   });
+  baseFiltered = filtered.map((c) => c.key);
+  const pages = Math.max(1, Math.ceil(filtered.length / baseState.size));
+  const focusIndex = focusContactKey ? baseFiltered.indexOf(focusContactKey) : -1;
+  if (focusIndex >= 0) baseState.page = Math.floor(focusIndex / baseState.size);
+  baseState.page = Math.min(baseState.page, pages - 1);
+  renderBasePager(filtered.length, pages);
   if (!filtered.length) {
     el.innerHTML = `<tr><td colspan="7">${emptyStateHtml("Ничего не найдено.")}</td></tr>`;
     renderBaseBulk();
     return;
   }
-  const rows = filtered.slice(0, contactsShown);
+  const rows = filtered.slice(baseState.page * baseState.size, (baseState.page + 1) * baseState.size);
+  // Новые и обновлённые с прошлого показа компании — мягкая подсветка.
+  const fresh = new Set();
+  if (baseSeen.size) {
+    lastContacts.forEach((c) => {
+      if (baseSeen.get(c.key) !== c.updated_at) fresh.add(c.key);
+    });
+  }
+  baseSeen = new Map(lastContacts.map((c) => [c.key, c.updated_at]));
   el.innerHTML =
     rows
       .map((card) => {
@@ -778,7 +816,7 @@ function renderContactsList() {
         const more = card.contacts.length - 1;
         const open = baseState.open.has(card.key) || card.key === focusContactKey;
         return `
-      <tr class="base-row${open ? " is-open" : ""}${card.key === focusContactKey ? " is-focused" : ""}" data-card-key="${escapeHtml(card.key)}" tabindex="0" aria-expanded="${open}">
+      <tr class="base-row${fresh.has(card.key) ? " row-fresh" : ""}${open ? " is-open" : ""}${card.key === focusContactKey ? " is-focused" : ""}" data-card-key="${escapeHtml(card.key)}" tabindex="0" aria-expanded="${open}">
         <td class="base-check"><input type="checkbox" data-select="${escapeHtml(card.key)}" aria-label="Выбрать" ${baseState.selected.has(card.key) ? "checked" : ""} /></td>
         <td><strong>${escapeHtml(card.company || p?.value || "Без названия")}</strong>
           ${card.website ? `<div class="muted small">${escapeHtml(card.website.replace(/^https?:\/\//, "").replace(/\/$/, ""))}</div>` : ""}</td>
@@ -791,14 +829,7 @@ function renderContactsList() {
       </tr>
       ${open ? `<tr class="base-detail"><td colspan="7">${baseDetailHtml(card)}</td></tr>` : ""}`;
       })
-      .join("") +
-    (filtered.length > rows.length
-      ? `<tr><td colspan="7"><button type="button" class="btn btn-secondary" id="contacts-more" style="width:100%;justify-content:center">Показать ещё (${filtered.length - rows.length})</button></td></tr>`
-      : "");
-  document.getElementById("contacts-more")?.addEventListener("click", () => {
-    contactsShown += 50;
-    renderContactsList();
-  });
+      .join("");
   if (focusContactKey) {
     el.querySelector(".base-row.is-focused")?.scrollIntoView({ block: "center", behavior: REDUCE_MOTION ? "auto" : "smooth" });
     baseState.open.add(focusContactKey);
@@ -835,6 +866,7 @@ function renderContactsList() {
     rows.forEach((c) => (all.checked ? baseState.selected.add(c.key) : baseState.selected.delete(c.key)));
     renderContactsList();
   };
+  baseState.pageKeys = rows.map((c) => c.key);
   bindBaseDetail(el);
   renderBaseBulk();
 }
@@ -913,6 +945,49 @@ function bindBaseDetail(el) {
 }
 
 // Панель действий над выбранными — появляется, только когда что-то отмечено.
+// Страницы: «1–50 из 2 840», стрелки и размер страницы.
+function renderBasePager(total, pages) {
+  const pager = document.getElementById("base-pager");
+  if (total <= 50) {
+    pager.innerHTML = total ? `<span class="muted small">${total} ${plural(total, "компания", "компании", "компаний")}</span>` : "";
+    return;
+  }
+  const from = baseState.page * baseState.size + 1;
+  const to = Math.min(total, from + baseState.size - 1);
+  pager.innerHTML = `
+    <button type="button" class="btn btn-ghost btn-small" data-page="-1" ${baseState.page ? "" : "disabled"} aria-label="Предыдущая страница">‹</button>
+    <span><b>${from}–${to}</b> из ${total.toLocaleString("ru-RU")}</span>
+    <button type="button" class="btn btn-ghost btn-small" data-page="1" ${baseState.page < pages - 1 ? "" : "disabled"} aria-label="Следующая страница">›</button>
+    <label class="muted small">по <select id="base-page-size" aria-label="Строк на странице">
+      ${[50, 100, 200].map((n) => `<option value="${n}" ${n === baseState.size ? "selected" : ""}>${n}</option>`).join("")}
+    </select></label>`;
+  pager.querySelectorAll("[data-page]").forEach((b) =>
+    b.addEventListener("click", () => {
+      baseState.page += Number(b.dataset.page);
+      renderContactsList();
+      document.getElementById("base-table").scrollIntoView({ block: "start", behavior: REDUCE_MOTION ? "auto" : "smooth" });
+    })
+  );
+  document.getElementById("base-page-size").addEventListener("change", (e) => {
+    baseState.size = Number(e.target.value);
+    baseState.page = 0;
+    renderContactsList();
+  });
+}
+
+// Каждый загруженный файл — отдельный пункт в фильтре «Источник».
+function fillFileOptions() {
+  const select = document.getElementById("contacts-filter-source");
+  const files = [...new Set(lastContacts.flatMap((c) => c.files || []))].sort();
+  const have = [...select.options].filter((o) => o.value.startsWith("file:")).map((o) => o.value.slice(5));
+  if (have.join("\n") === files.join("\n")) return;
+  const value = select.value;
+  select.querySelectorAll('option[value^="file:"]').forEach((o) => o.remove());
+  const anchor = select.querySelector('option[value="file"]');
+  files.reverse().forEach((f) => anchor.after(new Option(`↳ 📄 ${f}`, `file:${f}`)));
+  select.value = [...select.options].some((o) => o.value === value) ? value : "";
+}
+
 function renderBaseBulk() {
   const bar = document.getElementById("base-bulk");
   const keys = [...baseState.selected].filter((k) => lastContacts.some((c) => c.key === k));
@@ -922,9 +997,15 @@ function renderBaseBulk() {
     return;
   }
   bar.hidden = false;
-  const skipped = keys.every((k) => lastContacts.find((c) => c.key === k)?.status === "skip");
+  const byKey = new Map(lastContacts.map((c) => [c.key, c]));
+  const skipped = keys.every((k) => byKey.get(k)?.status === "skip");
+  // Как в Gmail: выбрана вся страница — предложить все по фильтру.
+  const pageAll = (baseState.pageKeys || []).length && baseState.pageKeys.every((k) => baseState.selected.has(k));
+  const moreByFilter = pageAll && baseFiltered.length > keys.length;
   bar.innerHTML = `
-    <span>Выбрано: <b>${keys.length}</b></span>
+    <span>Выбрано: <b>${keys.length.toLocaleString("ru-RU")}</b>${
+      moreByFilter ? ` · <button type="button" class="link-btn" data-bulk="all">Выбрать все ${baseFiltered.length.toLocaleString("ru-RU")} по фильтру</button>` : ""
+    }</span>
     <button type="button" class="btn btn-primary btn-small" data-bulk="write">✉️ Написать выбранным</button>
     <button type="button" class="btn btn-secondary btn-small" data-bulk="${skipped ? "unskip" : "skip"}">${skipped ? "Снова можно писать" : "🚫 Не писать"}</button>
     <button type="button" class="btn btn-ghost btn-small" data-bulk="delete">🗑 Удалить</button>
@@ -933,8 +1014,12 @@ function renderBaseBulk() {
     b.addEventListener("click", async () => {
       const action = b.dataset.bulk;
       try {
-        if (action === "clear") {
-          baseState.selected.clear();
+        if (action === "clear" || action === "all") {
+          // Только выбор — без запроса к серверу.
+          if (action === "clear") baseState.selected.clear();
+          else baseFiltered.forEach((k) => baseState.selected.add(k));
+          renderContactsList();
+          return;
         } else if (action === "write") {
           await api("/api/campaigns", { method: "POST", body: JSON.stringify({ keys }) });
           baseState.selected.clear();
@@ -1028,13 +1113,13 @@ function plural(n, one, few, many) {
 // не площадки с откликами, а свои способы выйти на работодателя.
 let lastOwnChannels = "";
 async function renderOwnChannels() {
-  let w, c;
+  let w, c, d;
   try {
-    [w, c] = await Promise.all([api("/api/settings/telegram-watch"), api("/api/campaigns")]);
+    [w, c, d] = await Promise.all([api("/api/settings/telegram-watch"), api("/api/campaigns"), api("/api/direct/summary")]);
   } catch (e) {
     return;
   }
-  const snapshot = JSON.stringify([w, c]);
+  const snapshot = JSON.stringify([w, c, d]);
   if (snapshot === lastOwnChannels) return;
   lastOwnChannels = snapshot;
   const el = document.getElementById("own-channels");
@@ -1050,13 +1135,17 @@ async function renderOwnChannels() {
   const replied = items.filter((i) => i.status === "replied").length;
   const drafts = items.filter((i) => i.status === "draft").length;
   const followUps = items.filter((i) => i.follow_up_text).length;
+  const ms = c.mail_status;
   const mailText = !c.email_connected
     ? "Gmail не подключён"
-    : c.campaigns.some((x) => x.progress)
-      ? "идёт отправка…"
-      : drafts
-        ? `${drafts} ${plural(drafts, "письмо ждёт", "письма ждут", "писем ждут")} отправки`
-        : "готово к рассылке";
+    : ms
+      ? ms.text
+      : c.campaigns.some((x) => x.progress)
+        ? "пишу письма…"
+        : drafts
+          ? `${drafts} ${plural(drafts, "письмо ждёт", "письма ждут", "писем ждут")} — нажмите «Начать отправку»`
+          : "готово к рассылке";
+  const mailDot = !c.email_connected || ms?.state === "stopped" ? "error" : ms?.state === "active" ? "ok running" : ms ? "never_run" : "ok";
   el.innerHTML = `
     <div class="source-card own-card">
       <h3>
@@ -1074,18 +1163,49 @@ async function renderOwnChannels() {
       </div>
     </div>
     <div class="source-card own-card">
-      <h3><span class="dot ${c.email_connected ? "ok" : "error"}"></span> ✉️ Отправка почты</h3>
-      <div class="row"><span>Состояние</span><span>${mailText}</span></div>
+      <h3><span class="dot ${mailDot}"></span> ✉️ Отправка почты</h3>
+      <div class="row${ms?.state === "stopped" ? " row-alert" : ""}"><span>Сейчас</span><span>${escapeHtml(mailText)}</span></div>
+      ${ms ? `<div class="row"><span>Сегодня</span><span><span data-count="mail-today">${ms.sent_today}</span> из ${ms.limit}</span></div>` : ""}
+      ${ms?.last ? `<div class="row"><span>Последнее письмо</span><span>${fmtDay(ms.last.at)} → ${escapeHtml(ms.last.company)}</span></div>` : ""}
       <div class="row"><span>Можно написать</span><span>${c.available} ${plural(c.available, "компании", "компаниям", "компаниям")}</span></div>
-      <div class="row"><span>Отправлено за неделю</span><span>${sentWeek}</span></div>
+      <div class="row"><span>Отправлено за неделю</span><span data-count="mail-week">${sentWeek}</span></div>
       <div class="row"><span>Ответили</span><span>${replied}${followUps ? ` · ⏳ напоминаний готово: ${followUps}` : ""}</span></div>
       <div class="row"><span>Ответы и возвраты</span><span>${c.email_connected ? "проверяет каждый час" : "—"}</span></div>
       <div class="own-card-actions">
         <button type="button" class="btn btn-secondary btn-small" data-own-go="outreach">Открыть рассылку</button>
-        ${c.email_connected ? "" : `<button type="button" class="btn btn-ghost btn-small" data-own-settings="settings-outreach">Подключить Gmail</button>`}
+        ${!c.email_connected ? `<button type="button" class="btn btn-ghost btn-small" data-own-settings="settings-outreach">Подключить Gmail</button>`
+          : ms?.state === "stopped"
+            ? ms.goto.startsWith("settings-")
+              ? `<button type="button" class="btn btn-ghost btn-small" data-own-settings="${ms.goto}">Что делать</button>`
+              : `<button type="button" class="btn btn-ghost btn-small" data-own-go="${ms.goto}">Проверить адреса</button>`
+            : ""}
+      </div>
+    </div>
+    <div class="source-card own-card">
+      <h3>
+        <input type="checkbox" class="switch" id="own-direct-toggle" title="Включить или выключить поиск на сайтах компаний" ${d.enabled ? "checked" : ""} />
+        <span class="dot ${d.enabled ? "ok" : "error"}"></span> 🏢 Сайты компаний
+      </h3>
+      <div class="row"><span>Состояние</span><span>${d.enabled ? "собирает компании в Базу" : "выключено"}</span></div>
+      <div class="row"><span>Где ищет</span><span>${[d.companies && `${d.companies} ${plural(d.companies, "компанию", "компании", "компаний")}`, d.wwr && "We Work Remotely", d.hn && "HN"].filter(Boolean).join(" + ") || "ничего — добавьте компании"}</span></div>
+      <div class="row"><span>Добавлено в Базу за неделю</span><span data-count="sites-week">${d.added_week}</span></div>
+      <div class="row"><span>С email — готовы к рассылке</span><span data-count="sites-ready">${d.ready}</span></div>
+      <div class="own-card-actions">
+        <button type="button" class="btn btn-secondary btn-small" data-own-go="contacts" data-base-source="sites">Открыть Базу</button>
+        ${d.ready ? `<button type="button" class="btn btn-secondary btn-small" data-own-go="outreach">Разослать →</button>` : ""}
+        <button type="button" class="btn btn-ghost btn-small" data-own-settings="settings-direct">Настроить</button>
       </div>
     </div>`;
-  el.querySelectorAll("[data-own-go]").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.ownGo)));
+  animateCounts(el);
+  el.querySelectorAll("[data-own-go]").forEach((b) =>
+    b.addEventListener("click", () => {
+      if (b.dataset.baseSource) {
+        document.getElementById("contacts-filter-source").value = b.dataset.baseSource;
+        baseState.page = 0;
+      }
+      switchTab(b.dataset.ownGo);
+    })
+  );
   el.querySelectorAll("[data-own-settings]").forEach((b) =>
     b.addEventListener("click", () => {
       switchTab("settings");
@@ -1093,6 +1213,17 @@ async function renderOwnChannels() {
       if (b.dataset.ownSettings === "settings-tg-quick") loadTelegramWatch();
     })
   );
+  document.getElementById("own-direct-toggle").addEventListener("change", async (e) => {
+    e.target.disabled = true;
+    try {
+      await api("/api/settings", { method: "POST", body: JSON.stringify({ source: "direct", schedule_enabled: e.target.checked }) });
+      showToast(e.target.checked ? "Поиск на сайтах компаний включён" : "Поиск на сайтах компаний выключен", "success");
+    } catch (err) {
+      showToast(err.message.replace(/^\d+: /, ""), "error");
+    }
+    lastOwnChannels = "";
+    renderOwnChannels();
+  });
   document.getElementById("own-tg-toggle").addEventListener("change", async (e) => {
     e.target.disabled = true;
     try {
@@ -1442,6 +1573,10 @@ async function importPreview(file) {
       el.innerHTML = `<p class="ok-text">✅ Добавлено: компаний ${res.companies}, контактов ${res.contacts} из ${escapeHtml(res.filename)}. </p>
         <button type="button" class="btn btn-primary btn-small" data-goto-outreach>✉️ Перейти к рассылке →</button>`;
       el.querySelector("[data-goto-outreach]").addEventListener("click", () => switchTab("outreach"));
+      showToast(`База обновлена: +${res.companies} ${plural(res.companies, "компания", "компании", "компаний")}`, "success");
+      // Сразу показать новое: фильтр по этому файлу, подсветка строк.
+      document.getElementById("contacts-filter-source").value = `file:${res.filename}`;
+      baseState.page = 0;
       render.contacts();
     } catch (err) {
       showToast(err.message.replace(/^\d+: /, ""), "error");
@@ -1484,10 +1619,17 @@ async function loadCampaigns() {
   if (cur?.progress?.kind === "prepare") {
     body = progressHtml("Пишу письма", cur.progress, cur.id);
   } else if (cur?.stats.pending) {
-    body = `<p>Писем ещё не написано: <b>${cur.stats.pending}</b>.</p>
-      <button type="button" class="btn btn-primary" data-campaign="${cur.id}" data-action="prepare">✍️ Написать письма (${cur.stats.pending})</button>`;
+    // Порциями по дневному лимиту — см. start_campaign_job("prepare").
+    const batch = Math.min(cur.stats.pending, Math.max(0, data.daily_limit - drafts.length));
+    const days = Math.ceil((cur.stats.pending + drafts.length) / Math.max(1, data.daily_limit));
+    body = batch
+      ? `<p>В очереди: <b>${cur.stats.pending}</b>. Письма пишутся порциями по дневному лимиту (${data.daily_limit}), следующие — сами на следующий день, придут в бот.</p>
+         <button type="button" class="btn btn-primary" data-campaign="${cur.id}" data-action="prepare">✍️ Написать ${batch} ${plural(batch, "письмо", "письма", "писем")}</button>`
+      : `<p class="muted">Ещё в очереди: <b>${cur.stats.pending}</b> — следующая порция будет готова завтра, когда эти письма уйдут${days > 1 ? ` (≈ ${days} ${plural(days, "день", "дня", "дней")} на всю рассылку)` : ""}.</p>`;
   } else if (!cur && data.available) {
+    const days = data.days_needed;
     body = `<p class="muted small">Для каждой компании — своё письмо: обращение по имени, почему именно она, 2–3 ваших достижения под её профиль, 150–180 слов, тема «[Должность] Application — Имя Фамилия».</p>
+      ${days > 1 ? `<p class="muted small">Сейчас можно ${data.daily_limit} писем в день${data.mail_plan.warmup && data.daily_limit < data.mail_plan.daily_limit ? ` (разогрев ящика — дальше больше, до ${data.mail_plan.daily_limit})` : ""}: вся база — ≈ ${days} ${plural(days, "день", "дня", "дней")} отправки. Письма пишутся порциями, каждый день новая порция приходит в бот. Быстрее — выберите нужные компании в Базе фильтрами и «✉️ Написать выбранным».</p>` : ""}
       <div class="step-actions">
         ${sources.length > 1 ? `<select id="campaign-source" aria-label="Кому писать">
           <option value="">всем (${data.available})</option>
@@ -1520,6 +1662,11 @@ async function loadCampaigns() {
     sendBody = `<p class="warn-text">Почта Gmail не подключена — <a href="#" data-goto-settings="settings-outreach">подключить</a> (пароль приложения Google, 2 минуты).</p>`;
   } else if (cur?.progress?.kind === "send" || cur?.progress?.kind === "followups") {
     sendBody = progressHtml(cur.progress.kind === "send" ? "Отправляю" : "Отправляю напоминания", cur.progress, cur.id);
+  } else if (drafts.length && cur.sending) {
+    // Отправка включена, но сейчас ждёт: вечер/выходные, лимит, возвраты.
+    sendBody = `<p>⏸ Отправка идёт по расписанию — ждут ещё <b>${drafts.length}</b>. ${escapeHtml(data.mail_plan.reason || "Следующее письмо — в течение 15 минут.")}</p>
+      <div class="step-actions"><button type="button" class="btn btn-ghost btn-small" data-campaign="${cur.id}" data-action="stop">Остановить рассылку</button></div>
+      <p class="small">🛡 ${escapeHtml(mailPlanText(data.mail_plan))} · <a href="#" data-goto-settings="settings-outreach">настроить</a></p>`;
   } else if (drafts.length) {
     sendBody = `<div class="step-actions">
         <label class="muted small">Резюме во вложении
@@ -1528,9 +1675,10 @@ async function loadCampaigns() {
             ${resumes.map((r) => `<option value="${escapeHtml(r.name)}">${escapeHtml(r.name)}</option>`).join("")}
           </select>
         </label>
-        <button type="button" class="btn btn-primary" data-campaign="${cur.id}" data-action="send">🚀 Отправить все (${drafts.length}) через Gmail</button>
+        <button type="button" class="btn btn-primary" data-campaign="${cur.id}" data-action="send">🚀 Начать отправку (${drafts.length})</button>
       </div>
-      <p class="muted small">По одному письму с паузой 1–2 минуты и в пределах дневного лимита — чтобы Gmail не счёл это спамом. Можно закрыть окно: бот продолжит сам.</p>`;
+      <p class="muted small">Бот отправляет по одному, со случайными паузами в течение рабочего дня — как человек. Что не уйдёт сегодня, продолжит сам в следующее время отправки. Можно закрыть окно.</p>
+      <p class="small">🛡 ${escapeHtml(mailPlanText(data.mail_plan))} · <a href="#" data-goto-settings="settings-outreach">настроить</a></p>`;
   } else {
     sendBody = `<p class="muted">Когда письма будут готовы — здесь одна кнопка отправки.</p>`;
   }
@@ -1646,7 +1794,6 @@ const render = {
   async contacts() {
     lastContacts = await api("/api/contacts");
     renderContactsList();
-    loadDirectCompanies();
   },
 
   outreach() {
@@ -1747,8 +1894,8 @@ const render = {
       // (s.schedule_enabled), а не сохраняется вручную между опросами —
       // рендер и так пропускается, пока status не изменится (см. unchanged
       // выше), так что раньше поставленная галочка не мигает.
-      // Telegram — отдельной карточкой «Telegram-парсер» в «Свои каналы».
-      const ruSources = status.sources.filter((s) => !INTL_SOURCES.has(s.name) && s.name !== "telegram");
+      // Telegram и «Сайты компаний» — отдельными карточками в «Свои каналы».
+      const ruSources = status.sources.filter((s) => !INTL_SOURCES.has(s.name) && !OWN_CHANNELS.has(s.name));
       const intlSources = status.sources.filter((s) => INTL_SOURCES.has(s.name));
       const renderSourceCard = (s, i) => {
           const dot = STATUS_DOT[s.status] || "never_run";
@@ -2948,7 +3095,26 @@ function isResumeAuditModalOpen() {
   return document.getElementById("resume-audit-overlay").style.display !== "none";
 }
 
-// Настройки → Компании: целевые компании модуля «Прямой поиск».
+// Настройки → «Сайты компаний»: переключатели и список компаний.
+async function loadDirectSettings() {
+  const d = await api("/api/direct/summary");
+  document.getElementById("direct-wwr").checked = d.wwr;
+  document.getElementById("direct-hn").checked = d.hn;
+  loadDirectCompanies();
+}
+
+async function saveDirectSetting(e) {
+  const field = { "direct-wwr": "wwr", "direct-hn": "hn" }[e.target.id];
+  if (!field) return;
+  try {
+    await api("/api/direct/settings", { method: "POST", body: JSON.stringify({ [field]: e.target.checked }) });
+    showToast("Сохранено", "success");
+  } catch (err) {
+    e.target.checked = !e.target.checked;
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  }
+}
+
 async function loadDirectCompanies() {
   const list = document.getElementById("direct-companies");
   const companies = await api("/api/direct/companies");
@@ -2992,6 +3158,7 @@ async function addDirectCompany() {
 }
 
 function switchSettingsTab(paneId) {
+  if (paneId === "settings-direct") loadDirectSettings().catch(() => {});
   document
     .querySelectorAll("#settings-jump button")
     .forEach((b) => b.classList.toggle("active", b.dataset.settingsTab === paneId));
@@ -3561,6 +3728,14 @@ async function renderDraftsQueue() {
   });
 }
 
+// «Сегодня: 12 из 25 · разогрев, день 3 · отправка будни 9–19».
+function mailPlanText(p) {
+  if (!p) return "";
+  const warm = p.warmup && p.limit < p.daily_limit ? ` (разогрев, день ${p.warmup_day} — до ${p.daily_limit} дойдёт постепенно)` : "";
+  const when = `${p.weekdays_only ? "будни" : "каждый день"} ${p.send_from}:00–${p.send_to}:00`;
+  return `Сегодня отправлено ${p.sent_today} из ${p.limit}${warm} · отправка: ${when}${p.can_send ? "" : ` · ⏸ ${p.reason}`}`;
+}
+
 async function loadOutreachSettings() {
   const s = await api("/api/settings/outreach");
   document.getElementById("outreach-email").value = s.email_address;
@@ -3574,8 +3749,12 @@ async function loadOutreachSettings() {
   document.getElementById("outreach-hunter-status").textContent = s.hunter_preview
     ? `сохранён: ${s.hunter_preview}`
     : "не задан";
-  document.getElementById("outreach-email-enabled").checked = s.email_outreach;
   document.getElementById("outreach-email-limit").value = s.email_daily_limit;
+  document.getElementById("outreach-send-from").value = s.send_from;
+  document.getElementById("outreach-send-to").value = s.send_to;
+  document.getElementById("outreach-weekdays").checked = s.weekdays_only;
+  document.getElementById("outreach-warmup").checked = s.warmup;
+  document.getElementById("outreach-guard-status").textContent = mailPlanText(s.mail_plan);
   document.getElementById("outreach-follow-up").value = s.follow_up_days;
   document.getElementById("outreach-digest").checked = s.digest_enabled;
   document.getElementById("outreach-digest-hour").value = s.digest_hour;
@@ -3589,8 +3768,11 @@ async function saveOutreachSettings() {
   const num = (id) => parseInt(document.getElementById(id).value, 10);
   const body = {
     email_address: document.getElementById("outreach-email").value.trim(),
-    email_outreach: document.getElementById("outreach-email-enabled").checked,
     email_daily_limit: num("outreach-email-limit"),
+    send_from: num("outreach-send-from"),
+    send_to: num("outreach-send-to"),
+    weekdays_only: document.getElementById("outreach-weekdays").checked,
+    warmup: document.getElementById("outreach-warmup").checked,
     follow_up_days: num("outreach-follow-up"),
     digest_enabled: document.getElementById("outreach-digest").checked,
     digest_hour: num("outreach-digest-hour"),
@@ -3621,15 +3803,30 @@ async function updateActivity() {
     return;
   }
   const el = document.getElementById("activity");
+  // state: нет/active — крутится; waiting — ⏸ спокойно; stopped — красным, нужны вы.
+  const icon = (a) =>
+    a.state === "waiting" ? `<span class="activity-icon" aria-hidden="true">⏸</span>`
+      : a.state === "stopped" ? `<span class="activity-icon" aria-hidden="true">⛔</span>`
+      : `<span class="activity-spin" aria-hidden="true"></span>`;
   el.innerHTML = items
     .map(
-      (a) => `<button type="button" class="activity-item" data-activity-view="${a.view}">
-        <span class="activity-spin" aria-hidden="true"></span>
-        <span>${escapeHtml(a.text)}${a.source ? " " + escapeHtml(sourceLabel(a.source)) : ""}${a.total ? ` · ${a.done}/${a.total}` : ""}</span>
+      (a) => `<button type="button" class="activity-item${a.state ? ` is-${a.state}` : ""}" data-activity-view="${a.goto || a.view}">
+        ${icon(a)}
+        <span>${escapeHtml(a.text)}${a.source ? " " + escapeHtml(sourceLabel(a.source)) : ""}${a.total ? ` · ${a.done}/${a.total}` : ""}${a.state === "stopped" ? " — что делать →" : ""}</span>
       </button>`
     )
     .join("");
-  el.querySelectorAll("[data-activity-view]").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.activityView)));
+  el.querySelectorAll("[data-activity-view]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const to = b.dataset.activityView;
+      if (to.startsWith("settings-")) {
+        switchTab("settings");
+        switchSettingsTab(to);
+      } else {
+        switchTab(to);
+      }
+    })
+  );
 }
 
 // «Откликаться автоматически» разом для всех включённых площадок —
@@ -3678,6 +3875,17 @@ async function loadAccounts() {
   document.getElementById("accounts-services").innerHTML = services
     .map((c) => row(c.ok, c.label, c.hint, c.ok || !c.goto ? "</div>" : `<button type="button" class="btn btn-secondary btn-small" data-account-goto="${escapeHtml(c.goto)}">Подключить</button></div>`))
     .join("");
+  const outreach = await api("/api/settings/outreach").catch(() => null);
+  if (outreach) {
+    document.getElementById("accounts-services").insertAdjacentHTML(
+      "beforeend",
+      `<div class="account-row ${outreach.hunter_preview ? "is-ok" : "is-optional"}">
+        <span class="account-mark">${outreach.hunter_preview ? "✓" : "○"}</span>
+        <span class="account-text"><b>Hunter — поиск email HR (необязательно)</b><span class="muted small">${outreach.hunter_preview ? `ключ ${escapeHtml(outreach.hunter_preview)}` : "без ключа контакты ищутся только на сайте компании"}</span></span>
+        ${outreach.hunter_preview ? "" : `<button type="button" class="btn btn-ghost btn-small" data-account-goto="settings-outreach" data-anchor="hunter-block">Добавить ключ</button>`}
+      </div>`
+    );
+  }
   const platforms = status.sources.filter((s) => s.schedule_enabled && s.name !== "telegram");
   document.getElementById("accounts-platforms").innerHTML = platforms.length
     ? platforms
@@ -3697,6 +3905,7 @@ async function loadAccounts() {
       const goto = b.dataset.accountGoto;
       if (goto.startsWith("settings-")) {
         switchSettingsTab(goto);
+        if (b.dataset.anchor) document.getElementById(b.dataset.anchor)?.scrollIntoView({ block: "center" });
         if (goto === "settings-tg-quick") loadTelegramWatch();
       } else {
         switchTab(goto);
@@ -4266,7 +4475,7 @@ const CHANGELOG_ITEMS = [
   "«Входящие»: ответы hh и HR из Telegram в одном месте + черновики ответов на подтверждение",
   "Этап у каждого отклика и воронка до оффера в Аналитике",
   "Настройки → «Контакты и письма»: почта Gmail, Hunter, сводка, напоминания HR",
-  "Площадка «Прямой поиск» и Настройки → «Компании»: вакансии прямо с сайтов компаний",
+  "🏢 «Сайты компаний» в «Свои каналы»: сами собирают компании с email HR в Базу — дальше рассылка одной кнопкой",
   "У интервью в Истории → «Действия»: подготовка, тренажёр, событие в календарь",
   "Аналитика: спрос на навыки, зарплаты на рынке, сравнение офферов",
 ];
@@ -5312,6 +5521,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   document
     .getElementById("direct-company-add")
     .addEventListener("click", addDirectCompany);
+  document.getElementById("settings-direct").addEventListener("change", saveDirectSetting);
   document.getElementById("offer-add").addEventListener("click", addOffer);
   document.getElementById("outreach-save").addEventListener("click", saveOutreachSettings);
   document.getElementById("tgq-save").addEventListener("click", saveTelegramWatch);
@@ -5364,10 +5574,14 @@ document.addEventListener("DOMContentLoaded", async () => {
       renderContactsList();
     })
   );
-  ["contacts-filter-source"].forEach((id) =>
-    document.getElementById(id).addEventListener("change", renderContactsList)
+  const resetPage = () => {
+    baseState.page = 0;
+    renderContactsList();
+  };
+  ["contacts-filter-source", "contacts-filter-contact"].forEach((id) =>
+    document.getElementById(id).addEventListener("change", resetPage)
   );
-  document.getElementById("contacts-filter-query").addEventListener("input", renderContactsList);
+  document.getElementById("contacts-filter-query").addEventListener("input", resetPage);
   document.getElementById("outreach-email-test").addEventListener("click", testOutreachEmail);
   ["outreach-digest", "outreach-digest-hour", "digest-quiet"].forEach((id) => document.getElementById(id).addEventListener("change", saveDigest));
   // Фильтры удалёнки — в «Что ищу», сохраняются сразу.

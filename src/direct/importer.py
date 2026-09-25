@@ -16,7 +16,7 @@ from xml.etree import ElementTree as ET
 
 from src.direct.contacts import extract_emails
 
-FIELDS = ("company", "email", "name", "position", "website", "title", "link", "telegram", "emphasis")
+FIELDS = ("company", "email", "name", "position", "website", "title", "source_url", "link", "telegram", "emphasis")
 
 # Заголовки столбцов по-русски и по-английски → поле.
 _HEADER_SYNONYMS = {
@@ -26,10 +26,15 @@ _HEADER_SYNONYMS = {
     "position": ("должность контакта", "position", "роль", "role"),
     "website": ("сайт", "website", "site", "домен", "domain"),
     "title": ("вакансия", "vacancy", "job", "позиция", "title"),
+    # Где адрес опубликован (например, «Source URL» в careerLauncher) — это
+    # не вакансия, а источник контакта. Стоит до «link»: «source url» ⊃ «url».
+    "source_url": ("источник", "source url", "source"),
     "link": ("ссылка", "link", "url", "линк"),
     "telegram": ("telegram", "телеграм", "tg"),
     "emphasis": ("упор", "акцент", "emphasis", "заметк", "notes", "комментар", "описание", "description"),
 }
+# accessibility@, candidate.accommodations@, fraud@, eeo@ — не для откликов.
+_NOT_FOR_APPLICATIONS = re.compile(r"accessib|accommodat|fraud|eeo|disability", re.I)
 _EMAIL_RE = re.compile(r"^[\w.+-]+@[\w-]+(\.[\w-]+)+$")
 
 
@@ -103,9 +108,95 @@ def _docx_text(data: bytes) -> str:
     return "\n".join("".join(t.text or "" for t in p.iter(f"{w}t")) for p in root.iter(f"{w}p"))
 
 
+def _markdown_rows(text: str) -> list[list[str]] | None:
+    """Таблица Markdown (| a | b |) — строки без разделителя |---|."""
+    rows = [
+        [cell.strip().strip("`") for cell in line.strip().strip("|").split("|")]
+        for line in text.splitlines()
+        if line.strip().startswith("|") and not re.fullmatch(r"[\s|:-]+", line)
+    ]
+    return rows if len(rows) > 1 else None
+
+
+def _pdf_table_rows(data: bytes) -> list[list[str]] | None:
+    """Таблица из PDF по координатам: строки — по высоте, столбец — по
+    ближайшему заголовку. Без ИИ, так что email не «съедет» в чужую
+    строку. None — в PDF нет таблицы с заголовками «Компания»/«Email»."""
+    from pdfminer.high_level import extract_pages
+    from pdfminer.layout import LTTextContainer, LTTextLine
+
+    header: list[str] = []
+    centers: list[float] = []
+    rows: list[list[str]] = []
+    page_rows: list[tuple[float, list[str]]] = []
+    for page in extract_pages(io.BytesIO(data)):
+        lines = sorted(
+            ((line.y0, (line.x0 + line.x1) / 2, line.get_text().strip())
+             for box in page if isinstance(box, LTTextContainer)
+             for line in box if isinstance(line, LTTextLine) and line.get_text().strip()),
+            key=lambda t: -t[0],
+        )
+        groups: list[list[tuple[float, float, str]]] = []
+        for line in lines:  # одна строка таблицы — ячейки с почти одной высотой
+            if groups and groups[-1][0][0] - line[0] < 2:
+                groups[-1].append(line)
+            else:
+                groups.append([line])
+        for group in groups:
+            cells = sorted((x, text) for _, x, text in group)
+            texts = [t for _, t in cells]
+            if not header:
+                fields = {_field_for(t) for t in texts}
+                if "email" in fields and ({"company", "name"} & fields):
+                    header, centers = texts, [x for x, _ in cells]
+                continue
+            if texts == header:
+                continue  # заголовок повторяется на каждой странице
+            row = [""] * len(header)
+            for x, text in cells:
+                i = min(range(len(centers)), key=lambda i: abs(centers[i] - x))
+                row[i] = _join_cell(row[i], text)
+            page_rows.append((group[0][0], row))
+        rows += _merge_wrapped(page_rows, len(header))
+        page_rows = []
+    return [header, *rows] if header and rows else None
+
+
+def _join_cell(head: str, tail: str) -> str:
+    """Перенос внутри ячейки: «name@site.» + «com» — без пробела."""
+    if not head:
+        return tail
+    return head + tail if head[-1] in ".@-_" else f"{head} {tail}"
+
+
+def _merge_wrapped(rows: list[tuple[float, list[str]]], width: int) -> list[list[str]]:
+    """Длинная ячейка переносится на строку выше/ниже остальных — такой
+    обрывок (заполнено меньше половины ячеек) приклеиваем к ближайшей
+    по высоте полной строке, сверху вниз."""
+    full = [i for i, (_, row) in enumerate(rows) if sum(1 for c in row if c) * 2 >= width]
+    if not full:
+        return [row for _, row in rows]
+    parts: dict[int, list[int]] = {i: [] for i in full}
+    for i, (y, _) in enumerate(rows):
+        owner = i if i in parts else min(full, key=lambda f: abs(rows[f][0] - y))
+        parts[owner].append(i)
+    merged = []
+    for owner in full:
+        row = [""] * width
+        for i in sorted(parts[owner], key=lambda i: -rows[i][0]):  # сверху вниз
+            for c, text in enumerate(rows[i][1]):
+                if text:
+                    row[c] = _join_cell(row[c], text)
+        merged.append(row)
+    return merged
+
+
 def read_file(filename: str, data: bytes) -> tuple[list[list[str]] | None, str]:
-    """(строки таблицы, "") для CSV/XLSX или (None, текст) для остального."""
+    """(строки таблицы, "") для CSV/XLSX/таблицы Markdown или (None, текст)."""
     ext = filename.rsplit(".", 1)[-1].lower()
+    if ext == "md":
+        text = _decode(data)
+        return _markdown_rows(text), text
     if ext == "xlsx":
         return _xlsx_rows(data), ""
     if ext in ("csv", "tsv"):
@@ -115,13 +206,18 @@ def read_file(filename: str, data: bytes) -> tuple[list[list[str]] | None, str]:
     if ext == "pdf":
         from pdfminer.high_level import extract_text
 
-        return None, extract_text(io.BytesIO(data))
+        table = _pdf_table_rows(data)
+        return (table, "") if table else (None, extract_text(io.BytesIO(data)))
     return None, _decode(data)
 
 
 def rows_from_table(rows: list[list[str]]) -> list[dict]:
     header, *body = rows
     mapping = {i: _field_for(h) for i, h in enumerate(header)}
+    # «Title» рядом с именем и email — должность человека, а не вакансия
+    # (у списка вакансий есть ссылка).
+    if "link" not in mapping.values() and "position" not in mapping.values():
+        mapping = {i: "position" if f == "title" else f for i, f in mapping.items()}
     if "email" not in mapping.values() and "company" not in mapping.values():
         raise ValueError(
             "Не нашёл столбцы «Компания» и «Email» — проверьте первую строку-заголовок."
@@ -266,6 +362,8 @@ def check_email(email: str) -> tuple[str, str]:
     """(статус, пояснение): ok / bad / unknown."""
     if not _EMAIL_RE.match(email):
         return "bad", "неверный формат адреса"
+    if _NOT_FOR_APPLICATIONS.search(email.split("@")[0]):
+        return "bad", "ящик для доступности/жалоб, а не для откликов"
     accepts = domain_accepts_mail(email.split("@")[1])
     if accepts is False:
         return "bad", "у домена нет почтового сервера — письмо не дойдёт"

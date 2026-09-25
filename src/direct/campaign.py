@@ -11,6 +11,7 @@ import json
 import random
 import secrets
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
@@ -70,6 +71,14 @@ class CampaignStore:
                 item.update(fields)
                 self._save(data)
 
+    def update(self, campaign_id: str, **fields) -> None:
+        """Поля самой рассылки (например, день последней порции писем)."""
+        with state_file_lock(self.path):
+            data = self._load()
+            if campaign_id in data:
+                data[campaign_id].update(fields)
+                self._save(data)
+
     def emails_with_status(self, *statuses: str) -> set[str]:
         return {
             email
@@ -106,7 +115,7 @@ class CampaignJob(threading.Thread):
         kind: str,
         emails: list[str],
         step: Callable[[str], Optional[str]],
-        pause: bool,
+        pause: "bool | Callable[[], float]",
         on_finish: Optional[Callable[["CampaignJob"], None]] = None,
     ):
         super().__init__(name=f"campaign-{campaign_id}-{kind}", daemon=True)
@@ -115,6 +124,7 @@ class CampaignJob(threading.Thread):
         self.on_finish = on_finish
         self.done = 0
         self.message = ""
+        self.next_at = 0.0  # когда следующее письмо (time.time()) — для «через ~N мин»
         self._stopping = threading.Event()
 
     def stop(self) -> None:
@@ -133,7 +143,10 @@ class CampaignJob(threading.Thread):
                     self.message = reason
                     break
                 last = index == len(self.emails) - 1
-                if self.pause and not last and self._stopping.wait(random.randint(*PAUSE_SECONDS)):
+                # pause — True (1–2 мин) или функция, считающая «человеческую» паузу.
+                seconds = (self.pause() if callable(self.pause) else random.randint(*PAUSE_SECONDS)) if self.pause else 0
+                self.next_at = time.time() + seconds
+                if self.pause and not last and self._stopping.wait(seconds):
                     self.message = "Остановлено"
                     break
             else:
@@ -148,4 +161,5 @@ class CampaignJob(threading.Thread):
         job = cls.RUNNING.get(campaign_id)
         if job is None:
             return None
-        return {"kind": job.kind, "done": job.done, "total": len(job.emails)}
+        return {"kind": job.kind, "done": job.done, "total": len(job.emails),
+                "next_in": max(0, int(job.next_at - time.time())) if job.next_at else 0}

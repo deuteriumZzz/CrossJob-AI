@@ -245,3 +245,41 @@ def test_new_channels_picked_up_without_restart(tmp_path, monkeypatch):
     monkeypatch.setattr(w.asyncio, "sleep", no_sleep)
     asyncio.run(tw._watch_settings())
     assert subscribed == [["old", "new_one"]] and tw.keywords == ["go"]
+
+
+def test_email_from_post_marks_base_and_do_not_write(monkeypatch):
+    """Письмо HR из поста парсера: в Базе «написали» (рассылка второй раз не
+    напишет), ответ ловится; «Не писать компании» — статус «не писать»."""
+    from src.job_sources.contact_book import ContactBook
+    from src.webui.api import _contact_status
+
+    with tempfile.TemporaryDirectory() as tmp:
+        main, params, _, calls, cb = _button_env(tmp, monkeypatch)
+        out = params["outputFileDirectory"]
+        params["secretsFile"].write_text("email:\n  address: me@gmail.com\n  app_password: p\n", encoding="utf-8")
+        (params["dataFolder"] / main.RESUME_PDF).write_bytes(b"%PDF")
+        contact = {"kind": "email", "value": "HR@acme.io"}
+        ContactBook(out).add("Acme", [{**contact, "source": "пост в @geekjobs"}])
+        post_id = w.save_watch_post(out, {
+            "channel": "geekjobs", "link": "https://t.me/geekjobs/6", "title": "Python Dev",
+            "text": "Acme: HR@acme.io", "contacts": [contact],
+        })
+        monkeypatch.setattr(main, "generate_first_message", lambda *a: {"subject": "Python Dev", "text": "Hi"})
+        monkeypatch.setattr(main, "build_message", lambda *a, **k: "msg")
+        monkeypatch.setattr(main, "send_email", lambda creds, msg: "<id1>")
+        main._handle_vacancy_button(params, "key", "T", cb(f"l:{post_id}:0"))
+        draft_msg = [p for m, p in calls["bot"] if m == "sendMessage"][-1]
+        buttons = [b["callback_data"] for row in draft_msg["reply_markup"]["inline_keyboard"] for b in row]
+        assert any(b.startswith("nd:") for b in buttons)
+        main._handle_vacancy_button(params, "key", "T", cb(next(b for b in buttons if b.startswith("d:"))))
+
+        status = lambda: _contact_status(ContactBook(out).get("acme")["contacts"][0], {}, {}, set())  # noqa: E731
+        assert status() == "written"
+        monkeypatch.setattr(main, "bounced_addresses", lambda creds, addrs: set())
+        monkeypatch.setattr(main, "senders_replied", lambda creds, addrs: {"hr@acme.io"})
+        monkeypatch.setattr(main, "notify", lambda *a: None)
+        main._check_contact_book_mail(params, {})
+        assert status() == "replied"
+
+        main._handle_vacancy_button(params, "key", "T", cb(f"n:{post_id}"))
+        assert ContactBook(out).get("acme")["do_not_contact"] is True

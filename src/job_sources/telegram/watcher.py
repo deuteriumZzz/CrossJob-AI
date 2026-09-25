@@ -436,7 +436,8 @@ def save_telegram_letter(data_folder: Path, post: dict, text: str) -> Path:
 def vacancy_keyboard(post_id: str, contacts: list[dict], resumes: list[Path]) -> dict:
     """Кнопки под вакансией: для Telegram-контакта — «Здравствуйте»,
     «Здравствуйте + резюме» (по кнопке на файл резюме) и письмо LLM; для
-    email — черновик письма LLM."""
+    email — черновик письма LLM; «Не писать компании» — в Базе статус
+    «не писать», в рассылки она не попадёт."""
     rows: list[list[dict]] = []
     for index, contact in enumerate(contacts[:2]):
         if contact["kind"] == "telegram":
@@ -450,4 +451,6 @@ def vacancy_keyboard(post_id: str, contacts: list[dict], resumes: list[Path]) ->
             rows.append([{"text": f"✍️ Сопроводительное для {who} (LLM)", "callback_data": f"l:{post_id}:{index}"}])
         elif contact["kind"] == "email":
             rows.append([{"text": f"✍️ Письмо на {contact['value']} (LLM)", "callback_data": f"l:{post_id}:{index}"}])
+    if rows:
+        rows.append([{"text": "🚫 Не писать компании", "callback_data": f"n:{post_id}"}])
     return {"inline_keyboard": rows}

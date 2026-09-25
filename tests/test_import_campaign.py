@@ -1,3 +1,4 @@
+import json
 import io
 import tempfile
 import zipfile
@@ -130,6 +131,8 @@ def test_import_api_and_full_campaign(client, monkeypatch):  # noqa: F811
     # Фоновые задачи — синхронно и без пауз.
     monkeypatch.setattr(camp.CampaignJob, "start", lambda self: self.run())
     monkeypatch.setattr(camp, "PAUSE_SECONDS", (0, 0))
+    monkeypatch.setattr(main.mail_guard, "_in_window", lambda moment, s: True)  # тест не зависит от часа
+    monkeypatch.setattr(main.mail_guard, "human_pause", lambda p, now=None: 0)
     monkeypatch.setattr(main, "generate_company_email",
                         lambda resume, name, position, card, contact, key: {"subject": "Python Dev Application — Ann", "text": "Hello Acme"})
     (ctx.config["dataFolder"] / "resume.pdf").write_bytes(b"%PDF")
@@ -417,3 +420,141 @@ def test_resumes_overview(client):  # noqa: F811
 
 def test_ui_files_are_not_served_stale(client):  # noqa: F811
     assert client.get("/style.css").headers.get("cache-control") == "no-cache"
+
+
+def test_company_sites_collect_into_base_for_campaign(client):  # noqa: F811
+    """«Сайты компаний» кладут компании в Базу: с email — сразу в рассылку,
+    без email — тоже видны под фильтром «sites»."""
+    ctx = api.get_ctx()
+    book = ContactBook(ctx.output_folder)
+    vacancy = lambda n: {"title": "Python dev", "link": f"https://x/{n}", "source": "direct"}  # noqa: E731
+    book.add("Acme", [{"kind": "email", "value": "jobs@acme.io", "source": "Сайты компаний: текст вакансии"}],
+             vacancy=vacancy(1))
+    book.add("NoMail Inc", [], vacancy=vacancy(2))
+    cards = {c["company"]: c for c in client.get("/api/contacts").json()}
+    assert cards["Acme"]["source_kinds"] == ["sites"]
+    assert cards["NoMail Inc"]["source_kinds"] == ["sites"]
+    s = client.get("/api/direct/summary").json()
+    assert (s["in_base"], s["added_week"], s["ready"]) == (2, 2, 1)
+    created = client.post("/api/campaigns", json={"source": "Сайты компаний"}).json()
+    assert len(created["items"]) == 1
+
+
+def test_campaign_prepares_in_daily_batches(monkeypatch):
+    """3 адреса при лимите 2: сегодня — 2 письма, остальное ждёт; на
+    следующий день, когда порция ушла, готовится следующая."""
+    with tempfile.TemporaryDirectory() as tmp:
+        out, data = Path(tmp) / "out", Path(tmp) / "data"
+        out.mkdir(); data.mkdir()
+        (data / main.RESUME_PDF).write_bytes(b"%PDF")
+        params = {"outputFileDirectory": out, "dataFolder": data, "direct": {"email_daily_limit": 2}}
+        monkeypatch.setattr(camp.CampaignJob, "start", lambda self: self.run())
+        monkeypatch.setattr(main, "candidate_name", lambda *a: "Ann")
+        monkeypatch.setattr(main, "generate_company_email", lambda *a: {"subject": "s", "text": "t"})
+        monkeypatch.setattr(main, "_notify_with_buttons", lambda *a: None)
+        store = camp.CampaignStore(out)
+        cid = store.create("t", [{"key": k, "email": f"{k}@x.io", "company": k} for k in "abc"])
+
+        main.start_campaign_job(params, "key", cid, "prepare")
+        stats = lambda: camp.campaign_stats(store.get(cid))  # noqa: E731
+        assert (stats()["draft"], stats()["pending"]) == (2, 1)
+
+        main._prepare_campaign_batches(params, "key")  # тот же день — ждём
+        assert stats()["pending"] == 1
+        for email in ("a@x.io", "b@x.io"):
+            store.update_item(cid, email, status="sent")
+        store.update(cid, batch_day="2000-01-01")  # «вчера»
+        main._prepare_campaign_batches(params, "key")
+        assert (stats()["draft"], stats()["pending"]) == (1, 0)
+
+
+def test_markdown_table_import_skips_non_application_inboxes():
+    """Таблица Markdown (как data/companies.md в byborh/careerLauncher):
+    Source URL — источник контакта, а не вакансия; accessibility@ и
+    accommodations@ — не для откликов."""
+    md = (
+        "# Big Tech Contacts\n\n"
+        "| Company | Domain | Role Email | Department / Team | Location | Description | Source URL | Last Verified |\n"
+        "|---|---|---|---|---|---|---|---|\n"
+        "| NVIDIA | nvidia.com | `hr@nvidia.com` | For Employment | Global | GPUs. | https://nvidia.com/jobs | 2025-10-18 |\n"
+        "| Disney | disney.com | Candidate.Accommodations@Disney.com | For Employment | Global | Media. | https://disney.com | 2025-11-03 |\n"
+    ).encode()
+    table, _ = importer.read_file("companies.md", md)
+    rows = importer.rows_from_table(table)
+    nvidia = rows[0]
+    assert (nvidia["company"], nvidia["email"], nvidia["website"]) == ("NVIDIA", "hr@nvidia.com", "nvidia.com")
+    assert nvidia["source_url"] == "https://nvidia.com/jobs" and nvidia["link"] == ""
+    assert nvidia["emphasis"] == "GPUs."
+    assert importer.check_email(rows[1]["email"])[0] == "bad"
+
+
+def test_pdf_table_wrapped_cell_rejoins_its_row():
+    """Длинный email в PDF-таблице переносится: обрывки сверху и снизу
+    приклеиваются к своей строке, «name@site.» + «com» — без пробела."""
+    rows = [
+        (700.0, ["1", "Ann", "ann@a.com", "HR", "A"]),
+        (695.0, ["", "", "very.long.name@excelencia.", "", ""]),
+        (692.0, ["2", "Gita V", "", "Head TA", "Excelencia"]),
+        (689.0, ["", "", "com", "", ""]),
+        (684.0, ["3", "Bob", "bob@b.com", "HR", "B"]),
+    ]
+    merged = importer._merge_wrapped(rows, 5)
+    assert [r[2] for r in merged] == ["ann@a.com", "very.long.name@excelencia.com", "bob@b.com"]
+    assert merged[1][4] == "Excelencia"
+    assert importer._join_cell("Lakshmi", "Radhakrishnan") == "Lakshmi Radhakrishnan"
+
+
+def test_mail_guard_warmup_window_and_bounces(tmp_path):
+    """Разогрев: 15 в первый день, +5 за каждый день отправки; вне рабочих
+    часов и в выходные — ждём; 3 возврата за сутки — стоп."""
+    from datetime import datetime, timedelta, timezone
+
+    from src.direct import mail_guard as g
+
+    tz = timezone(timedelta(hours=3))
+    monday_noon = datetime(2026, 9, 21, 12, tzinfo=tz)
+    params = {"direct": {"email_daily_limit": 50}}
+    p = g.plan(params, tmp_path, monday_noon)
+    assert (p["limit"], p["can_send"]) == (15, True)
+
+    sent = {f"a{i}@x.io": {"sent_at": (monday_noon - timedelta(days=d)).isoformat()} for i, d in enumerate([1, 2, 2])}
+    (tmp_path / "campaigns.json").write_text(json.dumps({"c": {"items": sent}}))
+    assert g.plan(params, tmp_path, monday_noon)["limit"] == 25  # два дня отправки
+    assert g.plan({"direct": {"email_daily_limit": 50, "warmup": False}}, tmp_path, monday_noon)["limit"] == 50
+
+    evening, saturday = monday_noon.replace(hour=21), monday_noon + timedelta(days=5)
+    assert not g.plan(params, tmp_path, evening)["can_send"]
+    assert g.next_window(evening, g.settings(params)) == monday_noon.replace(day=22, hour=9)
+    assert not g.plan(params, tmp_path, saturday)["can_send"]
+    assert g.next_window(saturday, g.settings(params)).weekday() == 0
+
+    bounced = {f"b{i}@x.io": {"bounced_at": (monday_noon - timedelta(hours=1)).isoformat()} for i in range(3)}
+    (tmp_path / "campaigns.json").write_text(json.dumps({"c": {"items": {**sent, **bounced}}}))
+    p = g.plan(params, tmp_path, monday_noon)
+    assert not p["can_send"] and "Возвратов" in p["reason"]
+    assert g.days_needed({"limit": 15, "daily_limit": 30, "warmup": True}, 100) == 5  # 15+20+25+30+30
+
+
+def test_mail_status_waiting_stopped_and_gmail_auth(client, monkeypatch):  # noqa: F811
+    """Строка «Сейчас»: включённая рассылка вечером — «ждёт»; пароль Gmail
+    не принят — «остановлено», новый пароль снимает стоп."""
+    ctx = api.get_ctx()
+    store = camp.CampaignStore(ctx.output_folder)
+    cid = store.create("t", [{"key": "a", "email": "a@x.io", "company": "A"}])
+    store.update_item(cid, "a@x.io", status="draft", code="c1")
+    assert not any(a.get("state") for a in client.get("/api/activity").json())  # не включена
+
+    store.update(cid, sending=True)
+    monkeypatch.setattr(api.mail_guard, "_in_window", lambda moment, s: False)
+    [item] = [a for a in client.get("/api/activity").json() if a.get("state")]
+    assert item["state"] == "waiting" and "вне времени отправки" in item["text"]
+
+    assert main._gmail_auth_failed("Не удалось отправить письмо a@x.io: (535, b'5.7.8 Username and Password not accepted')")
+    store.update(cid, error="Gmail не принял пароль приложения")
+    [item] = [a for a in client.get("/api/activity").json() if a.get("state")]
+    assert item["state"] == "stopped" and item["goto"] == "settings-outreach"
+    status = client.get("/api/campaigns").json()["mail_status"]
+    assert status["state"] == "stopped" and status["waiting"] == 1
+
+    client.post("/api/settings/outreach", json={"email_app_password": "abcd efgh ijkl mnop"})
+    assert store.get(cid)["error"] == ""

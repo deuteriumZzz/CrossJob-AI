@@ -276,6 +276,17 @@ def _looks_russian(text: str) -> bool:
     return bool(letters) and cyrillic / len(letters) > 0.3
 
 
+# Домены России и СНГ, где деловая переписка обычно по-русски. Название
+# компании у них часто латиницей (Ozon, Kaspi, EPAM) — по нему язык не понять.
+_CIS_TLDS = ("ru", "su", "рф", "xn--p1ai", "by", "kz", "kg", "uz")
+
+
+def _cis_company(card: dict) -> bool:
+    hosts = [card.get("website") or ""] + [c["value"].split("@")[-1] for c in card.get("contacts", []) if c["kind"] == "email"]
+    hosts = [h.lower().split("//")[-1].split("/")[0].rstrip(".") for h in hosts if h]
+    return any(h.rsplit(".", 1)[-1] in _CIS_TLDS for h in hosts)
+
+
 def generate_first_message(
     resume_pdf_path: Path,
     candidate_name: str,
@@ -361,8 +372,9 @@ def generate_company_email(
     from pdfminer.high_level import extract_text
 
     vacancy = (card.get("vacancies") or [{}])[-1]
-    sample = " ".join([card.get("company", ""), card.get("emphasis", ""), vacancy.get("title", "")])
-    russian = _looks_russian(sample)
+    sample = " ".join([card.get("company", ""), card.get("emphasis", ""), vacancy.get("title", ""),
+                       vacancy.get("text", "")[:1500]])
+    russian = _looks_russian(sample) or _cis_company(card)
     chain = _COMPANY_EMAIL_PROMPT | get_chat_llm(llm_api_key, temperature=0.4) | StrOutputParser()
     text = chain.invoke(
         {
