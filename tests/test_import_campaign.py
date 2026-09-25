@@ -201,8 +201,9 @@ def test_edit_and_skip_campaign_letter(client):  # noqa: F811
 
 def test_setup_checklist_points_to_fix(client):  # noqa: F811
     setup = {c["id"]: c for c in client.get("/api/todo").json()["setup"]}
-    assert setup["daemon"]["ok"] is False and setup["daemon"]["goto"] == "start-bot"
-    assert list(setup)[0] == "resume" and list(setup)[-1] == "daemon"  # шаги мастера по порядку
+    assert "daemon" not in setup  # «Запустить бота» — состояние, а не шаг настройки
+    assert list(setup)[0] == "resume" and list(setup)[-1] == "gmail"  # шаги мастера по порядку
+    assert [i for i, c in setup.items() if c["required"]] == ["resume", "llm", "schedule"]
     assert setup["gmail"]["ok"] is False and setup["gmail"]["goto"] == "settings-outreach"
     assert "watch" not in setup  # без входа в Telegram пункт про каналы не показываем
 

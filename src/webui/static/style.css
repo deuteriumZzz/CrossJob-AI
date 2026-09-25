@@ -3961,3 +3961,40 @@ input.num-input {
   margin: 0 0 10px;
   line-height: 1.5;
 }
+
+/* Главное настроено — вместо мастера одна тихая строка. */
+.setup-slim {
+  margin-bottom: 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--muted);
+}
+.setup-slim > summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.setup-slim > summary::-webkit-details-marker {
+  display: none;
+}
+.setup-slim > summary::before {
+  content: "▸";
+  transition: transform 0.2s ease;
+}
+.setup-slim[open] > summary::before {
+  transform: rotate(90deg);
+}
+.setup-slim[open] > summary {
+  margin-bottom: 8px;
+}
+.setup-dismiss {
+  margin-left: auto;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 4px;
+}

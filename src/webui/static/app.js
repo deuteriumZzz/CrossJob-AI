@@ -1436,39 +1436,62 @@ async function renderTodo() {
   applySubnavBadges();
   const setup = todo.setup || [];
   const missing = setup.filter((c) => !c.ok);
-  // Мастер настройки — пока что-то не подключено. Шаги идут по порядку,
-  // «Следующий шаг» — одна главная кнопка.
-  const next = missing[0];
+  const missingRequired = missing.filter((c) => c.required);
   const done = setup.length - missing.length;
-  const setupHtml = next
-    ? `<div class="setup">
+  const stepsHtml = (next) => `<ol class="setup-steps">${setup
+    .map(
+      (c, i) => `<li class="${c.ok ? "is-done" : c === next ? "is-next" : ""}">
+        <button type="button" class="setup-step" data-setup-goto="${escapeHtml(c.goto)}" ${c.goto && !c.ok ? "" : "disabled"}>
+          <span class="setup-step-mark">${c.ok ? "✓" : i + 1}</span>${escapeHtml(c.label)}${c.required ? "" : ` <span class="muted small">по желанию</span>`}
+        </button></li>`
+    )
+    .join("")}</ol>`;
+  // Три состояния: 1) не настроено главное (резюме, ключ ИИ, площадка) —
+  // полный мастер для новичка; 2) главное есть, дополнительное нет — одна
+  // тихая строка, её можно раскрыть или скрыть ✕; 3) всё есть — ничего.
+  // Сломалось потом — отдельной строкой в «Что сделать сейчас», не мастером.
+  let setupHtml = "";
+  const optionalKey = missing.map((c) => c.id).join(",");
+  let dismissed = "";
+  try {
+    dismissed = localStorage.getItem("cj-setup-dismissed") || "";
+  } catch (e) {}
+  if (missingRequired.length) {
+    const next = missingRequired[0];
+    setupHtml = `<div class="setup">
         <div class="setup-head">
           <h3 style="margin:0">Настройка: ${done} из ${setup.length}</h3>
           <div class="progress setup-progress"><div style="width:${Math.round((100 * done) / setup.length)}%"></div></div>
         </div>
         <div class="setup-next">
           <div><span class="muted small">Следующий шаг</span><div><b>${escapeHtml(next.label)}</b> — ${escapeHtml(next.hint)}</div></div>
-          ${next.goto === "start-bot"
-            ? `<span class="muted small">Кнопка «▶ Запустить» — в меню слева</span>`
-            : next.goto ? `<button type="button" class="btn btn-primary" data-setup-goto="${escapeHtml(next.goto)}">Сделать →</button>` : ""}
+          ${next.goto ? `<button type="button" class="btn btn-primary" data-setup-goto="${escapeHtml(next.goto)}">Сделать →</button>` : ""}
         </div>
-        <ol class="setup-steps">${setup
-          .map(
-            (c, i) => `<li class="${c.ok ? "is-done" : c === next ? "is-next" : ""}">
-              <button type="button" class="setup-step" data-setup-goto="${escapeHtml(c.goto)}" ${c.goto && !c.ok && c.goto !== "start-bot" ? "" : "disabled"}>
-                <span class="setup-step-mark">${c.ok ? "✓" : i + 1}</span>${escapeHtml(c.label)}
-              </button></li>`
-          )
-          .join("")}</ol>
-      </div>`
-    : "";
-  const bindSetup = () =>
+        ${stepsHtml(next)}
+      </div>`;
+  } else if (missing.length && dismissed !== optionalKey) {
+    setupHtml = `<details class="setup-slim">
+        <summary>✓ Всё главное настроено · можно ещё подключить: ${missing.map((c) => escapeHtml(c.label)).join(", ")}
+          <button type="button" class="icon-btn setup-dismiss" title="Скрыть — всё есть в Настройки → Подключения" aria-label="Скрыть">✕</button></summary>
+        ${stepsHtml(null)}
+      </details>`;
+  }
+  const bindSetup = () => {
+    el.querySelector(".setup-dismiss")?.addEventListener("click", (e) => {
+      e.preventDefault(); // не раскрывать <details>
+      try {
+        // Запоминаем именно этот набор: появится новое — строка вернётся.
+        localStorage.setItem("cj-setup-dismissed", optionalKey);
+      } catch (err) {}
+      el.querySelector(".setup-slim")?.remove();
+    });
+    bindSetupSteps();
+  };
+  const bindSetupSteps = () =>
     el.querySelectorAll("[data-setup-goto]").forEach((btn) =>
       btn.addEventListener("click", () => {
         const goto = btn.dataset.setupGoto;
-        if (goto === "start-bot") {
-          document.getElementById("daemon-toggle").click();
-        } else if (goto.startsWith("settings-")) {
+        if (goto.startsWith("settings-")) {
           switchTab("settings");
           switchSettingsTab(goto);
           if (goto === "settings-tg-quick") loadTelegramWatch();
@@ -1478,7 +1501,7 @@ async function renderTodo() {
       })
     );
   if (!todo.items.length) {
-    el.innerHTML = setupHtml + `<div class="todo-calm">✓ Сейчас ничего не ждёт вашего решения${missing.length ? "" : " — бот работает сам"}.</div>`;
+    el.innerHTML = setupHtml + `<div class="todo-calm">✓ Сейчас ничего не ждёт вашего решения.</div>`;
     bindSetup();
     return;
   }

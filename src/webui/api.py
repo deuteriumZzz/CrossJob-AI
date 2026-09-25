@@ -1319,6 +1319,7 @@ def get_todo(ctx: AppContext = Depends(get_ctx)) -> dict:
             "text": _plural(len(paused), "площадка на паузе", "площадки на паузе", "площадок на паузе") + " после капчи/блокировки: " + ", ".join(paused)
             + f" — пройдите проверку на сайте и напишите боту /resume {paused[0]}",
         })
+    items += _broken_later(ctx)
     return {
         "items": items,
         "setup": _setup_checklist(ctx),
@@ -1334,21 +1335,22 @@ def _setup_checklist(ctx: AppContext) -> list[dict]:
     """«Готовность» на Главной: что подключено и куда нажать, если нет.
     goto — подраздел дашборда или вкладка настроек (settings-*).
     Только дешёвые проверки (файлы/ключи) — Главная обновляется часто."""
-    from src.job_sources.telegram.watcher import active_watcher
-
     secrets = ConfigValidator.load_yaml(ctx.secrets_file)
     data_folder: Path = ctx.config["dataFolder"]
     telegram = ctx.config.get("telegram") or {}
     tg_logged_in = (ctx.output_folder / ".telegram_session.session").exists()
     profile_file = data_folder / "job_application_profile.yaml"
     profile = ConfigValidator.load_yaml(profile_file) if profile_file.exists() else {}
-    # Порядок — это порядок шагов мастера на Главной: от резюме до «Запустить».
+    # Порядок — это порядок шагов мастера на Главной. Первые три — нужные:
+    # без них бот бесполезен; остальные — дополнительные каналы. «Запустить
+    # бота» — не шаг настройки, а состояние: оно видно по кнопке в меню.
     checks = [
         ("resume", "Резюме", (data_folder / RESUME_PDF).exists(),
          "загрузите PDF — по нему пишутся письма и отклики", "resume"),
         ("llm", "Ключ ИИ", bool(ctx.llm_api_key),
          "нужен для писем и подбора вакансий — бесплатный ключ получается за минуту", "settings-llm"),
-        ("schedule", "Площадки", any((ctx.config.get(n) or {}).get("schedule_enabled") for n, _ in ALL_SOURCES),
+        ("schedule", "Площадки", any((ctx.config.get(n) or {}).get("schedule_enabled") for n, _ in ALL_SOURCES)
+         or bool(telegram.get("watch_enabled")),
          "выберите режим «Откликается сам» или «Только ищет» на карточках площадок ниже", ""),
         ("salary", "Зарплатные ожидания",
          bool(ctx.config.get("salary_expectations") or (
@@ -1368,17 +1370,31 @@ def _setup_checklist(ctx: AppContext) -> list[dict]:
     checks += [
         ("gmail", "Почта Gmail", bool((secrets.get("email") or {}).get("app_password")),
          "для рассылки компаниям с резюме во вложении", "settings-outreach"),
-        ("daemon", "Запустить бота", ctx.scheduler_thread is not None and ctx.scheduler_thread.is_alive(),
-         "бот начнёт искать вакансии и следить за каналами", "start-bot"),
     ]
-    items = [
-        {"id": i, "label": label, "ok": ok, "hint": "" if ok else hint, "goto": goto}
+    return [
+        {"id": i, "label": label, "ok": ok, "hint": "" if ok else hint, "goto": goto,
+         "required": i in _REQUIRED_SETUP}
         for i, label, ok, hint, goto in checks
     ]
+
+
+_REQUIRED_SETUP = ("resume", "llm", "schedule")
+
+
+def _broken_later(ctx: AppContext) -> list[dict]:
+    """Что было настроено, но перестало работать, — одной строкой в «Что
+    сделать сейчас», а не возвратом мастера настройки."""
+    from src.job_sources.telegram.watcher import active_watcher
+
+    items = []
+    telegram = ctx.config.get("telegram") or {}
+    if telegram.get("watch_enabled") and not (ctx.output_folder / ".telegram_session.session").exists():
+        items.append({"id": "tg_login", "count": "!", "view": "telegram",
+                      "text": "Telegram-парсер включён, но вход в Telegram слетел — войдите снова"})
     watcher = active_watcher()
     if watcher is not None and not watcher.connected:
-        items.append({"id": "watch_conn", "label": "Шлюз Telegram на связи", "ok": False,
-                      "hint": "переподключается — подробности в «Логах»", "goto": "logs"})
+        items.append({"id": "watch_conn", "count": "!", "view": "logs",
+                      "text": "Telegram-парсер переподключается — если долго, подробности в «Логах»"})
     return items
 
 

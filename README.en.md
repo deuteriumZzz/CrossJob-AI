@@ -165,7 +165,7 @@ Six sections, each with one job:
 
 | Section | What's there |
 |---|---|
-| **Home** | A step-by-step setup wizard (while something isn't connected), "What to do now" (drafts, new replies, interviews, paused platforms), "Your channels" — "🏢 Companies & outreach" (the whole path in one card: a single next-step button — upload a list, write the emails, review and send, stop; reviewing emails and uploading a file happen in a side panel, without leaving the page) and "✈️ Telegram parser", platform cards with a toggle and a mode |
+| **Home** | A step-by-step setup wizard — until the essentials are set (resume, LLM key, a platform); after that, one quiet "you can also connect…" line (hide it with ✕), and anything that breaks later shows up as a single line in "What to do now"; "What to do now" (drafts, new replies, interviews, paused platforms), "Your channels" — "🏢 Companies & outreach" (the whole path in one card: a single next-step button — upload a list, write the emails, review and send, stop; reviewing emails and uploading a file happen in a side panel, without leaving the page) and "✈️ Telegram parser", platform cards with a toggle and a mode |
 | **Vacancies** | Everything the bot found: status, stage, score, letter; each vacancy has "Actions" — find HR, interview prep, trainer, calendar, fill the form. Rejections are hidden by default |
 | **Conversations** | Inbox (employer replies and "Waiting for your decision") · Telegram parser (how it works, account connection, dialogs) |
 | **Companies** | Base (a table of companies and HR that handles thousands of rows, file import with the "Where to get a company list?" prompt, Excel export) · Outreach (base → emails → sending via Gmail, stats, follow-ups) |
