@@ -45,6 +45,7 @@ This is an experimental alpha. Read the warnings on the release page before usin
 - [Building a company base with AI](#building-a-company-base-with-ai)
 - [Outreach without getting Gmail blocked](#outreach-without-getting-gmail-blocked)
 - [Letters that read like a human wrote them](#letters-that-read-like-a-human-wrote-them)
+- [What the AI does and by which rules](#what-the-ai-does-and-by-which-rules)
 - [Data & safety](#data--safety)
 - [Limits & anti-ban](#limits--anti-ban)
 - [Configuration](#configuration)
@@ -243,6 +244,35 @@ Everything sent to an employer is written by the rules of the [humanizer](https:
 Then a second pass, as in the skill itself: the code looks for remaining tells, and if there are any, the LLM rewrites the text once, keeping every fact. This covers outreach emails, Telegram messages to HR, cover letters, hh chat replies and text answers in hh questionnaires.
 
 The name in the subject and signature comes from the same PDF resume that goes out as the attachment.
+
+## What the AI does and by which rules
+
+CrossJob uses an LLM only where it can't do without one: scoring a vacancy, writing a text, understanding an HR reply. Each task has its own prompt — the full text is in the code (linked), here's what it means.
+
+| What the AI does | What it gets | Main rules | Prompt |
+|---|---|---|---|
+| Vacancy score, 1–10 | resume, vacancy, its salary and your expectations | 2–4 "what's missing" points; the score drops hard if the level is above yours, required skills are missing or the salary is below your expectations | [job_fit.py](src/job_sources/job_fit.py) |
+| Cover letter for an application | resume, vacancy | their main problem → 2–3 examples from the resume with numbers → honestly name one gap → why this particular company; under 250 words, in the vacancy's language, no placeholders like "[Company Name]" | [plain_cover_letter_prompt*](src/libs/resume_and_cover_builder/) |
+| First message to HR (Telegram parser buttons) | resume, vacancy text | the 2–3 main requirements and an example from the resume for each; no clichés; in the post's language | [hr_replies.py](src/job_sources/hr_replies.py) |
+| Email to a company (outreach) | resume, company, website, vacancy, HR name, "focus" from your file | greeting by name, 3 paragraphs, 150–180 words, a call at the end; Russian for Russia and the CIS, English for everyone else | [hr_replies.py](src/job_sources/hr_replies.py) |
+| Reading an HR reply | the message text | invitation / question / rejection / other — this is how replies are sorted in the Inbox | [hr_replies.py](src/job_sources/hr_replies.py) |
+| Reply in hh chat | resume, the employer's message | first decides whether a reply is needed at all (statuses and hh automation — no); if a fact is missing, says so plainly, especially about salary and experience | [reply_answerer.py](src/job_sources/reply_answerer.py) |
+| Employer questionnaire on hh | resume, vacancy, questions | picks options only from those offered, verbatim; text answers are short, first person; submitted only after your "yes" | [form_fill.py](src/job_sources/headhunter/form_fill.py) |
+| LinkedIn Easy Apply questions | resume, profile, question | short, facts only, always in English | [answerer.py](src/job_sources/linkedin/answerer.py) |
+| Reading a Telegram post | the post text | company, role, salary — only what's written; contacts are found by code, not by the AI | [post_parser.py](src/job_sources/telegram/post_parser.py) |
+| Reading a company list from text or PDF | the file text, in parts | only what's written; an email is accepted only if it's literally in the file | [importer.py](src/direct/importer.py) |
+| Interview prep and trainer | resume, vacancy, what's missing | questions with answer points from the resume; the only thing known about the company is its name — "check the company website"; answers scored 1–10 | [interview_prep.py](src/job_sources/interview_prep.py) |
+| Interview to calendar | the HR message | only an exact date and time; "sometime next week" creates no event | [interview_calendar.py](src/job_sources/interview_calendar.py) |
+| Resume audit | resume, vacancy | an honest recruiter review, an ATS check, experience rewritten with the Google XYZ formula; no numbers — a [ЗАПОЛНИТЬ] ("fill in") mark instead of invented figures | [resume_audit.py](src/job_sources/resume_audit.py) |
+| Positions to search for | resume | 2–4 titles, the way job sites phrase them | [resume_profile.py](src/job_sources/resume_profile.py) |
+| "Written by a human" check | the finished text | if AI tells remain — one rewrite keeping every fact; if it comes out 1.6× longer, the original stays | [anti_ai_rules.py](src/libs/resume_and_cover_builder/anti_ai_rules.py) |
+
+**What the AI never does**
+- **Never invents facts about you.** Experience, years, numbers and skills come only from your resume. If a number is missing, it writes [ЗАПОЛНИТЬ] ("fill in") or an honest "no data".
+- **Never invents addresses.** Emails and Telegram contacts are found in the text by code; from a file, an address is taken only if it's literally there.
+- **Never invents facts about a company** — only what's in the vacancy and the data.
+- **Never sends anything on its own.** Emails, messages to HR and questionnaires go out after you press the button. The bot sends by itself only platform applications in "Applies by itself" mode and outreach emails you've already reviewed.
+- **Your data is seen only by the LLM provider you chose** (Settings → LLM provider) with your own key: the resume and vacancy text go to it just for the task at hand.
 
 ## Data & safety
 
