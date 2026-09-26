@@ -3622,21 +3622,56 @@ function initSettingsDirtyTracking() {
   });
 }
 
-function toggleSidebarCollapse() {
+let sidebarTransitionTimer = null;
+
+function sidebarCanCollapse() {
+  return !window.matchMedia("(max-width: 760px)").matches;
+}
+
+function restoreSidebarCollapse() {
   const sidebar = document.querySelector(".sidebar");
-  const collapsed = sidebar.classList.toggle("collapsed");
+  const collapsed = localStorage.getItem("cj-sidebar-collapsed") === "1" && sidebarCanCollapse();
+  sidebar.classList.toggle("collapsed", collapsed);
+}
+
+function finishSidebarTransition(sidebar) {
+  clearTimeout(sidebarTransitionTimer);
+  sidebar.classList.remove("is-transitioning");
+  repositionTabIndicators();
+}
+
+function toggleSidebarCollapse() {
+  if (!sidebarCanCollapse()) return;
+  const sidebar = document.querySelector(".sidebar");
+  const collapsed = !sidebar.classList.contains("collapsed");
+  sidebar.classList.add("is-transitioning");
+  sidebar.classList.toggle("collapsed", collapsed);
   localStorage.setItem("cj-sidebar-collapsed", collapsed ? "1" : "0");
-  requestAnimationFrame(repositionTabIndicators);
+
+  const onTransitionEnd = (event) => {
+    if (event.target === sidebar && event.propertyName === "width") {
+      sidebar.removeEventListener("transitionend", onTransitionEnd);
+      finishSidebarTransition(sidebar);
+    }
+  };
+  sidebar.addEventListener("transitionend", onTransitionEnd);
+  clearTimeout(sidebarTransitionTimer);
+  sidebarTransitionTimer = setTimeout(() => {
+    sidebar.removeEventListener("transitionend", onTransitionEnd);
+    finishSidebarTransition(sidebar);
+  }, 350);
 }
 
 function initSidebarCollapse() {
-  const sidebar = document.querySelector(".sidebar");
-  if (localStorage.getItem("cj-sidebar-collapsed") === "1") {
-    sidebar.classList.add("collapsed");
-  }
   document
     .getElementById("sidebar-collapse-toggle")
     .addEventListener("click", toggleSidebarCollapse);
+  window.matchMedia("(max-width: 760px)").addEventListener("change", () => {
+    const sidebar = document.querySelector(".sidebar");
+    sidebar.classList.remove("is-transitioning");
+    restoreSidebarCollapse();
+    requestAnimationFrame(repositionTabIndicators);
+  });
 }
 
 // ---------- Командная палитра ----------
@@ -5776,6 +5811,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     initSetupScreen();
     return;
   }
+  restoreSidebarCollapse();
   document.getElementById("app-shell").style.display = "";
   initDashboard();
   document
