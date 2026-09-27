@@ -3744,10 +3744,7 @@ function openResumeAuditModal(result) {
 }
 
 function closeResumeAuditModal() {
-  const overlay = document.getElementById("resume-audit-overlay");
-  if (overlay.style.display === "none") return;
-  overlay.style.display = "none";
-  releaseFocusTrap(overlay);
+  hideOverlay(document.getElementById("resume-audit-overlay"));
 }
 
 function isResumeAuditModalOpen() {
@@ -4239,9 +4236,7 @@ function openCommandPalette() {
 }
 
 function closeCommandPalette() {
-  const overlay = document.getElementById("command-overlay");
-  overlay.style.display = "none";
-  releaseFocusTrap(overlay);
+  hideOverlay(document.getElementById("command-overlay"));
 }
 
 function isCommandPaletteOpen() {
@@ -4260,8 +4255,7 @@ function showConfirm(message) {
     const okBtn = document.getElementById("confirm-ok");
     const cancelBtn = document.getElementById("confirm-cancel");
     const cleanup = (result) => {
-      overlay.style.display = "none";
-      releaseFocusTrap(overlay);
+      hideOverlay(overlay);
       okBtn.removeEventListener("click", onOk);
       cancelBtn.removeEventListener("click", onCancel);
       overlay.removeEventListener("click", onOverlay);
@@ -4747,9 +4741,25 @@ function showOverlay(id) {
   trapFocus(overlay);
 }
 
+// Общий выход для всех .command-overlay (диалоги/командная палитра) —
+// раньше каждое место само дублировало "display:none +
+// releaseFocusTrap", без анимации закрытия. Фокус освобождаем сразу
+// (не ждём decorативный фейд), сам overlay прячем по animationend —
+// с safety-таймаутом на случай, если событие почему-то не придёт.
 function hideOverlay(overlay) {
-  overlay.style.display = "none";
+  if (!overlay || overlay.style.display === "none") return;
   releaseFocusTrap(overlay);
+  if (REDUCE_MOTION) {
+    overlay.style.display = "none";
+    return;
+  }
+  overlay.classList.add("is-closing");
+  const finish = () => {
+    overlay.style.display = "none";
+    overlay.classList.remove("is-closing");
+  };
+  overlay.addEventListener("animationend", finish, { once: true });
+  setTimeout(finish, 220);
 }
 
 // .ics собирается на сервере по введённому времени — ссылка на скачивание
@@ -4904,10 +4914,7 @@ function openCoverLetterModal(entry) {
 }
 
 function closeCoverLetterModal() {
-  const overlay = document.getElementById("cover-letter-overlay");
-  if (overlay.style.display === "none") return;
-  overlay.style.display = "none";
-  releaseFocusTrap(overlay);
+  hideOverlay(document.getElementById("cover-letter-overlay"));
 }
 
 function isCoverLetterModalOpen() {
@@ -4921,10 +4928,7 @@ function openShortcutsOverlay() {
 }
 
 function closeShortcutsOverlay() {
-  const overlay = document.getElementById("shortcuts-overlay");
-  if (overlay.style.display === "none") return;
-  overlay.style.display = "none";
-  releaseFocusTrap(overlay);
+  hideOverlay(document.getElementById("shortcuts-overlay"));
 }
 
 function initKeyboardShortcuts() {
@@ -5117,6 +5121,21 @@ function initOnboardingTour() {
 // Воронка — один ряд величин по этапам: горизонтальные полосы одного
 // цвета (--accent), число подписано у каждой полосы, ширина — доля от
 // числа реальных откликов; подсказка при наведении — title.
+// Полосы рисовались сразу на конечной ширине — на фоне анимированных
+// колец на карточках площадок это смотрелось недоделанным. Ширина уже
+// стоит в style инлайново (шаблон ниже) — сбрасываем в 0, ждём кадр,
+// возвращаем обратно; сам переход — CSS transition на .funnel-bar.
+function growFunnelBars(container) {
+  if (REDUCE_MOTION || !container) return;
+  const bars = [...container.querySelectorAll(".funnel-bar")];
+  const targets = bars.map((b) => b.style.width);
+  bars.forEach((b) => (b.style.width = "0%"));
+  void container.offsetWidth;
+  requestAnimationFrame(() => {
+    bars.forEach((b, i) => (b.style.width = targets[i]));
+  });
+}
+
 function renderFunnel(funnel) {
   const el = document.getElementById("funnel");
   if (!funnel.applied) {
@@ -5145,6 +5164,7 @@ function renderFunnel(funnel) {
       </div>`;
     })
     .join("");
+  growFunnelBars(el);
 }
 
 // Спрос на навыки — тот же вид, что воронка (одна величина, один цвет),
@@ -5163,6 +5183,7 @@ function renderMarket(market) {
         )
         .join("")
     : emptyStateHtml("Появится после новых откликов — навыки извлекаются из текста вакансий с этого обновления.");
+  growFunnelBars(skillsEl);
 
   const fmt = (n) => n.toLocaleString("ru-RU");
   const salaryEl = document.getElementById("salary-stats");

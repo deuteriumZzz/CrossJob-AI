@@ -2142,6 +2142,39 @@ nav.tabs button.active,
   z-index: 2000;
 }
 
+/* Раньше display:none → display:flex менялся мгновенно — заметный
+   рывок на фоне остального (тосты, смена вкладок, тумблеры), где
+   переход есть везде. display не анимируется transition'ом, поэтому
+   тут именно animation — она сама проигрывается при каждом появлении
+   элемента в потоке. Закрытие — через .is-closing, которую
+   closeOverlay() в app.js ставит и снимает по animationend. */
+@media (prefers-reduced-motion: no-preference) {
+  .command-overlay {
+    animation: overlay-fade-in 0.18s ease;
+  }
+  .command-overlay > .command-palette {
+    animation: dialog-scale-in 0.22s var(--ease-out);
+  }
+  .command-overlay.is-closing {
+    animation: overlay-fade-out 0.15s ease forwards;
+  }
+  .command-overlay.is-closing > .command-palette {
+    animation: dialog-scale-out 0.15s ease forwards;
+  }
+}
+@keyframes overlay-fade-in {
+  from { opacity: 0; }
+}
+@keyframes overlay-fade-out {
+  to { opacity: 0; }
+}
+@keyframes dialog-scale-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.97); }
+}
+@keyframes dialog-scale-out {
+  to { opacity: 0; transform: translateY(-4px) scale(0.98); }
+}
+
 .command-palette {
   width: min(560px, calc(100vw - 40px));
   background: var(--bg-elevated);
@@ -2763,6 +2796,11 @@ kbd {
   height: 100%;
   border-radius: 4px;
   background: var(--accent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .funnel-bar {
+    transition: width 0.6s var(--ease-out);
+  }
 }
 .funnel-value {
   min-width: 72px;
