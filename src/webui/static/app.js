@@ -361,7 +361,15 @@ async function refreshTelegramConnectStatus() {
 // его подразделы (id view-*) с подписями; первый — открывается по клику.
 const NAV_GROUPS = {
   overview: [["overview", "Главная"]],
-  history: [["history", "Вакансии"]],
+  // "Вакансии" и "Логи" — один и тот же архив действий бота на двух
+  // уровнях детализации (человеческая сводка / сырые строки
+  // исполнения), а не два разных раздела — были в разных местах меню
+  // (топ-навигация против "Настройки"), хотя отвечают на один и тот же
+  // вопрос "что бот сейчас делает и сделал".
+  history: [
+    ["history", "Вакансии"],
+    ["logs", "Технические детали"],
+  ],
   replies: [
     ["replies", "Входящие"],
     ["telegram", "Telegram-парсер"],
@@ -374,7 +382,6 @@ const NAV_GROUPS = {
   settings: [
     ["settings", "Настройки"],
     ["resume", "Мои резюме"],
-    ["logs", "Логи"],
   ],
 };
 const VIEW_GROUP = Object.fromEntries(
@@ -3325,7 +3332,12 @@ const LOG_LEVEL_ICON = { WARNING: "⚠️ ", ERROR: "❌ ", CRITICAL: "❌ " };
 
 function humanizeLogLine(line) {
   const m = line.match(LOG_LINE_RE);
-  if (!m) return line; // формат не распознан — показываем как есть, а не теряем строку
+  // Строки без метки времени — это продолжение (питон-трейсбек: "File
+  // ..., line N, in ...", объекты "<... at 0x...>") многострочного
+  // ERROR-сообщения от backtrace=True/diagnose=True в src/logging.py.
+  // В человеческом виде это чистый шум программиста — прячем, сама
+  // ERROR-строка с сутью ошибки уже прошла отдельной строкой выше.
+  if (!m) return null;
   const [, , time, level, message] = m;
   if (level === "DEBUG") return null;
   return `${time}  ${LOG_LEVEL_ICON[level] || ""}${message}`;
