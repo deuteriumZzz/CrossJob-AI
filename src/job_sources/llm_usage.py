@@ -138,6 +138,18 @@ def summarize_usage(output_folder: Path) -> dict:
     }
 
 
+def daily_token_limit_reached(output_folder: Path, limit: int) -> bool:
+    """True — сегодняшний расход токенов ИИ достиг дневного лимита.
+    В отличие от check_and_mark_alert ($-порог, уведомление один раз в
+    день) — это реальный дневной бюджет ИИ: считается для любого
+    провайдера (токены есть всегда, $ — только для OpenAI, см.
+    estimate_cost_usd), и вызывающий код (main._total_daily_limit_reached)
+    останавливает дальнейшие отклики за сегодня, а не только уведомляет."""
+    if limit <= 0:
+        return False
+    return summarize_usage(output_folder)["today_tokens"] >= limit
+
+
 def _alert_state_path(output_folder: Path) -> Path:
     return output_folder / ".llm_usage_alert.json"
 

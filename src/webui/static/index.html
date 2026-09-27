@@ -848,8 +848,12 @@
         <p id="usage-summary" class="muted small">Загрузка…</p>
         <p id="usage-note" class="muted small"></p>
         <label class="limit-field" style="max-width:320px">
-          <span>Уведомить, если расходы на ИИ за день превысят ($)</span>
+          <span title="Работает только для OpenAI — для бесплатных провайдеров (Groq, Gemini, OpenRouter и т.п.) точная цена в $ неизвестна никому, кроме них самих">Уведомить, если расходы на ИИ за день превысят ($, только OpenAI)</span>
           <input id="llm-alert-usd" type="number" min="0.01" step="0.01" placeholder="не задано" />
+        </label>
+        <label class="limit-field" style="max-width:320px">
+          <span title="Считается для любого провайдера — в отличие от $-уведомления выше, реально останавливает бота на сегодня (отклики и письма), а не только предупреждает">Остановиться на день при токенах ИИ больше</span>
+          <input id="llm-token-limit" type="number" min="1" step="1000" placeholder="не задано" />
         </label>
 
         <div class="filters">
@@ -1334,6 +1338,6 @@
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=53"></script>
+<script src="/app.js?v=54"></script>
 </body>
 </html>

@@ -3104,6 +3104,7 @@ class LimitsSettingsUpdate(BaseModel):
     total_daily_application_limit: Optional[int] = None
     job_max_applications: Optional[int] = None
     llm_daily_cost_alert_usd: Optional[float] = None
+    llm_daily_token_limit: Optional[int] = None
     job_min_score: Optional[float] = None
     job_suitability_score: Optional[float] = None
     application_retention_days: Optional[int] = None
@@ -3132,6 +3133,11 @@ def _limits_snapshot(ctx: AppContext) -> dict:
             "job_max_applications", JOB_MAX_APPLICATIONS
         ),
         "llm_daily_cost_alert_usd": limits.get("llm_daily_cost_alert_usd"),
+        # $-порог выше почти бесполезен на бесплатных провайдерах
+        # (estimate_cost_usd умеет считать $ только для OpenAI) — этот
+        # лимит на токенах реально останавливает бота, а не только
+        # уведомляет, и работает для любого провайдера.
+        "llm_daily_token_limit": limits.get("llm_daily_token_limit"),
         # Порог фита вакансии (score_job_fit, 0-10): ниже job_min_score
         # — skipped_low_fit, письмо не генерируется; между
         # job_min_score и job_suitability_score — weak, но отклик всё
@@ -3193,6 +3199,16 @@ def post_limits_settings(
             "limits",
             "llm_daily_cost_alert_usd",
             body.llm_daily_cost_alert_usd,
+        )
+
+    if body.llm_daily_token_limit is not None:
+        if body.llm_daily_token_limit <= 0:
+            raise HTTPException(400, "llm_daily_token_limit must be > 0")
+        set_source_field(
+            ctx.config_file,
+            "limits",
+            "llm_daily_token_limit",
+            body.llm_daily_token_limit,
         )
 
     if body.cover_letter_style is not None:

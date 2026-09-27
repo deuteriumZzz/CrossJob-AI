@@ -172,6 +172,7 @@ from src.job_sources.llm_provider import (
 from src.job_sources.llm_usage import (
     check_and_mark_alert,
     check_and_mark_llm_exhausted_alert,
+    daily_token_limit_reached,
 )
 from src.job_sources.llm_usage import (
     set_output_folder as set_llm_usage_output_folder,
@@ -1191,15 +1192,22 @@ def _total_daily_limit(parameters: dict) -> Optional[int]:
 def _total_daily_limit_reached(
     parameters: dict, applied_log: AppliedLog
 ) -> bool:
-    """True — общий (across all площадок) дневной бюджет откликов
-    исчерпан, вызывающий цикл должен остановиться немедленно, даже
-    если у своей площадки лимит ещё не исчерпан. Вызывается в каждом
-    search_and_apply_*/search_* так же, как уже существующая
-    проверка per-площадочного daily_limit — тем же местом в цикле."""
+    """True — общий (across all площадок) дневной бюджет откликов ИЛИ
+    дневной лимит токенов ИИ исчерпан, вызывающий цикл должен
+    остановиться немедленно, даже если у своей площадки лимит ещё не
+    исчерпан. Вызывается в каждом search_and_apply_*/search_* так же,
+    как уже существующая проверка per-площадочного daily_limit — тем
+    же местом в цикле.
+
+    Токены, а не $ — потому что $-оценка (estimate_cost_usd) считается
+    только для OpenAI; для бесплатных провайдеров (Groq/Gemini/
+    OpenRouter/...) $-порог никогда не может сработать, а токены
+    считаются для всех одинаково. В отличие от check_and_mark_alert
+    ($-порог — уведомление один раз в день) — при исчерпании токенов
+    бот действительно перестаёт откликаться и писать до завтра, не
+    только уведомляет."""
     total_limit = _total_daily_limit(parameters)
-    if total_limit is None:
-        return False
-    if applied_log.applied_today_count_all() >= total_limit:
+    if total_limit is not None and applied_log.applied_today_count_all() >= total_limit:
         logger.info(
             f"Reached total daily application limit ({total_limit}) "
             "across all platforms combined."
@@ -1208,6 +1216,23 @@ def _total_daily_limit_reached(
             parameters,
             f"Общий дневной лимит откликов ({total_limit}) на все "
             "площадки вместе достигнут.",
+        )
+        return True
+    token_limit = (parameters.get("limits") or {}).get(
+        "llm_daily_token_limit"
+    )
+    if token_limit and daily_token_limit_reached(
+        applied_log.path.parent, int(token_limit)
+    ):
+        logger.info(
+            f"Reached daily LLM token limit ({token_limit}) — "
+            "pausing applications/messages until tomorrow."
+        )
+        notify_routine(
+            parameters,
+            f"Дневной лимит токенов ИИ ({token_limit}) достигнут — "
+            "сегодня бот больше не откликается и не пишет, "
+            "продолжит завтра.",
         )
         return True
     return False

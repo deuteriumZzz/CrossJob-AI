@@ -2895,6 +2895,10 @@ const render = {
       document.getElementById("llm-alert-usd").value =
         limits.llm_daily_cost_alert_usd;
     }
+    if (limits.llm_daily_token_limit != null) {
+      document.getElementById("llm-token-limit").value =
+        limits.llm_daily_token_limit;
+    }
 
     api("/api/usage").then((usage) => {
       const fmtTokens = (n) => n.toLocaleString("ru-RU");
@@ -5936,6 +5940,8 @@ function initDashboard() {
     );
     const llmAlertRaw = document.getElementById("llm-alert-usd").value;
     const llmAlert = llmAlertRaw ? parseFloat(llmAlertRaw) : null;
+    const llmTokenLimitRaw = document.getElementById("llm-token-limit").value;
+    const llmTokenLimit = llmTokenLimitRaw ? parseInt(llmTokenLimitRaw, 10) : null;
     const retentionDays = parseInt(
       document.getElementById("limit-history-retention").value,
       10
@@ -5960,6 +5966,7 @@ function initDashboard() {
           continuous_cycle_enabled: document.getElementById("limit-continuous-cycle").checked,
           continuous_cycle_gap_minutes: Math.max(1, parseInt(document.getElementById("limit-continuous-gap").value, 10) || 3),
           ...(llmAlert !== null ? { llm_daily_cost_alert_usd: llmAlert } : {}),
+          ...(llmTokenLimit !== null ? { llm_daily_token_limit: llmTokenLimit } : {}),
         }),
       });
       status.textContent = "Сохранено.";
