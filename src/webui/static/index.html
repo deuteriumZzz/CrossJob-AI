@@ -573,6 +573,7 @@
             <button type="button" data-settings-tab="settings-llm">Провайдер ИИ</button>
             <button type="button" data-settings-tab="settings-notifications" data-onboarding-hide>📣 Уведомления в Telegram</button>
             <button type="button" data-settings-tab="settings-autostart" data-onboarding-hide>Автозапуск</button>
+            <button type="button" data-settings-tab="settings-backups" data-onboarding-hide>Резервные копии</button>
           </div>
         </details>
       </nav>
@@ -941,6 +942,16 @@
           </label>
         </div>
         <p class="muted small" id="daemon-service-status"></p>
+      </div>
+
+      <div class="panel settings-pane" id="settings-backups">
+        <h3>Резервные копии</h3>
+        <p class="muted small">
+          Раз в день сама сохраняется копия базы компаний, рассылок, откликов, переписки и черновиков —
+          на случай, если что-то испортилось или удалилось по ошибке. Хранятся 7 дней.
+          Восстановление делает свой снимок текущего состояния перед тем, как что-то менять.
+        </p>
+        <div id="backups-list"></div>
       </div>
 
       <div class="settings-pane" id="settings-table">
@@ -1323,6 +1334,6 @@
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=52"></script>
+<script src="/app.js?v=53"></script>
 </body>
 </html>

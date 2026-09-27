@@ -4254,6 +4254,67 @@ def get_logs(lines: int = 200, source: Optional[str] = None) -> dict:
     return {"lines": tail, "note": None}
 
 
+@app.get("/api/backups")
+def get_backups(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Резервные копии из daily_backup() (src/utils/backup.py) — раньше
+    были видны только по одной строке в подсказке "Где хранятся мои
+    данные?", восстановить можно было только руками в файлах."""
+    root = ctx.output_folder.parent / "backups"
+    if not root.exists():
+        return {"backups": []}
+    backups = []
+    for day_dir in sorted(
+        (p for p in root.iterdir() if p.is_dir() and p.name != "_before_restore"),
+        reverse=True,
+    ):
+        files = [f for f in day_dir.iterdir() if f.is_file()]
+        if not files:
+            continue
+        backups.append(
+            {
+                "date": day_dir.name,
+                "files": len(files),
+                "size_bytes": sum(f.stat().st_size for f in files),
+            }
+        )
+    return {"backups": backups}
+
+
+class BackupRestoreRequest(BaseModel):
+    date: str
+
+
+@app.post("/api/backups/restore")
+def post_backups_restore(
+    body: BackupRestoreRequest, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    import shutil
+
+    from src.utils.backup import BACKUP_FILES
+
+    root = ctx.output_folder.parent / "backups"
+    source = root / body.date
+    if not source.is_dir():
+        raise HTTPException(404, f"Резервной копии за {body.date} нет")
+    # Снимок текущего состояния перед восстановлением — единственный
+    # слот "до отката", не через daily_backup() (та привязана к
+    # календарной дате и сегодня наверняка уже отработала), чтобы
+    # неверно выбранную дату можно было тут же отменить.
+    safety = root / "_before_restore"
+    shutil.rmtree(safety, ignore_errors=True)
+    safety.mkdir(parents=True)
+    restored = []
+    for name in BACKUP_FILES:
+        current = ctx.output_folder / name
+        if current.exists():
+            shutil.copy2(current, safety / name)
+        backed_up = source / name
+        if backed_up.exists():
+            shutil.copy2(backed_up, current)
+            restored.append(name)
+    return {"restored": restored}
+
+
 @app.post("/api/daemon/start")
 def start_daemon(ctx: AppContext = Depends(get_ctx)) -> dict:
     if ctx.scheduler_thread is not None and ctx.scheduler_thread.is_alive():

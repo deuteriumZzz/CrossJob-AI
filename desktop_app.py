@@ -8,14 +8,53 @@ from __future__ import annotations
 
 import socket
 import subprocess
+import tempfile
 import threading
 import time
+from pathlib import Path
 
 import httpx
 import uvicorn
 import webview
+from filelock import FileLock, Timeout
 
 from src.utils import autostart
+
+# Не в data_folder — на самом первом запуске его ещё нет, а проверять
+# наличие второго экземпляра нужно раньше, чем дашборд вообще спросит
+# про data_folder. tempfile.gettempdir() — общий для пользователя путь
+# на всех трёх ОС.
+_INSTANCE_LOCK_PATH = Path(tempfile.gettempdir()) / "crossjob-ai.instance.lock"
+_INSTANCE_PORT_PATH = Path(tempfile.gettempdir()) / "crossjob-ai.instance.port"
+# Держим захваченным до конца процесса (не в "with") — FileLock снимает
+# ОС-блокировку сама, если процесс упадёт, так что специально
+# освобождать при обычном выходе не нужно и опасно освобождать раньше.
+_instance_lock: FileLock | None = None
+
+
+def _try_acquire_single_instance() -> int | None:
+    """None — мы первый и единственный экземпляр, можно поднимать
+    сервер и планировщик. Иначе — порт уже работающего экземпляра:
+    открываем окно на него и не трогаем больше ничего (см. риск
+    двойного отклика от двух параллельных демонов на одной папке
+    данных — то же самое, о чём уже предупреждает "Автозапуск" в
+    Настройках, только не только для этого одного сценария).
+    ponytail: между "лок снят" и "порт дописан" у держателя есть доля
+    секунды — воображаемое окно, где второй экземпляр прочтёт ещё
+    старый порт из прошлого запуска. Не страшно: get на несуществующий
+    порт просто не пройдёт _wait_until_ready тем же способом, что и
+    любой другой сбой сервера."""
+    global _instance_lock
+    lock = FileLock(str(_INSTANCE_LOCK_PATH), timeout=0)
+    try:
+        lock.acquire()
+    except Timeout:
+        try:
+            return int(_INSTANCE_PORT_PATH.read_text().strip())
+        except (OSError, ValueError):
+            return None
+    _instance_lock = lock
+    return None
 
 
 def _kill_stale_browser_processes() -> None:
@@ -65,6 +104,21 @@ def _wait_until_ready(
 
 
 def main() -> None:
+    existing_port = _try_acquire_single_instance()
+    if existing_port is not None:
+        # Уже есть живой экземпляр CrossJob-AI на этом порту — просто
+        # открываем на него ещё одно окно, не поднимая второй сервер и
+        # планировщик поверх той же папки данных.
+        webview.create_window(
+            "CrossJob-AI",
+            f"http://127.0.0.1:{existing_port}/",
+            width=1200,
+            height=800,
+            min_size=(900, 600),
+        )
+        webview.start()
+        return
+
     _kill_stale_browser_processes()
 
     # Нет проверки data_folder здесь — если его ещё нет, дашборд сам
@@ -74,6 +128,7 @@ def main() -> None:
     # без видимого терминала пользователь просто не понимал, почему
     # приложение мгновенно закрывается.
     port = _free_port()
+    _INSTANCE_PORT_PATH.write_text(str(port))
     server_config = uvicorn.Config(
         "src.webui.api:app", host="127.0.0.1", port=port, log_level="warning"
     )

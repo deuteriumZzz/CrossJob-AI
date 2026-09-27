@@ -3752,6 +3752,49 @@ function isResumeAuditModalOpen() {
 }
 
 // Настройки → «Сайты компаний»: переключатели и список компаний.
+// Раньше резервные копии (daily_backup, src/utils/backup.py) были
+// видны только одной строкой в подсказке "Где хранятся мои данные?" —
+// восстановить можно было только вручную в файлах на диске.
+async function loadBackups() {
+  const el = document.getElementById("backups-list");
+  el.innerHTML = `<div class="skeleton" style="height:60px"></div>`;
+  const { backups } = await api("/api/backups");
+  if (!backups.length) {
+    el.innerHTML = emptyStateHtml("Пока нет ни одной копии — появится после первого дня работы бота.");
+    return;
+  }
+  el.innerHTML = backups
+    .map(
+      (b) => `
+    <div class="account-row">
+      <span class="account-text"><b>${escapeHtml(b.date)}</b><span class="muted small">${b.files} ${plural(b.files, "файл", "файла", "файлов")} · ${Math.max(1, Math.round(b.size_bytes / 1024))} КБ</span></span>
+      <button type="button" class="btn btn-secondary btn-small" data-restore-backup="${escapeHtml(b.date)}">Восстановить</button>
+    </div>`
+    )
+    .join("");
+  el.querySelectorAll("[data-restore-backup]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const date = btn.dataset.restoreBackup;
+      const ok = await showConfirm(
+        `Восстановить данные на состояние ${date}? База компаний, рассылки, отклики, переписка и черновики будут заменены копией за эту дату — текущее состояние тоже сохранится отдельным снимком, но проверьте дату перед подтверждением.`
+      );
+      if (!ok) return;
+      btn.disabled = true;
+      try {
+        await api("/api/backups/restore", {
+          method: "POST",
+          body: JSON.stringify({ date }),
+        });
+        showToast("Восстановлено — перезагружаю страницу", "success");
+        setTimeout(() => location.reload(), 1200);
+      } catch (e) {
+        showToast(`Ошибка: ${e.message}`, "error");
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
 async function loadDirectSettings() {
   const d = await api("/api/direct/summary");
   document.getElementById("direct-wwr").checked = d.wwr;
@@ -3815,6 +3858,7 @@ async function addDirectCompany() {
 
 function switchSettingsTab(paneId) {
   if (paneId === "settings-direct") loadDirectSettings().catch(() => {});
+  if (paneId === "settings-backups") loadBackups().catch(() => {});
   document
     .querySelectorAll("#settings-jump button")
     .forEach((b) => b.classList.toggle("active", b.dataset.settingsTab === paneId));
