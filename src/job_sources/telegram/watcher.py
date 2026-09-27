@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Callable, Coroutine, Optional
 
 from src.job_sources.contact_book import ContactBook, contacts_from_text
-from src.job_sources.hr_replies import _looks_russian
+from src.job_sources.hr_replies import _looks_russian, generate_first_message
 from src.job_sources.resume_routing import resolve_resume
 from src.job_sources.telegram.client import normalize_channel
 from src.job_sources.telegram_conversations import TelegramConversations
@@ -196,6 +196,9 @@ class TelegramWatcher(threading.Thread):
             ),
             self.output_folder,
             active_hours,
+            send_file_fn=lambda contact, path: self.call(
+                lambda c: c.send_file(contact, path)
+            ),
         )
 
     def call(
@@ -390,14 +393,10 @@ class TelegramWatcher(threading.Thread):
                 not conversations.already_contacted(contact_value)
                 and conversations.sent_today_count() < daily_limit
             ):
-                from main import TELEGRAM_INTRO_TEMPLATE_DEFAULT
-
-                template = (
-                    tg_prefs.get("intro_message_template")
-                    or TELEGRAM_INTRO_TEMPLATE_DEFAULT
-                )
                 title = text.splitlines()[0][:120]
-                intro_text = template.format(role=title, link=link)
+                intro_text, resume_path = await asyncio.get_event_loop().run_in_executor(
+                    None, self._auto_message_text, title, text, link
+                )
                 queue_telegram_send(
                     self.output_folder,
                     contact_value,
@@ -411,6 +410,7 @@ class TelegramWatcher(threading.Thread):
                         "message_delay_max_seconds",
                         MAX_TELEGRAM_MESSAGE_DELAY_SECONDS,
                     ),
+                    resume_path,
                 )
                 logger.info(
                     f"Telegram auto_message: в очередь для @{contact_value}"
@@ -499,6 +499,46 @@ class TelegramWatcher(threading.Thread):
             logger.warning(
                 f"Telegram-шлюз: бот не отправил вакансию {post['link']}: {e}"
             )
+
+    def _auto_message_text(
+        self, title: str, post_text: str, link: str
+    ) -> tuple[str, str]:
+        """{текст, путь к резюме (пусто — не прикладывать)}. Текст —
+        персонализированный под вакансию через ту же LLM-генерацию, что
+        и ручное «написать первому», вместо одного и того же статичного
+        текста всем подряд. Резюме — по маршруту telegram_ru/en,
+        прикладывается отдельным файлом (см. flush_pending_telegram_sends),
+        ссылку в тексте не даём. При любой ошибке (нет ключа LLM, сеть)
+        — статичный шаблон без резюме, чтобы живой шлюз не падал."""
+        from main import TELEGRAM_INTRO_TEMPLATE_DEFAULT, candidate_name
+
+        tg_prefs = self.parameters.get("telegram") or {}
+        template = (
+            tg_prefs.get("intro_message_template")
+            or TELEGRAM_INTRO_TEMPLATE_DEFAULT
+        )
+        fallback = template.format(role=title, link=link)
+        if not self.llm_api_key:
+            return fallback, ""
+        try:
+            russian = _looks_russian(post_text or title)
+            resume_pdf = resolve_resume(self.parameters, "telegram", russian)
+            if resume_pdf is None:
+                return fallback, ""
+            message = generate_first_message(
+                resume_pdf,
+                candidate_name(self.parameters, resume_pdf),
+                "",
+                title,
+                post_text,
+                "telegram",
+                self.llm_api_key,
+            )
+            return message["text"] or fallback, str(resume_pdf)
+        except Exception as e:
+            logger.warning(f"Telegram auto_message: LLM недоступна, "
+                            f"шаблон как есть: {e}")
+            return fallback, ""
 
     def _remember_contacts(
         self, channel: str, link: str, text: str, contacts: list[dict]
@@ -624,6 +664,7 @@ def queue_telegram_send(
     job_link: str,
     delay_min_seconds: float,
     delay_max_seconds: float,
+    resume_path: str = "",
 ) -> None:
     import json
     import random
@@ -645,6 +686,7 @@ def queue_telegram_send(
         "text": text,
         "job_link": job_link,
         "send_after": send_after.isoformat(),
+        "resume_path": resume_path,
     }
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
@@ -665,12 +707,16 @@ def flush_pending_telegram_sends(
     send_fn: Callable[[str, str], None],
     output_folder: Path,
     active_hours: tuple[int, int] | None,
+    send_file_fn: Optional[Callable[[str, str], None]] = None,
 ) -> None:
     """Отправляет то, чему пришло время, и мы в рабочих часах; остальное
     остаётся в очереди до следующего тика. send_fn(contact, text) уже
     должен быть синхронным и привязанным к живому подключению — сюда
     приходят из потока _poll_bot_forever, а сессия Telethon живёт на
-    asyncio-луп шлюза (see TelegramWatcher.call — мост поток → луп)."""
+    asyncio-луп шлюза (see TelegramWatcher.call — мост поток → луп).
+    send_file_fn(contact, path) — резюме отдельным файлом сразу после
+    текста, если оно было привязано при постановке в очередь (см.
+    queue_telegram_send: ссылку в тексте больше не даём, только файл)."""
     import json
     from datetime import datetime
 
@@ -706,6 +752,15 @@ def flush_pending_telegram_sends(
                 entry["contact"], entry["text"], job_link=entry["job_link"]
             )
             logger.info(f"Автоотправка Telegram: @{entry['contact']}")
+            resume_path = entry.get("resume_path")
+            if resume_path and send_file_fn is not None:
+                try:
+                    send_file_fn(entry["contact"], resume_path)
+                except Exception as e:
+                    logger.warning(
+                        f"Текст ушёл, но резюме не отправилось "
+                        f"@{entry['contact']}: {e}"
+                    )
         except Exception as e:
             logger.warning(
                 f"Не удалось отправить отложенное сообщение "

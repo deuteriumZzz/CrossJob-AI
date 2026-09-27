@@ -401,6 +401,26 @@ def test_due_hh_reminders_skips_viewed_and_already_reminded():
     assert due_hh_reminders(entries, days=0, now=now) == []
 
 
+def test_greeting_time_phrase_follows_moscow_hour():
+    from zoneinfo import ZoneInfo
+
+    from src.job_sources.hr_replies import greeting_time_phrase
+
+    tz = ZoneInfo("Europe/Moscow")
+    assert greeting_time_phrase(datetime(2026, 1, 1, 8, 0, tzinfo=tz)) == "доброе утро"
+    assert greeting_time_phrase(datetime(2026, 1, 1, 14, 0, tzinfo=tz)) == "добрый день"
+    assert greeting_time_phrase(datetime(2026, 1, 1, 20, 0, tzinfo=tz)) == "добрый вечер"
+    assert greeting_time_phrase(datetime(2026, 1, 1, 3, 0, tzinfo=tz)) == ""
+    # UTC-момент, который в Москве уже день (+3ч: 11:30 -> 14:30) —
+    # считается по Москве, а не по UTC/локальному времени сервера.
+    assert (
+        greeting_time_phrase(
+            datetime(2026, 1, 1, 11, 30, tzinfo=ZoneInfo("UTC"))
+        )
+        == "добрый день"
+    )
+
+
 def test_fit_telegram_length_cuts_at_sentence_boundary():
     from src.job_sources.hr_replies import (
         _TELEGRAM_MESSAGE_LIMIT,

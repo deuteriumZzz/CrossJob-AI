@@ -610,4 +610,45 @@ def test_pending_telegram_sends_queue_and_flush():
             lambda contact, text: sent.append((contact, text)), out, None
         )
         assert sent == [("hr_user", "текст письма")]
+
+
+def test_pending_telegram_send_attaches_resume_file_after_text():
+    """resume_path в очереди — файл резюме уходит send_file_fn сразу
+    после текста, без ссылки в самом сообщении; без send_file_fn или
+    без resume_path файл не отправляется."""
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp)
+        w.queue_telegram_send(
+            out,
+            "hr_user",
+            "текст письма",
+            "https://t.me/c/1",
+            0,
+            0,
+            resume_path="/tmp/resume.pdf",
+        )
+        sent_files = []
+        w.flush_pending_telegram_sends(
+            lambda contact, text: None,
+            out,
+            None,
+            send_file_fn=lambda contact, path: sent_files.append(
+                (contact, path)
+            ),
+        )
+        assert sent_files == [("hr_user", "/tmp/resume.pdf")]
+
+        # Без resume_path (обычное сообщение) — файл не пытаемся слать.
+        w.queue_telegram_send(
+            out, "other_user", "другой текст", "https://t.me/c/2", 0, 0
+        )
+        w.flush_pending_telegram_sends(
+            lambda contact, text: None,
+            out,
+            None,
+            send_file_fn=lambda contact, path: sent_files.append(
+                (contact, path)
+            ),
+        )
+        assert sent_files == [("hr_user", "/tmp/resume.pdf")]
         assert w.pending_telegram_sends_count(out) == 0
