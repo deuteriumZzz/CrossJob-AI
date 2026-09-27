@@ -2577,6 +2577,7 @@ const render = {
     lastHistoryEntries = entries;
     if (!entries.length) {
       tbody.innerHTML = `<tr><td colspan="8">${emptyStateHtml("Ничего не найдено.")}</td></tr>`;
+      updateHistoryScrollHint();
       return;
     }
     const reversed = entries.slice().reverse();
@@ -2609,6 +2610,7 @@ const render = {
       </tr>`
       )
       .join("");
+    updateHistoryScrollHint();
     tbody.querySelectorAll("[data-cover-letter-btn]").forEach((btn) => {
       btn.addEventListener("click", () => {
         openCoverLetterModal(reversed[parseInt(btn.dataset.rowIndex, 10)]);
@@ -2892,6 +2894,8 @@ const render = {
         ${missing.length ? `<p class="muted small" style="margin:-6px 0 8px">${missing.join(", ")}</p>` : ""}
         <div class="row"><span>Проверяю</span><span>${s.schedule_enabled ? intervalLabel(s.interval_hours) : "выключено"}</span></div>
         <div class="row"><span>Автоотклик</span><span>${s.auto_apply ? "включён" : "выключен"}</span></div>
+        ${s.name === "headhunter" ? `<div class="row"><span>Автоответ в чате</span><span>${s.auto_reply ? "включён" : "выключен"}</span></div><div class="row"><span>Бамп резюме</span><span>${s.auto_bump_resume ? "включён" : "выключен"}</span></div>` : ""}
+        ${s.name === "djinni" ? `<div class="row"><span>Поднятие профиля</span><span>${s.auto_bump_resume ? "включено" : "выключено"}</span></div>` : ""}
         <div class="platform-card-quick">
           <label title="Бот проверяет по расписанию"><input type="checkbox" class="p-schedule-quick switch" data-source="${s.name}" ${s.schedule_enabled ? "checked" : ""} /> в расписании</label>
           <button type="button" class="btn btn-secondary btn-small p-open-drawer" data-source="${s.name}">⚙ Настроить</button>
@@ -3751,6 +3755,15 @@ function settingsTabAnchor(btn) {
 // активный + уже настроенные с ключом, остальные шумят на экране.
 // Сворачиваем неактивные/без ключа за кнопку "Показать все", если
 // пользователь сам не развернул список.
+function updateHistoryScrollHint() {
+  const wrap = document.getElementById("history-table-wrap");
+  if (!wrap) return;
+  const overflowing =
+    wrap.scrollWidth > wrap.clientWidth + 1 &&
+    wrap.scrollLeft < wrap.scrollWidth - wrap.clientWidth - 1;
+  wrap.classList.toggle("has-overflow-right", overflowing);
+}
+
 function updateProviderVisibility() {
   const grid = document.getElementById("provider-grid");
   const toggle = document.getElementById("provider-grid-toggle");
@@ -5461,6 +5474,15 @@ function initDashboard() {
       showToast(`Не удалось запустить проверку: ${e.message}`, "error");
     }
   });
+
+  // Таблица "Вакансии" обычно шире окна (8 колонок) — без подсказки
+  // пользователь не поймёт, что "Балл"/"Письмо" справа ещё есть, и
+  // просто не найдёт причину отказа. Градиент виден, только пока
+  // реально есть куда скроллить вправо.
+  document
+    .getElementById("history-table-wrap")
+    .addEventListener("scroll", updateHistoryScrollHint);
+  window.addEventListener("resize", updateHistoryScrollHint);
 
   document
     .getElementById("history-apply-filters")

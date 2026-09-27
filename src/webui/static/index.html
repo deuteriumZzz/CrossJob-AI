@@ -10,7 +10,7 @@
   href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&display=swap"
   rel="stylesheet"
 />
-<link rel="stylesheet" href="/style.css?v=32" />
+<link rel="stylesheet" href="/style.css?v=33" />
 </head>
 <body>
 <div id="setup-screen" class="setup-screen" style="display:none">
@@ -552,20 +552,19 @@
         <span class="settings-jump-label">Основное</span>
         <button type="button" class="active" data-settings-tab="settings-accounts">Подключения</button>
         <button type="button" data-settings-tab="settings-search">Что ищу</button>
-        <button type="button" data-settings-tab="settings-llm">Провайдер ИИ</button>
         <span class="settings-jump-label">Площадки</span>
         <button type="button" data-settings-tab="settings-table">Площадки</button>
-        <button type="button" data-settings-tab="settings-limits">Лимиты откликов</button>
+        <button type="button" data-settings-tab="settings-limits">Как отвечать и лимиты</button>
         <span class="settings-jump-label">Каналы отправки</span>
         <button type="button" data-settings-tab="settings-tg-quick">✈️ Telegram-парсер</button>
         <button type="button" data-settings-tab="settings-direct">🏢 Сайты компаний</button>
         <button type="button" data-settings-tab="settings-outreach">Почта и письма</button>
         <details class="settings-more">
-          <summary>Ещё ▾</summary>
+          <summary>Продвинутое ▾</summary>
           <div class="settings-more-menu">
+            <button type="button" data-settings-tab="settings-llm">Провайдер ИИ</button>
             <button type="button" data-settings-tab="settings-notifications">📣 Уведомления в Telegram</button>
             <button type="button" data-settings-tab="settings-autostart">Автозапуск</button>
-            <button type="button" data-settings-tab="settings-usage">Расходы на ИИ</button>
           </div>
         </details>
       </nav>
@@ -752,7 +751,38 @@
       </div>
 
       <div class="panel settings-pane" id="settings-limits">
-        <h3>Лимиты откликов</h3>
+        <h3>Как отвечать и лимиты</h3>
+
+        <h4>Как оцениваем и отвечаем</h4>
+        <div class="limits-grid">
+          <label class="limit-field">
+            <span>Строгость подбора — не понимаете, что значат баллы ниже? Выберите вариант, числа проставятся сами</span>
+            <select id="limit-fit-preset">
+              <option value="">— выбрать —</option>
+              <option value="soft">🙂 Мягко — брать почти всё, даже слабое совпадение</option>
+              <option value="standard">⚖️ Сбалансированно — пропускать только явно не подходящее</option>
+              <option value="strict">🎯 Строго — только сильное совпадение по опыту/навыкам/зарплате</option>
+            </select>
+          </label>
+          <label class="limit-field">
+            <span title="Только отклики на площадках (HH и т.п.) — не влияет на email-рассылку и Telegram-парсер, у них свой стиль в своих настройках">Стиль сопроводительного письма на площадках</span>
+            <select id="limit-cover-letter-style">
+              <option value="memorable">Запоминающийся (высокая конверсия на приглашения)</option>
+              <option value="neutral">Нейтральный (средняя конверсия на приглашения)</option>
+              <option value="classic">Классический (чуть ниже средней конверсии)</option>
+            </select>
+          </label>
+          <label class="limit-field">
+            <span>Порог отсева — балл фита ниже (0-10), при котором вакансия пропускается без письма</span>
+            <input id="limit-min-score" type="number" min="0" max="10" step="0.5" />
+          </label>
+          <label class="limit-field">
+            <span>Порог уверенного фита (0-10) — между этим и порогом отсева отклик уходит, но помечается как слабый</span>
+            <input id="limit-suitability-score" type="number" min="0" max="10" step="0.5" />
+          </label>
+        </div>
+
+        <h4>Лимиты в день</h4>
         <div class="risk-banner">
           ⚠️ Официальных цифр лимитов не публикует ни одна площадка — заданные здесь значения только уменьшают риск, но не гарантируют, что бота не заметят. Чем выше лимиты и чем ближе они к количеству найденных вакансий, тем больше активность похожа на бота. Повышайте постепенно, начните с малого. LinkedIn блокирует автоматизацию агрессивнее остальных — держите его лимит ниже.
           <br /><br />
@@ -775,41 +805,18 @@
             <span title="Максимум откликов за один заход площадки, не за день — защита от всплеска, чтобы дневная квота набиралась за несколько запусков по расписанию, а не за один">Максимум за один заход по умолчанию (не дневной лимит)</span>
             <input id="limit-per-run" type="number" min="1" />
           </label>
-          <label class="limit-field">
-            <span>Порог отсева — балл фита ниже (0-10), при котором вакансия пропускается без письма</span>
-            <input id="limit-min-score" type="number" min="0" max="10" step="0.5" />
-          </label>
-          <label class="limit-field">
-            <span>Порог уверенного фита (0-10) — между этим и порогом отсева отклик уходит, но помечается как слабый</span>
-            <input id="limit-suitability-score" type="number" min="0" max="10" step="0.5" />
-          </label>
+        </div>
+        <p class="muted small">Общий лимит — сколько откликов в день максимум по всем площадкам вместе. Своё число для отдельной площадки — галочкой «своё значение» в таблице ниже.</p>
+        <div id="total-budget-info" class="limit-bar-info"></div>
+
+        <h4>Реже нужно</h4>
+        <div class="limits-grid">
           <label class="limit-field" style="justify-content:flex-end">
             <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="switch" id="limit-continuous-cycle" /> Постоянный цикл вместо расписания</span>
           </label>
           <label class="limit-field">
             <span title="Пока включён постоянный цикл, свой интервал каждой площадки (в её ⚙ Настроить) не действует — все идут по общему кругу с этой паузой между переключением">Пауза между площадками в цикле, минут</span>
             <input id="limit-continuous-gap" type="number" min="1" style="width:100px" />
-          </label>
-          <label class="limit-field">
-            <span title="Только отклики на площадках (HH и т.п.) — не влияет на email-рассылку и Telegram-парсер, у них свой стиль в своих настройках">Стиль сопроводительного письма на площадках</span>
-            <select id="limit-cover-letter-style">
-              <option value="memorable">Запоминающийся (высокая конверсия на приглашения)</option>
-              <option value="neutral">Нейтральный (средняя конверсия на приглашения)</option>
-              <option value="classic">Классический (чуть ниже средней конверсии)</option>
-            </select>
-          </label>
-          <label class="limit-field">
-            <span>Строгость подбора — не понимаете, что значат баллы выше? Выберите вариант, числа проставятся сами</span>
-            <select id="limit-fit-preset">
-              <option value="">— выбрать —</option>
-              <option value="soft">🙂 Мягко — брать почти всё, даже слабое совпадение</option>
-              <option value="standard">⚖️ Сбалансированно — пропускать только явно не подходящее</option>
-              <option value="strict">🎯 Строго — только сильное совпадение по опыту/навыкам/зарплате</option>
-            </select>
-          </label>
-          <label class="limit-field">
-            <span>Уведомить, если расходы на ИИ за день превысят ($)</span>
-            <input id="llm-alert-usd" type="number" min="0.01" step="0.01" placeholder="не задано" />
           </label>
           <label class="limit-field">
             <span title="Записи об откликах старше выбранного срока удаляются безвозвратно при следующей плановой проверке — вместе с ними теряется и защита от повторного отклика на ту же вакансию">Хранить историю откликов</span>
@@ -822,15 +829,30 @@
             </select>
           </label>
         </div>
-        <p class="muted small">Общий лимит — сколько откликов в день максимум по всем площадкам вместе. Своё число для отдельной площадки — галочкой «своё значение» в таблице ниже.</p>
-        <div id="total-budget-info" class="limit-bar-info"></div>
+
+        <h4>Расходы на ИИ</h4>
+        <div id="llm-exhausted-banner" class="risk-banner" style="display:none">
+          ⚠️ Похоже, все настроенные провайдеры ИИ сегодня недоступны (несколько ошибок подряд, ни одного успешного вызова) — вероятно, исчерпаны бесплатные лимиты. Вакансии пока оцениваются с fallback, без реальной LLM-проверки. Добавьте платный ключ или подождите до завтра (лимиты бесплатных провайдеров обычно сбрасываются раз в сутки).
+        </div>
+        <p id="usage-summary" class="muted small">Загрузка…</p>
+        <p id="usage-note" class="muted small"></p>
+        <label class="limit-field" style="max-width:320px">
+          <span>Уведомить, если расходы на ИИ за день превысят ($)</span>
+          <input id="llm-alert-usd" type="number" min="0.01" step="0.01" placeholder="не задано" />
+        </label>
+
         <div class="filters">
           <button id="limits-save" class="btn btn-primary">Сохранить</button>
+          <span id="limits-status" class="muted small"></span>
+        </div>
+
+        <h4>Частота откликов — готовые режимы</h4>
+        <p class="muted small">Это про риск капчи/блокировки (сколько и как часто), а не про качество подбора — качество настраивается в «Строгость подбора» выше.</p>
+        <div class="filters">
           <button id="limits-distribute" class="btn btn-secondary" title="Раскидывает общий дневной лимит по площадкам в расписании случайными долями (LinkedIn — меньше остальных)">🎲 Распределить по площадкам</button>
           <button id="limits-preset-cautious" class="btn btn-ghost" title="HH и остальные — 8/день, LinkedIn — 4/день, 3 за заход, интервал 4ч. Также снимает «своё значение» со всех площадок в таблице ниже. Расписание (какие площадки включены) не трогает — включённые останутся включены, выключенные не запустятся сами.">🐢 Осторожно</button>
           <button id="limits-preset-standard" class="btn btn-ghost" title="HH и остальные — 15/день, LinkedIn — 8/день, 5 за заход, интервал 3ч. Также снимает «своё значение» со всех площадок в таблице ниже. Расписание (какие площадки включены) не трогает — включённые останутся включены, выключенные не запустятся сами.">⚖️ Стандартно</button>
           <button id="limits-preset-aggressive" class="btn btn-ghost" title="HH и остальные — 25/день, LinkedIn — 12/день, 8 за заход, интервал 2ч. Выше риск капчи/блокировки. Также снимает «своё значение» со всех площадок в таблице ниже. Расписание (какие площадки включены) не трогает — включённые останутся включены, выключенные не запустятся сами.">🚀 Агрессивно</button>
-          <span id="limits-status" class="muted small"></span>
         </div>
       </div>
 
@@ -904,16 +926,6 @@
           </label>
         </div>
         <p class="muted small" id="daemon-service-status"></p>
-      </div>
-
-      <div class="panel settings-pane" id="settings-usage">
-        <h3>Расходы на ИИ</h3>
-        <div id="llm-exhausted-banner" class="risk-banner" style="display:none">
-          ⚠️ Похоже, все настроенные провайдеры ИИ сегодня недоступны (несколько ошибок подряд, ни одного успешного вызова) — вероятно, исчерпаны бесплатные лимиты. Вакансии пока оцениваются с fallback, без реальной LLM-проверки. Добавьте платный ключ или подождите до завтра (лимиты бесплатных провайдеров обычно сбрасываются раз в сутки).
-        </div>
-        <p id="usage-summary" class="muted small">Загрузка…</p>
-        <p id="usage-note" class="muted small"></p>
-        <p class="muted small">Лимит расходов задаётся на вкладке «Лимиты откликов» — рядом с остальными лимитами.</p>
       </div>
 
       <div class="settings-pane" id="settings-table">
@@ -1064,6 +1076,7 @@
       <div class="panel settings-pane" id="settings-outreach">
         <h3>Контакты и письма HR</h3>
         <p class="muted small">Как бот пишет HR напрямую. Ни одно письмо или сообщение не уходит без вашего подтверждения — черновики ждут во «Входящих» и в CrossJob-боте (кнопки «Отправить» / «Пропустить»).</p>
+        <p class="muted small">Стиль текста писем на площадках (HH и т.п.) — в <a href="#" data-goto-settings="settings-limits">«Как отвечать и лимиты»</a>. Какое резюме уходит вложением в рассылку и в Telegram — в <a href="#" data-goto-view="resume">«Мои резюме»</a>.</p>
 
         <h4>Почта Gmail</h4>
         <p class="muted small" id="outreach-email-status"></p>
@@ -1294,6 +1307,6 @@
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=37"></script>
+<script src="/app.js?v=39"></script>
 </body>
 </html>

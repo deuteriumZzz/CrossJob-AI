@@ -1825,12 +1825,22 @@ def _setup_checklist(ctx: AppContext) -> list[dict]:
             "settings-outreach",
         ),
     ]
+    # "bot"/"telegram"/"watch" — три разных Telegram-подключения подряд
+    # в одном списке; без подписи после того, как все три уже зелёные,
+    # не видно, чем они отличаются. У остальных проверок подсказка —
+    # инструкция "как исправить", которая после ok теряет смысл, а у
+    # этих трёх — короткое постоянное описание роли.
+    _ok_hint = {
+        "bot": "личный бот в Telegram — сюда приходят вакансии с кнопками и ответы HR",
+        "telegram": "вход в Telegram под вашим аккаунтом — им читаются каналы ниже",
+        "watch": "мониторит добавленные каналы по словам-фильтрам",
+    }
     return [
         {
             "id": i,
             "label": label,
             "ok": ok,
-            "hint": "" if ok else hint,
+            "hint": (_ok_hint.get(i, "") if ok else hint),
             "goto": goto,
             "required": i in _REQUIRED_SETUP,
         }

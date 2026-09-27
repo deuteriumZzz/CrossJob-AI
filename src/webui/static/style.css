@@ -1084,6 +1084,22 @@ p.muted {
   border-radius: var(--radius);
   overflow: auto;
   box-shadow: var(--shadow);
+  position: relative;
+}
+
+/* Таблица шире окна — справа есть ещё колонки (напр. "Балл", "Письмо"
+   в «Вакансиях»), а обычный overflow:auto без подсказки об этом не
+   говорит. Градиент-«таяние» видно, только пока есть куда скроллить —
+   .has-overflow-right ставит/снимает JS по scrollLeft. */
+.table-wrap.has-overflow-right::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 28px;
+  background: linear-gradient(to right, transparent, var(--panel));
+  pointer-events: none;
 }
 
 table {
