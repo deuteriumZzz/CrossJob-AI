@@ -9,7 +9,10 @@ from selenium.webdriver.common.by import By
 
 from src.job import Job
 from src.job_sources.llm_provider import get_chat_llm
-from src.libs.resume_and_cover_builder.anti_ai_rules import ANTI_AI_STRUCTURE_RU, humanize
+from src.libs.resume_and_cover_builder.anti_ai_rules import (
+    ANTI_AI_STRUCTURE_RU,
+    humanize,
+)
 
 PAGE_LOAD_WAIT_SECONDS = 3
 OTHER_OPTION_SENTINEL = "__other_option__"

@@ -17,9 +17,11 @@ import re
 import threading
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Callable, Coroutine, Optional
 
 from src.job_sources.contact_book import ContactBook, contacts_from_text
+from src.job_sources.hr_replies import _looks_russian
+from src.job_sources.resume_routing import resolve_resume
 from src.job_sources.telegram.client import normalize_channel
 from src.job_sources.telegram_conversations import TelegramConversations
 from src.job_sources.telegram_notify import (
@@ -34,8 +36,17 @@ RECONNECT_DELAY_SECONDS = 30
 _SEEN_LIMIT = 3000
 # Слова, по которым сама по себе должность ничего не говорит.
 _GENERIC_WORDS = {
-    "developer", "разработчик", "engineer", "инженер", "программист",
-    "senior", "middle", "junior", "lead", "specialist", "специалист",
+    "developer",
+    "разработчик",
+    "engineer",
+    "инженер",
+    "программист",
+    "senior",
+    "middle",
+    "junior",
+    "lead",
+    "specialist",
+    "специалист",
 }
 
 
@@ -49,12 +60,18 @@ def default_keywords(positions: list[str]) -> list[str]:
     words: list[str] = []
     for position in positions:
         for word in re.findall(r"[\w+#.]+", position.casefold()):
-            if word not in _GENERIC_WORDS and len(word) > 2 and word not in words:
+            if (
+                word not in _GENERIC_WORDS
+                and len(word) > 2
+                and word not in words
+            ):
                 words.append(word)
     return words
 
 
-def match_keywords(text: str, keywords: list[str], stop_words: list[str]) -> list[str]:
+def match_keywords(
+    text: str, keywords: list[str], stop_words: list[str]
+) -> list[str]:
     """Совпавшие ключевые слова (по вхождению, без учёта регистра) или
     пустой список, если совпадений нет или есть стоп-слово."""
     lowered = text.casefold()
@@ -113,14 +130,18 @@ class TelegramWatcher(threading.Thread):
         _ACTIVE = self
         if self.bot is not None:
             threading.Thread(
-                target=self._poll_bot_forever, name="telegram-bot-inbox", daemon=True
+                target=self._poll_bot_forever,
+                name="telegram-bot-inbox",
+                daemon=True,
             ).start()
         try:
             while not self._stopping.is_set():
                 try:
                     self.loop.run_until_complete(self._serve())
                 except Exception as e:
-                    logger.warning(f"Telegram-шлюз: обрыв ({e}), переподключаюсь…")
+                    logger.warning(
+                        f"Telegram-шлюз: обрыв ({e}), переподключаюсь…"
+                    )
                 self.connected = False
                 if self._stopping.wait(RECONNECT_DELAY_SECONDS):
                     break
@@ -143,21 +164,50 @@ class TelegramWatcher(threading.Thread):
         раз в 3 минуты. Разбор общий с демоном — main.handle_bot_updates."""
         from src.job_sources.telegram_control import poll_bot_updates
 
+        assert self.bot is not None  # поток запускается только с ботом
         token = self.bot[0]
         while not self._stopping.is_set():
             try:
-                updates = poll_bot_updates(token, self.output_folder, timeout=25)
+                updates = poll_bot_updates(
+                    token, self.output_folder, timeout=25
+                )
                 if updates:
                     from main import handle_bot_updates
 
-                    handle_bot_updates(self.parameters, self.llm_api_key, updates)
+                    handle_bot_updates(
+                        self.parameters, self.llm_api_key, updates
+                    )
+                self._flush_pending_sends()
             except Exception as e:
-                logger.warning(f"Telegram-бот: не удалось прочитать обновления: {e}")
+                logger.warning(
+                    f"Telegram-бот: не удалось прочитать обновления: {e}"
+                )
                 self._stopping.wait(5)
 
-    def call(self, factory: Callable[[Any], Awaitable[Any]], timeout: float = 60) -> Any:
+    def _flush_pending_sends(self) -> None:
+        tg_prefs = self.parameters.get("telegram") or {}
+        start, end = tg_prefs.get("active_hours_start"), tg_prefs.get(
+            "active_hours_end"
+        )
+        active_hours = (start, end) if start is not None and end is not None else None
+        flush_pending_telegram_sends(
+            lambda contact, text: self.call(
+                lambda c: c.send_message(contact, text)
+            ),
+            self.output_folder,
+            active_hours,
+        )
+
+    def call(
+        self,
+        factory: Callable[[Any], Coroutine[Any, Any, Any]],
+        timeout: float = 60,
+    ) -> Any:
         """Выполнить действие через подключение шлюза из другого потока."""
-        future = asyncio.run_coroutine_threadsafe(factory(self.client), self.loop)
+        assert self.loop is not None, "шлюз ещё не запущен"
+        future = asyncio.run_coroutine_threadsafe(
+            factory(self.client), self.loop
+        )
         return future.result(timeout)
 
     # --- работа ---------------------------------------------------------
@@ -190,25 +240,76 @@ class TelegramWatcher(threading.Thread):
 
     async def _subscribe(self) -> None:
         """Слушаем self.channels. Новые посты Telegram присылает только из
-        каналов, где аккаунт состоит, — поэтому в новые каналы вступаем."""
+        каналов, где аккаунт состоит, — поэтому в новые каналы вступаем.
+        Канал, который видим впервые, — досматриваем его историю за
+        последние N дней (см. _backfill_channel): вакансия могла быть
+        опубликована до того, как канал добавили, и всё ещё быть открыта."""
         from telethon import events
         from telethon.tl.functions.channels import JoinChannelRequest
 
+        backfilled = _load_backfilled_channels(self.output_folder)
+        newly_backfilled = []
         chats = []
         for channel in self.channels:
             try:
                 entity = await self.client.get_entity(channel)
                 if getattr(entity, "left", False):
                     await self.client(JoinChannelRequest(entity))
-                    logger.info(f"Telegram-шлюз: вступил в @{channel}, чтобы получать посты")
+                    logger.info(
+                        f"Telegram-шлюз: вступил в @{channel}, чтобы "
+                        "получать посты"
+                    )
                 chats.append(entity)
+                if channel not in backfilled:
+                    newly_backfilled.append(channel)
+                    asyncio.ensure_future(
+                        self._backfill_channel(entity, channel)
+                    )
             except Exception as e:
-                logger.warning(f"Telegram-шлюз: канал @{channel} недоступен: {e}")
+                logger.warning(
+                    f"Telegram-шлюз: канал @{channel} недоступен: {e}"
+                )
+        if newly_backfilled:
+            # Помечаем сразу, до завершения самого досмотра — иначе
+            # повторный вызов _subscribe (смена ключевых слов и т.п.)
+            # раньше, чем досмотр закончится, запустил бы его ещё раз.
+            _save_backfilled_channels(
+                self.output_folder, backfilled | set(newly_backfilled)
+            )
         self.client.remove_event_handler(self._on_channel_post)
-        self.client.add_event_handler(self._on_channel_post, events.NewMessage(chats=chats))
+        self.client.add_event_handler(
+            self._on_channel_post, events.NewMessage(chats=chats)
+        )
         logger.info(
             f"Telegram-шлюз: слушаю {len(chats)} каналов, слова: "
             f"{', '.join(self.keywords) or '—'}"
+        )
+
+    async def _backfill_channel(self, entity, channel: str) -> None:
+        days = (self.parameters.get("telegram") or {}).get(
+            "channel_backfill_days", 14
+        )
+        if not days:
+            return
+        from datetime import datetime, timedelta, timezone
+
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+        found = 0
+        try:
+            async for message in self.client.iter_messages(entity, limit=300):
+                if message.date is not None and message.date < since:
+                    break
+                await self._handle_post(channel, message)
+                found += 1
+        except Exception as e:
+            logger.warning(
+                f"Telegram-шлюз: не удалось досмотреть историю @{channel} "
+                f"за {days} дн.: {e}"
+            )
+            return
+        logger.info(
+            f"Telegram-шлюз: досмотрел @{channel} за {days} дн. "
+            f"({found} постов проверено)"
         )
 
     async def _watch_settings(self) -> None:
@@ -219,21 +320,43 @@ class TelegramWatcher(threading.Thread):
         while self.client.is_connected():
             await asyncio.sleep(60)
             try:
-                prefs = yaml.safe_load(
-                    (Path(self.parameters["dataFolder"]) / "work_preferences.yaml").read_text(encoding="utf-8")
-                ) or {}
+                prefs = (
+                    yaml.safe_load(
+                        (
+                            Path(self.parameters["dataFolder"])
+                            / "work_preferences.yaml"
+                        ).read_text(encoding="utf-8")
+                    )
+                    or {}
+                )
             except (OSError, KeyError, yaml.YAMLError):
                 continue
             telegram = prefs.get("telegram") or {}
+            self.parameters = {
+                **self.parameters,
+                "resume_routing": dict(prefs.get("resume_routing") or {}),
+            }
             self.keywords = telegram.get("watch_keywords") or self.keywords
             self.stop_words = telegram.get("watch_stop_words") or []
-            channels = [normalize_channel(c) for c in telegram.get("channels") or [] if str(c).strip()]
+            channels = [
+                normalize_channel(c)
+                for c in telegram.get("channels") or []
+                if str(c).strip()
+            ]
             if channels and channels != self.channels:
                 self.channels = channels
                 await self._subscribe()
 
     async def _on_channel_post(self, event) -> None:
-        text = (event.message.message or "").strip()
+        chat = await event.get_chat()
+        channel = getattr(chat, "username", None) or str(event.chat_id)
+        await self._handle_post(channel, event.message)
+
+    async def _handle_post(self, channel: str, message) -> None:
+        """Общая логика для живого поста (_on_channel_post) и досмотра
+        истории нового канала (_backfill_channel) — фильтр, дедуп,
+        автоотправка/доставка на модерацию одинаковы в обоих случаях."""
+        text = (message.message or "").strip()
         if not text:
             return
         matched = match_keywords(text, self.keywords, self.stop_words)
@@ -246,17 +369,65 @@ class TelegramWatcher(threading.Thread):
         if len(self._seen) > _SEEN_LIMIT:
             self._seen.popitem(last=False)
 
-        chat = await event.get_chat()
-        channel = getattr(chat, "username", None) or str(event.chat_id)
-        link = f"https://t.me/{channel}/{event.message.id}"
+        link = f"https://t.me/{channel}/{message.id}"
         contacts = contacts_from_text(text, exclude=(channel,))
         self.matched_count += 1
+
+        tg_prefs = self.parameters.get("telegram") or {}
+        telegram_contacts = [c for c in contacts if c["kind"] == "telegram"]
+        if tg_prefs.get("auto_message") and len(telegram_contacts) == 1:
+            from src.job_sources.apply_pacing import (
+                MAX_TELEGRAM_MESSAGE_DELAY_SECONDS,
+                MIN_TELEGRAM_MESSAGE_DELAY_SECONDS,
+            )
+
+            contact_value = telegram_contacts[0]["value"]
+            conversations = TelegramConversations(
+                self.output_folder / "telegram_conversations.json"
+            )
+            daily_limit = tg_prefs.get("daily_message_limit", 15)
+            if (
+                not conversations.already_contacted(contact_value)
+                and conversations.sent_today_count() < daily_limit
+            ):
+                from main import TELEGRAM_INTRO_TEMPLATE_DEFAULT
+
+                template = (
+                    tg_prefs.get("intro_message_template")
+                    or TELEGRAM_INTRO_TEMPLATE_DEFAULT
+                )
+                title = text.splitlines()[0][:120]
+                intro_text = template.format(role=title, link=link)
+                queue_telegram_send(
+                    self.output_folder,
+                    contact_value,
+                    intro_text,
+                    link,
+                    tg_prefs.get(
+                        "message_delay_min_seconds",
+                        MIN_TELEGRAM_MESSAGE_DELAY_SECONDS,
+                    ),
+                    tg_prefs.get(
+                        "message_delay_max_seconds",
+                        MAX_TELEGRAM_MESSAGE_DELAY_SECONDS,
+                    ),
+                )
+                logger.info(
+                    f"Telegram auto_message: в очередь для @{contact_value}"
+                )
+                self._remember_contacts(channel, link, text, contacts)
+                return
+
         if self.bot is not None:
             # Через бота — чтобы под вакансией были кнопки быстрого ответа.
             post = {
-                "channel": channel, "link": link, "text": text[:4000],
+                "channel": channel,
+                "link": link,
+                "text": text[:4000],
                 "title": text.splitlines()[0][:120],
-                "contacts": [{"kind": c["kind"], "value": c["value"]} for c in contacts],
+                "contacts": [
+                    {"kind": c["kind"], "value": c["value"]} for c in contacts
+                ],
             }
             await asyncio.get_event_loop().run_in_executor(
                 None, self._deliver_via_bot, post, matched
@@ -264,18 +435,26 @@ class TelegramWatcher(threading.Thread):
             self._remember_contacts(channel, link, text, contacts)
             return
         try:
-            forwarded = await self.client.forward_messages(self.forward_to, event.message)
+            forwarded = await self.client.forward_messages(
+                self.forward_to, message
+            )
             header = [f"🎯 {', '.join(matched)} · @{channel}"]
             if contacts:
                 header.append(
                     "Контакты: "
                     + ", ".join(
-                        f"@{c['value']}" if c["kind"] == "telegram" else c["value"]
+                        (
+                            f"@{c['value']}"
+                            if c["kind"] == "telegram"
+                            else c["value"]
+                        )
                         for c in contacts
                     )
                 )
             await self.client.send_message(
-                self.forward_to, "\n".join(header), reply_to=forwarded.id,
+                self.forward_to,
+                "\n".join(header),
+                reply_to=forwarded.id,
                 link_preview=False,
             )
         except Exception as e:
@@ -283,27 +462,47 @@ class TelegramWatcher(threading.Thread):
         self._remember_contacts(channel, link, text, contacts)
 
     def _deliver_via_bot(self, post: dict, matched: list[str]) -> None:
+        assert self.bot is not None  # зовётся только при подключённом боте
         token, chat_id = self.bot
         post_id = save_watch_post(self.output_folder, post)
-        contacts_line = ", ".join(
-            f"@{c['value']}" if c["kind"] == "telegram" else c["value"]
-            for c in post["contacts"]
-        ) or "не найдены — откройте пост"
-        body = post["text"] if len(post["text"]) <= 3000 else post["text"][:3000] + "…"
+        contacts_line = (
+            ", ".join(
+                f"@{c['value']}" if c["kind"] == "telegram" else c["value"]
+                for c in post["contacts"]
+            )
+            or "не найдены — откройте пост"
+        )
+        body = (
+            post["text"]
+            if len(post["text"]) <= 3000
+            else post["text"][:3000] + "…"
+        )
+        russian = _looks_russian(post.get("text") or post.get("title", ""))
+        routed_resume = resolve_resume(self.parameters, "telegram", russian)
         try:
-            bot_request(token, "sendMessage", {
-                "chat_id": chat_id,
-                "text": f"🎯 {', '.join(matched)} · @{post['channel']}\n"
-                        f"Контакты: {contacts_line}\n{post['link']}\n\n{body}",
-                "disable_web_page_preview": True,
-                "reply_markup": vacancy_keyboard(
-                    post_id, post["contacts"], telegram_resumes(Path(self.parameters["dataFolder"]))
-                ),
-            })
+            bot_request(
+                token,
+                "sendMessage",
+                {
+                    "chat_id": chat_id,
+                    "text": f"🎯 {', '.join(matched)} · @{post['channel']}\n"
+                    f"Контакты: {contacts_line}\n{post['link']}\n\n{body}",
+                    "disable_web_page_preview": True,
+                    "reply_markup": vacancy_keyboard(
+                        post_id,
+                        post["contacts"],
+                        [routed_resume] if routed_resume is not None else [],
+                    ),
+                },
+            )
         except Exception as e:
-            logger.warning(f"Telegram-шлюз: бот не отправил вакансию {post['link']}: {e}")
+            logger.warning(
+                f"Telegram-шлюз: бот не отправил вакансию {post['link']}: {e}"
+            )
 
-    def _remember_contacts(self, channel: str, link: str, text: str, contacts: list[dict]) -> None:
+    def _remember_contacts(
+        self, channel: str, link: str, text: str, contacts: list[dict]
+    ) -> None:
         if contacts:
             ContactBook(self.output_folder).add(
                 "",
@@ -333,8 +532,12 @@ class TelegramWatcher(threading.Thread):
         text = (event.message.message or "").strip()
         if not text:
             return
-        conversations.record_inbound(username, text, event.message.id, event.message.date)
-        notify_from_secrets(self.parameters, f"✈️ Ответ HR @{username}: {text}")
+        conversations.record_inbound(
+            username, text, event.message.id, event.message.date
+        )
+        notify_from_secrets(
+            self.parameters, f"✈️ Ответ HR @{username}: " f"{text}"
+        )
 
 
 def start_telegram_watcher(
@@ -348,12 +551,19 @@ def start_telegram_watcher(
     if not telegram.get("watch_enabled"):
         return None
     try:
-        secrets = yaml.safe_load(Path(parameters["secretsFile"]).read_text(encoding="utf-8")) or {}
+        secrets = (
+            yaml.safe_load(
+                Path(parameters["secretsFile"]).read_text(encoding="utf-8")
+            )
+            or {}
+        )
     except OSError:
         return None
     tg = secrets.get("telegram") or {}
     if not tg.get("api_id") or not tg.get("api_hash"):
-        logger.warning("Telegram-шлюз: нет telegram.api_id/api_hash в secrets.yaml.")
+        logger.warning(
+            "Telegram-шлюз: нет telegram.api_id/api_hash в secrets.yaml."
+        )
         return None
     keywords = telegram.get("watch_keywords") or default_keywords(
         telegram.get("positions") or parameters.get("positions") or []
@@ -373,11 +583,144 @@ def start_telegram_watcher(
     return watcher
 
 
+# --- Автоотправка (telegram.auto_message): очередь вместо time.sleep() --
+# Пауза перед холодным сообщением — минуты (см. apply_pacing.py), а клик
+# по кнопке "Отправить" и разбор команд бота идут в потоке
+# _poll_bot_forever — блокирующий sleep там надолго заморозил бы приём
+# следующих кнопок/команд. Вместо этого пишем "отправить не раньше X" и
+# разгребаем очередь на каждом тике того же цикла (уже крутится каждые
+# ~25 секунд длинным поллингом, ничего нового заводить не нужно).
+PENDING_SENDS_FILE = ".pending_telegram_sends.json"
+BACKFILLED_CHANNELS_FILE = ".telegram_backfilled_channels.json"
+
+
+def _load_backfilled_channels(output_folder: Path) -> set[str]:
+    import json
+
+    try:
+        return set(
+            json.loads(
+                (output_folder / BACKFILLED_CHANNELS_FILE).read_text(
+                    encoding="utf-8"
+                )
+            )
+        )
+    except (OSError, ValueError):
+        return set()
+
+
+def _save_backfilled_channels(output_folder: Path, channels: set[str]) -> None:
+    import json
+
+    (output_folder / BACKFILLED_CHANNELS_FILE).write_text(
+        json.dumps(sorted(channels), ensure_ascii=False), encoding="utf-8"
+    )
+
+
+def queue_telegram_send(
+    output_folder: Path,
+    contact: str,
+    text: str,
+    job_link: str,
+    delay_min_seconds: float,
+    delay_max_seconds: float,
+) -> None:
+    import json
+    import random
+    from datetime import datetime, timedelta
+
+    path = output_folder / PENDING_SENDS_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    send_after = datetime.now().astimezone() + timedelta(
+        seconds=random.uniform(delay_min_seconds, delay_max_seconds)
+    )
+    entry_id = hashlib.sha1(
+        f"{contact}:{job_link}".encode("utf-8")
+    ).hexdigest()[:10]
+    data[entry_id] = {
+        "contact": contact,
+        "text": text,
+        "job_link": job_link,
+        "send_after": send_after.isoformat(),
+    }
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
+def pending_telegram_sends_count(output_folder: Path) -> int:
+    import json
+
+    try:
+        data = json.loads(
+            (output_folder / PENDING_SENDS_FILE).read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return 0
+    return len(data)
+
+
+def flush_pending_telegram_sends(
+    send_fn: Callable[[str, str], None],
+    output_folder: Path,
+    active_hours: tuple[int, int] | None,
+) -> None:
+    """Отправляет то, чему пришло время, и мы в рабочих часах; остальное
+    остаётся в очереди до следующего тика. send_fn(contact, text) уже
+    должен быть синхронным и привязанным к живому подключению — сюда
+    приходят из потока _poll_bot_forever, а сессия Telethon живёт на
+    asyncio-луп шлюза (see TelegramWatcher.call — мост поток → луп)."""
+    import json
+    from datetime import datetime
+
+    from src.job_sources.telegram_conversations import TelegramConversations
+
+    path = output_folder / PENDING_SENDS_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if not data:
+        return
+    now = datetime.now().astimezone()
+    if active_hours is not None and not (
+        active_hours[0] <= now.hour < active_hours[1]
+    ):
+        return  # вне рабочих часов — вся очередь ждёт следующего тика
+    conversations = TelegramConversations(
+        output_folder / "telegram_conversations.json"
+    )
+    remaining = {}
+    for entry_id, entry in data.items():
+        try:
+            due = datetime.fromisoformat(entry["send_after"])
+        except (KeyError, ValueError):
+            continue
+        if now < due:
+            remaining[entry_id] = entry
+            continue
+        try:
+            send_fn(entry["contact"], entry["text"])
+            conversations.record_outbound(
+                entry["contact"], entry["text"], job_link=entry["job_link"]
+            )
+            logger.info(f"Автоотправка Telegram: @{entry['contact']}")
+        except Exception as e:
+            logger.warning(
+                f"Не удалось отправить отложенное сообщение "
+                f"@{entry['contact']}: {e}"
+            )
+    path.write_text(json.dumps(remaining, ensure_ascii=False), encoding="utf-8")
+
+
 # --- Кнопки под вакансией: посты, резюме и письма для Telegram ----------
 
 WATCH_POSTS_FILE = ".watch_posts.json"
 _WATCH_POSTS_LIMIT = 500
-TELEGRAM_FOLDER = "telegram"  # data_folder/telegram — резюме и письма для Telegram
+TELEGRAM_FOLDER = (
+    "telegram"  # data_folder/telegram — резюме и письма для Telegram
+)
 
 
 def save_watch_post(output_folder: Path, post: dict) -> str:
@@ -402,7 +745,9 @@ def get_watch_post(output_folder: Path, post_id: str) -> Optional[dict]:
     import json
 
     try:
-        return json.loads((output_folder / WATCH_POSTS_FILE).read_text(encoding="utf-8")).get(post_id)
+        return json.loads(
+            (output_folder / WATCH_POSTS_FILE).read_text(encoding="utf-8")
+        ).get(post_id)
     except (OSError, ValueError):
         return None
 
@@ -427,13 +772,22 @@ def save_telegram_letter(data_folder: Path, post: dict, text: str) -> Path:
     folder = data_folder / TELEGRAM_FOLDER / "letters"
     folder.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M")
-    name = re.sub(r"[^\w\-]+", "_", f"{stamp}_{post.get('channel', '')}_{post.get('title', '')}")[:120]
+    name = re.sub(
+        r"[^\w\-]+",
+        "_",
+        f"{stamp}_{post.get('channel', '')}_{post.get('title', '')}",
+    )[:120]
     path = folder / f"{name.strip('_')}.txt"
-    path.write_text(f"{post.get('title', '')}\n{post.get('link', '')}\n\n{text}\n", encoding="utf-8")
+    path.write_text(
+        f"{post.get('title', '')}\n{post.get('link', '')}\n\n{text}\n",
+        encoding="utf-8",
+    )
     return path
 
 
-def vacancy_keyboard(post_id: str, contacts: list[dict], resumes: list[Path]) -> dict:
+def vacancy_keyboard(
+    post_id: str, contacts: list[dict], resumes: list[Path]
+) -> dict:
     """Кнопки под вакансией: для Telegram-контакта — «Здравствуйте»,
     «Здравствуйте + резюме» (по кнопке на файл резюме) и письмо LLM; для
     email — черновик письма LLM; «Не писать компании» — в Базе статус
@@ -442,15 +796,44 @@ def vacancy_keyboard(post_id: str, contacts: list[dict], resumes: list[Path]) ->
     for index, contact in enumerate(contacts[:2]):
         if contact["kind"] == "telegram":
             who = f"@{contact['value']}"
-            row = [{"text": f"👋 {who}", "callback_data": f"q:{post_id}:{index}:-1"}]
+            row = [
+                {
+                    "text": f"👋 {who}",
+                    "callback_data": f"q:{post_id}:{index}:-1",
+                }
+            ]
             row += [
-                {"text": f"👋 + 📎 {resume.stem}", "callback_data": f"q:{post_id}:{index}:{r}"}
+                {
+                    "text": f"👋 + 📎 {resume.stem}",
+                    "callback_data": f"q:{post_id}:{index}:{r}",
+                }
                 for r, resume in enumerate(resumes[:3])
             ]
             rows.append(row)
-            rows.append([{"text": f"✍️ Сопроводительное для {who} (LLM)", "callback_data": f"l:{post_id}:{index}"}])
+            rows.append(
+                [
+                    {
+                        "text": f"✍️ Сопроводительное для {who} (LLM)",
+                        "callback_data": f"l:{post_id}:{index}",
+                    }
+                ]
+            )
         elif contact["kind"] == "email":
-            rows.append([{"text": f"✍️ Письмо на {contact['value']} (LLM)", "callback_data": f"l:{post_id}:{index}"}])
+            rows.append(
+                [
+                    {
+                        "text": f"✍️ Письмо на {contact['value']} (LLM)",
+                        "callback_data": f"l:{post_id}:{index}",
+                    }
+                ]
+            )
     if rows:
-        rows.append([{"text": "🚫 Не писать компании", "callback_data": f"n:{post_id}"}])
+        rows.append(
+            [
+                {
+                    "text": "🚫 Не писать компании",
+                    "callback_data": f"n:{post_id}",
+                }
+            ]
+        )
     return {"inline_keyboard": rows}

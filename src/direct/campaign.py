@@ -19,7 +19,15 @@ from typing import Callable, Optional
 from src.utils.file_lock import state_file_lock
 
 CAMPAIGNS_FILE = "campaigns.json"
-STATUSES = ("pending", "draft", "sent", "failed", "bounced", "replied", "skipped")
+STATUSES = (
+    "pending",
+    "draft",
+    "sent",
+    "failed",
+    "bounced",
+    "replied",
+    "skipped",
+)
 PAUSE_SECONDS = (60, 120)  # между письмами — чтобы Gmail не счёл рассылкой
 
 
@@ -35,7 +43,9 @@ class CampaignStore:
 
     def _save(self, data: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
     def all(self) -> dict:
         return self._load()
@@ -54,8 +64,12 @@ class CampaignStore:
                 "created_at": datetime.now().astimezone().isoformat(),
                 "items": {
                     t["email"].lower(): {
-                        "key": t["key"], "company": t["company"],
-                        "status": "pending", "reason": "", "code": "", "sent_at": "",
+                        "key": t["key"],
+                        "company": t["company"],
+                        "status": "pending",
+                        "reason": "",
+                        "code": "",
+                        "sent_at": "",
                     }
                     for t in targets
                 },
@@ -66,7 +80,9 @@ class CampaignStore:
     def update_item(self, campaign_id: str, email: str, **fields) -> None:
         with state_file_lock(self.path):
             data = self._load()
-            item = data.get(campaign_id, {}).get("items", {}).get(email.lower())
+            item = (
+                data.get(campaign_id, {}).get("items", {}).get(email.lower())
+            )
             if item is not None:
                 item.update(fields)
                 self._save(data)
@@ -83,8 +99,14 @@ class CampaignStore:
             for t in targets:
                 email = t["email"].lower()
                 if email not in items:
-                    items[email] = {"key": t["key"], "company": t["company"],
-                                    "status": "pending", "reason": "", "code": "", "sent_at": ""}
+                    items[email] = {
+                        "key": t["key"],
+                        "company": t["company"],
+                        "status": "pending",
+                        "reason": "",
+                        "code": "",
+                        "sent_at": "",
+                    }
                     added += 1
             self._save(data)
         return added
@@ -142,7 +164,9 @@ class CampaignJob(threading.Thread):
         self.on_finish = on_finish
         self.done = 0
         self.message = ""
-        self.next_at = 0.0  # когда следующее письмо (time.time()) — для «через ~N мин»
+        self.next_at = (
+            0.0  # когда следующее письмо (time.time()) — для «через ~N мин»
+        )
         self._stopping = threading.Event()
 
     def stop(self) -> None:
@@ -161,8 +185,17 @@ class CampaignJob(threading.Thread):
                     self.message = reason
                     break
                 last = index == len(self.emails) - 1
-                # pause — True (1–2 мин) или функция, считающая «человеческую» паузу.
-                seconds = (self.pause() if callable(self.pause) else random.randint(*PAUSE_SECONDS)) if self.pause else 0
+                # pause — True (1–2 мин) или функция, считающая «человеческую»
+                # паузу.
+                seconds = (
+                    (
+                        self.pause()
+                        if callable(self.pause)
+                        else random.randint(*PAUSE_SECONDS)
+                    )
+                    if self.pause
+                    else 0
+                )
                 self.next_at = time.time() + seconds
                 if self.pause and not last and self._stopping.wait(seconds):
                     self.message = "Остановлено"
@@ -179,5 +212,11 @@ class CampaignJob(threading.Thread):
         job = cls.RUNNING.get(campaign_id)
         if job is None:
             return None
-        return {"kind": job.kind, "done": job.done, "total": len(job.emails),
-                "next_in": max(0, int(job.next_at - time.time())) if job.next_at else 0}
+        return {
+            "kind": job.kind,
+            "done": job.done,
+            "total": len(job.emails),
+            "next_in": (
+                max(0, int(job.next_at - time.time())) if job.next_at else 0
+            ),
+        }

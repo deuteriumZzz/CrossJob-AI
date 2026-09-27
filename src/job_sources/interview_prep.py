@@ -48,7 +48,11 @@ def generate_interview_prep(
     gaps: list[str],
     llm_api_key: str,
 ) -> str:
-    chain = _PREP_PROMPT | get_chat_llm(llm_api_key, temperature=0.3) | StrOutputParser()
+    chain = (
+        _PREP_PROMPT
+        | get_chat_llm(llm_api_key, temperature=0.3)
+        | StrOutputParser()
+    )
     return chain.invoke(
         {
             "resume_text": extract_text(str(resume_pdf_path)),
@@ -115,7 +119,11 @@ def evaluate_answer(
     answer: str,
     llm_api_key: str,
 ) -> str:
-    chain = _FEEDBACK_PROMPT | get_chat_llm(llm_api_key, temperature=0.2) | StrOutputParser()
+    chain = (
+        _FEEDBACK_PROMPT
+        | get_chat_llm(llm_api_key, temperature=0.2)
+        | StrOutputParser()
+    )
     return chain.invoke(
         {
             "resume_text": extract_text(str(resume_pdf_path)),

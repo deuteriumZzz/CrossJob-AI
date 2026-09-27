@@ -1,5 +1,4 @@
 from pathlib import Path
-
 from typing import Optional
 
 import httpx
@@ -8,6 +7,29 @@ import yaml
 from src.logging import logger
 
 TELEGRAM_API_BASE = "https://api.telegram.org"
+
+
+class TelegramAPIError(RuntimeError):
+    """A Bot API error whose message never contains the bot token."""
+
+
+def raise_for_telegram_status(response: httpx.Response, method: str) -> None:
+    """Raise a sanitized error instead of httpx's token-bearing request URL."""
+    try:
+        response.raise_for_status()
+    except Exception:
+        description = ""
+        try:
+            payload = response.json()
+            if isinstance(payload, dict):
+                description = str(payload.get("description") or "")
+        except Exception:
+            pass
+        status = getattr(response, "status_code", "error")
+        detail = f": {description[:200]}" if description else ""
+        raise TelegramAPIError(
+            f"Telegram API {method} returned HTTP {status}{detail}"
+        ) from None
 
 
 def notify_manual_login_required(
@@ -63,7 +85,7 @@ def send_document_from_secrets(
             files={"document": (filename, content)},
             timeout=20,
         )
-        response.raise_for_status()
+        raise_for_telegram_status(response, "sendDocument")
     except Exception as e:
         logger.warning(f"Failed to send Telegram document: {e}")
 
@@ -78,16 +100,18 @@ def send_notification(bot_token: str, chat_id: str, text: str) -> None:
         json={"chat_id": chat_id, "text": text},
         timeout=10,
     )
-    response.raise_for_status()
+    raise_for_telegram_status(response, "sendMessage")
 
 
 def bot_request(bot_token: str, method: str, payload: dict) -> dict:
     """Любой метод Bot API (sendMessage с кнопками, answerCallbackQuery,
     editMessageReplyMarkup…). Бросает при ошибке — вызывающий решает."""
     response = httpx.post(
-        f"{TELEGRAM_API_BASE}/bot{bot_token}/{method}", json=payload, timeout=15
+        f"{TELEGRAM_API_BASE}/bot{bot_token}/{method}",
+        json=payload,
+        timeout=15,
     )
-    response.raise_for_status()
+    raise_for_telegram_status(response, method)
     return response.json().get("result") or {}
 
 

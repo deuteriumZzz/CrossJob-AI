@@ -144,7 +144,9 @@ def test_resilient_get_retries_once_after_renderer_timeout():
         def get(self, url):
             self.calls.append(url)
             if len(self.calls) <= self.failures:
-                raise TimeoutException("Timed out receiving message from renderer: 75.000")
+                raise TimeoutException(
+                    "Timed out receiving message from renderer: 75.000"
+                )
 
         def execute_script(self, script):
             self.stopped += 1

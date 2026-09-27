@@ -302,7 +302,7 @@ python main.py --daemon           # встроенный планировщик 
 
 - **`data_folder/secrets.yaml`** — ключи ИИ (`llm_api_keys`, 14 провайдеров; по умолчанию рекомендуем бесплатный Groq с моделью `openai/gpt-oss-120b`), `telegram: {api_id, api_hash}` с [my.telegram.org](https://my.telegram.org/apps), бот уведомлений `notifications`, почта `email: {address, app_password}`, необязательный `hunter_api_key`.
 - **`data_folder/work_preferences.yaml`** — должности, локации, чёрные списки, фильтры; блок на каждую площадку (`schedule_enabled`, `interval_hours`, `auto_apply`, свои `positions`/`locations`, лимиты); `telegram:` (`channels`, `watch_enabled`, `watch_keywords`, `watch_stop_words`, приветствие); `djinni:` (`country`, `experience_years`, `auto_bump_resume`); `headhunter.auto_bump_resume`, `headhunter.auto_reply`; `direct:` («Сайты компаний» и почта: `schedule_enabled`, `companies`, `wwr`, `hn`, `email_daily_limit`, `warmup`, `send_from`, `send_to`, `weekdays_only`, `follow_up_days`); `digest: {enabled, hour, quiet}`; `excluded_remote_regions`.
-- **Резюме** — `data_folder/resume.pdf` (основное), `resume_linkedin.pdf` (зарубежные площадки и английские письма), дополнительные PDF в `data_folder/telegram/` (кнопки в Telegram и выбор в рассылке). Удобнее загружать в **Настройки → Мои резюме**.
+- **Резюме** — `data_folder/resume.pdf` (основное), `resume_linkedin.pdf` (зарубежные площадки), дополнительные PDF в `data_folder/telegram/`. В **Мои резюме** можно отдельно выбрать RU/EN-файл для Telegram-парсера и email-рассылки; язык вакансии и страна компании определяются автоматически.
 - **Логи** — `log/app.log` (ротация 10 МБ, неделя), видны в **Настройки → Логи**.
 
 Полное описание каждого поля — в [GUIDE.md](docs/GUIDE.md).

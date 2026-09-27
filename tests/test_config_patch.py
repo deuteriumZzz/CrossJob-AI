@@ -1,11 +1,16 @@
 import tempfile
 from pathlib import Path
 
+import pytest
+import yaml
+
 from src.config_patch import (
+    ConfigWriteError,
     set_list_field,
     set_source_field,
     set_source_list_field,
     set_top_level_field,
+    stage_config_updates,
     unset_source_field,
 )
 
@@ -264,6 +269,117 @@ def test_set_source_list_field_creates_block_if_missing():
 
         text = config_file.read_text(encoding="utf-8")
         assert "telegram:\n  channels:\n    - 'c1'" in text
+
+
+def test_set_source_field_replaces_folded_scalar_without_orphaning_body():
+    """Сохранение Telegram-настроек не должно оставлять тело `>-`.
+
+    `intro_message_template` в шаблонном work_preferences.yaml задан
+    folded scalar-ом. Дашборд сохраняет его как однострочную строку;
+    старый редактор заменял только заголовок и оставлял старые строки
+    тела, из-за чего YAML становился невалидным.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        config_file = Path(tmp) / "work_preferences.yaml"
+        config_file.write_text(
+            "telegram:\n"
+            "  channels:\n"
+            "    - old_channel\n"
+            "  intro_message_template: >-\n"
+            "    Здравствуйте! Заинтересовала вакансия «{role}».\n"
+            "    Расскажу подробнее о себе.\n"
+            "  auto_message: false\n",
+            encoding="utf-8",
+        )
+
+        set_source_field(
+            config_file,
+            "telegram",
+            "intro_message_template",
+            "Новое сообщение для {role}",
+            quote=True,
+        )
+
+        parsed = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+        assert parsed["telegram"] == {
+            "channels": ["old_channel"],
+            "intro_message_template": "Новое сообщение для {role}",
+            "auto_message": False,
+        }
+
+
+def test_settings_write_creates_backup_and_keeps_yaml_valid():
+    with tempfile.TemporaryDirectory() as tmp:
+        config_file = Path(tmp) / "work_preferences.yaml"
+        original = (
+            "telegram:\n"
+            "  channels:\n"
+            "    - old_channel\n"
+            "  intro_message_template: >-\n"
+            "    Старый шаблон.\n"
+        )
+        config_file.write_text(original, encoding="utf-8")
+
+        set_source_list_field(
+            config_file, "telegram", "channels", ["new_channel"]
+        )
+
+        assert config_file.with_suffix(".yaml.bak").read_text(
+            encoding="utf-8"
+        ) == original
+        assert yaml.safe_load(config_file.read_text(encoding="utf-8")) == {
+            "telegram": {
+                "channels": ["new_channel"],
+                "intro_message_template": "Старый шаблон.",
+            }
+        }
+
+
+def test_invalid_update_leaves_config_and_backup_untouched():
+    with tempfile.TemporaryDirectory() as tmp:
+        config_file = Path(tmp) / "work_preferences.yaml"
+        original = "telegram:\n  auto_message: false\n"
+        config_file.write_text(original, encoding="utf-8")
+
+        with pytest.raises(ConfigWriteError, match="valid YAML"):
+            set_source_field(
+                config_file,
+                "telegram",
+                "bad_value",
+                "[not closed",
+            )
+
+        assert config_file.read_text(encoding="utf-8") == original
+        assert not config_file.with_suffix(".yaml.bak").exists()
+
+
+def test_staged_updates_commit_once_and_support_multiline_text():
+    with tempfile.TemporaryDirectory() as tmp:
+        config_file = Path(tmp) / "work_preferences.yaml"
+        original = "telegram:\n  channels: []\n"
+        config_file.write_text(original, encoding="utf-8")
+
+        with stage_config_updates(config_file) as staged:
+            set_source_list_field(
+                staged, "telegram", "channels", ["new_channel"]
+            )
+            set_source_field(
+                staged,
+                "telegram",
+                "intro_message_template",
+                "Первая строка\nВторая строка",
+                quote=True,
+            )
+
+        assert config_file.with_suffix(".yaml.bak").read_text(
+            encoding="utf-8"
+        ) == original
+        assert yaml.safe_load(config_file.read_text(encoding="utf-8")) == {
+            "telegram": {
+                "channels": ["new_channel"],
+                "intro_message_template": "Первая строка\nВторая строка",
+            }
+        }
 
 
 if __name__ == "__main__":

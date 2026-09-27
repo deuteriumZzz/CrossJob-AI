@@ -38,7 +38,13 @@ def test_resume_command_clears_captcha_block_and_forces_immediate_retry(
             main,
             "poll_bot_updates",
             lambda *a, **k: [
-                {"update_id": 1, "message": {"chat": {"id": 123}, "text": "/resume headhunter"}}
+                {
+                    "update_id": 1,
+                    "message": {
+                        "chat": {"id": 123},
+                        "text": "/resume headhunter",
+                    },
+                }
             ],
         )
         monkeypatch.setattr(main, "send_notification", lambda *a, **k: None)

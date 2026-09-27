@@ -12,9 +12,21 @@ from src.logging import logger
 # Слова, которые есть почти в любой должности и ничего не говорят о
 # специализации — без них "Python-разработчик" сводится к "python".
 _GENERIC_WORDS = {
-    "developer", "разработчик", "engineer", "инженер", "программист",
-    "senior", "middle", "junior", "lead", "specialist", "специалист",
-    "remote", "удаленно", "удалённо", "software",
+    "developer",
+    "разработчик",
+    "engineer",
+    "инженер",
+    "программист",
+    "senior",
+    "middle",
+    "junior",
+    "lead",
+    "specialist",
+    "специалист",
+    "remote",
+    "удаленно",
+    "удалённо",
+    "software",
 }
 _WORD_RE = re.compile(r"[\w+#.]+")
 
@@ -28,7 +40,8 @@ def matches_positions(job: Job, positions: list[str]) -> bool:
     title = job.role.casefold()
     for position in positions:
         words = [
-            w for w in _WORD_RE.findall(position.casefold())
+            w
+            for w in _WORD_RE.findall(position.casefold())
             if w not in _GENERIC_WORDS
         ]
         if words and all(w in title for w in words):

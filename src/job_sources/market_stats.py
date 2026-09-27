@@ -16,19 +16,23 @@ from statistics import median
 _US_ONLY_RE = re.compile(
     r"\b(us|u\.s\.|usa|united states)[- ]?(only|based)\b"
     r"|\bremote\s*[-–(]\s*(us|usa|united states)\b"
-    r"|\b(located|based|reside|residing)\s+in\s+the\s+(us|u\.s\.|usa|united states)\b"
-    r"|\b(authorized|authorization)\s+to\s+work\s+in\s+the\s+(us|u\.s\.|usa|united states)\b"
+    r"|\b(located|based|reside|residing)\s+in\s+the\s+(us|u\.s\.|usa|united "
+    r"states)\b"
+    r"|\b(authorized|authorization)\s+to\s+work\s+in\s+the\s+"
+    r"(us|u\.s\.|usa|united states)\b"
     r"|\bus\s+citizens?\b|\bgreen\s+card\b",
     re.IGNORECASE,
 )
 _EU_ONLY_RE = re.compile(
     r"\b(eu|europe|emea)[- ]?(only|based)\b"
-    r"|\b(located|based|reside|residing)\s+in\s+(the\s+)?(eu|europe|european union)\b"
+    r"|\b(located|based|reside|residing)\s+in\s+(the\s+)?"
+    r"(eu|europe|european union)\b"
     r"|\beu\s+work\s+permit\b",
     re.IGNORECASE,
 )
 _GLOBAL_RE = re.compile(
-    r"\b(anywhere|worldwide|work from anywhere|global(ly)?\s+remote|fully remote,? worldwide)\b",
+    r"\b(anywhere|worldwide|work from anywhere|global(ly)?\s+remote|fully "
+    r"remote,? worldwide)\b",
     re.IGNORECASE,
 )
 
@@ -145,9 +149,7 @@ def parse_salary(text: str) -> dict | None:
         return None
     clean = text.replace("\u200d", "").replace("\xa0", " ")
     currency = next((c for c, rx in _CURRENCIES if rx.search(clean)), None)
-    numbers = [
-        int(re.sub(r"[\s,]", "", n)) for n in _NUMBER_RE.findall(clean)
-    ]
+    numbers = [int(re.sub(r"[\s,]", "", n)) for n in _NUMBER_RE.findall(clean)]
     numbers = [n for n in numbers if n >= 100]
     if not currency or not numbers:
         return None

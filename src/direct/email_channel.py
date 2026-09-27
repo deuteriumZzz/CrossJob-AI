@@ -55,7 +55,9 @@ def send_email(credentials: dict, message: EmailMessage) -> str:
     return message["Message-ID"]
 
 
-def senders_replied(credentials: dict, addresses: list[str], days: int = 60) -> set[str]:
+def senders_replied(
+    credentials: dict, addresses: list[str], days: int = 60
+) -> set[str]:
     """Кто из addresses написал нам за последние days дней (только
     чтение ящика, письма не помечаются прочитанными)."""
     if not addresses:
@@ -66,13 +68,17 @@ def senders_replied(credentials: dict, addresses: list[str], days: int = 60) -> 
         imap.login(credentials["address"], credentials["app_password"])
         imap.select("INBOX", readonly=True)
         for address in addresses:
-            status, data = imap.search(None, f'(FROM "{address}" SINCE {since})')
+            status, data = imap.search(
+                None, f'(FROM "{address}" SINCE {since})'
+            )
             if status == "OK" and data and data[0].split():
                 replied.add(address)
     return replied
 
 
-def bounced_addresses(credentials: dict, addresses: list[str], days: int = 30) -> set[str]:
+def bounced_addresses(
+    credentials: dict, addresses: list[str], days: int = 30
+) -> set[str]:
     """Какие из addresses вернулись с ошибкой доставки: ищем в ящике
     письма от mailer-daemon/postmaster и адрес внутри их текста."""
     if not addresses:
@@ -84,13 +90,19 @@ def bounced_addresses(credentials: dict, addresses: list[str], days: int = 30) -
         imap.login(credentials["address"], credentials["app_password"])
         imap.select("INBOX", readonly=True)
         for sender in ("mailer-daemon", "postmaster"):
-            status, data = imap.search(None, f'(FROM "{sender}" SINCE {since})')
+            status, data = imap.search(
+                None, f'(FROM "{sender}" SINCE {since})'
+            )
             if status != "OK" or not data or not data[0]:
                 continue
             for num in data[0].split()[-200:]:
                 status, parts = imap.fetch(num, "(BODY.PEEK[TEXT])")
                 if status != "OK":
                     continue
-                body = b"".join(p[1] for p in parts if isinstance(p, tuple)).decode("utf-8", "ignore").lower()
+                body = (
+                    b"".join(p[1] for p in parts if isinstance(p, tuple))
+                    .decode("utf-8", "ignore")
+                    .lower()
+                )
                 bounced |= {a for a in wanted if a in body}
     return bounced

@@ -122,9 +122,88 @@ if __name__ == "__main__":
 
 def test_reply_checks_on_by_default_but_hh_only_with_platform():
     noop = lambda p, k: None  # noqa: E731
-    checks = {"check_email_replies": noop, "check_telegram_commands": noop, "check_hh_replies": noop}
+    checks = {
+        "check_email_replies": noop,
+        "check_telegram_commands": noop,
+        "check_hh_replies": noop,
+    }
     with tempfile.TemporaryDirectory() as tmp:
-        off = _make_scheduler(tmp, {"check_telegram_commands": {"schedule_enabled": False}}, checks)
-        assert off.due_sources() == ["check_email_replies"]  # hh не в расписании — браузер не открываем
-        on = _make_scheduler(tmp, {"headhunter": {"schedule_enabled": True}}, checks)
+        off = _make_scheduler(
+            tmp,
+            {"check_telegram_commands": {"schedule_enabled": False}},
+            checks,
+        )
+        assert off.due_sources() == [
+            "check_email_replies"
+        ]  # hh не в расписании — браузер не открываем
+        on = _make_scheduler(
+            tmp, {"headhunter": {"schedule_enabled": True}}, checks
+        )
         assert sorted(on.due_sources()) == sorted(checks)
+
+
+def test_continuous_cycle_runs_one_source_per_tick_round_robin():
+    """limits.continuous_cycle_enabled: все площадки из ротации сначала
+    due одновременно, но за один run_once() уходит только первая по
+    порядку — следующий тик подхватывает следующую (round-robin), а не
+    все разом. check_* задачи в ротацию не входят и идут как обычно."""
+    with tempfile.TemporaryDirectory() as tmp:
+        calls = []
+        now = datetime(2026, 8, 20, 10, 0, 0)
+        parameters = {
+            "headhunter": {"schedule_enabled": True},
+            "geekjob": {"schedule_enabled": True},
+            "getmatch": {"schedule_enabled": True},
+            "limits": {
+                "continuous_cycle_enabled": True,
+                "continuous_cycle_gap_minutes": 3,
+            },
+        }
+        source_map = {
+            name: (lambda p, k, n=name: calls.append(n))
+            for name in ("headhunter", "geekjob", "getmatch")
+        }
+        scheduler = _make_scheduler(tmp, parameters, source_map, now=now)
+        scheduler.run_once()
+        assert calls == ["headhunter"]
+        scheduler.run_once()
+        assert calls == ["headhunter", "geekjob"]
+        scheduler.run_once()
+        assert calls == ["headhunter", "geekjob", "getmatch"]
+
+        # Ещё виток раньше 3 минут — headhunter пока не due снова.
+        scheduler.run_once()
+        assert calls == ["headhunter", "geekjob", "getmatch"]
+
+        from src.scheduler_state import get_next_run
+
+        assert get_next_run(Path(tmp), "headhunter") == now + timedelta(
+            minutes=3
+        )
+
+
+def test_continuous_cycle_piggybacks_hh_replies_on_headhunter_turn():
+    """Постоянный цикл: check_hh_replies не идёт по своему таймеру —
+    срабатывает сразу после хода headhunter в том же тике, одним заходом."""
+    with tempfile.TemporaryDirectory() as tmp:
+        calls = []
+        now = datetime(2026, 8, 20, 10, 0, 0)
+        parameters = {
+            "headhunter": {"schedule_enabled": True},
+            "limits": {
+                "continuous_cycle_enabled": True,
+                "continuous_cycle_gap_minutes": 3,
+            },
+        }
+        source_map = {
+            "headhunter": lambda p, k: calls.append("headhunter"),
+            "check_hh_replies": lambda p, k: calls.append("check_hh_replies"),
+        }
+        scheduler = _make_scheduler(tmp, parameters, source_map, now=now)
+        scheduler.run_once()
+        assert calls == ["headhunter", "check_hh_replies"]
+
+        # На следующем тике до истечения gap — headhunter не due, и
+        # check_hh_replies за ним следом тоже не запускается сам по себе.
+        scheduler.run_once()
+        assert calls == ["headhunter", "check_hh_replies"]

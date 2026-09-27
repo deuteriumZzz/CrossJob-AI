@@ -15,10 +15,19 @@ from tests.test_webui_api import client  # noqa: F401  (fixture)
 
 
 def test_find_ats_in_html():
-    assert ats.find_ats_in_html('<a href="https://jobs.lever.co/acme/123">') == ("lever", "acme")
-    assert ats.find_ats_in_html('src="https://boards.greenhouse.io/embed/job_board?for=acme"') == ("greenhouse", "acme")
-    assert ats.find_ats_in_html('https://job-boards.greenhouse.io/gitlab/jobs/1') == ("greenhouse", "gitlab")
-    assert ats.find_ats_in_html("https://jobs.ashbyhq.com/Linear") == ("ashby", "Linear")
+    assert ats.find_ats_in_html(
+        '<a href="https://jobs.lever.co/acme/123">'
+    ) == ("lever", "acme")
+    assert ats.find_ats_in_html(
+        'src="https://boards.greenhouse.io/embed/job_board?for=acme"'
+    ) == ("greenhouse", "acme")
+    assert ats.find_ats_in_html(
+        "https://job-boards.greenhouse.io/gitlab/jobs/1"
+    ) == ("greenhouse", "gitlab")
+    assert ats.find_ats_in_html("https://jobs.ashbyhq.com/Linear") == (
+        "ashby",
+        "Linear",
+    )
     assert ats.find_ats_in_html("<html>nothing</html>") is None
 
 
@@ -39,19 +48,26 @@ def test_parse_wwr_rss():
     </item></channel></rss>"""
     [job] = parse_wwr_rss(xml)
     assert (job.company, job.role, job.location) == (
-        "Acme", "Senior Python Engineer", "Anywhere in the World",
+        "Acme",
+        "Senior Python Engineer",
+        "Anywhere in the World",
     )
     assert job.external_id == "wwr-acme-senior-python"
     assert "Python & Django" in job.description
 
 
 def test_parse_hn_comment():
-    job = parse_hn_comment({
-        "id": 42,
-        "text": "Acme | Backend Engineer (Python) | Remote (EU) | Full-time<p>Write to jobs@acme.io",
-    })
+    job = parse_hn_comment(
+        {
+            "id": 42,
+            "text": "Acme | Backend Engineer (Python) | Remote (EU) | "
+            "Full-time<p>Write to jobs@acme.io",
+        }
+    )
     assert (job.company, job.role, job.location) == (
-        "Acme", "Backend Engineer (Python)", "Remote (EU) | Full-time",
+        "Acme",
+        "Backend Engineer (Python)",
+        "Remote (EU) | Full-time",
     )
     assert job.link.endswith("id=42")
     assert parse_hn_comment({"id": 1, "text": "just chatting"}) is None
@@ -66,7 +82,9 @@ def test_matches_positions():
 
 
 def test_build_message_threads_follow_up():
-    msg = build_message("me@x.io", "hr@acme.io", "Re: Dev", "Hi", in_reply_to="<abc@x>")
+    msg = build_message(
+        "me@x.io", "hr@acme.io", "Re: Dev", "Hi", in_reply_to="<abc@x>"
+    )
     assert msg["In-Reply-To"] == "<abc@x>"
     assert msg["References"] == "<abc@x>"
     assert msg["Message-ID"]
@@ -75,31 +93,62 @@ def test_build_message_threads_follow_up():
 def test_send_email_draft_records_outreach_and_respects_limit(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp:
         data, out = Path(tmp) / "data", Path(tmp) / "out"
-        data.mkdir(); out.mkdir()
+        data.mkdir()
+        out.mkdir()
         secrets = data / "secrets.yaml"
         secrets.write_text(
             "email:\n  address: me@x.io\n  app_password: p\n", encoding="utf-8"
         )
         (data / main.RESUME_PDF).write_bytes(b"%PDF")
-        params = {"dataFolder": data, "outputFileDirectory": out,
-                  "secretsFile": secrets, "direct": {"email_daily_limit": 1}}
+        params = {
+            "dataFolder": data,
+            "outputFileDirectory": out,
+            "secretsFile": secrets,
+            "direct": {"email_daily_limit": 1},
+        }
         log = AppliedLog(out / "applied_log.json")
         for n in ("1", "2"):
-            log.record(Job(role="Dev", company=f"Co{n}", link=f"https://j/{n}",
-                           source="direct", external_id=n), "", "", "dry_run", 8, [])
+            log.record(
+                Job(
+                    role="Dev",
+                    company=f"Co{n}",
+                    link=f"https://j/{n}",
+                    source="direct",
+                    external_id=n,
+                ),
+                "",
+                "",
+                "dry_run",
+                8,
+                [],
+            )
         sent = []
-        monkeypatch.setattr(main, "send_email", lambda creds, m: sent.append(m) or "<id1>")
+        monkeypatch.setattr(
+            main, "send_email", lambda creds, m: sent.append(m) or "<id1>"
+        )
         drafts = DraftStore(out / main.HR_DRAFTS_FILE)
-        code = drafts.add("hr@co1.io", "Letter", "email", "https://j/1",
-                          channel="email", subject="Dev")
+        code = drafts.add(
+            "hr@co1.io",
+            "Letter",
+            "email",
+            "https://j/1",
+            channel="email",
+            subject="Dev",
+        )
         assert main.send_hr_draft(params, code) == "Отправлено hr@co1.io."
         entry = log.find_by_source_and_external_id("direct", "1")
         assert entry["outreach_email"] == "hr@co1.io"
         assert entry["outreach_message_id"] == "<id1>"
         assert sent[0].get_payload()[1].get_filename() == main.RESUME_PDF
 
-        code2 = drafts.add("hr@co2.io", "Letter", "email", "https://j/2",
-                           channel="email", subject="Dev")
+        code2 = drafts.add(
+            "hr@co2.io",
+            "Letter",
+            "email",
+            "https://j/2",
+            channel="email",
+            subject="Dev",
+        )
         assert "лимит" in main.send_hr_draft(params, code2)
         assert len(sent) == 1
 
@@ -107,34 +156,65 @@ def test_send_email_draft_records_outreach_and_respects_limit(monkeypatch):
 def test_companies_api(client, monkeypatch):  # noqa: F811
     monkeypatch.setattr(api, "discover_ats", lambda site: ("lever", "acme"))
     monkeypatch.setattr(api, "fetch_jobs", lambda c: [Job(role="Dev")] * 3)
-    body = client.post("/api/direct/companies", json={"website": "acme.io", "name": "Acme"}).json()
-    assert body == {"name": "Acme", "website": "acme.io", "ats": "lever", "slug": "acme", "jobs": 3}
-    assert [c["slug"] for c in client.get("/api/direct/companies").json()] == ["acme"]
+    body = client.post(
+        "/api/direct/companies", json={"website": "acme.io", "name": "Acme"}
+    ).json()
+    assert body == {
+        "name": "Acme",
+        "website": "acme.io",
+        "ats": "lever",
+        "slug": "acme",
+        "jobs": 3,
+    }
+    assert [c["slug"] for c in client.get("/api/direct/companies").json()] == [
+        "acme"
+    ]
     client.delete("/api/direct/companies/acme")
     assert client.get("/api/direct/companies").json() == []
     monkeypatch.setattr(api, "discover_ats", lambda site: None)
-    assert client.post("/api/direct/companies", json={"website": "x.io"}).status_code == 404
+    assert (
+        client.post(
+            "/api/direct/companies", json={"website": "x.io"}
+        ).status_code
+        == 404
+    )
 
 
 def test_prefill_direct_application_passes_profile_and_letter(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp:
         data, out = Path(tmp) / "data", Path(tmp) / "out"
-        data.mkdir(); out.mkdir()
+        data.mkdir()
+        out.mkdir()
         (data / main.PLAIN_TEXT_RESUME_YAML).write_text(
-            "personal_information:\n  name: Ann\n  email: ann@x.io\n", encoding="utf-8"
+            "personal_information:\n  name: Ann\n  email: ann@x.io\n",
+            encoding="utf-8",
         )
         (data / main.RESUME_PDF).write_bytes(b"%PDF")
         AppliedLog(out / "applied_log.json").record(
-            Job(role="Dev", company="Co", link="https://job-boards.greenhouse.io/co/jobs/1",
-                source="direct", external_id="gh-co-1"),
-            "My letter", "", "dry_run", 8, [],
+            Job(
+                role="Dev",
+                company="Co",
+                link="https://job-boards.greenhouse.io/co/jobs/1",
+                source="direct",
+                external_id="gh-co-1",
+            ),
+            "My letter",
+            "",
+            "dry_run",
+            8,
+            [],
         )
         calls = []
         monkeypatch.setattr(main, "init_browser", lambda profile: "driver")
-        monkeypatch.setattr(main, "prefill_application",
-                            lambda *a: calls.append(a) or ["first_name"])
+        monkeypatch.setattr(
+            main,
+            "prefill_application",
+            lambda *a: calls.append(a) or ["first_name"],
+        )
         params = {"dataFolder": data, "outputFileDirectory": out}
-        assert main.prefill_direct_application(params, "direct", "gh-co-1") == ["first_name"]
+        assert main.prefill_direct_application(
+            params, "direct", "gh-co-1"
+        ) == ["first_name"]
         driver, link, person, resume, letter = calls[0]
         assert link.endswith("/jobs/1")
         assert person == {"name": "Ann", "email": "ann@x.io"}

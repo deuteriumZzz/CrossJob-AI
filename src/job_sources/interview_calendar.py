@@ -30,7 +30,9 @@ _EXTRACT_PROMPT = ChatPromptTemplate.from_template(
 
 
 class _When(BaseModel):
-    start: str = Field(description="ISO 8601 с часовым поясом или пустая строка")
+    start: str = Field(
+        description="ISO 8601 с часовым поясом или пустая строка"
+    )
 
 
 def extract_interview_time(

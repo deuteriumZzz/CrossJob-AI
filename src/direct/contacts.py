@@ -11,13 +11,28 @@ import httpx
 _OBFUSCATED_RE = [
     (re.compile(r"\s*[\[(]\s*at\s*[\])]\s*", re.IGNORECASE), "@"),
     (re.compile(r"\s*[\[(]\s*dot\s*[\])]\s*", re.IGNORECASE), "."),
-    (re.compile(r"\s+at\s+(?=[\w-]+\s*(?:\.|\[dot\]|\(dot\)))", re.IGNORECASE), "@"),
+    (
+        re.compile(
+            r"\s+at\s+(?=[\w-]+\s*(?:\.|\[dot\]|\(dot\)))", re.IGNORECASE
+        ),
+        "@",
+    ),
 ]
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 # Служебные ящики, куда писать бесполезно (идея отсева — JobHunter).
 _SKIP_PREFIXES = (
-    "noreply", "no-reply", "donotreply", "privacy", "legal", "security",
-    "abuse", "support", "billing", "press", "gdpr", "dpo",
+    "noreply",
+    "no-reply",
+    "donotreply",
+    "privacy",
+    "legal",
+    "security",
+    "abuse",
+    "support",
+    "billing",
+    "press",
+    "gdpr",
+    "dpo",
 )
 _SKIP_DOMAINS = ("example.com", "sentry.io", "domain.com", "email.com")
 

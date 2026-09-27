@@ -29,29 +29,50 @@ _TELEGRAM_RE = re.compile(
     r"(?:t\.me/|(?<![\w.])@)([a-zA-Z][a-zA-Z0-9_]{4,31})\b"
 )
 _TELEGRAM_LINK_RE = re.compile(r"t\.me/([a-zA-Z][a-zA-Z0-9_]{4,31})\b")
-_LINKEDIN_RE = re.compile(
-    r"https?://(?:[\w-]+\.)?linkedin\.com/in/[\w%-]+/?"
-)
+_LINKEDIN_RE = re.compile(r"https?://(?:[\w-]+\.)?linkedin\.com/in/[\w%-]+/?")
 
 
 # Общие почтовые сервисы — по ним компанию не узнать.
 _FREE_MAIL = {
-    "gmail.com", "googlemail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com",
-    "proton.me", "protonmail.com", "mail.ru", "bk.ru", "list.ru", "inbox.ru", "yandex.ru",
-    "ya.ru", "yandex.com", "rambler.ru", "gmx.com", "aol.com", "live.com",
+    "gmail.com",
+    "googlemail.com",
+    "yahoo.com",
+    "outlook.com",
+    "hotmail.com",
+    "icloud.com",
+    "proton.me",
+    "protonmail.com",
+    "mail.ru",
+    "bk.ru",
+    "list.ru",
+    "inbox.ru",
+    "yandex.ru",
+    "ya.ru",
+    "yandex.com",
+    "rambler.ru",
+    "gmx.com",
+    "aol.com",
+    "live.com",
 }
 
 
 def _domain(value: str) -> str:
-    """acme.io из «https://www.acme.io/jobs» или «hr@acme.io»; пусто для gmail и т.п."""
+    """acme.io из «https://www.acme.io/jobs» или «hr@acme.io»; пусто для
+    gmail и т.п."""
     value = value.strip().lower()
-    host = value.split("@", 1)[1] if "@" in value else re.sub(r"^[a-z]+://", "", value).split("/")[0]
+    host = (
+        value.split("@", 1)[1]
+        if "@" in value
+        else re.sub(r"^[a-z]+://", "", value).split("/")[0]
+    )
     host = host.removeprefix("www.")
     return "" if not host or "." not in host or host in _FREE_MAIL else host
 
 
 def _card_domains(card: dict) -> set[str]:
-    values = [card.get("website") or ""] + [c["value"] for c in card["contacts"] if c["kind"] == "email"]
+    values = [card.get("website") or ""] + [
+        c["value"] for c in card["contacts"] if c["kind"] == "email"
+    ]
     return {d for d in map(_domain, values) if d}
 
 
@@ -73,9 +94,7 @@ def contacts_from_text(
         {"kind": "email", "value": e} for e in extract_emails(text)
     ]
     telegram_re = _TELEGRAM_RE if bare_mentions else _TELEGRAM_LINK_RE
-    usernames = {
-        u for u in telegram_re.findall(text) if u.lower() not in skip
-    }
+    usernames = {u for u in telegram_re.findall(text) if u.lower() not in skip}
     found += [{"kind": "telegram", "value": u} for u in sorted(usernames)]
     found += [
         {"kind": "linkedin", "value": u.rstrip("/")}
@@ -125,9 +144,16 @@ class ContactBook:
             if key not in data["companies"]:
                 # «Acme», «ACME LLC» и acme.io — одна компания: ищем по домену
                 # сайта/почты, иначе одной компании ушло бы два письма.
-                incoming = _card_domains({"website": website, "contacts": contacts})
+                incoming = _card_domains(
+                    {"website": website, "contacts": contacts}
+                )
                 key = next(
-                    (k for k, c in data["companies"].items() if incoming & _card_domains(c)), key
+                    (
+                        k
+                        for k, c in data["companies"].items()
+                        if incoming & _card_domains(c)
+                    ),
+                    key,
                 )
             card = data["companies"].setdefault(
                 key,
@@ -146,8 +172,12 @@ class ContactBook:
             if emphasis and not card.get("emphasis"):
                 # «На что сделать упор» из вашего файла — для письма.
                 card["emphasis"] = emphasis
-            if vacancy and vacancy.get("link") and all(
-                v["link"] != vacancy["link"] for v in card["vacancies"]
+            if (
+                vacancy
+                and vacancy.get("link")
+                and all(
+                    v["link"] != vacancy["link"] for v in card["vacancies"]
+                )
             ):
                 card["vacancies"].append({**vacancy, "found_at": now})
             known = {(c["kind"], c["value"].lower()) for c in card["contacts"]}
@@ -176,7 +206,11 @@ class ContactBook:
         """Удаляет компании, возвращает удалённые — для «Отменить»."""
         with state_file_lock(self.path):
             data = self._load()
-            removed = [{"key": k, **data["companies"].pop(k)} for k in keys if k in data["companies"]]
+            removed = [
+                {"key": k, **data["companies"].pop(k)}
+                for k in keys
+                if k in data["companies"]
+            ]
             self._save(data)
         return removed
 
@@ -191,7 +225,11 @@ class ContactBook:
     def keys_with(self, value: str) -> list[str]:
         """Компании, у которых есть этот контакт (email или @ник)."""
         value = value.lower()
-        return [k for k, c in self.all().items() if any(x["value"].lower() == value for x in c["contacts"])]
+        return [
+            k
+            for k, c in self.all().items()
+            if any(x["value"].lower() == value for x in c["contacts"])
+        ]
 
     def update_contact(self, value: str, **fields) -> bool:
         """Поля контакта во всех компаниях, где он есть (отметки «письмо

@@ -211,6 +211,41 @@ class AppliedLog:
 
         self._write_locked(_mutate)
 
+    def mark_reminder_sent(self, source: str, external_id: str) -> None:
+        """Напоминание "молчите долго" отправлено в чат — одно на
+        отклик, см. hr_replies.due_hh_reminders."""
+
+        def _mutate(data: dict) -> None:
+            for entry in data["applications"]:
+                if (
+                    entry["source"] == source
+                    and entry["external_id"] == external_id
+                ):
+                    entry["reminder_sent_at"] = (
+                        datetime.now().astimezone().isoformat()
+                    )
+                    return
+
+        self._write_locked(_mutate)
+
+    def mark_cover_letter_sent_via_chat(
+        self, source: str, external_id: str
+    ) -> None:
+        """Отклик ушёл без письма (форма его не приняла), письмо
+        отправлено отдельным сообщением в чат — не повторяем на
+        следующей проверке (см. main._send_missing_cover_letters)."""
+
+        def _mutate(data: dict) -> None:
+            for entry in data["applications"]:
+                if (
+                    entry["source"] == source
+                    and entry["external_id"] == external_id
+                ):
+                    entry["cover_letter_sent_via_chat"] = True
+                    return
+
+        self._write_locked(_mutate)
+
     def update_reply_state(
         self, source: str, external_id: str, state: str
     ) -> bool:
@@ -231,9 +266,7 @@ class AppliedLog:
                     if entry.get("last_known_state") == state:
                         return
                     entry["last_known_state"] = state
-                    entry["state_at"] = (
-                        datetime.now().astimezone().isoformat()
-                    )
+                    entry["state_at"] = datetime.now().astimezone().isoformat()
                     changed = True
                     return
 

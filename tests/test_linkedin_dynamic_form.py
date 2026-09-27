@@ -118,9 +118,9 @@ def test_radio_label_uses_inner_paragraph_when_aria_is_wrong():
 def test_radio_label_falls_back_to_aria_label_without_labelledby():
     driver = MagicMock()
     radio = MagicMock()
-    radio.get_attribute.side_effect = lambda name: {
-        "aria-label": "Yes"
-    }.get(name)
+    radio.get_attribute.side_effect = lambda name: {"aria-label": "Yes"}.get(
+        name
+    )
     radio.find_element.side_effect = Exception("no inner <p>")
 
     assert _radio_label(driver, radio) == "Yes"
@@ -130,9 +130,9 @@ def test_radio_label_falls_back_to_label_for_when_aria_gives_nothing():
     """Общий фолбэк на <label for=id> — используется, только если и
     aria-labelledby, и внутренний <p>, и aria-label все пустые."""
     radio = MagicMock()
-    radio.get_attribute.side_effect = lambda name: {
-        "id": "radio-yes"
-    }.get(name)
+    radio.get_attribute.side_effect = lambda name: {"id": "radio-yes"}.get(
+        name
+    )
     radio.find_element.side_effect = Exception("no inner <p>")
 
     label = MagicMock()
@@ -145,7 +145,7 @@ def test_radio_label_falls_back_to_label_for_when_aria_gives_nothing():
 
 
 def test_fill_text_field_selects_autocomplete_suggestion_if_present():
-    """"Location (city)" и подобные поля — автокомплит: LinkedIn считает
+    """ "Location (city)" и подобные поля — автокомплит: LinkedIn считает
     поле невалидным, пока не выбран вариант из выпадающего списка, даже
     если текст уже напечатан (подтверждено живьём 2026-09-09)."""
     field = MagicMock()
@@ -222,9 +222,9 @@ def test_scrape_visible_fields_skips_step_title_paragraphs():
     question_p.text = "Are you comfortable working remotely?*"
 
     radio = MagicMock()
-    radio.get_attribute.side_effect = lambda name: {
-        "aria-label": "Yes"
-    }.get(name)
+    radio.get_attribute.side_effect = lambda name: {"aria-label": "Yes"}.get(
+        name
+    )
     radio.find_element.side_effect = Exception("no inner <p>")
 
     group = _make_group(radios=[radio])
@@ -249,7 +249,7 @@ def test_scrape_visible_fields_skips_step_title_paragraphs():
 
 
 def test_scrape_visible_fields_skips_validation_message_paragraphs():
-    """"This field is required"/"Invalid input" — тоже свои <p>, не
+    """ "This field is required"/"Invalid input" — тоже свои <p>, не
     только заголовки шагов — подтверждено живьём 2026-09-12: у
     radio-группы про образование ближайшим <p> оказалось "This field
     is required" (осталось от предыдущей неудачной попытки отправить
@@ -263,19 +263,17 @@ def test_scrape_visible_fields_skips_validation_message_paragraphs():
     question_p.text = "Have you completed a Bachelor's Degree?*"
 
     radio = MagicMock()
-    radio.get_attribute.side_effect = lambda name: {
-        "aria-label": "Yes"
-    }.get(name)
+    radio.get_attribute.side_effect = lambda name: {"aria-label": "Yes"}.get(
+        name
+    )
     radio.find_element.side_effect = Exception("no inner <p>")
 
     group = _make_group(radios=[radio])
     question_p.find_element.return_value = group
 
     form = MagicMock()
-    form.find_elements.side_effect = (
-        lambda by, selector: [validation_p, question_p]
-        if selector == "p"
-        else []
+    form.find_elements.side_effect = lambda by, selector: (
+        [validation_p, question_p] if selector == "p" else []
     )
 
     driver = MagicMock()
@@ -305,8 +303,8 @@ def test_scrape_visible_fields_drops_radio_when_all_labels_match_question():
     question_p.find_element.return_value = group
 
     form = MagicMock()
-    form.find_elements.side_effect = (
-        lambda by, selector: [question_p] if selector == "p" else []
+    form.find_elements.side_effect = lambda by, selector: (
+        [question_p] if selector == "p" else []
     )
 
     driver = MagicMock()
@@ -360,8 +358,8 @@ def test_scrape_visible_fields_detects_select_question():
     question_p.find_element.return_value = group
 
     form = MagicMock()
-    form.find_elements.side_effect = (
-        lambda by, selector: [question_p] if selector == "p" else []
+    form.find_elements.side_effect = lambda by, selector: (
+        [question_p] if selector == "p" else []
     )
 
     driver = MagicMock()
@@ -393,7 +391,7 @@ def _location_field():
 
 
 def test_scrape_visible_fields_finds_uncovered_required_text_field():
-    """"Location (city)" — обязательное текстовое поле БЕЗ своего <p>,
+    """ "Location (city)" — обязательное текстовое поле БЕЗ своего <p>,
     текст вопроса лежит в placeholder/label (см. _label_text_for)."""
     form = MagicMock()
     form.find_elements.side_effect = lambda by, selector: (
@@ -411,7 +409,7 @@ def test_scrape_visible_fields_finds_uncovered_required_text_field():
 
 
 def test_check_required_consent_checkboxes_clicks_unchecked_required():
-    """"I agree to be contacted"-style чекбоксы часто идут без <p> —
+    """ "I agree to be contacted"-style чекбоксы часто идут без <p> —
     scrape_visible_fields их не видит вообще, LinkedIn не пускал
     дальше по валидации (подтверждено по логам демона 2026-09-09: 3 из
     3 реальных вакансий в одном заходе упёрлись в "stuck (no

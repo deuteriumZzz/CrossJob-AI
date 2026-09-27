@@ -86,6 +86,33 @@ def fetch_new_employer_messages(driver) -> list[dict]:
     return results
 
 
+def send_chat_cover_letter(driver, vacancy_id: str, text: str) -> bool:
+    """Отклик ушёл без сопроводительного письма (форма его не приняла,
+    см. HeadHunterBrowserClient._fill_cover_letter_if_present) — письмо
+    отправляется первым сообщением в чат этой вакансии, тем же способом,
+    что fetch_new_employer_messages находит и открывает чат. ponytail:
+    та же неподтверждённая разметка чата, что и в остальных
+    best-effort местах этого источника."""
+    driver.get(NEGOTIATIONS_URL)
+    time.sleep(PAGE_LOAD_WAIT_SECONDS)
+    for item in driver.find_elements(
+        By.CSS_SELECTOR, '[data-qa*="negotiations-item"]'
+    ):
+        links = item.find_elements(By.CSS_SELECTOR, 'a[href*="/vacancy/"]')
+        if not links:
+            continue
+        href = links[0].get_attribute("href") or ""
+        if vacancy_id not in href:
+            continue
+        chat_link = item.find_elements(By.CSS_SELECTOR, 'a[data-qa*="chat"]')
+        if not chat_link:
+            return False
+        driver.get(chat_link[0].get_attribute("href"))
+        time.sleep(PAGE_LOAD_WAIT_SECONDS)
+        return send_reply(driver, text)
+    return False
+
+
 def send_reply(driver, text: str) -> bool:
     """Отправляет ответ в уже открытом чате (после
     fetch_new_employer_messages). ponytail: см. её докстринг про

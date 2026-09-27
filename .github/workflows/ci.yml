@@ -43,7 +43,8 @@ jobs:
       # conflict, not a real style issue. Per-file E501 ignores below
       # are all unsplittable template/fixture strings, not real code:
       # config.py has a URL inside a vendored HTML template;
-      # autostart.py has the required macOS plist DOCTYPE line;
+      # autostart.py and daemon_service.py have the required macOS plist
+      # DOCTYPE line;
       # test_habr_career_mapping.py and test_himalayas_mapping.py have
       # raw HTML test fixtures; resume_audit.py has natural-language
       # LLM prompt text.
@@ -51,7 +52,7 @@ jobs:
         run: |
           flake8 --max-line-length=79 --select=E,F \
             --extend-ignore=E704,E203 \
-            --per-file-ignores="src/libs/resume_and_cover_builder/config.py:E501,src/utils/autostart.py:E501,tests/test_habr_career_mapping.py:E501,tests/test_himalayas_mapping.py:E501,src/job_sources/resume_audit.py:E501"
+            --per-file-ignores="src/libs/resume_and_cover_builder/config.py:E501,src/utils/autostart.py:E501,src/utils/daemon_service.py:E501,tests/test_habr_career_mapping.py:E501,tests/test_himalayas_mapping.py:E501,src/job_sources/resume_audit.py:E501"
 
       - name: mypy
         run: mypy --ignore-missing-imports main.py src desktop_app.py

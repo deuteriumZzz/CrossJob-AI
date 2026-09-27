@@ -20,8 +20,10 @@ TIMEOUT = 20
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; CrossJob-AI)"}
 
 WWR_FEEDS = (
-    "https://weworkremotely.com/categories/remote-back-end-programming-jobs.rss",
-    "https://weworkremotely.com/categories/remote-full-stack-programming-jobs.rss",
+    "https://weworkremotely.com/categories/"
+    "remote-back-end-programming-jobs.rss",
+    "https://weworkremotely.com/categories/"
+    "remote-full-stack-programming-jobs.rss",
 )
 HN_SEARCH_URL = (
     "https://hn.algolia.com/api/v1/search_by_date"

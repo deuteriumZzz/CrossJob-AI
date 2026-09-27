@@ -1,7 +1,9 @@
 from unittest.mock import MagicMock, patch
 
 from src.job_sources.telegram_notify import (
+    TelegramAPIError,
     notify_manual_login_required,
+    raise_for_telegram_status,
     send_notification,
 )
 
@@ -31,6 +33,23 @@ def test_send_notification_posts_to_telegram_api():
         timeout=10,
     )
     mock_response.raise_for_status.assert_called_once()
+
+
+def test_telegram_http_error_never_exposes_bot_token():
+    response = MagicMock()
+    response.raise_for_status.side_effect = RuntimeError(
+        "request failed: https://api.telegram.org/botSUPER_SECRET/getUpdates"
+    )
+    response.status_code = 409
+    response.json.return_value = {"description": "Conflict"}
+
+    try:
+        raise_for_telegram_status(response, "getUpdates")
+    except TelegramAPIError as error:
+        assert "SUPER_SECRET" not in str(error)
+        assert "409" in str(error) and "Conflict" in str(error)
+    else:
+        raise AssertionError("TelegramAPIError was not raised")
 
 
 if __name__ == "__main__":

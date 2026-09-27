@@ -45,7 +45,13 @@ def _make_data_folder(tmp: str) -> Path:
         "headhunter:\n"
         "  auto_apply: false\n"
         "  schedule_enabled: false\n"
-        "  interval_hours: 3\n",
+        "  interval_hours: 3\n"
+        "\n"
+        "telegram:\n"
+        "  channels: []\n"
+        "  intro_message_template: >-\n"
+        "    Исходное сообщение для {role}.\n"
+        "    Продолжение шаблона.\n",
         encoding="utf-8",
     )
     return data_folder
@@ -127,6 +133,73 @@ def test_readiness_resume_check_headhunter_and_linkedin(client):
         "readiness"
     ]
     assert li["resume"] == {"filename": "resume_linkedin.pdf", "ready": True}
+
+
+def test_resume_routing_settings_round_trip_and_reject_escape(client):
+    data_folder = api._data_folder
+    (data_folder / "resume.pdf").write_bytes(b"%PDF-1.4 fake")
+    (data_folder / "resume_linkedin.pdf").write_bytes(b"%PDF-1.4 fake")
+    (data_folder / "telegram").mkdir()
+    (data_folder / "telegram" / "backend_ru.pdf").write_bytes(b"%PDF-1.4 fake")
+    (data_folder / "telegram" / "backend_en.pdf").write_bytes(b"%PDF-1.4 fake")
+
+    response = client.put(
+        "/api/resumes/routing",
+        json={
+            "email_ru": "resume.pdf",
+            "email_en": "resume_linkedin.pdf",
+            "telegram_ru": "telegram/backend_ru.pdf",
+            "telegram_en": "telegram/backend_en.pdf",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["routing"] == {
+        "email_ru": "resume.pdf",
+        "email_en": "resume_linkedin.pdf",
+        "telegram_ru": "telegram/backend_ru.pdf",
+        "telegram_en": "telegram/backend_en.pdf",
+    }
+    assert {item["value"] for item in body["available"]} == {
+        "resume.pdf",
+        "resume_linkedin.pdf",
+        "telegram/backend_ru.pdf",
+        "telegram/backend_en.pdf",
+    }
+    persisted = api._data_folder.joinpath("work_preferences.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "resume_routing:" in persisted
+    assert "telegram_ru: 'telegram/backend_ru.pdf'" in persisted
+
+    response = client.put(
+        "/api/resumes/routing",
+        json={
+            "email_ru": "../outside.pdf",
+            "email_en": "resume_linkedin.pdf",
+            "telegram_ru": "telegram/backend_ru.pdf",
+            "telegram_en": "telegram/backend_en.pdf",
+        },
+    )
+    assert response.status_code == 400
+
+
+def test_resumes_endpoint_exposes_effective_language_routes(client):
+    data_folder = api._data_folder
+    (data_folder / "resume.pdf").write_bytes(b"%PDF-1.4 fake")
+    (data_folder / "resume_linkedin.pdf").write_bytes(b"%PDF-1.4 fake")
+    (data_folder / "telegram").mkdir()
+    (data_folder / "telegram" / "backend_ru.pdf").write_bytes(b"%PDF-1.4 fake")
+    (data_folder / "telegram" / "backend_en.pdf").write_bytes(b"%PDF-1.4 fake")
+
+    body = client.get("/api/resumes").json()
+
+    assert body["routing"] == {
+        "email_ru": "resume.pdf",
+        "email_en": "resume_linkedin.pdf",
+        "telegram_ru": "telegram/backend_ru.pdf",
+        "telegram_en": "telegram/backend_en.pdf",
+    }
 
 
 def test_stats_empty_log_returns_zeros(client):
@@ -617,13 +690,35 @@ def test_post_telegram_settings_updates_channels(client):
 
     response = client.post(
         "/api/settings/telegram",
-        json={"channels": ["chan_one", "chan_two"]},
+        json={
+            "channels": [
+                " @chan_one ",
+                "https://t.me/chan_two/",
+                "chan_one",
+            ],
+            "intro_message_template": "Новое сообщение для {role}",
+        },
     )
     assert response.status_code == 200
     assert response.json()["channels"] == ["chan_one", "chan_two"]
+    assert response.json()["intro_message_template"] == "Новое сообщение для {role}"
 
     follow_up = client.get("/api/settings/telegram")
     assert follow_up.json()["channels"] == ["chan_one", "chan_two"]
+    assert follow_up.json()["intro_message_template"] == "Новое сообщение для {role}"
+
+
+def test_post_telegram_settings_rejects_invalid_channel_without_saving(client):
+    config_file = api._data_folder / "work_preferences.yaml"
+    original = config_file.read_text(encoding="utf-8")
+
+    response = client.post(
+        "/api/settings/telegram",
+        json={"channels": ["not a public channel!"]},
+    )
+
+    assert response.status_code == 422
+    assert config_file.read_text(encoding="utf-8") == original
 
 
 def test_post_generate_positions_saves_inferred_list(client):

@@ -2957,6 +2957,96 @@ kbd {
   margin: 0 0 8px;
 }
 
+.tg-channel-composer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.tg-channel-composer input {
+  min-width: 0;
+  flex: 1;
+}
+
+.tg-channel-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.tg-channel-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 5px 7px 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+}
+
+.tg-channel-link {
+  overflow: hidden;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tg-channel-link:hover {
+  text-decoration: underline;
+}
+
+.tg-channel-remove {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.tg-channel-remove:hover,
+.tg-channel-remove:focus-visible {
+  background: var(--danger-bg, #fff0f0);
+  color: var(--danger, #b42318);
+}
+
+.tg-channel-empty {
+  width: 100%;
+  margin: 0;
+}
+
+.tg-channel-bulk {
+  margin-top: 8px;
+}
+
+@media (max-width: 560px) {
+  .tg-channel-composer {
+    flex-wrap: wrap;
+  }
+
+  .tg-channel-composer input {
+    flex-basis: 100%;
+  }
+}
+
 /* Импорт файла и рассылка (Общение → База компаний / Рассылка) */
 #import-preview:not(:empty) {
   margin-bottom: 14px;
@@ -3782,6 +3872,35 @@ details.panel.more[open] > summary {
 .resume-action {
   justify-self: end;
 }
+.resume-routing {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+.resume-routing-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.resume-routing-head h4,
+.resume-routing-head p {
+  margin: 0;
+}
+.resume-routing-head p {
+  margin-top: 4px;
+}
+.resume-routing-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  margin-top: 14px;
+}
+.resume-routing-grid select {
+  width: 100%;
+}
 @media (max-width: 700px) {
   .resume-head {
     display: none;
@@ -3797,6 +3916,9 @@ details.panel.more[open] > summary {
   .resume-row > .resume-action {
     grid-row: 1;
     grid-column: 2;
+  }
+  .resume-routing-grid {
+    grid-template-columns: 1fr;
   }
 }
 

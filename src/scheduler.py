@@ -14,6 +14,22 @@ from src.scheduler_state import get_next_run, record_run_result
 
 DEFAULT_INTERVAL_HOURS = 3
 
+# Площадки, участвующие в "постоянном цикле" (limits.continuous_cycle_enabled)
+# — реальный поиск+отклик на job-бордах. telegram — свой живой шлюз
+# (посты приходят в момент публикации, ему это не нужно), direct —
+# email-рассылка со своим тёмпом (mail_guard), не годится под общий
+# 3-минутный круг.
+CONTINUOUS_CYCLE_SOURCES = {
+    "headhunter",
+    "geekjob",
+    "getmatch",
+    "linkedin",
+    "habr_career",
+    "wellfound",
+    "himalayas",
+    "djinni",
+}
+
 
 # Как часто проверять ответы, если в настройках не задано: команды боту —
 # каждые 3 минуты, ответы HR — чаще, чем поиск вакансий.
@@ -23,6 +39,7 @@ CHECK_INTERVAL_HOURS = {
     "check_email_replies": 1,
     "check_hh_replies": 1,
 }
+
 
 class Scheduler:
     """Встроенный планировщик вместо внешнего cron — сам решает,
@@ -61,7 +78,11 @@ class Scheduler:
             # hh открывает браузер — только если сама площадка в расписании.
             enabled_by_default = name.startswith("check_") and (
                 name != "check_hh_replies"
-                or bool((self.parameters.get("headhunter") or {}).get("schedule_enabled"))
+                or bool(
+                    (self.parameters.get("headhunter") or {}).get(
+                        "schedule_enabled"
+                    )
+                )
             )
             if not source_config.get("schedule_enabled", enabled_by_default):
                 continue
@@ -74,10 +95,36 @@ class Scheduler:
         from src.utils.backup import daily_backup
 
         daily_backup(self.output_folder)
-        for name in self.due_sources():
+        limits = self.parameters.get("limits") or {}
+        continuous = bool(limits.get("continuous_cycle_enabled"))
+        gap_hours = max(1, int(limits.get("continuous_cycle_gap_minutes", 3))) / 60
+
+        due = self.due_sources()
+        if continuous:
+            # Раунд-робин через уже существующий next_run каждой площадки:
+            # запускаем только САМУЮ первую по порядку due-площадку из
+            # ротации за один тик — её next_run сдвинется на gap_hours
+            # вперёд, и на следующем тике (30с) уже другая due-площадка
+            # окажется первой. check_*-задачи (ответы HR и т.п.) в
+            # ротацию не входят — идут своим чередом, как обычно.
+            due_cycle = [n for n in due if n in CONTINUOUS_CYCLE_SOURCES]
+            due_rest = [n for n in due if n not in CONTINUOUS_CYCLE_SOURCES]
+            # check_hh_replies не идёт отдельным таймером, пока постоянный
+            # цикл включён — раз уж на HH и так заходим каждый gap_hours,
+            # логичнее проверить сообщения/дослать письмо тем же заходом,
+            # чем открывать браузер на HH ещё раз отдельно по своему таймеру.
+            due_rest = [n for n in due_rest if n != "check_hh_replies"]
+            due = due_rest + (due_cycle[:1] if due_cycle else [])
+
+        for name in due:
             run_at = self.now_fn()
-            interval_hours = (self.parameters.get(name) or {}).get(
-                "interval_hours", CHECK_INTERVAL_HOURS.get(name, DEFAULT_INTERVAL_HOURS)
+            interval_hours = (
+                gap_hours
+                if continuous and name in CONTINUOUS_CYCLE_SOURCES
+                else (self.parameters.get(name) or {}).get(
+                    "interval_hours",
+                    CHECK_INTERVAL_HOURS.get(name, DEFAULT_INTERVAL_HOURS),
+                )
             )
             next_run = run_at + timedelta(hours=interval_hours)
             try:
@@ -99,10 +146,45 @@ class Scheduler:
                 )
                 continue
             record_run_result(self.output_folder, name, "ok", next_run, run_at)
+            if (
+                continuous
+                and name == "headhunter"
+                and "check_hh_replies" in self.source_map
+            ):
+                self._run_piggybacked_hh_replies()
 
         self._check_llm_cost_alert()
         self._purge_old_cover_letters()
         self._purge_old_applications()
+
+    def _run_piggybacked_hh_replies(self) -> None:
+        """Постоянный цикл: раз уж только что заходили на HH (поиск+
+        отклик), проверяем сообщения/дошлём письмо в чат тем же
+        заходом — вместо отдельного таймера check_hh_replies (см.
+        due_sources исключение выше)."""
+        run_at = self.now_fn()
+        interval_hours = (self.parameters.get("check_hh_replies") or {}).get(
+            "interval_hours", CHECK_INTERVAL_HOURS.get("check_hh_replies", 1)
+        )
+        next_run = run_at + timedelta(hours=interval_hours)
+        try:
+            self.source_map["check_hh_replies"](
+                self.parameters, self.llm_api_key
+            )
+        except Exception as e:
+            logger.exception(f"[scheduler] check_hh_replies failed: {e}")
+            record_run_result(
+                self.output_folder,
+                "check_hh_replies",
+                "error",
+                next_run,
+                run_at,
+                error=str(e),
+            )
+            return
+        record_run_result(
+            self.output_folder, "check_hh_replies", "ok", next_run, run_at
+        )
 
     def _purge_old_cover_letters(self) -> None:
         retention_days = int(
@@ -149,7 +231,10 @@ class Scheduler:
         self.stop_event.set()
 
     def run_forever(self, tick_seconds: int = 30) -> None:
-        from src.job_sources.telegram.watcher import active_watcher, start_telegram_watcher
+        from src.job_sources.telegram.watcher import (
+            active_watcher,
+            start_telegram_watcher,
+        )
 
         logger.info("Scheduler started.")
         # Постоянный шлюз Telegram (telegram.watch_enabled) живёт, пока
@@ -166,6 +251,7 @@ class Scheduler:
         finally:
             # Парсер могли включить/выключить из дашборда на ходу — гасим
             # тот, что работает сейчас, а не только запущенный здесь.
-            for w in {watcher, active_watcher()} - {None}:
-                w.stop()
+            for w in (watcher, active_watcher()):
+                if w is not None:
+                    w.stop()
             logger.info("Scheduler stopped.")

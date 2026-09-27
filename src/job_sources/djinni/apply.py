@@ -28,13 +28,29 @@ LOGIN_TIMEOUT_SECONDS = 600
 PAGE_LOAD_WAIT_SECONDS = 3
 
 _APPLY_MARKERS = (
-    "apply for the job", "відгукнутися на вакансію", "откликнуться на вакансию",
-    "відгукнутися", "откликнуться", "apply",
+    "apply for the job",
+    "відгукнутися на вакансію",
+    "откликнуться на вакансию",
+    "відгукнутися",
+    "откликнуться",
+    "apply",
 )
-_SUBMIT_MARKERS = ("apply for the job", "відгукнутися", "откликнуться", "надіслати", "отправить", "send", "apply")
+_SUBMIT_MARKERS = (
+    "apply for the job",
+    "відгукнутися",
+    "откликнуться",
+    "надіслати",
+    "отправить",
+    "send",
+    "apply",
+)
 _APPLIED_MARKERS = (
-    "you applied", "you have applied", "ви відгукнулися", "вы откликнулись",
-    "відгук надіслано", "application sent",
+    "you applied",
+    "you have applied",
+    "ви відгукнулися",
+    "вы откликнулись",
+    "відгук надіслано",
+    "application sent",
 )
 
 
@@ -57,8 +73,13 @@ class DjinniSession:
         if _in_cabinet(self.driver):
             return
         get_with_retry(self.driver, f"{BASE}/login?lang=en&next=/my/profile/")
-        logger.info(f"Djinni: войдите вручную в открывшемся браузере (до {LOGIN_TIMEOUT_SECONDS}с).")
-        notify_manual_login_required(parameters, "Djinni", LOGIN_TIMEOUT_SECONDS)
+        logger.info(
+            "Djinni: войдите вручную в открывшемся браузере (до "
+            f"{LOGIN_TIMEOUT_SECONDS}с)."
+        )
+        notify_manual_login_required(
+            parameters, "Djinni", LOGIN_TIMEOUT_SECONDS
+        )
         deadline = time.monotonic() + LOGIN_TIMEOUT_SECONDS
         # После входа через Google Djinni может открыть не кабинет, а любую
         # свою страницу — ждём ухода со страниц входа, потом сверяем кабинет.
@@ -69,7 +90,9 @@ class DjinniSession:
         get_with_retry(self.driver, f"{BASE}/my/profile/")
         time.sleep(PAGE_LOAD_WAIT_SECONDS)
         if not _in_cabinet(self.driver):
-            raise RuntimeError("Djinni: вход не подтвердился — кабинет /my/ не открывается.")
+            raise RuntimeError(
+                "Djinni: вход не подтвердился — кабинет /my/ не открывается."
+            )
 
     def quit(self) -> None:
         self.driver.quit()
@@ -88,14 +111,19 @@ def _left_login(driver) -> bool:
 
 def _guest_redirect(driver) -> bool:
     """Перекинуло на вход — значит, сессия слетела."""
-    return any(p in driver.current_url for p in ("/login", "/continue", "/signup"))
+    return any(
+        p in driver.current_url for p in ("/login", "/continue", "/signup")
+    )
 
 
 def _visible_by_text(root, markers: tuple[str, ...]):
     """Первая видимая кнопка/ссылка с маркером в тексте — маркеры идут
     от самого точного к общему."""
     candidates = [
-        el for el in root.find_elements(By.CSS_SELECTOR, 'button, a, input[type="submit"]')
+        el
+        for el in root.find_elements(
+            By.CSS_SELECTOR, 'button, a, input[type="submit"]'
+        )
         if el.is_displayed()
     ]
     for marker in markers:
@@ -125,22 +153,42 @@ def bump_profile(driver) -> str:
     if wait:
         return f"not_yet:{wait.group(1)}"
     button = next(
-        (b for b in driver.find_elements(By.CSS_SELECTOR, "button, a")
-         if b.is_displayed() and "bump my profile" in (b.text or "").lower()),
+        (
+            b
+            for b in driver.find_elements(By.CSS_SELECTOR, "button, a")
+            if b.is_displayed() and "bump my profile" in (b.text or "").lower()
+        ),
         None,
     )
-    if button is None or not button.is_enabled() or button.get_attribute("disabled"):
+    if (
+        button is None
+        or not button.is_enabled()
+        or button.get_attribute("disabled")
+    ):
         return "not_found"
-    driver.execute_script("arguments[0].scrollIntoView({block: 'center'}); arguments[0].click();", button)
+    driver.execute_script(
+        "arguments[0].scrollIntoView({block: 'center'}); "
+        "arguments[0].click();",
+        button,
+    )
     time.sleep(PAGE_LOAD_WAIT_SECONDS)
     # После поднятия Djinni снова пишет «можно через 7 дней».
     driver.get(f"{BASE}/my/profile/")
     time.sleep(PAGE_LOAD_WAIT_SECONDS)
-    return "bumped" if _BUMP_AGAIN_RE.search(visible_text(driver)) else "not_found"
+    return (
+        "bumped"
+        if _BUMP_AGAIN_RE.search(visible_text(driver))
+        else "not_found"
+    )
 
 
 _UNMET_MARKER = "does not meet some of the requirements"
-_UNMET_END = ("if you", "update your profile", "want to compare", "see applicant insights")
+_UNMET_END = (
+    "if you",
+    "update your profile",
+    "want to compare",
+    "see applicant insights",
+)
 
 
 def unmet_requirements(driver, job_link: str) -> list[str]:
@@ -154,16 +202,22 @@ def unmet_requirements(driver, job_link: str) -> list[str]:
     raise_if_blocked(visible_text(driver))
     text = visible_text(driver)
     if "can't apply for jobs right now" in text.lower():
-        raise DjinniProfileRequired("На Djinni не заполнен профиль кандидата — откликаться нельзя, пока он не создан: djinni.co/my/wizard/")
+        raise DjinniProfileRequired(
+            "На Djinni не заполнен профиль кандидата — откликаться нельзя, "
+            "пока он не создан: djinni.co/my/wizard/"
+        )
     start = text.find(_UNMET_MARKER)
     if start < 0:
         return []
-    reasons = []
-    for line in text[start + len(_UNMET_MARKER):].splitlines():
+    reasons: list[str] = []
+    for line in text[start + len(_UNMET_MARKER) :].splitlines():
         line = line.strip()
         if not line or line.lower().startswith("specified by"):
             continue
-        if any(line.lower().startswith(e) for e in _UNMET_END) or len(reasons) >= 10:
+        if (
+            any(line.lower().startswith(e) for e in _UNMET_END)
+            or len(reasons) >= 10
+        ):
             break
         reasons.append(line)
     return reasons or ["профиль не проходит требования компании"]
@@ -182,20 +236,34 @@ def apply_to_job(driver, job_link: str, message: str) -> bool:
     # Без заполненного профиля Djinni показывает кнопку, но откликнуться не
     # даёт (подтверждено вживую 2026-09-25) — говорим прямо, что делать.
     if "can't apply for jobs right now" in visible_text(driver).lower():
-        raise DjinniProfileRequired("На Djinni не заполнен профиль кандидата — откликаться нельзя, пока он не создан: djinni.co/my/wizard/")
+        raise DjinniProfileRequired(
+            "На Djinni не заполнен профиль кандидата — откликаться нельзя, "
+            "пока он не создан: djinni.co/my/wizard/"
+        )
 
     button = _visible_by_text(driver, _APPLY_MARKERS)
     if button is None:
         logger.warning(f"Djinni: не нашёл кнопку отклика на {job_link}")
         return False
-    driver.execute_script("arguments[0].scrollIntoView({block: 'center'}); arguments[0].click();", button)
+    driver.execute_script(
+        "arguments[0].scrollIntoView({block: 'center'}); "
+        "arguments[0].click();",
+        button,
+    )
     time.sleep(2)
     if _guest_redirect(driver):
         return False
 
-    fields = [t for t in driver.find_elements(By.TAG_NAME, "textarea") if t.is_displayed()]
+    fields = [
+        t
+        for t in driver.find_elements(By.TAG_NAME, "textarea")
+        if t.is_displayed()
+    ]
     if not fields:
-        logger.warning(f"Djinni: после кнопки отклика нет поля для сообщения на {job_link}")
+        logger.warning(
+            "Djinni: после кнопки отклика нет поля для сообщения на "
+            f"{job_link}"
+        )
         return False
     field = fields[0]
     field.clear()
@@ -205,11 +273,19 @@ def apply_to_job(driver, job_link: str, message: str) -> bool:
     forms = field.find_elements(By.XPATH, "./ancestor::form[1]")
     form = forms[0] if forms else driver
     submit = next(
-        (b for b in form.find_elements(By.CSS_SELECTOR, 'button[type="submit"], input[type="submit"]') if b.is_displayed()),
+        (
+            b
+            for b in form.find_elements(
+                By.CSS_SELECTOR, 'button[type="submit"], input[type="submit"]'
+            )
+            if b.is_displayed()
+        ),
         None,
     ) or _visible_by_text(form, _SUBMIT_MARKERS)
     if submit is None:
-        logger.warning(f"Djinni: не нашёл кнопку отправки отклика на {job_link}")
+        logger.warning(
+            f"Djinni: не нашёл кнопку отправки отклика на {job_link}"
+        )
         return False
     driver.execute_script("arguments[0].click();", submit)
     time.sleep(3)

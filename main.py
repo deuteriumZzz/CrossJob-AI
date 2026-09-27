@@ -6,8 +6,8 @@ import shutil
 import sys
 import threading
 import time
-from collections import Counter
 import traceback
+from collections import Counter
 from contextlib import nullcontext
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -27,7 +27,24 @@ from config import (
     LINKEDIN_DAILY_APPLICATION_LIMIT,
     LLM_MODEL_TYPE,
 )
-from src.config_patch import set_source_field, set_top_level_field
+from src.config_patch import (
+    set_list_field,
+    set_source_field,
+    set_top_level_field,
+)
+from src.direct import mail_guard
+from src.direct.campaign import CampaignJob, CampaignStore, campaign_stats
+from src.direct.companies import all_companies
+from src.direct.contacts import extract_emails
+from src.direct.dossier import collect_dossier
+from src.direct.email_channel import (
+    bounced_addresses,
+    build_message,
+    send_email,
+    senders_replied,
+)
+from src.direct.form_fill import prefill_application
+from src.direct.source import DirectSource
 from src.job import Job
 from src.job_sources.applied_log import AppliedLog, effective_stage
 from src.job_sources.apply_pacing import (
@@ -44,52 +61,28 @@ from src.job_sources.block_detection import (
     is_still_blocked,
     mark_blocked,
 )
-from src.job_sources.cover_letter import generate_cover_letter_for_job
+from src.job_sources.contact_book import ContactBook, contacts_from_text
+from src.job_sources.cover_letter import (
+    generate_cover_letter_for_job,
+    set_cover_letter_style,
+)
+from src.job_sources.djinni.apply import (
+    DjinniProfileRequired,
+    DjinniSession,
+)
+from src.job_sources.djinni.apply import apply_to_job as apply_to_djinni_job
+from src.job_sources.djinni.apply import bump_profile as bump_djinni_profile
+from src.job_sources.djinni.apply import (
+    unmet_requirements as djinni_unmet_requirements,
+)
+from src.job_sources.djinni.search import search as search_djinni_jobs
 from src.job_sources.geekjob.auth import GeekjobSession
 from src.job_sources.geekjob.client import GeekjobClient
 from src.job_sources.geekjob.source import GeekjobSource
 from src.job_sources.getmatch.auth import GetMatchSession
 from src.job_sources.getmatch.client import GetMatchClient
 from src.job_sources.getmatch.source import GetMatchSource
-from src.direct.companies import all_companies
-from src.direct.contacts import extract_emails
-from src.direct import mail_guard
-from src.direct.dossier import collect_dossier
-from src.direct.campaign import CampaignJob, CampaignStore, campaign_stats
-from src.direct.email_channel import (
-    bounced_addresses,
-    build_message,
-    send_email,
-    senders_replied,
-)
-from src.direct.form_fill import prefill_application
-from src.direct.source import DirectSource
-from src.job_sources.contact_book import ContactBook, contacts_from_text
-from src.job_sources.telegram.post_parser import parse_post
-from src.job_sources.telegram.watcher import (
-    active_watcher,
-    get_watch_post,
-    save_telegram_letter,
-    telegram_resumes,
-)
 from src.job_sources.github_context import fetch_github_summary
-from src.job_sources.interview_calendar import build_ics, extract_interview_time
-from src.job_sources.interview_prep import generate_interview_prep
-from src.job_sources.telegram_notify import send_document_from_secrets
-from src.job_sources.hr_replies import (
-    CATEGORY_LABELS,
-    CATEGORY_STAGE,
-    FOLLOW_UP_TEXT,
-    FOLLOW_UP_TEXT_EN,
-    DraftStore,
-    _looks_russian,
-    build_digest,
-    generate_company_email,
-    generate_first_message,
-    classify_reply,
-    due_follow_ups,
-    format_draft_notification,
-)
 from src.job_sources.habr_career.auth import HabrCareerSession
 from src.job_sources.habr_career.client import HabrCareerClient
 from src.job_sources.habr_career.source import HabrCareerSource
@@ -105,6 +98,7 @@ from src.job_sources.headhunter.browser_replies import (
     block_employer,
     fetch_new_employer_messages,
     find_external_link,
+    send_chat_cover_letter,
     send_reply,
 )
 from src.job_sources.headhunter.browser_session import HeadHunterSession
@@ -123,7 +117,6 @@ from src.job_sources.headhunter.telegram_approval import (
     get_pending_form,
     notify_pending_form,
     parse_form_commands,
-    poll_form_commands,
     remove_pending_form,
     save_pending_form,
     update_pending_form_answers,
@@ -132,12 +125,27 @@ from src.job_sources.himalayas.apply import (
     apply_to_job as apply_to_himalayas_job,
 )
 from src.job_sources.himalayas.auth import HimalayasSession
-from src.job_sources.djinni.apply import DjinniProfileRequired, DjinniSession
-from src.job_sources.djinni.apply import apply_to_job as apply_to_djinni_job
-from src.job_sources.djinni.apply import bump_profile as bump_djinni_profile
-from src.job_sources.djinni.apply import unmet_requirements as djinni_unmet_requirements
-from src.job_sources.djinni.search import search as search_djinni_jobs
 from src.job_sources.himalayas.source import HimalayasSource
+from src.job_sources.hr_replies import (
+    CATEGORY_LABELS,
+    CATEGORY_STAGE,
+    FOLLOW_UP_TEXT,
+    FOLLOW_UP_TEXT_EN,
+    DraftStore,
+    _looks_russian,
+    build_digest,
+    classify_reply,
+    company_uses_russian,
+    due_follow_ups,
+    format_draft_notification,
+    generate_company_email,
+    generate_first_message,
+)
+from src.job_sources.interview_calendar import (
+    build_ics,
+    extract_interview_time,
+)
+from src.job_sources.interview_prep import generate_interview_prep
 from src.job_sources.job_fit import classify_fit, score_job_fit
 from src.job_sources.linkedin.answerer import EasyApplyAnswerer
 from src.job_sources.linkedin.auth import LinkedInSession
@@ -178,20 +186,33 @@ from src.job_sources.resume_profile import (
     extract_plain_text_resume,
     infer_positions_from_resume,
 )
+from src.job_sources.resume_routing import (
+    ResumeChannel,
+    resolve_resume,
+    resolve_resume_name,
+    resume_relative_name,
+)
 from src.job_sources.telegram.client import TelegramSourceClient
 from src.job_sources.telegram.contact import extract_contact
+from src.job_sources.telegram.post_parser import parse_post
 from src.job_sources.telegram.source import TelegramSource
+from src.job_sources.telegram.watcher import (
+    active_watcher,
+    get_watch_post,
+    save_telegram_letter,
+    telegram_resumes,
+)
 from src.job_sources.telegram_control import HELP_TEXT as _TELEGRAM_HELP_TEXT
 from src.job_sources.telegram_control import (
     parse_control_commands,
     poll_bot_updates,
-    poll_control_commands,
 )
 from src.job_sources.telegram_conversations import TelegramConversations
 from src.job_sources.telegram_notify import (
     bot_credentials,
     bot_request,
     notify_from_secrets,
+    send_document_from_secrets,
     send_notification,
 )
 from src.job_sources.wellfound.auth import WellfoundSession
@@ -208,7 +229,6 @@ from src.resume_schemas.resume import Resume
 from src.scheduler import DEFAULT_INTERVAL_HOURS, Scheduler
 from src.scheduler_state import load_state, record_run_result
 from src.utils.chrome_utils import HTML_to_PDF, init_browser
-from src.utils.file_lock import state_file_lock
 from src.utils.constants import (
     PLAIN_TEXT_RESUME_YAML,
     RESUME_PDF,
@@ -216,6 +236,7 @@ from src.utils.constants import (
     SECRETS_YAML,
     WORK_PREFERENCES_YAML,
 )
+from src.utils.file_lock import state_file_lock
 
 
 class ConfigError(Exception):
@@ -278,8 +299,12 @@ class ConfigValidator:
         чтобы вся проверка конфигурации ловила один тип исключения
         с понятным текстом."""
         try:
-            with open(yaml_path, "r") as stream:
+            with open(yaml_path, "r", encoding="utf-8") as stream:
                 return yaml.safe_load(stream)
+        except UnicodeDecodeError as exc:
+            raise ConfigError(
+                f"YAML file {yaml_path} must be saved as UTF-8: {exc}"
+            ) from exc
         except yaml.YAMLError as exc:
             raise ConfigError(f"Error reading YAML file {yaml_path}: {exc}")
         except FileNotFoundError:
@@ -598,7 +623,9 @@ def ensure_plain_text_resume(parameters: dict, llm_api_key: str) -> Path:
     resume.pdf лениво, при первом обращении к одному из этих
     пунктов, и переиспользуется дальше без повторной генерации."""
     plain_text_resume_file: Path = parameters["plainTextResumeFile"]
-    if not plain_text_resume_file.exists() or is_template_resume(plain_text_resume_file):
+    if not plain_text_resume_file.exists() or is_template_resume(
+        plain_text_resume_file
+    ):
         resume_pdf_path = parameters["dataFolder"] / RESUME_PDF
         if not resume_pdf_path.exists():
             raise FileNotFoundError(
@@ -625,7 +652,10 @@ def is_template_resume(path: Path) -> bool:
         return False
 
 
-_NAME_LINE = re.compile(r"^[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё'’.-]+(?: [A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё'’.-]+){1,3}$")
+_NAME_LINE = re.compile(
+    r"^[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё'’.-]+(?: "
+    r"[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё'’.-]+){1,3}$"
+)
 
 
 def candidate_name(parameters: dict, resume_pdf: Optional[Path] = None) -> str:
@@ -643,9 +673,14 @@ def candidate_name(parameters: dict, resume_pdf: Optional[Path] = None) -> str:
                     return line
         except Exception as e:
             logger.warning(f"Не удалось прочитать имя из {pdf.name}: {e}")
-    resume_yaml = Path(parameters.get("plainTextResumeFile") or parameters["dataFolder"] / PLAIN_TEXT_RESUME_YAML)
+    resume_yaml = Path(
+        parameters.get("plainTextResumeFile")
+        or parameters["dataFolder"] / PLAIN_TEXT_RESUME_YAML
+    )
     if resume_yaml.exists() and not is_template_resume(resume_yaml):
-        person = (yaml.safe_load(resume_yaml.read_text(encoding="utf-8")) or {}).get("personal_information") or {}
+        person = (
+            yaml.safe_load(resume_yaml.read_text(encoding="utf-8")) or {}
+        ).get("personal_information") or {}
         return f"{person.get('name', '')} {person.get('surname', '')}".strip()
     return ""
 
@@ -1454,6 +1489,24 @@ def search_and_apply_headhunter(
                     logger.info(
                         f"Applied to {job.role} at {job.company} ({job.link})"
                     )
+                    if not cover_letter and hh_preferences.get(
+                        "chat_cover_letter_followup"
+                    ):
+                        # Форма отклика не приняла письмо (сухой отклик) —
+                        # генерируем его сейчас, пока job ещё в памяти, и
+                        # сохраняем в applied_log; отправит в чат
+                        # check_headhunter_replies (см.
+                        # _send_missing_cover_letters), не блокируя сам
+                        # отклик паузой на LLM+чат прямо здесь.
+                        try:
+                            cover_letter = generate_cover_letter_for_job(
+                                resume_pdf_path, job, llm_api_key
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                "Не удалось сгенерировать письмо для "
+                                f"досылки в чат {job.company}: {e}"
+                            )
                 else:
                     status = "dry_run"
                     logger.warning(
@@ -2932,10 +2985,15 @@ def search_direct(
     hunter_key = secrets.get("hunter_api_key") or ""
 
     jobs = DirectSource().search(
-        {**parameters, "direct": {**config, "companies": all_companies(parameters)}}
+        {
+            **parameters,
+            "direct": {**config, "companies": all_companies(parameters)},
+        }
     )
     logger.info(f"Found {len(jobs)} matching direct vacancies.")
-    in_book = {v["link"] for card in book.all().values() for v in card["vacancies"]}
+    in_book = {
+        v["link"] for card in book.all().values() for v in card["vacancies"]
+    }
     job_max_applications = _job_max_applications(parameters, "direct")
     added = with_email = processed = 0
     for job in jobs:
@@ -2958,32 +3016,49 @@ def search_direct(
             )
             continue
 
-        vacancy = {"title": job.role, "link": job.link, "source": "direct",
-                   "text": job.description[:4000], "score": fit.score}
+        vacancy = {
+            "title": job.role,
+            "link": job.link,
+            "source": "direct",
+            "text": job.description[:4000],
+            "score": fit.score,
+        }
         contacts = [
-            {"kind": "email", "value": email, "source": "Сайты компаний: текст вакансии",
-             "source_url": job.link}
+            {
+                "kind": "email",
+                "value": email,
+                "source": "Сайты компаний: текст вакансии",
+                "source_url": job.link,
+            }
             for email in extract_emails(job.description)
         ]
         if not contacts:
             try:
                 found = collect_dossier(
-                    {"website": job.company_url, "vacancies": [vacancy]}, hunter_key
+                    {"website": job.company_url, "vacancies": [vacancy]},
+                    hunter_key,
                 )["contacts"]
             except Exception as e:
                 logger.warning(f"Сайты компаний: контакты {job.company}: {e}")
                 found = []
             contacts = [
                 {**c, "source": f"Сайты компаний: {c['source']}"}
-                for c in found if c["kind"] == "email"
+                for c in found
+                if c["kind"] == "email"
             ]
-        book.add(job.company, contacts, vacancy=vacancy, website=job.company_url)
+        book.add(
+            job.company, contacts, vacancy=vacancy, website=job.company_url
+        )
         in_book.add(job.link)
         added += 1
         with_email += bool(contacts)
         logger.info(
             f"[в Базу] {job.role} at {job.company}"
-            + (f" — {contacts[0]['value']}" if contacts else " — email не найден")
+            + (
+                f" — {contacts[0]['value']}"
+                if contacts
+                else " — email не найден"
+            )
         )
 
     if added:
@@ -3024,7 +3099,11 @@ def prefill_direct_application(
     driver = init_browser(output_folder / ".chrome_profile_direct")
     _PREFILL_BROWSERS.append(driver)
     return prefill_application(
-        driver, entry["link"], person, resume_pdf, entry.get("cover_letter", "")
+        driver,
+        entry["link"],
+        person,
+        resume_pdf,
+        entry.get("cover_letter", ""),
     )
 
 
@@ -3040,7 +3119,6 @@ def start_campaign_job(
     через Gmail с паузой 1–2 мин, резюме во вложении, до дневного лимита;
     kind="followups" — отправка готовых напоминаний (в той же ветке)."""
     output_folder: Path = parameters["outputFileDirectory"]
-    data_folder: Path = parameters["dataFolder"]
     store = CampaignStore(output_folder)
     drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
     book = ContactBook(output_folder)
@@ -3050,91 +3128,211 @@ def start_campaign_job(
 
     if kind == "prepare":
         positions = parameters.get("positions") or []
-        resume_pdf = data_folder / RESUME_PDF_LINKEDIN
-        if not resume_pdf.exists():
-            resume_pdf = data_folder / RESUME_PDF
-        name = candidate_name(parameters, resume_pdf)
         # Порциями по дневному лимиту: 3000 писем разом — 3000 запросов к
         # ИИ и письма, которые уйдут через месяцы. Следующую порцию
         # готовит _prepare_campaign_batches на следующий день.
         limit = mail_guard.plan(parameters, output_folder)["limit"]
-        ready = sum(1 for item in campaign["items"].values() if item["status"] == "draft")
+        ready = sum(
+            1
+            for item in campaign["items"].values()
+            if item["status"] == "draft"
+        )
 
         def freshness(email: str) -> str:
             # Свежие компании Базы — первыми: они актуальнее.
             card = book.get(campaign["items"][email]["key"]) or {}
-            found = next((c.get("found_at", "") for c in card.get("contacts", []) if c["value"].lower() == email), "")
+            found = next(
+                (
+                    c.get("found_at", "")
+                    for c in card.get("contacts", [])
+                    if c["value"].lower() == email
+                ),
+                "",
+            )
             return found or card.get("created_at", "")
 
-        pending = [e for e, item in campaign["items"].items() if item["status"] == "pending"]
-        emails = sorted(pending, key=freshness, reverse=True)[: max(0, limit - ready)]
+        pending = [
+            e
+            for e, item in campaign["items"].items()
+            if item["status"] == "pending"
+        ]
+        emails = sorted(pending, key=freshness, reverse=True)[
+            : max(0, limit - ready)
+        ]
         # Новая порция ждёт вашего «Отправить все» (бот / Главная) — если
         # только вы не включили «отправлять новые порции сам» и эта
         # рассылка уже отправляла (первую порцию вы смотрите всегда).
-        auto_send = bool((parameters.get("direct") or {}).get("auto_send")) and any(
-            item["status"] in ("sent", "replied", "bounced") for item in campaign["items"].values()
+        auto_send = bool(
+            (parameters.get("direct") or {}).get("auto_send")
+        ) and any(
+            item["status"] in ("sent", "replied", "bounced")
+            for item in campaign["items"].values()
         )
-        store.update(campaign_id, batch_day=datetime.now().astimezone().date().isoformat(), sending=auto_send)
+        store.update(
+            campaign_id,
+            batch_day=datetime.now().astimezone().date().isoformat(),
+            sending=auto_send,
+        )
 
         def step(email: str) -> Optional[str]:
             item = campaign["items"][email]
             card = book.get(item["key"]) or {"company": item["company"]}
-            contact = next((c for c in card.get("contacts", []) if c["value"].lower() == email), {})
+            contact: dict = next(
+                (
+                    c
+                    for c in card.get("contacts", [])
+                    if c["value"].lower() == email
+                ),
+                {},
+            )
             vacancy = (card.get("vacancies") or [{}])[-1]
+            russian = company_uses_russian(card)
+            resume_pdf = resolve_resume(parameters, "email", russian)
+            if resume_pdf is None:
+                store.update_item(
+                    campaign_id,
+                    email,
+                    status="failed",
+                    reason="Не найдено резюме для вложения",
+                )
+                return None
+            name = candidate_name(parameters, resume_pdf)
             try:
                 letter = generate_company_email(
-                    resume_pdf, name, vacancy.get("title") or (positions[0] if positions else "Python Developer"),
-                    card, contact.get("name", ""), llm_api_key,
+                    resume_pdf,
+                    name,
+                    vacancy.get("title")
+                    or (positions[0] if positions else "Python Developer"),
+                    card,
+                    contact.get("name", ""),
+                    llm_api_key,
+                    parameters,
                 )
             except Exception as e:
-                store.update_item(campaign_id, email, status="failed", reason=f"LLM: {e}"[:200])
+                store.update_item(
+                    campaign_id,
+                    email,
+                    status="failed",
+                    reason=f"LLM: {e}"[:200],
+                )
                 return None
             code = drafts.add(
-                email, letter["text"], "email", vacancy.get("link", ""),
-                channel="email", subject=letter["subject"], campaign=campaign_id,
+                email,
+                letter["text"],
+                "email",
+                vacancy.get("link", ""),
+                channel="email",
+                subject=letter["subject"],
+                campaign=campaign_id,
+                russian=russian,
+                resume=resume_relative_name(parameters, resume_pdf),
             )
-            store.update_item(campaign_id, email, status="draft", code=code, reason="")
+            store.update_item(
+                campaign_id, email, status="draft", code=code, reason=""
+            )
             return None
 
         def on_prepared(job: CampaignJob) -> None:
             stats = campaign_stats(store.get(campaign_id) or campaign)
             if stats["draft"] and auto_send:
-                _notify_with_buttons(parameters, (
-                    f"✍️ Рассылка «{campaign['name']}»: готово писем — {stats['draft']}. "
-                    "Отправлю сам в рабочее время, по одному."
-                    + (f" Ещё в очереди — {stats['pending']}." if stats["pending"] else "")
-                ), [[{"text": "👀 Показать по одному", "callback_data": f"cv:{campaign_id}:d"},
-                     {"text": "⏸ Не отправлять", "callback_data": f"cx:{campaign_id}"}]])
+                _notify_with_buttons(
+                    parameters,
+                    (
+                        f"✍️ Рассылка «{campaign['name']}»: готово писем — "
+                        f"{stats['draft']}. "
+                        "Отправлю сам в рабочее время, по одному."
+                        + (
+                            f" Ещё в очереди — {stats['pending']}."
+                            if stats["pending"]
+                            else ""
+                        )
+                    ),
+                    [
+                        [
+                            {
+                                "text": "👀 Показать по одному",
+                                "callback_data": f"cv:{campaign_id}:d",
+                            },
+                            {
+                                "text": "⏸ Не отправлять",
+                                "callback_data": f"cx:{campaign_id}",
+                            },
+                        ]
+                    ],
+                )
             elif stats["draft"]:
-                _notify_with_buttons(parameters, (
-                    f"✍️ Рассылка «{campaign['name']}»: готово писем — {stats['draft']}"
-                    + (f", не получилось — {stats['failed']}" if stats["failed"] else "")
-                    + (f", ещё в очереди — {stats['pending']}" if stats["pending"] else "")
-                    + ". Отправить через Gmail с резюме?"
-                ), [[{"text": "🚀 Отправить все", "callback_data": f"cs:{campaign_id}"},
-                     {"text": "👀 Показать по одному", "callback_data": f"cv:{campaign_id}:d"}]])
+                _notify_with_buttons(
+                    parameters,
+                    (
+                        f"✍️ Рассылка «{campaign['name']}»: готово писем — "
+                        f"{stats['draft']}"
+                        + (
+                            f", не получилось — {stats['failed']}"
+                            if stats["failed"]
+                            else ""
+                        )
+                        + (
+                            f", ещё в очереди — {stats['pending']}"
+                            if stats["pending"]
+                            else ""
+                        )
+                        + ". Отправить через Gmail с резюме?"
+                    ),
+                    [
+                        [
+                            {
+                                "text": "🚀 Отправить все",
+                                "callback_data": f"cs:{campaign_id}",
+                            },
+                            {
+                                "text": "👀 Показать по одному",
+                                "callback_data": f"cv:{campaign_id}:d",
+                            },
+                        ]
+                    ],
+                )
 
-        job = CampaignJob(campaign_id, "prepare", emails, step, pause=False, on_finish=on_prepared)
+        job = CampaignJob(
+            campaign_id,
+            "prepare",
+            emails,
+            step,
+            pause=False,
+            on_finish=on_prepared,
+        )
     elif kind == "followups":
         emails = [
-            e for e, item in campaign["items"].items()
-            if item.get("follow_up_code") and not item.get("followed_up_at")
+            e
+            for e, item in campaign["items"].items()
+            if item.get("follow_up_code")
+            and not item.get("followed_up_at")
             and drafts.get(item["follow_up_code"]) is not None
         ]
 
         def step(email: str) -> Optional[str]:
-            result = send_hr_draft(parameters, campaign["items"][email]["follow_up_code"])
+            result = send_hr_draft(
+                parameters, campaign["items"][email]["follow_up_code"]
+            )
             if not result.startswith("Отправлено"):
                 logger.warning(f"Напоминание {email}: {result}")
             return None
 
         job = CampaignJob(campaign_id, "followups", emails, step, pause=True)
     else:
-        emails = [e for e, item in campaign["items"].items() if item["status"] == "draft"]
+        emails = [
+            e
+            for e, item in campaign["items"].items()
+            if item["status"] == "draft"
+        ]
         # «Отправлять» — режим рассылки, а не разовый прогон: что не ушло
         # сегодня (лимит, вечер, выходные), check_campaign_sending
         # продолжит в следующее время отправки.
-        store.update(campaign_id, sending=True, resume=str(resume_path or ""), alerted="")
+        store.update(
+            campaign_id,
+            sending=True,
+            resume=str(resume_path or ""),
+            alerted="",
+        )
 
         def step(email: str) -> Optional[str]:
             guard = mail_guard.plan(parameters, output_folder)
@@ -3142,33 +3340,54 @@ def start_campaign_job(
                 return guard["reason"]
             code = campaign["items"][email]["code"]
             if drafts.get(code) is None:
-                store.update_item(campaign_id, email, status="skipped", reason="черновик удалён во «Входящих»")
+                store.update_item(
+                    campaign_id,
+                    email,
+                    status="skipped",
+                    reason="черновик удалён во «Входящих»",
+                )
                 return None
             result = send_hr_draft(parameters, code, attachment=resume_path)
             if _gmail_auth_failed(result):
                 # Пароль приложения отозван/сменён — все письма упадут так же.
                 # Стоп и один сигнал; снимется, когда сохраните новый пароль.
-                store.update(campaign_id, error="Gmail не принял пароль приложения — создайте новый в Настройках → Почта и письма")
+                store.update(
+                    campaign_id,
+                    error="Gmail не принял пароль приложения — создайте "
+                    "новый в Настройках → Почта и письма",
+                )
                 return "Gmail не принял пароль приложения"
             if result.startswith("Отправлено"):
-                store.update_item(campaign_id, email, status="sent", sent_at=datetime.now().astimezone().isoformat(), reason="")
+                store.update_item(
+                    campaign_id,
+                    email,
+                    status="sent",
+                    sent_at=datetime.now().astimezone().isoformat(),
+                    reason="",
+                )
                 return None
             if result.startswith("⏸"):
                 return result[2:]  # остальные останутся черновиками до завтра
-            store.update_item(campaign_id, email, status="failed", reason=result[:200])
+            store.update_item(
+                campaign_id, email, status="failed", reason=result[:200]
+            )
             return None
 
         def on_finish(job: CampaignJob) -> None:
             current = store.get(campaign_id) or campaign
             stats = campaign_stats(current)
             text = (
-                f"✉️ Рассылка «{campaign['name']}»: отправлено {stats['sent']} из "
-                f"{stats['total']}, ошибок {stats['failed']}, ждут отправки {stats['draft']}. "
+                f"✉️ Рассылка «{campaign['name']}»: отправлено "
+                f"{stats['sent']} из "
+                f"{stats['total']}, ошибок {stats['failed']}, ждут отправки "
+                f"{stats['draft']}. "
                 f"{job.message}"
             )
             # Остановка, где нужны вы (пароль Gmail, волна возвратов), — сразу
             # и один раз; обычные паузы (вечер, лимит) — в сводку.
-            stopped = current.get("error") or ("Возвратов" in job.message and job.message)
+            stopped = current.get("error") or (
+                "Возвратов" in job.message and job.message
+            )
             if stopped and current.get("alerted") != stopped:
                 store.update(campaign_id, alerted=stopped)
                 notify(parameters, f"⛔ {text}")
@@ -3176,8 +3395,13 @@ def start_campaign_job(
                 notify_routine(parameters, text)
 
         job = CampaignJob(
-            campaign_id, "send", emails, step,
-            pause=lambda: mail_guard.human_pause(mail_guard.plan(parameters, output_folder)),
+            campaign_id,
+            "send",
+            emails,
+            step,
+            pause=lambda: mail_guard.human_pause(
+                mail_guard.plan(parameters, output_folder)
+            ),
             on_finish=on_finish,
         )
     job.start()
@@ -3197,25 +3421,57 @@ def _check_campaign_mail(parameters: dict, credentials: dict) -> None:
     if not sent:
         return
     for email in bounced_addresses(credentials, list(sent)):
-        store.update_item(sent[email][0], email, status="bounced", reason="адрес не существует (возврат)",
-                          bounced_at=datetime.now().astimezone().isoformat())
+        store.update_item(
+            sent[email][0],
+            email,
+            status="bounced",
+            reason="адрес не существует (возврат)",
+            bounced_at=datetime.now().astimezone().isoformat(),
+        )
     replied = senders_replied(credentials, [e for e in sent])
     for email in replied:
         cid, name, company = sent[email]
-        store.update_item(cid, email, status="replied", replied_at=datetime.now().astimezone().isoformat())
-        notify(parameters, f"✉️ Ответ на письмо из рассылки «{name}»: {company} ({email}). Проверьте почту.")
+        store.update_item(
+            cid,
+            email,
+            status="replied",
+            replied_at=datetime.now().astimezone().isoformat(),
+        )
+        notify(
+            parameters,
+            f"✉️ Ответ на письмо из рассылки «{name}»: {company} ({email}). "
+            "Проверьте почту.",
+        )
     _draft_campaign_follow_ups(parameters, store, set(replied))
 
 
-def _mark_contact_mail(output_folder: Path, draft: dict, message_id: str) -> None:
+def _mark_contact_mail(
+    output_folder: Path, draft: dict, message_id: str
+) -> None:
     now_iso = datetime.now().astimezone().isoformat()
-    fields = {"followed_up_at": now_iso} if draft["kind"] == "follow_up" else {
-        "sent_at": now_iso, "message_id": message_id,
-        "subject": draft.get("subject", ""), "job_link": draft.get("job_link", ""),
-    }
+    fields = (
+        {"followed_up_at": now_iso}
+        if draft["kind"] == "follow_up"
+        else {
+            "sent_at": now_iso,
+            "message_id": message_id,
+            "subject": draft.get("subject", ""),
+            "job_link": draft.get("job_link", ""),
+        }
+    )
     book = ContactBook(output_folder)
     if not book.update_contact(draft["contact"], **fields):
-        book.add("", [{"kind": "email", "value": draft["contact"], "source": "письмо HR", **fields}])
+        book.add(
+            "",
+            [
+                {
+                    "kind": "email",
+                    "value": draft["contact"],
+                    "source": "письмо HR",
+                    **fields,
+                }
+            ],
+        )
 
 
 def _check_contact_book_mail(parameters: dict, credentials: dict) -> None:
@@ -3227,7 +3483,10 @@ def _check_contact_book_mail(parameters: dict, credentials: dict) -> None:
         c["value"].lower(): (card.get("company") or c["value"], c)
         for card in book.all().values()
         for c in card["contacts"]
-        if c["kind"] == "email" and c.get("sent_at") and not c.get("replied_at") and not c.get("bounced_at")
+        if c["kind"] == "email"
+        and c.get("sent_at")
+        and not c.get("replied_at")
+        and not c.get("bounced_at")
     }
     if not sent:
         return
@@ -3235,24 +3494,37 @@ def _check_contact_book_mail(parameters: dict, credentials: dict) -> None:
     bounced = {a.lower() for a in bounced_addresses(credentials, list(sent))}
     for email in bounced:
         book.update_contact(email, bounced_at=now.isoformat())
-    replied = {a.lower() for a in senders_replied(credentials, list(sent))} - bounced
+    replied = {
+        a.lower() for a in senders_replied(credentials, list(sent))
+    } - bounced
     for email in replied:
         book.update_contact(email, replied_at=now.isoformat())
-        notify(parameters, f"✉️ Ответ на письмо: {sent[email][0]} ({email}). Проверьте почту.")
+        notify(
+            parameters,
+            f"✉️ Ответ на письмо: {sent[email][0]} ({email}). Проверьте "
+            "почту.",
+        )
     days = int((parameters.get("direct") or {}).get("follow_up_days", 7))
     if days <= 0:
         return
     drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
     for email, (company, c) in sent.items():
         if (
-            email in bounced or email in replied or c.get("follow_up_code") or c.get("followed_up_at")
-            or now - datetime.fromisoformat(c["sent_at"]) < timedelta(days=days)
+            email in bounced
+            or email in replied
+            or c.get("follow_up_code")
+            or c.get("followed_up_at")
+            or now - datetime.fromisoformat(c["sent_at"])
+            < timedelta(days=days)
         ):
             continue
         subject = c.get("subject") or ""
         code = drafts.add(
-            c["value"], FOLLOW_UP_TEXT if _looks_russian(subject) else FOLLOW_UP_TEXT_EN,
-            "follow_up", c.get("job_link", ""), channel="email",
+            c["value"],
+            FOLLOW_UP_TEXT if _looks_russian(subject) else FOLLOW_UP_TEXT_EN,
+            "follow_up",
+            c.get("job_link", ""),
+            channel="email",
             subject=subject if subject.startswith("Re:") else f"Re: {subject}",
             in_reply_to=c.get("message_id", ""),
         )
@@ -3266,7 +3538,13 @@ def _check_contact_book_mail(parameters: dict, credentials: dict) -> None:
 
 def _gmail_auth_failed(result: str) -> bool:
     return result.startswith("Не удалось отправить") and any(
-        m in result for m in ("535", "Username and Password", "Authentication", "BadCredentials")
+        m in result
+        for m in (
+            "535",
+            "Username and Password",
+            "Authentication",
+            "BadCredentials",
+        )
     )
 
 
@@ -3280,10 +3558,17 @@ def check_campaign_sending(parameters: dict, llm_api_key: str) -> None:
         return
     for cid, campaign in CampaignStore(output_folder).all().items():
         if (
-            campaign.get("sending") and not campaign.get("error") and not CampaignJob.RUNNING.get(cid)
-            and any(item["status"] == "draft" for item in campaign["items"].values())
+            campaign.get("sending")
+            and not campaign.get("error")
+            and not CampaignJob.RUNNING.get(cid)
+            and any(
+                item["status"] == "draft"
+                for item in campaign["items"].values()
+            )
         ):
-            resume = Path(campaign["resume"]) if campaign.get("resume") else None
+            resume = (
+                Path(campaign["resume"]) if campaign.get("resume") else None
+            )
             start_campaign_job(parameters, llm_api_key, cid, "send", resume)
             return  # по одной рассылке за раз — лимит общий
 
@@ -3297,14 +3582,18 @@ def _prepare_campaign_batches(parameters: dict, llm_api_key: str) -> None:
     for cid, campaign in store.all().items():
         statuses = [item["status"] for item in campaign["items"].values()]
         if (
-            campaign.get("batch_day") and campaign["batch_day"] != today
-            and "pending" in statuses and "draft" not in statuses
+            campaign.get("batch_day")
+            and campaign["batch_day"] != today
+            and "pending" in statuses
+            and "draft" not in statuses
             and not CampaignJob.RUNNING.get(cid)
         ):
             start_campaign_job(parameters, llm_api_key, cid, "prepare")
 
 
-def _draft_campaign_follow_ups(parameters: dict, store: CampaignStore, replied: set) -> None:
+def _draft_campaign_follow_ups(
+    parameters: dict, store: CampaignStore, replied: set
+) -> None:
     """Кто молчит direct.follow_up_days (7) дней после письма рассылки —
     одно короткое напоминание в той же ветке, черновиком на просмотр
     (вкладка «Рассылка»). Язык — как у исходного письма."""
@@ -3317,27 +3606,55 @@ def _draft_campaign_follow_ups(parameters: dict, store: CampaignStore, replied: 
         created = 0
         for email, item in campaign["items"].items():
             if (
-                item["status"] != "sent" or email in replied
-                or item.get("follow_up_code") or item.get("followed_up_at")
+                item["status"] != "sent"
+                or email in replied
+                or item.get("follow_up_code")
+                or item.get("followed_up_at")
                 or not item.get("sent_at")
-                or now - datetime.fromisoformat(item["sent_at"]) < timedelta(days=days)
+                or now - datetime.fromisoformat(item["sent_at"])
+                < timedelta(days=days)
             ):
                 continue
             subject = item.get("subject") or ""
             code = drafts.add(
-                email, FOLLOW_UP_TEXT if _looks_russian(subject) else FOLLOW_UP_TEXT_EN,
-                "follow_up", "", channel="email", campaign=cid,
-                subject=subject if subject.startswith("Re:") else f"Re: {subject}",
+                email,
+                (
+                    FOLLOW_UP_TEXT
+                    if _looks_russian(subject)
+                    else FOLLOW_UP_TEXT_EN
+                ),
+                "follow_up",
+                "",
+                channel="email",
+                campaign=cid,
+                subject=(
+                    subject if subject.startswith("Re:") else f"Re: {subject}"
+                ),
                 in_reply_to=item.get("message_id", ""),
             )
             store.update_item(cid, email, follow_up_code=code)
             created += 1
         if created:
-            _notify_with_buttons(parameters, (
-                f"⏳ Рассылка «{campaign['name']}»: {created} — без ответа {days}+ дн. "
-                "Готово короткое напоминание в той же ветке письма."
-            ), [[{"text": "⏳ Напомнить всем", "callback_data": f"cf:{cid}"},
-                 {"text": "👀 Показать по одному", "callback_data": f"cv:{cid}:f"}]])
+            _notify_with_buttons(
+                parameters,
+                (
+                    f"⏳ Рассылка «{campaign['name']}»: {created} — без "
+                    f"ответа {days}+ дн. "
+                    "Готово короткое напоминание в той же ветке письма."
+                ),
+                [
+                    [
+                        {
+                            "text": "⏳ Напомнить всем",
+                            "callback_data": f"cf:{cid}",
+                        },
+                        {
+                            "text": "👀 Показать по одному",
+                            "callback_data": f"cv:{cid}:f",
+                        },
+                    ]
+                ],
+            )
 
 
 def _notify_with_buttons(parameters: dict, text: str, keyboard: list) -> None:
@@ -3347,7 +3664,15 @@ def _notify_with_buttons(parameters: dict, text: str, keyboard: list) -> None:
         notify(parameters, text)
         return
     try:
-        bot_request(creds[0], "sendMessage", {"chat_id": creds[1], "text": text, "reply_markup": {"inline_keyboard": keyboard}})
+        bot_request(
+            creds[0],
+            "sendMessage",
+            {
+                "chat_id": creds[1],
+                "text": text,
+                "reply_markup": {"inline_keyboard": keyboard},
+            },
+        )
     except Exception as e:
         logger.warning(f"Не удалось отправить в бот: {e}")
         notify(parameters, text)
@@ -3382,39 +3707,41 @@ def check_email_replies(parameters: dict, llm_api_key: str) -> None:
     days = int((parameters.get("direct") or {}).get("follow_up_days", 7))
     drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
     now = datetime.now().astimezone()
-    for e in waiting:
-        if e["outreach_email"] in replied:
+    for entry in waiting:
+        if entry["outreach_email"] in replied:
             applied_log.update_fields(
-                e["source"], e["external_id"], email_replied=True
+                entry["source"], entry["external_id"], email_replied=True
             )
-            if not e.get("stage"):
-                applied_log.set_stage(e["source"], e["external_id"], "replied")
+            if not entry.get("stage"):
+                applied_log.set_stage(
+                    entry["source"], entry["external_id"], "replied"
+                )
             notify(
                 parameters,
-                f"✉️ Ответ на письмо: {e['company']} — {e['title']} "
-                f"({e['outreach_email']}). Проверьте почту.",
+                f"✉️ Ответ на письмо: {entry['company']} — {entry['title']} "
+                f"({entry['outreach_email']}). Проверьте почту.",
             )
         elif (
             days > 0
-            and not e.get("email_followed_up")
-            and now - datetime.fromisoformat(e["outreach_sent_at"])
+            and not entry.get("email_followed_up")
+            and now - datetime.fromisoformat(entry["outreach_sent_at"])
             >= timedelta(days=days)
         ):
             code = drafts.add(
-                e["outreach_email"],
+                entry["outreach_email"],
                 FOLLOW_UP_TEXT,
                 "follow_up",
-                e["link"],
+                entry["link"],
                 channel="email",
-                subject=f"Re: {e['title']} — отклик",
-                in_reply_to=e.get("outreach_message_id", ""),
+                subject=f"Re: {entry['title']} — отклик",
+                in_reply_to=entry.get("outreach_message_id", ""),
             )
             applied_log.update_fields(
-                e["source"], e["external_id"], email_followed_up=True
+                entry["source"], entry["external_id"], email_followed_up=True
             )
             notify(
                 parameters,
-                f"⏳ {e['company']} не ответили на письмо {days}+ дн. "
+                f"⏳ {entry['company']} не ответили на письмо {days}+ дн. "
                 f"Напоминание: «отправить {code}» / «пропустить {code}».",
             )
 
@@ -3426,7 +3753,9 @@ def _djinni_bump_due(output_folder: Path) -> bool:
     """Поднимать профиль можно раз в 7 дней — помним, когда можно снова,
     чтобы не открывать браузер на каждом прогоне впустую."""
     try:
-        next_at = json.loads((output_folder / DJINNI_BUMP_FILE).read_text(encoding="utf-8"))["next_at"]
+        next_at = json.loads(
+            (output_folder / DJINNI_BUMP_FILE).read_text(encoding="utf-8")
+        )["next_at"]
     except (OSError, ValueError, KeyError):
         return True
     return datetime.now().astimezone() >= datetime.fromisoformat(next_at)
@@ -3435,10 +3764,15 @@ def _djinni_bump_due(output_folder: Path) -> bool:
 def _djinni_bump_done(output_folder: Path, result: str) -> None:
     """bumped → через 7 дней; not_yet:N → через N дней (так пишет сам
     Djinni); кнопки нет → попробуем на следующий день."""
-    days = 7 if result == "bumped" else int(result.split(":")[1]) if result.startswith("not_yet:") else 1
+    days = (
+        7
+        if result == "bumped"
+        else int(result.split(":")[1]) if result.startswith("not_yet:") else 1
+    )
     next_at = datetime.now().astimezone() + timedelta(days=days)
     (output_folder / DJINNI_BUMP_FILE).write_text(
-        json.dumps({"last_result": result, "next_at": next_at.isoformat()}), encoding="utf-8"
+        json.dumps({"last_result": result, "next_at": next_at.isoformat()}),
+        encoding="utf-8",
     )
 
 
@@ -3460,7 +3794,9 @@ def search_and_apply_djinni(
     if not resume_pdf_path.exists():
         raise FileNotFoundError(f"Resume PDF not found: {resume_pdf_path}.")
 
-    auto_apply = bool((parameters.get("djinni") or {}).get("auto_apply", False))
+    auto_apply = bool(
+        (parameters.get("djinni") or {}).get("auto_apply", False)
+    )
     output_folder: Path = parameters["outputFileDirectory"]
     applied_log = AppliedLog(output_folder / "applied_log.json")
     if is_still_blocked(output_folder, "djinni"):
@@ -3472,7 +3808,11 @@ def search_and_apply_djinni(
     except PlatformBlockedError as e:
         logger.error(f"djinni.co appears to have blocked us: {e}")
         mark_blocked(output_folder, "djinni")
-        notify(parameters, f"djinni.co: похоже на блокировку ({e}). Площадка поставлена на паузу на 24ч.")
+        notify(
+            parameters,
+            f"djinni.co: похоже на блокировку ({e}). Площадка поставлена на "
+            "паузу на 24ч.",
+        )
         return
     logger.info(f"Found {len(jobs)} matching djinni.co vacancies.")
     already_seen = sum(1 for job in jobs if applied_log.already_applied(job))
@@ -3484,36 +3824,56 @@ def search_and_apply_djinni(
     session: Optional[DjinniSession] = None
     sent_count = 0
     try:
-        if (parameters.get("djinni") or {}).get("auto_bump_resume") and _djinni_bump_due(output_folder):
+        if (parameters.get("djinni") or {}).get(
+            "auto_bump_resume"
+        ) and _djinni_bump_due(output_folder):
             try:
-                session = DjinniSession(output_folder / ".chrome_profile_djinni")
+                session = DjinniSession(
+                    output_folder / ".chrome_profile_djinni"
+                )
                 session.ensure_logged_in(parameters)
                 result = bump_djinni_profile(session.driver)
                 _djinni_bump_done(output_folder, result)
                 logger.info(f"Djinni: поднятие профиля — {result}")
                 if result == "bumped":
-                    notify_routine(parameters, "Djinni: профиль поднят в поиске рекрутеров.")
+                    notify_routine(
+                        parameters,
+                        "Djinni: профиль поднят в поиске рекрутеров.",
+                    )
             except Exception as e:
                 logger.warning(f"Не удалось поднять профиль на Djinni: {e}")
 
         for job in jobs:
             if stop_event is not None and stop_event.is_set():
-                logger.info("Stop requested — прерываю перед следующей вакансией.")
+                logger.info(
+                    "Stop requested — прерываю перед следующей вакансией."
+                )
                 break
             if sent_count >= job_max_applications:
-                logger.info(f"Reached JOB_MAX_APPLICATIONS ({job_max_applications}) for this run.")
+                logger.info(
+                    f"Reached JOB_MAX_APPLICATIONS ({job_max_applications}) "
+                    "for this run."
+                )
                 break
             if _total_daily_limit_reached(parameters, applied_log):
                 break
             if applied_log.already_applied(job):
                 continue
-            if auto_apply and applied_log.applied_today_count("djinni") >= daily_limit:
-                logger.info(f"Reached daily application limit ({daily_limit}) for djinni.co today.")
+            if (
+                auto_apply
+                and applied_log.applied_today_count("djinni") >= daily_limit
+            ):
+                logger.info(
+                    f"Reached daily application limit ({daily_limit}) for "
+                    "djinni.co today."
+                )
                 break
 
             if auto_apply:
                 if session is None:
-                    session = DjinniSession(output_folder / ".chrome_profile_djinni")
+                    session = DjinniSession(
+                        output_folder / ".chrome_profile_djinni"
+                    )
                     session.ensure_logged_in(parameters)
                 # Djinni сам не пускает, если профиль не проходит требования
                 # (стаж, страна, английский, зарплата) — проверяем первым:
@@ -3525,15 +3885,29 @@ def search_and_apply_djinni(
                     notify(parameters, f"Djinni: {e}")
                     break
                 if unmet:
-                    logger.info(f"Skipping {job.role} at {job.company}: Djinni не пустит — {'; '.join(unmet[:3])}")
-                    applied_log.record(job, "", "", "skipped_requirements", None, unmet)
+                    logger.info(
+                        f"Skipping {job.role} at {job.company}: Djinni не "
+                        f"пустит — {'; '.join(unmet[:3])}"
+                    )
+                    applied_log.record(
+                        job, "", "", "skipped_requirements", None, unmet
+                    )
                     continue
 
             fit = score_job_fit(resume_pdf_path, job, llm_api_key)
-            tier = classify_fit(fit.score, _job_min_score(parameters), _job_suitability_score(parameters))
+            tier = classify_fit(
+                fit.score,
+                _job_min_score(parameters),
+                _job_suitability_score(parameters),
+            )
             if tier == "skip":
-                logger.info(f"Skipping {job.role} at {job.company}: fit score {fit.score}/10 below minimum.")
-                applied_log.record(job, "", "", "skipped_low_fit", fit.score, fit.gaps)
+                logger.info(
+                    f"Skipping {job.role} at {job.company}: fit score "
+                    f"{fit.score}/10 below minimum."
+                )
+                applied_log.record(
+                    job, "", "", "skipped_low_fit", fit.score, fit.gaps
+                )
                 continue
 
             try:
@@ -3543,14 +3917,20 @@ def search_and_apply_djinni(
                     resume_pdf_path, job, llm_api_key, template="auto_plain"
                 )
             except Exception as e:
-                logger.exception(f"Failed to generate cover letter for {job.role} at {job.company}, skipping: {e}")
+                logger.exception(
+                    f"Failed to generate cover letter for {job.role} at "
+                    f"{job.company}, skipping: {e}"
+                )
                 continue
 
             status: Literal["applied", "dry_run"] = "dry_run"
             if auto_apply:
                 wait_before_apply()
+                assert session is not None  # открыта выше, при проверке
                 try:
-                    applied = apply_to_djinni_job(session.driver, job.link, cover_letter)
+                    applied = apply_to_djinni_job(
+                        session.driver, job.link, cover_letter
+                    )
                 except DjinniProfileRequired as e:
                     logger.error(str(e))
                     notify(parameters, f"Djinni: {e}")
@@ -3558,20 +3938,41 @@ def search_and_apply_djinni(
                 except PlatformBlockedError as e:
                     logger.error(f"djinni.co appears to have blocked us: {e}")
                     mark_blocked(output_folder, "djinni")
-                    notify(parameters, f"djinni.co: похоже на блокировку ({e}). Площадка поставлена на паузу на 24ч.")
+                    notify(
+                        parameters,
+                        f"djinni.co: похоже на блокировку ({e}). Площадка "
+                        "поставлена на паузу на 24ч.",
+                    )
                     break
                 if applied:
                     status = "applied"
-                    logger.info(f"Applied to {job.role} at {job.company} ({job.link})")
+                    logger.info(
+                        f"Applied to {job.role} at {job.company} ({job.link})"
+                    )
                 else:
-                    logger.warning(f"Не удалось подтверждённо откликнуться на {job.link} — записано как dry-run.")
+                    logger.warning(
+                        "Не удалось подтверждённо откликнуться на "
+                        f"{job.link} — записано как dry-run."
+                    )
             else:
-                logger.info(f"[manual apply needed] {job.role} at {job.company} ({job.link})")
+                logger.info(
+                    f"[manual apply needed] {job.role} at {job.company} "
+                    f"({job.link})"
+                )
 
-            applied_log.record(job, cover_letter, resume_id="", status=status, score=fit.score, gaps=fit.gaps)
+            applied_log.record(
+                job,
+                cover_letter,
+                resume_id="",
+                status=status,
+                score=fit.score,
+                gaps=fit.gaps,
+            )
             sent_count += 1
 
-        _log_funnel_summary("djinni", applied_log, len(jobs), already_seen, run_start)
+        _log_funnel_summary(
+            "djinni", applied_log, len(jobs), already_seen, run_start
+        )
     finally:
         if session is not None:
             session.quit()
@@ -3623,6 +4024,9 @@ def run_selected_sources(
                 # search_telegram), это его аналог auto_apply.
                 override["auto_message"] = False
             parameters[name] = override
+    set_cover_letter_style(
+        (parameters.get("limits") or {}).get("cover_letter_style", "memorable")
+    )
     output_folder = parameters.get("outputFileDirectory")
     before = (
         AppliedLog(output_folder / "applied_log.json").count_in_period("day")
@@ -3731,8 +4135,12 @@ def notify_routine(parameters: dict, text: str) -> None:
             queue = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             queue = []
-        queue.append({"at": datetime.now().astimezone().isoformat(), "text": text})
-        path.write_text(json.dumps(queue[-200:], ensure_ascii=False), encoding="utf-8")
+        queue.append(
+            {"at": datetime.now().astimezone().isoformat(), "text": text}
+        )
+        path.write_text(
+            json.dumps(queue[-200:], ensure_ascii=False), encoding="utf-8"
+        )
 
 
 def _prepare_external_form(
@@ -4160,11 +4568,64 @@ def check_headhunter_replies(parameters: dict, llm_api_key: str):
             _answer_headhunter_messages(
                 parameters, driver, applied_log, llm_api_key
             )
+        if hh_preferences.get("chat_cover_letter_followup"):
+            _send_missing_cover_letters(driver, applied_log)
     finally:
         driver.quit()
 
     if hh_preferences.get("auto_reply"):
         _process_pending_form_approvals(parameters, llm_api_key)
+
+
+def send_headhunter_reminder(
+    parameters: dict, external_id: str, text: str
+) -> bool:
+    """Ручная отправка напоминания "молчите долго" в чат конкретного
+    отклика (кнопка «🔔 Напомнить о себе» во «Входящих») — открывает
+    свою браузерную сессию, как и остальные ручные HH-действия
+    (prefill_direct_application и т.п.), а не переиспользует сессию
+    демона, чтобы не мешать плановому прогону, если он идёт параллельно."""
+    output_folder: Path = parameters["outputFileDirectory"]
+    applied_log = AppliedLog(output_folder / "applied_log.json")
+    driver = init_browser(output_folder / ".chrome_profile_headhunter")
+    try:
+        sent = send_chat_cover_letter(driver, external_id, text)
+    finally:
+        driver.quit()
+    if sent:
+        applied_log.mark_reminder_sent("headhunter", external_id)
+    return sent
+
+
+def _send_missing_cover_letters(driver, applied_log: AppliedLog) -> None:
+    """headhunter.chat_cover_letter_followup: отклики, ушедшие без
+    сопроводительного письма (форма его не приняла — см. письмо уже
+    сгенерированное в search_and_apply_headhunter и сохранённое в
+    applied_log именно для этого), досылаются первым сообщением в чат."""
+    for entry in applied_log.entries_by_source_and_status(
+        "headhunter", "applied"
+    ):
+        if not entry.get("cover_letter") or entry.get(
+            "cover_letter_sent_via_chat"
+        ):
+            continue
+        try:
+            sent = send_chat_cover_letter(
+                driver, entry["external_id"], entry["cover_letter"]
+            )
+        except Exception as e:
+            logger.warning(
+                f"Не удалось отправить письмо в чат {entry['company']}: {e}"
+            )
+            continue
+        if sent:
+            applied_log.mark_cover_letter_sent_via_chat(
+                "headhunter", entry["external_id"]
+            )
+            logger.info(
+                f"Письмо досослано в чат: {entry['company']} — "
+                f"{entry['title']}"
+            )
 
 
 def _sync_headhunter_negotiation_states(
@@ -4179,7 +4640,7 @@ def _sync_headhunter_negotiation_states(
     # уведомлений о давних ответах одна сводка в конце.
     backfill = not any(e.get("last_known_state") for e in entries)
     updated = 0
-    backfilled = Counter()
+    backfilled: Counter[str] = Counter()
     for entry in entries:
         state = states.get(entry["external_id"])
         if not state:
@@ -4275,16 +4736,35 @@ def handle_bot_updates(
     bot_token, chat_id = creds
     for update in updates:
         callback = update.get("callback_query")
-        if callback and str((callback.get("message") or {}).get("chat", {}).get("id")) == chat_id:
+        if (
+            callback
+            and str((callback.get("message") or {}).get("chat", {}).get("id"))
+            == chat_id
+        ):
             try:
-                _handle_vacancy_button(parameters, llm_api_key, bot_token, callback)
+                _handle_vacancy_button(
+                    parameters, llm_api_key, bot_token, callback
+                )
             except Exception as e:
                 logger.warning(f"Кнопка {callback.get('data')}: {e}")
-                bot_request(bot_token, "answerCallbackQuery", {
-                    "callback_query_id": callback["id"], "text": f"Ошибка: {e}"[:180], "show_alert": True,
-                })
-    _run_form_commands(parameters, llm_api_key, parse_form_commands(updates, chat_id))
-    _run_control_commands(parameters, parse_control_commands(updates, chat_id), bot_token, chat_id)
+                bot_request(
+                    bot_token,
+                    "answerCallbackQuery",
+                    {
+                        "callback_query_id": callback["id"],
+                        "text": f"Ошибка: {e}"[:180],
+                        "show_alert": True,
+                    },
+                )
+    _run_form_commands(
+        parameters, llm_api_key, parse_form_commands(updates, chat_id)
+    )
+    _run_control_commands(
+        parameters,
+        parse_control_commands(updates, chat_id),
+        bot_token,
+        chat_id,
+    )
 
 
 def _run_control_commands(
@@ -4309,7 +4789,11 @@ def _run_control_commands(
             send_notification(
                 bot_token,
                 chat_id,
-                "Пропущено." if known else f"Черновик {cmd['code']} не найден.",
+                (
+                    "Пропущено."
+                    if known
+                    else f"Черновик {cmd['code']} не найден."
+                ),
             )
         elif action == "status":
             send_notification(
@@ -4487,9 +4971,13 @@ HR_DRAFTS_FILE = ".hr_reply_drafts.json"
 
 
 def _telegram_client(parameters: dict) -> TelegramSourceClient:
-    tg = ConfigValidator.load_yaml(parameters["secretsFile"]).get("telegram") or {}
+    tg = (
+        ConfigValidator.load_yaml(parameters["secretsFile"]).get("telegram")
+        or {}
+    )
     return TelegramSourceClient(
-        int(tg["api_id"]), tg["api_hash"],
+        int(tg["api_id"]),
+        tg["api_hash"],
         parameters["outputFileDirectory"] / ".telegram_session",
     )
 
@@ -4507,45 +4995,95 @@ def _handle_vacancy_button(
     answer = {"callback_query_id": callback["id"]}
 
     def done(status: str) -> None:
-        bot_request(bot_token, "answerCallbackQuery", {**answer, "text": status[:180]})
-        bot_request(bot_token, "editMessageReplyMarkup", {
-            "chat_id": message["chat"]["id"], "message_id": message["message_id"],
-            "reply_markup": {"inline_keyboard": [[{"text": status[:60], "callback_data": "noop"}]]},
-        })
+        bot_request(
+            bot_token, "answerCallbackQuery", {**answer, "text": status[:180]}
+        )
+        bot_request(
+            bot_token,
+            "editMessageReplyMarkup",
+            {
+                "chat_id": message["chat"]["id"],
+                "message_id": message["message_id"],
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [{"text": status[:60], "callback_data": "noop"}]
+                    ]
+                },
+            },
+        )
 
     resumes = telegram_resumes(data_folder)
+    post: dict = {}
+    contact: dict = {}
     if parts[0] in ("q", "l"):
-        post = get_watch_post(output_folder, parts[1])
-        if post is None:
+        found = get_watch_post(output_folder, parts[1])
+        if found is None:
             raise ValueError("пост устарел — откройте его по ссылке")
+        post = found
         contact = post["contacts"][int(parts[2])]
+        russian = _looks_russian(post.get("text") or post.get("title", ""))
+        route_channel: ResumeChannel = (
+            "email"
+            if parts[0] == "l" and contact["kind"] == "email"
+            else "telegram"
+        )
+        routed_resume = resolve_resume(parameters, route_channel, russian)
+        resumes = [routed_resume] if routed_resume is not None else []
     if parts[0] == "q":
         resume_index = int(parts[3])
+        if resume_index >= len(resumes):
+            done("⚠️ Выбранное резюме больше недоступно")
+            return
         template = (parameters.get("telegram") or {}).get(
             "intro_message_template"
-        ) or "Здравствуйте! Увидел вакансию «{role}» ({link}). Буду рад обсудить."
+        ) or (
+            "Здравствуйте! Увидел вакансию «{role}» ({link}). Буду рад "
+            "обсудить."
+        )
         text = template.format(role=post["title"], link=post["link"])
         with _telegram_client(parameters) as client:
             client.send_message(contact["value"], text)
             if resume_index >= 0:
                 client.send_file(contact["value"], resumes[resume_index])
-        TelegramConversations(output_folder / "telegram_conversations.json").record_outbound(
-            contact["value"], text, job_link=post["link"]
+        TelegramConversations(
+            output_folder / "telegram_conversations.json"
+        ).record_outbound(contact["value"], text, job_link=post["link"])
+        done(
+            f"✅ Отправлено @{contact['value']}"
+            + (" + резюме" if resume_index >= 0 else "")
         )
-        done(f"✅ Отправлено @{contact['value']}" + (" + резюме" if resume_index >= 0 else ""))
     elif parts[0] == "l":
-        bot_request(bot_token, "answerCallbackQuery", {**answer, "text": "Пишу письмо под вакансию…"})
+        bot_request(
+            bot_token,
+            "answerCallbackQuery",
+            {**answer, "text": "Пишу письмо под вакансию…"},
+        )
         resume_pdf = resumes[0] if resumes else data_folder / RESUME_PDF
         name = candidate_name(parameters, resume_pdf)
         channel_kind = "email" if contact["kind"] == "email" else "telegram"
         letter = generate_first_message(
-            resume_pdf, name, "", post["title"], post["text"], channel_kind, llm_api_key
+            resume_pdf,
+            name,
+            "",
+            post["title"],
+            post["text"],
+            channel_kind,
+            llm_api_key,
         )
         path = save_telegram_letter(data_folder, post, letter["text"])
-        extra = {"channel": "email", "subject": letter["subject"]} if channel_kind == "email" else {}
+        extra = (
+            {"channel": "email", "subject": letter["subject"]}
+            if channel_kind == "email"
+            else {}
+        )
         code = DraftStore(output_folder / HR_DRAFTS_FILE).add(
-            contact["value"], letter["text"], "first" if channel_kind == "telegram" else "email",
-            post["link"], **extra,
+            contact["value"],
+            letter["text"],
+            "first" if channel_kind == "telegram" else "email",
+            post["link"],
+            russian=russian,
+            resume=resume_relative_name(parameters, resume_pdf),
+            **extra,
         )
         # Telegram: без резюме или + резюме файлом. Email: резюме уходит
         # вложением всегда (Gmail), кнопки — какое именно приложить.
@@ -4555,27 +5093,67 @@ def _handle_vacancy_button(
             else []
         )
         send_row += [
-            {"text": f"✅ + 📎 {resume.stem}", "callback_data": f"d:{code}:{r}"}
+            {
+                "text": f"✅ + 📎 {resume.stem}",
+                "callback_data": f"d:{code}:{r}",
+            }
             for r, resume in enumerate(resumes[:3])
         ]
-        bot_request(bot_token, "sendMessage", {
-            "chat_id": message["chat"]["id"],
-            "reply_to_message_id": message["message_id"],
-            "text": f"✍️ Письмо для {contact['value']} (сохранено: telegram/letters/{path.name}):\n\n{letter['text']}",
-            "reply_markup": {"inline_keyboard": [send_row, [
-                {"text": "✖️ Пропустить", "callback_data": f"x:{code}"},
-                {"text": "🚫 Не писать компании", "callback_data": f"nd:{code}"},
-            ]]},
-        })
-    elif parts[0] == "d":
-        draft = DraftStore(output_folder / HR_DRAFTS_FILE).get(parts[1])
-        resume_index = int(parts[2])
-        is_email = bool(draft) and draft.get("channel") == "email"
-        result = send_hr_draft(
-            parameters, parts[1],
-            attachment=resumes[resume_index] if is_email and resume_index >= 0 else None,
+        bot_request(
+            bot_token,
+            "sendMessage",
+            {
+                "chat_id": message["chat"]["id"],
+                "reply_to_message_id": message["message_id"],
+                "text": f"✍️ Письмо для {contact['value']} (сохранено: "
+                f"telegram/letters/{path.name}):\n\n{letter['text']}",
+                "reply_markup": {
+                    "inline_keyboard": [
+                        send_row,
+                        [
+                            {
+                                "text": "✖️ Пропустить",
+                                "callback_data": f"x:{code}",
+                            },
+                            {
+                                "text": "🚫 Не писать компании",
+                                "callback_data": f"nd:{code}",
+                            },
+                        ],
+                    ]
+                },
+            },
         )
-        if result.startswith("Отправлено") and draft and resume_index >= 0 and draft.get("channel", "telegram") == "telegram":
+    elif parts[0] == "d":
+        draft = DraftStore(output_folder / HR_DRAFTS_FILE).get(parts[1]) or {}
+        stored_resume = resolve_resume_name(parameters, draft.get("resume"))
+        if stored_resume is not None:
+            resumes = [stored_resume]
+        elif "russian" in draft:
+            routed_resume = resolve_resume(
+                parameters, "telegram", bool(draft["russian"])
+            )
+            resumes = [routed_resume] if routed_resume is not None else []
+        resume_index = int(parts[2])
+        if resume_index >= len(resumes):
+            done("⚠️ Выбранное резюме больше недоступно")
+            return
+        is_email = draft.get("channel") == "email"
+        result = send_hr_draft(
+            parameters,
+            parts[1],
+            attachment=(
+                resumes[resume_index]
+                if is_email and resume_index >= 0
+                else None
+            ),
+        )
+        if (
+            result.startswith("Отправлено")
+            and draft
+            and resume_index >= 0
+            and draft.get("channel", "telegram") == "telegram"
+        ):
             with _telegram_client(parameters) as client:
                 client.send_file(draft["contact"], resumes[resume_index])
             result += " + резюме"
@@ -4584,7 +5162,9 @@ def _handle_vacancy_button(
         drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
         draft = drafts.get(parts[1]) or {}
         if draft.get("campaign") and draft["kind"] != "follow_up":
-            CampaignStore(output_folder).update_item(draft["campaign"], draft["contact"], status="skipped")
+            CampaignStore(output_folder).update_item(
+                draft["campaign"], draft["contact"], status="skipped"
+            )
         drafts.remove(parts[1])
         done("✖️ Пропущено")
     elif parts[0] in ("n", "nd"):
@@ -4592,26 +5172,38 @@ def _handle_vacancy_button(
         # Снять можно в Базе («Можно писать»).
         drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
         if parts[0] == "n":
-            post = get_watch_post(output_folder, parts[1])
-            if post is None:
+            found = get_watch_post(output_folder, parts[1])
+            if found is None:
                 raise ValueError("пост устарел — отметьте компанию в Базе")
+            post = found
             values = [c["value"] for c in post["contacts"]]
         else:
             draft = drafts.get(parts[1]) or {}
             values = [draft["contact"]] if draft else []
             if draft.get("campaign"):
-                CampaignStore(output_folder).update_item(draft["campaign"], draft["contact"], status="skipped")
+                CampaignStore(output_folder).update_item(
+                    draft["campaign"], draft["contact"], status="skipped"
+                )
             drafts.remove(parts[1])
         book = ContactBook(output_folder)
         keys = sorted({k for v in values for k in book.keys_with(v)})
         book.update(keys, do_not_contact=True)
-        done("🚫 Больше не пишем этой компании" if keys else "⚠️ Компании нет в Базе")
+        done(
+            "🚫 Больше не пишем этой компании"
+            if keys
+            else "⚠️ Компании нет в Базе"
+        )
     elif parts[0] in ("cs", "cf"):
         # Рассылка целиком из бота: cs — отправить письма, cf — напоминания.
         if CampaignJob.RUNNING.get(parts[1]):
             done("⏳ Уже отправляю")
             return
-        start_campaign_job(parameters, llm_api_key, parts[1], "send" if parts[0] == "cs" else "followups")
+        start_campaign_job(
+            parameters,
+            llm_api_key,
+            parts[1],
+            "send" if parts[0] == "cs" else "followups",
+        )
         done("🚀 Отправляю по одному, пауза 1–2 мин — пришлю итог")
     elif parts[0] == "cx":
         # «⏸ Не отправлять»: рассылка ждёт, письма остаются черновиками.
@@ -4627,21 +5219,51 @@ def _handle_vacancy_button(
         field = "code" if parts[2] == "d" else "follow_up_code"
         shown = 0
         for email, item in campaign["items"].items():
-            draft = drafts.get(item.get(field) or "")
-            if draft is None or (parts[2] == "f" and item.get("followed_up_at")):
+            shown_draft = drafts.get(item.get(field) or "")
+            if shown_draft is None or (
+                parts[2] == "f" and item.get("followed_up_at")
+            ):
                 continue
             if shown == 10:
-                bot_request(bot_token, "sendMessage", {"chat_id": message["chat"]["id"], "text": "Остальные — в дашборде: Компании → Рассылки."})
+                bot_request(
+                    bot_token,
+                    "sendMessage",
+                    {
+                        "chat_id": message["chat"]["id"],
+                        "text": "Остальные — в дашборде: Компании → Рассылки.",
+                    },
+                )
                 break
-            bot_request(bot_token, "sendMessage", {
-                "chat_id": message["chat"]["id"],
-                "text": f"✉️ {item['company']} — {email}\nТема: {draft.get('subject', '')}\n\n{draft['text']}"[:4000],
-                "reply_markup": {"inline_keyboard": [[
-                    {"text": "✅ Отправить", "callback_data": f"d:{item[field]}:-1"},
-                    {"text": "✖️ Пропустить", "callback_data": f"x:{item[field]}"},
-                    {"text": "🚫 Не писать", "callback_data": f"nd:{item[field]}"},
-                ]]},
-            })
+            bot_request(
+                bot_token,
+                "sendMessage",
+                {
+                    "chat_id": message["chat"]["id"],
+                    "text": (
+                        f"✉️ {item['company']} — {email}\nТема: "
+                        f"{shown_draft.get('subject', '')}\n\n"
+                        f"{shown_draft['text']}"
+                    )[:4000],
+                    "reply_markup": {
+                        "inline_keyboard": [
+                            [
+                                {
+                                    "text": "✅ Отправить",
+                                    "callback_data": f"d:{item[field]}:-1",
+                                },
+                                {
+                                    "text": "✖️ Пропустить",
+                                    "callback_data": f"x:{item[field]}",
+                                },
+                                {
+                                    "text": "🚫 Не писать",
+                                    "callback_data": f"nd:{item[field]}",
+                                },
+                            ]
+                        ]
+                    },
+                },
+            )
             shown += 1
         done(f"👀 Показал: {shown}")
     else:
@@ -4678,7 +5300,9 @@ def _react_to_hr_reply(
         filter(None, [job.get("company"), job.get("title")])
     )
     try:
-        category = classify_reply(text, llm_api_key) if llm_api_key else "other"
+        category = (
+            classify_reply(text, llm_api_key) if llm_api_key else "other"
+        )
     except Exception as e:
         logger.warning(f"Не удалось разобрать ответ @{contact}: {e}")
         category = "other"
@@ -4778,7 +5402,11 @@ def prepare_interview(parameters: dict, llm_api_key: str, entry: dict) -> str:
         parameters,
         f"🎯 Подготовка к интервью: {entry.get('company')} — "
         f"{entry.get('title')}\n\n{prep[:1500]}"
-        + ("\n\n…полностью — в «Истории» в дашборде." if len(prep) > 1500 else ""),
+        + (
+            "\n\n…полностью — в «Истории» в дашборде."
+            if len(prep) > 1500
+            else ""
+        ),
     )
     return prep
 
@@ -4808,7 +5436,10 @@ def _draft_follow_ups(
 
 
 def send_hr_draft(
-    parameters: dict, code: str, text: str = "", attachment: Optional[Path] = None
+    parameters: dict,
+    code: str,
+    text: str = "",
+    attachment: Optional[Path] = None,
 ) -> str:
     """Отправляет подтверждённый черновик (из Telegram-команды или
     дашборда); text — отредактированный текст, если правили. Возвращает
@@ -4826,7 +5457,9 @@ def send_hr_draft(
         )
     tg_secrets = secrets.get("telegram") or {}
     if not tg_secrets.get("api_id") or not tg_secrets.get("api_hash"):
-        return "Нет telegram.api_id/api_hash в secrets.yaml — не могу отправить."
+        return (
+            "Нет telegram.api_id/api_hash в secrets.yaml — не могу отправить."
+        )
     try:
         with TelegramSourceClient(
             int(tg_secrets["api_id"]),
@@ -4838,7 +5471,9 @@ def send_hr_draft(
         return f"Не удалось отправить @{draft['contact']}: {e}"
     TelegramConversations(
         output_folder / "telegram_conversations.json"
-    ).record_outbound(draft["contact"], message, job_link=draft.get("job_link", ""))
+    ).record_outbound(
+        draft["contact"], message, job_link=draft.get("job_link", "")
+    )
     drafts.remove(code)
     return f"Отправлено @{draft['contact']}."
 
@@ -4866,12 +5501,23 @@ def _send_email_draft(
     # Лимит с разогревом и стоп при возвратах — для любых писем HR; время
     # отправки проверяет только рассылка (вручную вы отправляете сами).
     guard = mail_guard.plan(parameters, output_folder)
-    if draft["kind"] != "follow_up" and (guard["left_today"] <= 0 or guard["bounce_stopped"]):
-        return "⏸ " + (guard["reason"] if guard["bounce_stopped"]
-                       else f"Дневной лимит писем ({guard['limit']}) исчерпан — отправлю завтра")
-    resume = attachment or parameters["dataFolder"] / RESUME_PDF_LINKEDIN
-    if not resume.exists():
-        resume = parameters["dataFolder"] / RESUME_PDF
+    if draft["kind"] != "follow_up" and (
+        guard["left_today"] <= 0 or guard["bounce_stopped"]
+    ):
+        return "⏸ " + (
+            guard["reason"]
+            if guard["bounce_stopped"]
+            else f"Дневной лимит писем ({guard['limit']}) исчерпан — "
+            "отправлю завтра"
+        )
+    resume = attachment or resolve_resume_name(parameters, draft.get("resume"))
+    if resume is None:
+        russian = bool(
+            draft.get("russian", _looks_russian(draft.get("subject", "")))
+        )
+        resume = resolve_resume(parameters, "email", russian)
+    if draft["kind"] != "follow_up" and resume is None:
+        return "Не найдено резюме для вложения."
     email_message = build_message(
         credentials["address"],
         draft["contact"],
@@ -4887,11 +5533,20 @@ def _send_email_draft(
     if draft.get("campaign"):
         # Для напоминания в той же ветке письма рассылки.
         now_iso = datetime.now().astimezone().isoformat()
-        fields = {"followed_up_at": now_iso} if draft["kind"] == "follow_up" else {
-            "message_id": message_id, "subject": draft.get("subject", ""),
-            "status": "sent", "sent_at": now_iso, "reason": "",
-        }
-        CampaignStore(output_folder).update_item(draft["campaign"], draft["contact"], **fields)
+        fields = (
+            {"followed_up_at": now_iso}
+            if draft["kind"] == "follow_up"
+            else {
+                "message_id": message_id,
+                "subject": draft.get("subject", ""),
+                "status": "sent",
+                "sent_at": now_iso,
+                "reason": "",
+            }
+        )
+        CampaignStore(output_folder).update_item(
+            draft["campaign"], draft["contact"], **fields
+        )
     entry = next((e for e in entries if e["link"] == draft["job_link"]), None)
     if entry is not None and draft["kind"] != "follow_up":
         applied_log.update_fields(
@@ -5067,20 +5722,12 @@ def export_application_history(parameters: dict):
 def append_to_company_blacklist(
     config_file: Path, companies: list[str]
 ) -> None:
-    """Дописывает компании в company_blacklist текстово (не через
-    yaml.safe_dump всего файла), чтобы не потерять комментарии и
-    форматирование, которые уже есть в work_preferences.yaml."""
-    text = config_file.read_text(encoding="utf-8")
-    lines = text.splitlines()
-    new_entries = [f"  - {company}" for company in companies]
-    for index, line in enumerate(lines):
-        if line.strip() == "company_blacklist:":
-            insert_at = index + 1
-            lines[insert_at:insert_at] = new_entries
-            config_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            return
-    text += "\n\ncompany_blacklist:\n" + "\n".join(new_entries) + "\n"
-    config_file.write_text(text, encoding="utf-8")
+    """Добавляет компании через проверенную атомарную запись YAML."""
+    current = ConfigValidator.load_yaml(config_file).get(
+        "company_blacklist"
+    ) or []
+    merged = list(dict.fromkeys([*companies, *current]))
+    set_list_field(config_file, "company_blacklist", merged)
 
 
 def suggest_blacklist_additions(

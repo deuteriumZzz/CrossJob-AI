@@ -23,15 +23,39 @@ MAX_PAGES = 6
 
 # Бесплатные почтовые сервисы — их домен не сайт компании.
 _FREE_MAIL = {
-    "gmail.com", "yandex.ru", "ya.ru", "mail.ru", "bk.ru", "list.ru",
-    "inbox.ru", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com",
-    "proton.me", "protonmail.com", "rambler.ru",
+    "gmail.com",
+    "yandex.ru",
+    "ya.ru",
+    "mail.ru",
+    "bk.ru",
+    "list.ru",
+    "inbox.ru",
+    "outlook.com",
+    "hotmail.com",
+    "yahoo.com",
+    "icloud.com",
+    "proton.me",
+    "protonmail.com",
+    "rambler.ru",
 }
 # Ссылки, которые сайтом компании не являются.
 _NOT_COMPANY = (
-    "t.me", "telegram", "hh.ru", "linkedin.com", "habr.com", "getmatch",
-    "google.", "forms.", "notion.", "instagram", "facebook", "vk.com",
-    "youtube", "twitter", "x.com", "github.com",
+    "t.me",
+    "telegram",
+    "hh.ru",
+    "linkedin.com",
+    "habr.com",
+    "getmatch",
+    "google.",
+    "forms.",
+    "notion.",
+    "instagram",
+    "facebook",
+    "vk.com",
+    "youtube",
+    "twitter",
+    "x.com",
+    "github.com",
 )
 _URL_RE = re.compile(r"https?://[^\s)\"'<>]+")
 _HREF_RE = re.compile(r'href=["\']([^"\'#]+)["\']', re.IGNORECASE)
@@ -41,7 +65,9 @@ _INTERESTING_LINK_RE = re.compile(
     re.IGNORECASE,
 )
 _TAG_RE = re.compile(r"<[^>]+>")
-_CODE_BLOCK_RE = re.compile(r"<(script|style)\b.*?</\1>", re.IGNORECASE | re.DOTALL)
+_CODE_BLOCK_RE = re.compile(
+    r"<(script|style)\b.*?</\1>", re.IGNORECASE | re.DOTALL
+)
 
 
 def candidate_websites(card: dict) -> list[str]:
@@ -103,7 +129,9 @@ def collect_dossier(card: dict, hunter_key: str = "") -> dict:
             html = _CODE_BLOCK_RE.sub(" ", page.text)
             text = _TAG_RE.sub(" ", html)
             hrefs = " ".join(_HREF_RE.findall(html))
-            for contact in contacts_from_text(f"{text} {hrefs}", bare_mentions=False):
+            for contact in contacts_from_text(
+                f"{text} {hrefs}", bare_mentions=False
+            ):
                 contacts.append(
                     {
                         **contact,

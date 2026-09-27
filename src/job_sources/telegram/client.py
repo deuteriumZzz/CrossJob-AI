@@ -88,7 +88,11 @@ class TelegramSourceClient:
 
     def iter_channel_messages(self, channel: str, limit: int) -> list[Message]:
         if self._watcher is not None:
-            return list(self._watcher.call(lambda c: c.get_messages(channel, limit=limit)))
+            return list(
+                self._watcher.call(
+                    lambda c: c.get_messages(channel, limit=limit)
+                )
+            )
         return list(self._client.iter_messages(channel, limit=limit))
 
     def send_message(self, contact: str, text: str) -> Message:

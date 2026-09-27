@@ -59,7 +59,9 @@ def test_question_gets_draft_and_stage(monkeypatch):
             params, "key", conversations.get("hr_anna"), "Ваши ожидания?"
         )
 
-        drafts = DraftStore(params["outputFileDirectory"] / main.HR_DRAFTS_FILE)
+        drafts = DraftStore(
+            params["outputFileDirectory"] / main.HR_DRAFTS_FILE
+        )
         [(code, draft)] = drafts.all().items()
         assert draft["contact"] == "hr_anna"
         assert draft["text"] == "От 250 000 ₽."
@@ -93,7 +95,9 @@ def test_interest_marks_interview_without_draft(monkeypatch):
 def test_send_hr_draft_sends_and_records(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp:
         params, _, conversations = _setup(tmp)
-        drafts = DraftStore(params["outputFileDirectory"] / main.HR_DRAFTS_FILE)
+        drafts = DraftStore(
+            params["outputFileDirectory"] / main.HR_DRAFTS_FILE
+        )
         code = drafts.add("hr_anna", "Черновик", "reply", "")
         delivered: list[tuple] = []
 
@@ -159,7 +163,9 @@ def test_due_follow_ups():
 def test_digest_counts_last_day():
     with tempfile.TemporaryDirectory() as tmp:
         log = AppliedLog(Path(tmp) / "applied_log.json")
-        job = Job(role="Dev", company="Co", source="headhunter", external_id="1")
+        job = Job(
+            role="Dev", company="Co", source="headhunter", external_id="1"
+        )
         log.record(job, "", "", "applied", 8, [])
         log.update_reply_state("headhunter", "1", "Приглашение на интервью")
         text = build_digest(log, [], {"ab12": {}})
@@ -181,9 +187,15 @@ def test_daily_digest_sent_once_per_day(monkeypatch):
         main._maybe_send_daily_digest(params, "t", "c")
         assert len(sent) == 1
         state = json.loads((out / ".digest_state.json").read_text())
-        assert state["last_sent"] == datetime.now().astimezone().date().isoformat()
+        assert (
+            state["last_sent"]
+            == datetime.now().astimezone().date().isoformat()
+        )
         main._maybe_send_daily_digest(
-            {"outputFileDirectory": Path(tmp) / "x", "digest": {"enabled": False}},
+            {
+                "outputFileDirectory": Path(tmp) / "x",
+                "digest": {"enabled": False},
+            },
             "t",
             "c",
         )
@@ -198,8 +210,17 @@ def test_control_commands_parse_draft_actions(monkeypatch):
         def json(self):
             return {
                 "result": [
-                    {"update_id": 1, "message": {"chat": {"id": 5}, "text": "отправить AB12"}},
-                    {"update_id": 2, "message": {"chat": {"id": 5}, "text": "skip cd34"}},
+                    {
+                        "update_id": 1,
+                        "message": {
+                            "chat": {"id": 5},
+                            "text": "отправить AB12",
+                        },
+                    },
+                    {
+                        "update_id": 2,
+                        "message": {"chat": {"id": 5}, "text": "skip cd34"},
+                    },
                 ]
             }
 
@@ -222,15 +243,18 @@ def test_outreach_settings_roundtrip(client):  # noqa: F811
     assert s["skip_us_only"] is True  # по умолчанию US-only отсекается
     assert s["follow_up_days"] == 7
 
-    s = client.post("/api/settings/outreach", json={
-        "email_address": "me@gmail.com",
-        "email_app_password": "abcd efgh ijkl mnop",
-        "hunter_api_key": "hunter-key-123456",
-        "follow_up_days": 5,
-        "digest_hour": 8,
-        "skip_us_only": False,
-        "skip_europe_only": True,
-    }).json()
+    s = client.post(
+        "/api/settings/outreach",
+        json={
+            "email_address": "me@gmail.com",
+            "email_app_password": "abcd efgh ijkl mnop",
+            "hunter_api_key": "hunter-key-123456",
+            "follow_up_days": 5,
+            "digest_hour": 8,
+            "skip_us_only": False,
+            "skip_europe_only": True,
+        },
+    ).json()
     assert s["email_connected"] is True
     assert s["follow_up_days"] == 5
     assert s["digest_hour"] == 8
@@ -249,17 +273,36 @@ def test_hr_drafts_queue_endpoint(client):  # noqa: F811
     from src.webui import api as webapi
 
     ctx = webapi.get_ctx()
-    ctx.applied_log.record(Job(role="Dev", company="Acme", link="https://t.me/jobs/9",
-                               source="telegram", external_id="9"), "", "", "applied", 8, [])
+    ctx.applied_log.record(
+        Job(
+            role="Dev",
+            company="Acme",
+            link="https://t.me/jobs/9",
+            source="telegram",
+            external_id="9",
+        ),
+        "",
+        "",
+        "applied",
+        8,
+        [],
+    )
     drafts = DraftStore(ctx.output_folder / main.HR_DRAFTS_FILE)
     drafts.add("hr_anna", "Ответ", "reply", "https://t.me/jobs/9")
-    drafts.add("hr@acme.io", "Письмо", "email", "https://t.me/jobs/9", channel="email")
+    drafts.add(
+        "hr@acme.io", "Письмо", "email", "https://t.me/jobs/9", channel="email"
+    )
     items = client.get("/api/hr-drafts").json()
     assert {(i["channel"], i["company"]) for i in items} == {
-        ("telegram", "Acme"), ("email", "Acme"),
+        ("telegram", "Acme"),
+        ("email", "Acme"),
     }
-    names = [c["name"] for c in client.get("/api/status").json()["chat_checks"]]
-    assert "check_email_replies" in names and "check_telegram_commands" in names
+    names = [
+        c["name"] for c in client.get("/api/status").json()["chat_checks"]
+    ]
+    assert (
+        "check_email_replies" in names and "check_telegram_commands" in names
+    )
 
 
 def test_company_email_language_by_domain_and_text():
@@ -269,6 +312,109 @@ def test_company_email_language_by_domain_and_text():
     from src.job_sources.hr_replies import _cis_company, _looks_russian
 
     assert _cis_company({"website": "https://kaspi.kz/", "contacts": []})
-    assert _cis_company({"website": "", "contacts": [{"kind": "email", "value": "hr@ozon.ru"}]})
-    assert not _cis_company({"website": "nvidia.com", "contacts": [{"kind": "email", "value": "hr@nvidia.com"}]})
+    assert _cis_company(
+        {"website": "", "contacts": [{"kind": "email", "value": "hr@ozon.ru"}]}
+    )
+    assert not _cis_company(
+        {
+            "website": "nvidia.com",
+            "contacts": [{"kind": "email", "value": "hr@nvidia.com"}],
+        }
+    )
     assert _looks_russian("Ищем Python-разработчика в команду")
+
+
+def test_build_contact_footer_prefers_resume_over_manual_override():
+    """Резюме — источник по умолчанию; поле в настройках побеждает,
+    только когда явно заполнено; пусто и там, и там — просто нет в
+    подписи, ничего не выдумывается (без телефона в резюме и без
+    ручного WhatsApp — WhatsApp не попадает в подпись)."""
+    from src.job_sources.hr_replies import build_contact_footer
+
+    with tempfile.TemporaryDirectory() as tmp:
+        data = Path(tmp)
+        secrets = data / "secrets.yaml"
+        secrets.write_text(
+            "email:\n  address: me@gmail.com\n"
+            "github:\n  username: deuteriumZzz\n",
+            encoding="utf-8",
+        )
+        resume_yaml = data / "plain_text_resume.yaml"
+        resume_yaml.write_text(
+            "personal_information:\n"
+            "  linkedin: linkedin.com/in/dmitry\n",
+            encoding="utf-8",
+        )
+        params = {
+            "secretsFile": secrets,
+            "plainTextResumeFile": resume_yaml,
+            "dataFolder": data,
+            "direct": {"candidate_linkedin": "linkedin.com/in/override"},
+        }
+        footer = build_contact_footer(params, data / "resume.pdf")
+        assert "me@gmail.com" in footer
+        assert "github.com/deuteriumZzz" in footer
+        # Ручное поле явно заполнено — побеждает над резюме.
+        assert "linkedin.com/in/override" in footer
+        assert "linkedin.com/in/dmitry" not in footer
+        # Нет WhatsApp ни в резюме, ни в настройках — не выдумываем.
+        assert "WhatsApp" not in footer
+
+
+def test_due_hh_reminders_skips_viewed_and_already_reminded():
+    from src.job_sources.hr_replies import due_hh_reminders, hh_reminder_text
+
+    now = datetime.now(timezone.utc)
+    old = (now - timedelta(days=10)).isoformat()
+    recent = (now - timedelta(days=1)).isoformat()
+    entries = [
+        {  # молчат достаточно долго — кандидат
+            "external_id": "1",
+            "title": "Python разработчик",
+            "applied_at": old,
+            "last_known_state": None,
+        },
+        {  # ещё рано — только день прошёл
+            "external_id": "2",
+            "title": "Backend Dev",
+            "applied_at": recent,
+            "last_known_state": None,
+        },
+        {  # уже просмотрели — не молчание
+            "external_id": "3",
+            "title": "Dev",
+            "applied_at": old,
+            "last_known_state": "Просмотрен",
+        },
+        {  # уже напоминали — не повторяем
+            "external_id": "4",
+            "title": "Dev",
+            "applied_at": old,
+            "last_known_state": None,
+            "reminder_sent_at": old,
+        },
+    ]
+    due = due_hh_reminders(entries, days=7, now=now)
+    assert [e["external_id"] for e in due] == ["1"]
+    assert "Python разработчик" in hh_reminder_text(due[0])
+
+    assert due_hh_reminders(entries, days=0, now=now) == []
+
+
+def test_fit_telegram_length_cuts_at_sentence_boundary():
+    from src.job_sources.hr_replies import (
+        _TELEGRAM_MESSAGE_LIMIT,
+        _fit_telegram_length,
+    )
+
+    short = "Здравствуйте! Интересует вакансия."
+    assert _fit_telegram_length(short) == short
+
+    long_text = (
+        "Здравствуйте! Заинтересовала ваша вакансия Python-разработчика. "
+        "У меня два года опыта с Django и FastAPI, строил CRM с нуля. "
+        "Буду рад обсудить детали, если позиция ещё открыта, спасибо за внимание."
+    )
+    fitted = _fit_telegram_length(long_text)
+    assert len(fitted) <= _TELEGRAM_MESSAGE_LIMIT
+    assert fitted.endswith((".", "!", "?"))

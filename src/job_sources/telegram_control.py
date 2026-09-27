@@ -6,7 +6,11 @@ from pathlib import Path
 
 import httpx
 
-from src.job_sources.telegram_notify import TELEGRAM_API_BASE
+from src.job_sources.telegram_notify import (
+    TELEGRAM_API_BASE,
+    raise_for_telegram_status,
+)
+from src.utils.file_lock import state_file_lock
 
 _OFFSET_FILE = ".telegram_control_offset.json"
 
@@ -14,7 +18,13 @@ _STATUS_RE = re.compile(r"^/status\s*$", re.IGNORECASE)
 _PAUSE_RE = re.compile(r"^/pause\s+(\w+)\s*$", re.IGNORECASE)
 _RESUME_RE = re.compile(r"^/resume\s+(\w+)\s*$", re.IGNORECASE)
 # Короткие имена, которые люди пишут на самом деле.
-_SOURCE_ALIASES = {"hh": "headhunter", "habr": "habr_career", "li": "linkedin", "gm": "getmatch", "tg": "telegram"}
+_SOURCE_ALIASES = {
+    "hh": "headhunter",
+    "habr": "habr_career",
+    "li": "linkedin",
+    "gm": "getmatch",
+    "tg": "telegram",
+}
 _HELP_RE = re.compile(r"^/(help|start)\s*$", re.IGNORECASE)
 _SEND_DRAFT_RE = re.compile(
     r"^(?:отправить|send)\s+([a-f0-9]{4})\s*$", re.IGNORECASE
@@ -54,24 +64,28 @@ def poll_bot_updates(
     «да <id>» для анкеты могло пропасть, если первым его забрал разбор
     /status. Теперь читаем здесь, а разбирают parse_* из одного списка.
     timeout>0 — long polling (постоянный шлюз: кнопки срабатывают сразу)."""
-    offset = _load_json(_offset_path(output_folder)).get("offset", 0)
-    response = httpx.get(
-        f"{TELEGRAM_API_BASE}/bot{bot_token}/getUpdates",
-        params={
-            "offset": offset,
-            "timeout": timeout,
-            "allowed_updates": json.dumps(["message", "callback_query"]),
-        },
-        timeout=timeout + 10,
-    )
-    response.raise_for_status()
-    updates = response.json().get("result", [])
-    if updates:
-        last = max(u.get("update_id", 0) for u in updates)
-        _offset_path(output_folder).write_text(
-            json.dumps({"offset": last + 1}), encoding="utf-8"
+    offset_path = _offset_path(output_folder)
+    # Telegram permits only one getUpdates consumer.  The lock also protects
+    # the shared offset when two desktop-app processes overlap briefly.
+    with state_file_lock(offset_path, timeout=timeout + 15):
+        offset = _load_json(offset_path).get("offset", 0)
+        response = httpx.get(
+            f"{TELEGRAM_API_BASE}/bot{bot_token}/getUpdates",
+            params={
+                "offset": offset,
+                "timeout": timeout,
+                "allowed_updates": json.dumps(["message", "callback_query"]),
+            },
+            timeout=timeout + 10,
         )
-    return updates
+        raise_for_telegram_status(response, "getUpdates")
+        updates = response.json().get("result", [])
+        if updates:
+            last = max(u.get("update_id", 0) for u in updates)
+            offset_path.write_text(
+                json.dumps({"offset": last + 1}), encoding="utf-8"
+            )
+        return updates
 
 
 def poll_control_commands(
@@ -115,13 +129,23 @@ def parse_control_commands(updates: list[dict], chat_id: str) -> list[dict]:
         match = _PAUSE_RE.match(text)
         if match:
             commands.append(
-                {"action": "pause", "source": _SOURCE_ALIASES.get(match.group(1).lower(), match.group(1).lower())}
+                {
+                    "action": "pause",
+                    "source": _SOURCE_ALIASES.get(
+                        match.group(1).lower(), match.group(1).lower()
+                    ),
+                }
             )
             continue
         match = _RESUME_RE.match(text)
         if match:
             commands.append(
-                {"action": "resume", "source": _SOURCE_ALIASES.get(match.group(1).lower(), match.group(1).lower())}
+                {
+                    "action": "resume",
+                    "source": _SOURCE_ALIASES.get(
+                        match.group(1).lower(), match.group(1).lower()
+                    ),
+                }
             )
             continue
 

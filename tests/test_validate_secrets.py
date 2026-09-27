@@ -12,6 +12,15 @@ def _secrets_file(tmp, text):
     return path
 
 
+def test_load_yaml_converts_invalid_utf8_to_config_error():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "broken.yaml"
+        path.write_bytes(b"telegram: \xbe\n")
+
+        with pytest.raises(ConfigError, match="UTF-8"):
+            ConfigValidator.load_yaml(path)
+
+
 def test_legacy_key_used_when_no_provider_given():
     with tempfile.TemporaryDirectory() as tmp:
         secrets_file = _secrets_file(tmp, "llm_api_key: 'sk-legacy'\n")

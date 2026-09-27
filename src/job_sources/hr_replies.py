@@ -16,9 +16,12 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
-from src.job_sources.applied_log import AppliedLog, effective_stage
+from src.job_sources.applied_log import AppliedLog, Stage, effective_stage
 from src.job_sources.llm_provider import get_chat_llm
-from src.libs.resume_and_cover_builder.anti_ai_rules import ANTI_AI_STRUCTURE_RU, humanize
+from src.libs.resume_and_cover_builder.anti_ai_rules import (
+    ANTI_AI_STRUCTURE_RU,
+    humanize,
+)
 from src.utils.file_lock import state_file_lock
 
 Category = Literal["interest", "question", "rejection", "other"]
@@ -30,7 +33,7 @@ CATEGORY_LABELS: dict[str, str] = {
     "other": "⚪ другое",
 }
 # Какой этап отклика означает ответ HR (None — этап не трогаем).
-CATEGORY_STAGE: dict[str, str | None] = {
+CATEGORY_STAGE: dict[str, Stage | None] = {
     "interest": "interview",
     "question": "replied",
     "rejection": "rejected",
@@ -168,6 +171,45 @@ def due_follow_ups(
     return due
 
 
+def due_hh_reminders(
+    entries: list[dict], days: int, now: datetime | None = None
+) -> list[dict]:
+    """Отклики HH, которые никто не просмотрел (или без сохранённого
+    статуса вовсе) дольше days дней, — кандидаты на напоминание в чате.
+    Уже напомненные (reminder_sent_at) не повторяются — одно
+    напоминание на отклик, не спам."""
+    if days <= 0:
+        return []
+    now = now or datetime.now().astimezone()
+    due = []
+    for entry in entries:
+        if entry.get("reminder_sent_at"):
+            continue
+        state = entry.get("last_known_state")
+        if state not in (None, "", "Не просмотрен"):
+            continue  # уже посмотрели/ответили/отказали — не молчание
+        applied_at = entry.get("applied_at")
+        if not applied_at:
+            continue
+        if now - datetime.fromisoformat(applied_at) >= timedelta(days=days):
+            due.append(entry)
+    return due
+
+
+def hh_reminder_text(entry: dict) -> str:
+    """Короткое, нейтральное — не выглядит навязчивым."""
+    title = entry.get("title") or "вакансия"
+    if _looks_russian(title):
+        return (
+            f"Здравствуйте! Напоминаю о своём отклике на «{title}» — если "
+            "позиция ещё актуальна, буду рад пообщаться."
+        )
+    return (
+        f"Hello! Just following up on my application for {title} — happy "
+        "to chat if the role is still open."
+    )
+
+
 def format_draft_notification(
     contact: str, company_title: str, incoming: str, code: str, draft: str
 ) -> str:
@@ -208,8 +250,7 @@ def build_digest(
         c
         for c in conversations
         if any(
-            m["direction"] == "in"
-            and datetime.fromisoformat(m["at"]) >= since
+            m["direction"] == "in" and datetime.fromisoformat(m["at"]) >= since
             for m in c.get("messages") or []
         )
     ]
@@ -261,7 +302,14 @@ _FIRST_MESSAGE_PROMPT = ChatPromptTemplate.from_template(
 )
 
 _LENGTH_RULES = {
-    "telegram": "2–4 предложения, как в личном чате, без приветственной воды.",
+    "telegram": (
+        "СТРОГО не больше 180-200 символов считая пробелы — это личное "
+        "сообщение в Telegram, а не письмо. Одно-два коротких предложения: "
+        "какая вакансия заинтересовала и одна цифра/факт из резюме по делу. "
+        "Никакого приветствия-разгона ('Здравствуйте! Меня заинтересовала "
+        "ваша вакансия...') — сразу по сути, как пишет живой человек "
+        "знакомому, а не бот. Без ссылок и списков."
+    ),
     "email": (
         "150–180 слов: абзац «кто я и что ищу», абзац «почему именно эта "
         "компания» (только по тексту вакансии), 2–3 достижения, в конце — "
@@ -272,7 +320,9 @@ _LENGTH_RULES = {
 
 def _looks_russian(text: str) -> bool:
     letters = [ch for ch in text if ch.isalpha()]
-    cyrillic = sum(1 for ch in letters if "а" <= ch.lower() <= "я" or ch in "ёЁ")
+    cyrillic = sum(
+        1 for ch in letters if "а" <= ch.lower() <= "я" or ch in "ёЁ"
+    )
     return bool(letters) and cyrillic / len(letters) > 0.3
 
 
@@ -282,9 +332,47 @@ _CIS_TLDS = ("ru", "su", "рф", "xn--p1ai", "by", "kz", "kg", "uz")
 
 
 def _cis_company(card: dict) -> bool:
-    hosts = [card.get("website") or ""] + [c["value"].split("@")[-1] for c in card.get("contacts", []) if c["kind"] == "email"]
-    hosts = [h.lower().split("//")[-1].split("/")[0].rstrip(".") for h in hosts if h]
+    hosts = [card.get("website") or ""] + [
+        c["value"].split("@")[-1]
+        for c in card.get("contacts", [])
+        if c["kind"] == "email"
+    ]
+    hosts = [
+        h.lower().split("//")[-1].split("/")[0].rstrip(".") for h in hosts if h
+    ]
     return any(h.rsplit(".", 1)[-1] in _CIS_TLDS for h in hosts)
+
+
+def company_uses_russian(card: dict) -> bool:
+    """Use the same language decision for a campaign letter and its CV."""
+    vacancy = (card.get("vacancies") or [{}])[-1]
+    sample = " ".join(
+        [
+            card.get("company", ""),
+            card.get("emphasis", ""),
+            vacancy.get("title", ""),
+            vacancy.get("text", "")[:1500],
+        ]
+    )
+    return _looks_russian(sample) or _cis_company(card)
+
+
+_TELEGRAM_MESSAGE_LIMIT = 200
+
+
+def _fit_telegram_length(text: str) -> str:
+    """LLM не всегда точно держит символьный лимит из промта (как и с
+    остальными правилами длины в проекте) — обрезаем по границе
+    предложения, а не как попало, если модель написала длиннее."""
+    if len(text) <= _TELEGRAM_MESSAGE_LIMIT:
+        return text
+    head = text[:_TELEGRAM_MESSAGE_LIMIT]
+    for stop in (". ", "! ", "? ", "\n"):
+        cut = head.rfind(stop)
+        if cut > _TELEGRAM_MESSAGE_LIMIT * 0.5:
+            return head[: cut + 1].strip()
+    cut = head.rfind(" ")
+    return (head[:cut] if cut > 0 else head).strip()
 
 
 def generate_first_message(
@@ -320,6 +408,8 @@ def generate_first_message(
         }
     ).strip()
     text = humanize(text, llm_api_key)
+    if channel == "telegram":
+        text = _fit_telegram_length(text)
     subject = f"{job_title} — {'отклик' if russian else 'Application'}"
     if candidate_name:
         subject += f" — {candidate_name}"
@@ -333,15 +423,28 @@ _COMPANY_EMAIL_PROMPT = ChatPromptTemplate.from_template(
     Напиши короткое персонализированное сопроводительное письмо от имени
     кандидата. Язык: {language}.
     - Обращение по имени контакта ({contact_name}), если оно есть; иначе
-      нейтральное приветствие.
-    - Первый абзац: кто я и что ищу (позиция: {target_position}).
-    - Второй абзац: почему именно эта компания — сошлись на сферу её
+      нейтральное обращение к команде найма компании (например "Dear
+      {company} Talent Team" на английском, "Здравствуйте" на русском) —
+      не пиши безликое "Dear Hiring Team" без названия компании.
+    - Первый абзац: кто я и что ищу (позиция: {target_position}), и одна
+      фраза, почему именно эта компания — сошлись на сферу её
       деятельности или на вакансию, если она указана. Не выдумывай факты
       о компании, которых нет в данных ниже.
-    - Третий абзац: два-три наиболее релевантных достижения из резюме,
-      подобранных под профиль компании.
-    - Завершение: готов обсудить на звонке, контакты.
+    - Дальше — список из 2-3 пунктов (каждый с "* " в начале строки):
+      самые релевантные достижения из резюме под профиль компании, с
+      цифрами и масштабом, а не общими словами. Это единственное
+      исключение из общего правила "без списков с метками" ниже — только
+      для этого блока.
+    - Завершение: одна фраза, что готов обсудить на звонке. Про контакты
+      и подпись ничего не пиши — это добавится отдельно после письма,
+      не смешивай.
+    - Подпись НЕ пиши вообще — ни имени, ни "С уважением"/"Best regards".
+      Заканчивай текст на завершающей фразе про звонок.
     - Тон деловой и сжатый, без клише и без воды. Максимум 150–180 слов.
+    - Также верни поле role_in_letter_language: точная позиция
+      "{target_position}", переведённая на язык письма ({language}), если
+      она изначально на другом языке — не меняй смысл, только язык.
+      Если она уже на языке {language} — верни её как есть.
 
     Кандидат: {candidate_name}
     Компания: {company}
@@ -351,11 +454,99 @@ _COMPANY_EMAIL_PROMPT = ChatPromptTemplate.from_template(
 
     Резюме:
     {resume_text}
-
-    Верни только текст письма, без темы.
     """
     + ANTI_AI_STRUCTURE_RU
 )
+
+
+class _CompanyEmail(BaseModel):
+    letter: str = Field(description="Текст письма, без темы и подписи")
+    role_in_letter_language: str = Field(
+        description="Название должности на языке письма"
+    )
+
+
+def _personal_info_from_resume(parameters: dict) -> dict:
+    """personal_information из plain_text_resume.yaml — тот же файл, что
+    уже используют prefill_direct_application и генерация PDF-резюме.
+    Ничего не парсит заново: просто читает то, что там уже разложено."""
+    import yaml
+    from src.utils.constants import PLAIN_TEXT_RESUME_YAML
+
+    resume_yaml = parameters.get("plainTextResumeFile") or (
+        parameters["dataFolder"] / PLAIN_TEXT_RESUME_YAML
+    )
+    try:
+        data = yaml.safe_load(Path(resume_yaml).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return (data or {}).get("personal_information") or {}
+
+
+def build_contact_footer(parameters: dict, resume_pdf_path: Path) -> str:
+    """Строка контактов в конце письма — собирается кодом, не моделью,
+    чтобы не придумывала лишнего. Источник по умолчанию — уже
+    разобранное резюме (plain_text_resume.yaml + сам текст PDF на
+    Telegram); поля в Настройках → Почта и письма ("Мои контакты для
+    подписи писем") — только override/фолбэк, если в резюме этого нет.
+    Если контакта нет нигде — просто не добавляется, ничего не выдумываем."""
+    import yaml
+    from pdfminer.high_level import extract_text as _extract_text
+
+    from src.job_sources.contact_book import contacts_from_text
+
+    try:
+        secrets_data = (
+            yaml.safe_load(
+                Path(parameters["secretsFile"]).read_text(encoding="utf-8")
+            )
+            or {}
+        )
+    except (OSError, ValueError):
+        secrets_data = {}
+    direct = parameters.get("direct") or {}
+    personal = _personal_info_from_resume(parameters)
+
+    parts: list[str] = []
+    email = (secrets_data.get("email") or {}).get("address") or ""
+    if email:
+        parts.append(email)
+
+    telegram = direct.get("candidate_telegram") or ""
+    if not telegram:
+        try:
+            found = contacts_from_text(_extract_text(str(resume_pdf_path)))
+            telegram = next(
+                (c["value"] for c in found if c["kind"] == "telegram"), ""
+            )
+        except Exception:
+            telegram = ""
+    if telegram:
+        parts.append(
+            telegram if "t.me" in telegram else f"t.me/{telegram.lstrip('@')}"
+        )
+
+    github_user = (secrets_data.get("github") or {}).get(
+        "username"
+    ) or personal.get("github", "")
+    if github_user:
+        parts.append(
+            github_user
+            if github_user.startswith("http")
+            else f"github.com/{github_user.lstrip('@')}"
+        )
+
+    whatsapp = direct.get("candidate_whatsapp") or "".join(
+        filter(None, [personal.get("phone_prefix", ""), personal.get("phone", "")])
+    )
+    if whatsapp:
+        parts.append(f"WhatsApp {whatsapp}")
+
+    linkedin = direct.get("candidate_linkedin") or personal.get("linkedin", "")
+    if linkedin:
+        parts.append(linkedin)
+
+    return " | ".join(parts)
 
 
 def generate_company_email(
@@ -365,36 +556,49 @@ def generate_company_email(
     card: dict,
     contact_name: str,
     llm_api_key: str,
+    parameters: dict,
 ) -> dict:
     """{"subject", "text"} письма компании из базы контактов. Английский
     по умолчанию (как в промте), русский — если компания/упор по-русски."""
-    from langchain_core.output_parsers import StrOutputParser
     from pdfminer.high_level import extract_text
 
     vacancy = (card.get("vacancies") or [{}])[-1]
-    sample = " ".join([card.get("company", ""), card.get("emphasis", ""), vacancy.get("title", ""),
-                       vacancy.get("text", "")[:1500]])
-    russian = _looks_russian(sample) or _cis_company(card)
-    chain = _COMPANY_EMAIL_PROMPT | get_chat_llm(llm_api_key, temperature=0.4) | StrOutputParser()
-    text = chain.invoke(
-        {
-            "language": "русский" if russian else "English",
-            "contact_name": contact_name or "не указано",
-            "target_position": target_position,
-            "candidate_name": candidate_name or "(имя — из резюме)",
-            "company": card.get("company") or "не указана",
-            "website": card.get("website") or "не указан",
-            "vacancy": vacancy.get("title") or "не указана",
-            "emphasis": card.get("emphasis") or "не указано",
-            "resume_text": extract_text(str(resume_pdf_path)),
-        }
-    ).strip()
+    russian = company_uses_russian(card)
+    language = "русский" if russian else "English"
+    llm = cast(BaseChatModel, get_chat_llm(llm_api_key, temperature=0.4))
+    chain = _COMPANY_EMAIL_PROMPT | llm.with_structured_output(_CompanyEmail)
+    result = cast(
+        _CompanyEmail,
+        chain.invoke(
+            {
+                "language": language,
+                "contact_name": contact_name or "не указано",
+                "target_position": target_position,
+                "candidate_name": candidate_name or "(имя — из резюме)",
+                "company": card.get("company") or "не указана",
+                "website": card.get("website") or "не указан",
+                "vacancy": vacancy.get("title") or "не указана",
+                "emphasis": card.get("emphasis") or "не указано",
+                "resume_text": extract_text(str(resume_pdf_path)),
+            }
+        ),
+    )
+    text = result.letter.strip()
     # Модель иногда оставляет заготовки вида «[Your Name]» — не отправляем их.
-    text = re.sub(r"\[(?:Your|Ваш[аеи]?)[^\]]*\]", candidate_name, text).strip()
+    text = re.sub(
+        r"\[(?:Your|Ваш[аеи]?)[^\]]*\]", candidate_name, text
+    ).strip()
     # Вторая проверка по скиллу humanizer: остались признаки — одна правка.
     text = humanize(text, llm_api_key)
+    footer = build_contact_footer(parameters, resume_pdf_path)
+    if footer:
+        text = f"{text}\n\n{candidate_name}\n{footer}"
+    else:
+        text = f"{text}\n\n{candidate_name}"
+    role = result.role_in_letter_language.strip() or target_position
     subject = (
-        f"{target_position} — отклик — {candidate_name}" if russian
-        else f"{target_position} Application — {candidate_name}"
+        f"{role} — отклик — {candidate_name}"
+        if russian
+        else f"{role} Application — {candidate_name}"
     ).strip(" —")
     return {"subject": subject, "text": text}

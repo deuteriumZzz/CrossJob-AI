@@ -16,7 +16,10 @@ TIMEOUT = 15
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; CrossJob-AI)"}
 
 API_URLS = {
-    "greenhouse": "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true",
+    "greenhouse": (
+        "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+        "?content=true"
+    ),
     "lever": "https://api.lever.co/v0/postings/{slug}?mode=json",
     "ashby": "https://api.ashbyhq.com/posting-api/job-board/{slug}",
     "workable": "https://apply.workable.com/api/v1/widget/accounts/{slug}",
@@ -32,14 +35,18 @@ ATS_URL_PATTERNS = {
     "workable": re.compile(r"apply\.workable\.com/([\w-]+)"),
 }
 _CAREERS_LINK_RE = re.compile(
-    r'href=["\']([^"\']*(?:career|jobs?|join|hiring|vacanc|openings)[^"\']*)["\']',
+    r'href=["\']([^"\']*'
+    r"(?:career|jobs?|join|hiring|vacanc|openings)"
+    r'[^"\']*)["\']',
     re.IGNORECASE,
 )
 _TAG_RE = re.compile(r"<[^>]+>")
 
 
 def _strip_html(html: str) -> str:
-    return re.sub(r"\s+", " ", unescape(_TAG_RE.sub(" ", unescape(html)))).strip()
+    return re.sub(
+        r"\s+", " ", unescape(_TAG_RE.sub(" ", unescape(html)))
+    ).strip()
 
 
 def _get(url: str) -> httpx.Response:
@@ -106,7 +113,12 @@ def fetch_jobs(company: dict) -> list[Job]:
     data = response.json()
 
     def job(**kw) -> Job:
-        return Job(company=name, source="direct", company_url=company.get("website", ""), **kw)
+        return Job(
+            company=name,
+            source="direct",
+            company_url=company.get("website", ""),
+            **kw,
+        )
 
     if ats == "greenhouse":
         return [

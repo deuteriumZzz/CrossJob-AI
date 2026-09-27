@@ -24,9 +24,7 @@ def test_effective_stage_from_hh_state_and_manual_override():
     assert effective_stage({"last_known_state": "Не просмотрен"}) is None
     assert effective_stage({"last_known_state": "Просмотрен"}) is None
     assert effective_stage({"last_known_state": "Отказ"}) == "rejected"
-    assert (
-        effective_stage({"last_known_state": "Приглашение"}) == "interview"
-    )
+    assert effective_stage({"last_known_state": "Приглашение"}) == "interview"
     assert effective_stage({"last_known_state": "Есть ответ"}) == "replied"
     assert (
         effective_stage({"last_known_state": "Отказ", "stage": "offer"})
@@ -68,7 +66,9 @@ def test_inbox_merges_hh_replies_and_telegram_dialogs(client):  # noqa: F811
     )
     conversations.record_outbound("hr_anna", "Здравствуйте!", tg_job.link)
     conversations.record_inbound(
-        "hr_anna", "Какие ожидания по зарплате?", 5,
+        "hr_anna",
+        "Какие ожидания по зарплате?",
+        5,
         datetime(2030, 1, 1, tzinfo=timezone.utc),
     )
     # Диалог без ответа HR во "Входящие" не попадает.

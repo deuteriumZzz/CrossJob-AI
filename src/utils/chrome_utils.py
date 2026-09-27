@@ -269,7 +269,9 @@ def _with_resilient_get(driver):
         try:
             original_get(url)
         except TimeoutException as e:
-            logger.warning(f"{url} не загрузилась за отведённое время, повторяю: {e.msg}")
+            logger.warning(
+                f"{url} не загрузилась за отведённое время, повторяю: {e.msg}"
+            )
             try:
                 driver.execute_script("window.stop();")
             except Exception:

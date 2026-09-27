@@ -30,9 +30,10 @@ def passes_blacklists(job: Job, preferences: dict) -> bool:
     # иначе отклики уходят туда, где кандидата не возьмут по географии.
     # excluded_remote_regions: [] — ничего не отсекать.
     excluded = preferences.get("excluded_remote_regions", ["us_only"])
-    if excluded and remote_region(
-        f"{job.location}\n{job.description}"
-    ) in excluded:
+    if (
+        excluded
+        and remote_region(f"{job.location}\n{job.description}") in excluded
+    ):
         return False
 
     # locations — общий allowlist для площадок, которые ищут широко

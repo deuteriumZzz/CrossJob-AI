@@ -39,6 +39,13 @@ const SOURCE_ICON = {
 
 // Площадки, нацеленные на зарубежный рынок — остальные площадки RU.
 const OWN_CHANNELS = new Set(["telegram", "direct"]);
+// "Расписание" звучит как редкий цикл раз в день — площадка на деле
+// проверяется почти непрерывно (следующий заход сразу после конца
+// предыдущего + этот интервал), просто с паузой, чтобы не выглядеть
+// ботом. Ниже часа показываем минуты — "0.05ч" человеку не читается.
+function intervalLabel(hours) {
+  return hours < 1 ? `каждые ${Math.round(hours * 60)} мин` : `каждые ${hours}ч`;
+}
 const INTL_SOURCES = new Set(["linkedin", "wellfound", "himalayas", "djinni"]);
 
 const STATUS_DOT = {
@@ -890,6 +897,7 @@ function baseDetailHtml(card) {
           )
           .join("")}
         ${card.emphasis ? `<p class="small"><b>На что сделать упор:</b> ${escapeHtml(card.emphasis)}</p>` : ""}
+        <p class="small">${card.resume_hint ? `📎 <b>Резюме для письма:</b> ${escapeHtml(card.resume_hint)}` : `⚠️ <b>Резюме для письма:</b> не найдено — проверьте Настройки → Почта и письма → маршруты резюме`}</p>
         ${card.vacancies.length ? `<h4>Вакансии</h4>${card.vacancies.slice(-3).map((v) => `<div class="small">${sourceIconHtml(v.source)}<a href="${escapeHtml(v.link)}" target="_blank" rel="noopener">${escapeHtml(v.title || v.link)}</a></div>`).join("")}` : ""}
         ${card.company ? `<div class="step-actions">${card.website ? "" : `<input type="text" class="dossier-site" placeholder="сайт компании" aria-label="Сайт компании" />`}
           <button type="button" class="btn btn-ghost btn-small" data-dossier data-key="${escapeHtml(card.key)}" title="Найти контакты на сайте компании и через Hunter">🔎 Найти ещё контакты</button></div>` : ""}
@@ -1573,8 +1581,141 @@ function applySubnavBadges() {
 // Каналы и правила Telegram — в Настройках → Telegram-парсер. Пока поля
 // не заполнены с сервера, автосохранение этого блока выключено: иначе
 // пустое поле могло бы затереть ваши каналы.
+function normalizeTelegramChannel(raw) {
+  let value = String(raw || "").trim();
+  const lower = value.toLowerCase();
+  for (const prefix of ["https://t.me/", "http://t.me/", "t.me/", "@"]) {
+    if (lower.startsWith(prefix)) {
+      value = value.slice(prefix.length);
+      break;
+    }
+  }
+  return value.split("/")[0].trim();
+}
+
+function telegramChannelsFromText(raw) {
+  const seen = new Set();
+  return String(raw || "")
+    .split(/\r?\n/)
+    .map(normalizeTelegramChannel)
+    .filter((channel) => /^[A-Za-z0-9_]{5,32}$/.test(channel))
+    .filter((channel) => {
+      const key = channel.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function setTelegramChannels(channels, notifyChange = false) {
+  const input = document.getElementById("tg-channels");
+  input.value = telegramChannelsFromText((channels || []).join("\n")).join("\n");
+  renderTelegramChannelList();
+  if (notifyChange) {
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+}
+
+function renderTelegramChannelList() {
+  const list = document.getElementById("tg-channel-list");
+  if (!list) return;
+  const channels = telegramChannelsFromText(
+    document.getElementById("tg-channels").value
+  );
+  list.replaceChildren();
+  if (!channels.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted small tg-channel-empty";
+    empty.textContent = "Пока нет каналов. Вставьте ссылку из Telegram.";
+    list.append(empty);
+    return;
+  }
+  channels.forEach((channel) => {
+    const item = document.createElement("div");
+    item.className = "tg-channel-card";
+    item.setAttribute("role", "listitem");
+    const link = document.createElement("a");
+    link.href = `https://t.me/${encodeURIComponent(channel)}`;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = `@${channel}`;
+    link.className = "tg-channel-link";
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "tg-channel-remove";
+    remove.setAttribute("aria-label", `Удалить @${channel}`);
+    remove.textContent = "×";
+    remove.addEventListener("click", () => {
+      setTelegramChannels(
+        channels.filter((item) => item !== channel),
+        true
+      );
+      document.getElementById("tg-channel-editor-status").textContent = `Удалён @${channel}.`;
+    });
+    item.append(link, remove);
+    list.append(item);
+  });
+}
+
+function addTelegramChannels(raw) {
+  const status = document.getElementById("tg-channel-editor-status");
+  const candidates = String(raw || "")
+    .split(/\r?\n/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const invalid = candidates.filter(
+    (value) => !/^[A-Za-z0-9_]{5,32}$/.test(normalizeTelegramChannel(value))
+  );
+  if (invalid.length) {
+    status.textContent = "Не удалось распознать ссылку. Добавьте публичный username или ссылку t.me/username.";
+    return false;
+  }
+  const previous = telegramChannelsFromText(
+    document.getElementById("tg-channels").value
+  );
+  const next = telegramChannelsFromText([...previous, ...candidates].join("\n"));
+  const added = next.length - previous.length;
+  setTelegramChannels(next, true);
+  status.textContent = added
+    ? `Добавлено: ${added}.`
+    : "Этот канал уже есть в списке.";
+  return true;
+}
+
+function initTelegramChannelEditor() {
+  const input = document.getElementById("tg-channel-input");
+  if (!input || input.dataset.bound) return;
+  input.dataset.bound = "1";
+  const add = () => {
+    if (addTelegramChannels(input.value)) input.value = "";
+    input.focus();
+  };
+  document.getElementById("tg-channel-add").addEventListener("click", add);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      add();
+    }
+  });
+  document.getElementById("tg-channel-paste").addEventListener("click", async () => {
+    const status = document.getElementById("tg-channel-editor-status");
+    try {
+      const copied = await navigator.clipboard.readText();
+      if (addTelegramChannels(copied)) input.value = "";
+      input.focus();
+    } catch (_) {
+      status.textContent = "Браузер не дал доступ к буферу. Вставьте ссылку в поле через Cmd/Ctrl+V.";
+      input.focus();
+    }
+  });
+  document
+    .getElementById("tg-channels")
+    .addEventListener("input", renderTelegramChannelList);
+  renderTelegramChannelList();
+}
+
 function fillTelegramRules(settings) {
-  document.getElementById("tg-channels").value = (settings.channels || []).join("\n");
+  setTelegramChannels(settings.channels || []);
   document.getElementById("tg-max-age").value = settings.max_post_age_days ?? "";
   document.getElementById("tg-daily-limit").value = settings.daily_message_limit ?? "";
   document.getElementById("tg-auto-message").checked = !!settings.auto_message;
@@ -1628,7 +1769,18 @@ async function loadTelegramWatch() {
   const greeting = document.getElementById("tgq-greeting");
   greeting.value = w.greeting;
   updateGreetingPreview();
+  document.getElementById("tgq-auto-message").checked = w.auto_message;
+  document.getElementById("tgq-delay-min").value = Math.round((w.message_delay_min_seconds || 0) / 60);
+  document.getElementById("tgq-delay-max").value = Math.round((w.message_delay_max_seconds || 0) / 60);
+  document.getElementById("tgq-hours-start").value = w.active_hours_start ?? "";
+  document.getElementById("tgq-hours-end").value = w.active_hours_end ?? "";
+  document.getElementById("tgq-daily-limit").value = w.daily_message_limit;
+  document.getElementById("tgq-backfill-days").value = w.channel_backfill_days;
+  document.getElementById("tgq-pending-status").textContent = w.pending_sends
+    ? `⏳ В очереди на отправку: ${w.pending_sends}`
+    : "Очередь пуста — нет отложенных сообщений";
   renderTelegramResumes(w.resumes);
+  document.getElementById("tgq-resume-route").innerHTML = `📎 <b>Автовыбор при отклике:</b> русская вакансия → ${w.resume_route_ru ? escapeHtml(w.resume_route_ru) : "⚠️ не найдено"}, зарубежная → ${w.resume_route_en ? escapeHtml(w.resume_route_en) : "⚠️ не найдено"}`;
   document.getElementById("tgq-bot-state").innerHTML = w.bot_connected
     ? "✅ В ваш CrossJob-бот — с кнопками быстрого ответа."
     : `⚠️ Бот уведомлений не подключён — <a href="#" data-goto-settings="settings-notifications">подключить</a> (1 минута), иначе кнопок не будет.`;
@@ -1650,6 +1802,7 @@ function renderTelegramResumes() {
 
 async function renderResumes() {
   const el = document.getElementById("resume-table");
+  const routingEl = document.getElementById("resume-routing");
   if (!el) return;
   let r;
   try {
@@ -1696,6 +1849,50 @@ async function renderResumes() {
       renderResumes();
     })
   );
+
+  if (!routingEl) return;
+  const routeFields = [
+    ["telegram_ru", "Telegram · русская вакансия"],
+    ["telegram_en", "Telegram · зарубежная вакансия"],
+    ["email_ru", "Рассылка · компания из России/СНГ"],
+    ["email_en", "Рассылка · зарубежная компания"],
+  ];
+  const options = (selected) => (r.available || [])
+    .map((item) => `<option value="${escapeHtml(item.value)}" ${item.value === selected ? "selected" : ""}>${escapeHtml(item.value)}</option>`)
+    .join("");
+  routingEl.innerHTML = `
+    <div class="resume-routing-head">
+      <div>
+        <h4>Какое резюме прикладывать автоматически</h4>
+        <p class="muted small">Бот определяет язык вакансии и страну компании, затем прикладывает выбранный здесь PDF.</p>
+      </div>
+      <span id="resume-routing-status" class="muted small" role="status"></span>
+    </div>
+    ${r.available?.length ? `<div class="resume-routing-grid">
+      ${routeFields.map(([key, label]) => `<label class="limit-field">
+        <span>${label}</span>
+        <select data-resume-route="${key}" aria-label="${label}">${options(r.routing?.[key] || "")}</select>
+      </label>`).join("")}
+    </div>` : `<p class="muted small">Сначала загрузите хотя бы одно резюме в PDF.</p>`}`;
+
+  routingEl.querySelectorAll("[data-resume-route]").forEach((select) => {
+    select.addEventListener("change", async () => {
+      const status = routingEl.querySelector("#resume-routing-status");
+      const fields = [...routingEl.querySelectorAll("[data-resume-route]")];
+      fields.forEach((field) => (field.disabled = true));
+      status.textContent = "Сохраняю…";
+      try {
+        const payload = Object.fromEntries(fields.map((field) => [field.dataset.resumeRoute, field.value]));
+        await api("/api/resumes/routing", { method: "PUT", body: JSON.stringify(payload) });
+        status.textContent = "✅ Сохранено";
+      } catch (err) {
+        status.textContent = err.message.replace(/^\d+: /, "");
+        showToast(status.textContent, "error");
+      } finally {
+        fields.forEach((field) => (field.disabled = false));
+      }
+    });
+  });
 }
 
 async function uploadTelegramResumes(files) {
@@ -1724,6 +1921,13 @@ async function saveTelegramWatch() {
         keywords: tagItemsOf(document.getElementById("tgq-keywords")),
         stop_words: tagItemsOf(document.getElementById("tgq-stop")),
         greeting: document.getElementById("tgq-greeting").value,
+        auto_message: document.getElementById("tgq-auto-message").checked,
+        message_delay_min_seconds: Math.max(0, parseInt(document.getElementById("tgq-delay-min").value, 10) || 0) * 60,
+        message_delay_max_seconds: Math.max(0, parseInt(document.getElementById("tgq-delay-max").value, 10) || 0) * 60,
+        active_hours_start: parseInt(document.getElementById("tgq-hours-start").value, 10) || 0,
+        active_hours_end: parseInt(document.getElementById("tgq-hours-end").value, 10) || 24,
+        daily_message_limit: Math.max(1, parseInt(document.getElementById("tgq-daily-limit").value, 10) || 15),
+        channel_backfill_days: Math.max(0, parseInt(document.getElementById("tgq-backfill-days").value, 10) || 0),
       }),
     });
     status.textContent = "✅ Сохранено — применяется сразу.";
@@ -1927,7 +2131,7 @@ async function loadCampaigns() {
     sendBody = `<div class="step-actions">
         <label class="muted small">Резюме во вложении
           <select data-campaign-resume="${cur.id}" aria-label="Резюме во вложении">
-            <option value="">основное резюме</option>
+            <option value="">автоматически: RU/EN по компании</option>
             ${resumes.map((r) => `<option value="${escapeHtml(r.name)}">${escapeHtml(r.name)}</option>`).join("")}
           </select>
         </label>
@@ -2240,7 +2444,7 @@ const render = {
               <input type="checkbox" class="schedule-toggle switch" data-source="${c.name}" title="Бот проверяет по расписанию" ${c.schedule_enabled ? "checked" : ""} />
               <span class="dot ${dot}"></span> ${c.label}
             </h3>
-            <div class="row"><span>Расписание</span><span>${c.schedule_enabled ? `каждые ${c.interval_hours}ч` : "выключено"}</span></div>
+            <div class="row"><span>Проверяю</span><span>${c.schedule_enabled ? intervalLabel(c.interval_hours) : "выключено"}</span></div>
             <div class="row"><span>Последняя проверка</span><span>${fmtTime(c.last_run)}</span></div>
             <div class="row"><span>Следующая проверка</span><span>${fmtTime(c.next_run)}</span></div>
             <p class="muted small" style="margin:6px 0 0">${c.note}</p>
@@ -2445,6 +2649,7 @@ const render = {
     if (!repliesLoaded) tbody.innerHTML = `<div class="skeleton" style="height:90px;margin-bottom:10px"></div>`.repeat(3);
 
     renderDraftsQueue();
+    renderHhRemindersQueue();
     const entries = await api("/api/inbox");
     // Конфетти — только на реально новый ответ, появившийся после
     // первой загрузки за сессию, не на каждое открытие вкладки с уже
@@ -2581,6 +2786,9 @@ const render = {
     document.getElementById("limit-history-retention").value = String(
       limits.application_retention_days || 0
     );
+    document.getElementById("limit-cover-letter-style").value = limits.cover_letter_style || "memorable";
+    document.getElementById("limit-continuous-cycle").checked = limits.continuous_cycle_enabled;
+    document.getElementById("limit-continuous-gap").value = limits.continuous_cycle_gap_minutes || 3;
     renderTotalBudget(status, limits.total_daily_application_limit);
     if (limits.llm_daily_cost_alert_usd != null) {
       document.getElementById("llm-alert-usd").value =
@@ -2613,7 +2821,12 @@ const render = {
     // читалась (см. Stripe/Linear/Vercel: список карточек со статусом
     // и быстрым тумблером снаружи, drawer с деталями по клику).
     const platformCards = document.getElementById("platform-cards");
+    // Telegram и «Сайты компаний» не откликаются как обычные площадки —
+    // у них уже есть свои полноценные вкладки (settings-tg-quick,
+    // settings-direct), дублировать их здесь карточкой с чужими для них
+    // ярлыками "Расписание"/"Автоотклик" только путает.
     platformCards.innerHTML = status.sources
+      .filter((s) => !OWN_CHANNELS.has(s.name))
       .map((s, i) => {
         const missing = (s.readiness && s.readiness.missing) || [];
         const ready = s.readiness && s.readiness.ready;
@@ -2626,7 +2839,7 @@ const render = {
       <div class="source-card stagger-item" data-source="${s.name}" style="animation-delay:${staggerDelay(i, 25)}">
         <h3 title="${readinessTitle}">${ready ? "✅" : "⚠️"} ${sourceIconHtml(s.name)}${sourceLabel(s.name)}</h3>
         ${missing.length ? `<p class="muted small" style="margin:-6px 0 8px">${missing.join(", ")}</p>` : ""}
-        <div class="row"><span>Расписание</span><span>${s.schedule_enabled ? `каждые ${s.interval_hours}ч` : "выключено"}</span></div>
+        <div class="row"><span>Проверяю</span><span>${s.schedule_enabled ? intervalLabel(s.interval_hours) : "выключено"}</span></div>
         <div class="row"><span>Автоотклик</span><span>${s.auto_apply ? "включён" : "выключен"}</span></div>
         <div class="platform-card-quick">
           <label title="Бот проверяет по расписанию"><input type="checkbox" class="p-schedule-quick switch" data-source="${s.name}" ${s.schedule_enabled ? "checked" : ""} /> в расписании</label>
@@ -2669,9 +2882,14 @@ const render = {
               <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-schedule switch" ${s.schedule_enabled ? "checked" : ""} />Включена</span>
             </label>
             <label class="limit-field">
-              <span>Интервал, ч</span>
-              <input type="number" class="d-interval" min="1" value="${s.interval_hours ?? 3}" />
+              <span title="Минимум 3 минуты — почти реалтайм, но не выглядит ботом. Пока идут поиск и отклик, площадка проверяется по сути непрерывно: следующий заход стартует через этот интервал после конца предыдущего.">Интервал, минут</span>
+              <input type="number" class="d-interval" min="3" step="1" value="${Math.round((s.interval_hours ?? 3) * 60)}" ${s.continuous_cycle_active ? "disabled" : ""} />
             </label>
+            ${
+              s.continuous_cycle_active
+                ? `<p class="muted small" style="margin:-6px 0 8px">⏱ Включён «Постоянный цикл» (Настройки → Лимиты откликов) — свой интервал этой площадки не действует, все идут по общему кругу.</p>`
+                : ""
+            }
             <label class="limit-field" style="justify-content:flex-end">
               <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto switch" ${s.auto_apply ? "checked" : ""} />Откликается сам</span>
               <span class="muted small">Включено — бот сам отправляет отклики, до дневного лимита. Выключено — только ищет: вакансии появляются в «Вакансиях», откликаетесь вы.</span>
@@ -2725,6 +2943,13 @@ const render = {
               </label>
               <label class="limit-field" style="justify-content:flex-end">
                 <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto-bump switch" ${s.auto_bump_resume ? "checked" : ""} />Бамп резюме на HH</span>
+              </label>
+              <label class="limit-field" style="justify-content:flex-end">
+                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-chat-cover-letter-followup switch" ${s.chat_cover_letter_followup ? "checked" : ""} />💬 Если отклик ушёл без письма — досылать его в чат</span>
+              </label>
+              <label class="limit-field">
+                <span title="0 — выключить напоминания. Список готовых напоминаний — во «Входящих»; отправка только по кнопке, не автоматически">Напомнить о себе, если не просмотрели, через (дней)</span>
+                <input type="number" class="d-reminder-days" min="0" value="${s.reminder_follow_up_days ?? 7}" style="width:80px" />
               </label>
               <label class="limit-field">
                 <span>Зарплата для автоответа в чате HH</span>
@@ -2804,15 +3029,19 @@ const render = {
           const statusEl = drawerBody.querySelector("#platform-drawer-status");
           const autoReplyEl = drawerBody.querySelector(".d-auto-reply");
           const autoBumpEl = drawerBody.querySelector(".d-auto-bump");
+          const chatFollowupEl = drawerBody.querySelector(
+            ".d-chat-cover-letter-followup"
+          );
+          const reminderDaysEl = drawerBody.querySelector(".d-reminder-days");
           await api("/api/settings", {
             method: "POST",
             body: JSON.stringify({
               source: sourceName,
               schedule_enabled: drawerBody.querySelector(".d-schedule").checked,
-              interval_hours: parseInt(
-                drawerBody.querySelector(".d-interval").value,
-                10
-              ),
+              interval_hours: Math.max(
+                3,
+                parseInt(drawerBody.querySelector(".d-interval").value, 10) || 3
+              ) / 60,
               auto_apply: drawerBody.querySelector(".d-auto").checked,
               resume_id: drawerBody.querySelector(".d-resume-id").value.trim(),
               // "своё" выключено → clear_* удаляет override в YAML,
@@ -2825,6 +3054,17 @@ const render = {
               locations: linesOfEl(drawerBody.querySelector(".d-locations")),
               ...(autoReplyEl ? { auto_reply: autoReplyEl.checked } : {}),
               ...(autoBumpEl ? { auto_bump_resume: autoBumpEl.checked } : {}),
+              ...(chatFollowupEl
+                ? { chat_cover_letter_followup: chatFollowupEl.checked }
+                : {}),
+              ...(reminderDaysEl
+                ? {
+                    reminder_follow_up_days: Math.max(
+                      0,
+                      parseInt(reminderDaysEl.value, 10) || 0
+                    ),
+                  }
+                : {}),
               ...(jobMaxOverride
                 ? {
                     job_max_applications: parseInt(
@@ -4019,6 +4259,57 @@ async function renderDraftsQueue() {
   });
 }
 
+// Очередь "Молчат долго" (HH) — отдельно от drafts-queue: не черновик
+// ответа, а напоминание о себе по уже отправленному отклику.
+async function renderHhRemindersQueue() {
+  const el = document.getElementById("hh-reminders-queue");
+  let reminders;
+  try {
+    reminders = await api("/api/headhunter/reminders");
+  } catch (e) {
+    el.style.display = "none";
+    return;
+  }
+  if (!reminders.length) {
+    el.style.display = "none";
+    return;
+  }
+  el.style.display = "";
+  document.getElementById("hh-reminders-list").innerHTML = reminders
+    .map(
+      (r) => `
+    <div class="hr-draft" data-reminder-id="${escapeHtml(r.external_id)}">
+      <div class="muted small">🔔 ${escapeHtml(r.company)}${r.title ? " — " + escapeHtml(r.title) : ""} · откликнулись ${fmtDay(r.applied_at)}</div>
+      <textarea rows="3">${escapeHtml(r.text)}</textarea>
+      <div class="filters">
+        <button type="button" data-reminder-send class="btn btn-primary btn-small">🔔 Напомнить о себе</button>
+        <a href="${escapeHtml(r.link)}" target="_blank" rel="noopener" class="muted small">Открыть вакансию</a>
+      </div>
+    </div>`
+    )
+    .join("");
+  el.querySelectorAll("[data-reminder-id]").forEach((box) => {
+    const externalId = box.dataset.reminderId;
+    box.querySelector("[data-reminder-send]").addEventListener("click", async (ev) => {
+      ev.target.disabled = true;
+      try {
+        await api("/api/headhunter/reminders/send", {
+          method: "POST",
+          body: JSON.stringify({
+            external_id: externalId,
+            text: box.querySelector("textarea").value,
+          }),
+        });
+        showToast("Напоминание отправлено", "success");
+        renderHhRemindersQueue();
+      } catch (err) {
+        showToast(err.message.replace(/^\d+: /, ""), "error");
+        ev.target.disabled = false;
+      }
+    });
+  });
+}
+
 // «Сегодня: 12 из 25 · разогрев, день 3 · отправка будни 9–19».
 function mailPlanText(p) {
   if (!p) return "";
@@ -4054,6 +4345,9 @@ async function loadOutreachSettings() {
   document.getElementById("digest-quiet").checked = s.digest_quiet;
   document.getElementById("outreach-skip-us").checked = s.skip_us_only;
   document.getElementById("outreach-skip-eu").checked = s.skip_europe_only;
+  document.getElementById("outreach-candidate-telegram").value = s.candidate_telegram;
+  document.getElementById("outreach-candidate-whatsapp").value = s.candidate_whatsapp;
+  document.getElementById("outreach-candidate-linkedin").value = s.candidate_linkedin;
 }
 
 async function saveOutreachSettings() {
@@ -4073,6 +4367,9 @@ async function saveOutreachSettings() {
     digest_hour: num("outreach-digest-hour"),
     skip_us_only: document.getElementById("outreach-skip-us").checked,
     skip_europe_only: document.getElementById("outreach-skip-eu").checked,
+    candidate_telegram: document.getElementById("outreach-candidate-telegram").value.trim(),
+    candidate_whatsapp: document.getElementById("outreach-candidate-whatsapp").value.trim(),
+    candidate_linkedin: document.getElementById("outreach-candidate-linkedin").value.trim(),
   };
   const password = document.getElementById("outreach-app-password").value.trim();
   if (password) body.email_app_password = password;
@@ -5290,6 +5587,9 @@ function initDashboard() {
           application_retention_days: Number.isFinite(retentionDays)
             ? retentionDays
             : 0,
+          cover_letter_style: document.getElementById("limit-cover-letter-style").value,
+          continuous_cycle_enabled: document.getElementById("limit-continuous-cycle").checked,
+          continuous_cycle_gap_minutes: Math.max(1, parseInt(document.getElementById("limit-continuous-gap").value, 10) || 3),
           ...(llmAlert !== null ? { llm_daily_cost_alert_usd: llmAlert } : {}),
         }),
       });
@@ -5541,7 +5841,7 @@ function initDashboard() {
         return v === "" ? null : Number(v);
       };
       try {
-        await api("/api/settings/telegram", {
+        const saved = await api("/api/settings/telegram", {
           method: "POST",
           body: JSON.stringify({
             channels: linesOf("tg-channels"),
@@ -5552,7 +5852,9 @@ function initDashboard() {
             active_hours_end: numOrNull("tg-hours-end"),
           }),
         });
-        status.textContent = "Сохранено.";
+        const channels = saved.channels || [];
+        setTelegramChannels(channels);
+        status.textContent = `Сохранено: ${channels.length} каналов.`;
         setTimeout(() => (status.textContent = ""), 2000);
       } catch (e) {
         status.textContent = `Ошибка: ${e.message}`;
@@ -5829,6 +6131,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
   document.getElementById("outreach-save").addEventListener("click", saveOutreachSettings);
+  initTelegramChannelEditor();
   document.getElementById("tgq-save").addEventListener("click", saveTelegramWatch);
   document.getElementById("import-btn").addEventListener("click", () => document.getElementById("import-file").click());
   document.getElementById("import-file").addEventListener("change", (e) => {

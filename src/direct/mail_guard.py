@@ -19,7 +19,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 WARMUP_START, WARMUP_STEP = 15, 5
-BOUNCE_STOP = 3  # по умолчанию: столько возвратов за сутки — и отправка встаёт до завтра
+BOUNCE_STOP = (
+    3  # по умолчанию: столько возвратов за сутки — и отправка встаёт до завтра
+)
 BOUNCE_STOP_MAX = 30
 MIN_PAUSE, MAX_PAUSE = 120, 40 * 60
 
@@ -40,13 +42,22 @@ def _events(output_folder: Path) -> tuple[list[datetime], list[datetime]]:
         for item in campaign.get("items", {}).values():
             sent.append(item.get("sent_at") or "")
             bounced.append(item.get("bounced_at") or "")
-    for entry in _load(output_folder / "applied_log.json").get("applications", []):
+    for entry in _load(output_folder / "applied_log.json").get(
+        "applications", []
+    ):
         sent.append(entry.get("outreach_sent_at") or "")
-    for card in _load(output_folder / "contact_book.json").get("companies", {}).values():
+    for card in (
+        _load(output_folder / "contact_book.json")
+        .get("companies", {})
+        .values()
+    ):
         for contact in card.get("contacts", []):
             sent.append(contact.get("sent_at") or "")
             bounced.append(contact.get("bounced_at") or "")
-    parse = lambda xs: [datetime.fromisoformat(x) for x in xs if x]  # noqa: E731
+
+    def parse(xs: list[str]) -> list[datetime]:
+        return [datetime.fromisoformat(x) for x in xs if x]
+
     return parse(sent), parse(bounced)
 
 
@@ -60,7 +71,10 @@ def settings(parameters: dict) -> dict:
         "weekdays_only": direct.get("weekdays_only", True) is not False,
         # Возвратов за сутки до стопа — настраивается (Защита почты), но не
         # выключается: волна возвратов уводит в спам письма и живым HR.
-        "bounce_stop": min(BOUNCE_STOP_MAX, max(1, int(direct.get("bounce_stop", BOUNCE_STOP)))),
+        "bounce_stop": min(
+            BOUNCE_STOP_MAX,
+            max(1, int(direct.get("bounce_stop", BOUNCE_STOP))),
+        ),
     }
 
 
@@ -74,7 +88,9 @@ def next_window(moment: datetime, s: dict) -> datetime:
     """Ближайшее начало времени отправки (или сейчас, если оно идёт)."""
     if _in_window(moment, s):
         return moment
-    day = moment.replace(hour=s["send_from"], minute=0, second=0, microsecond=0)
+    day = moment.replace(
+        hour=s["send_from"], minute=0, second=0, microsecond=0
+    )
     if moment.hour >= s["send_from"]:
         day += timedelta(days=1)
     while s["weekdays_only"] and day.weekday() >= 5:
@@ -82,7 +98,9 @@ def next_window(moment: datetime, s: dict) -> datetime:
     return day
 
 
-def plan(parameters: dict, output_folder: Path, now: datetime | None = None) -> dict:
+def plan(
+    parameters: dict, output_folder: Path, now: datetime | None = None
+) -> dict:
     """Сколько писем можно сегодня и можно ли прямо сейчас."""
     now = now or datetime.now().astimezone()
     s = settings(parameters)
@@ -97,11 +115,17 @@ def plan(parameters: dict, output_folder: Path, now: datetime | None = None) -> 
     in_window = _in_window(now, s)
     reason = ""
     if recent_bounces >= s["bounce_stop"]:
-        reason = f"Возвратов за сутки: {recent_bounces} — пауза до завтра, чтобы Gmail не счёл это спамом"
+        reason = (
+            f"Возвратов за сутки: {recent_bounces} — пауза до завтра, чтобы "
+            "Gmail не счёл это спамом"
+        )
     elif sent_today >= limit:
         reason = f"Дневной лимит писем ({limit}) исчерпан — продолжу завтра"
     elif not in_window:
-        reason = f"Вне времени отправки — продолжу {next_window(now, s).strftime('%d.%m в %H:%M')}"
+        reason = (
+            "Вне времени отправки — продолжу "
+            f"{next_window(now, s).strftime('%d.%m в %H:%M')}"
+        )
     return {
         **s,
         "limit": limit,

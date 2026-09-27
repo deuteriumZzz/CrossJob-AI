@@ -8,7 +8,7 @@ import zipfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
@@ -29,6 +29,7 @@ from config import (
 )
 from main import (
     ALL_SOURCES,
+    HR_DRAFTS_FILE,
     SCHEDULER_SOURCES,
     TELEGRAM_INTRO_TEMPLATE_DEFAULT,
     ConfigError,
@@ -43,34 +44,70 @@ from main import (
     apply_llm_provider_override,
     block_headhunter_employer,
 )
-from main import HR_DRAFTS_FILE
 from main import bootstrap_data_folder as _bootstrap_data_folder
-from main import prefill_direct_application as _prefill_direct_application
-from main import prepare_interview as _prepare_interview
 from main import check_campaign_sending as _check_campaign_sending
-from main import start_campaign_job as _start_campaign_job
-from main import send_hr_draft as _send_hr_draft
 from main import create_cover_letter as _create_cover_letter
 from main import create_resume_audit as _create_resume_audit
 from main import create_resume_pdf as _create_resume_pdf
 from main import create_resume_pdf_job_tailored as _create_resume_tailored
 from main import force_refresh_plain_text_resume as _refresh_plain_text
 from main import generate_positions_from_resume as _generate_positions
+from main import prefill_direct_application as _prefill_direct_application
+from main import prepare_interview as _prepare_interview
 from main import (
     run_selected_sources,
 )
+from main import send_headhunter_reminder as _send_headhunter_reminder
+from main import send_hr_draft as _send_hr_draft
+from main import start_campaign_job as _start_campaign_job
+from src.job_sources.apply_pacing import (
+    MAX_TELEGRAM_MESSAGE_DELAY_SECONDS,
+    MIN_TELEGRAM_MESSAGE_DELAY_SECONDS,
+)
+from src.job_sources.telegram.watcher import (
+    pending_telegram_sends_count,
+)
+from src.libs.resume_and_cover_builder.letter_styles import STYLE_LABELS
 from src.config_patch import (
+    ConfigWriteError,
     set_list_field,
     set_source_field,
     set_source_list_field,
     set_top_level_field,
+    stage_config_updates,
     unset_source_field,
 )
+from src.direct import mail_guard
+from src.direct.ats import discover_ats, fetch_jobs
+from src.direct.campaign import (
+    CAMPAIGNS_FILE,
+    CampaignJob,
+    CampaignStore,
+    campaign_stats,
+)
+from src.direct.companies import load_companies, save_companies
+from src.direct.dossier import collect_dossier
+from src.direct.email_channel import build_message, send_email
+from src.direct.importer import preview as import_preview
+from src.direct.importer import read_file, rows_from_table, rows_from_text
 from src.job_sources.applied_log import (
     STAGES,
     AppliedLog,
+    Stage,
     effective_stage,
 )
+from src.job_sources.block_detection import is_still_blocked
+from src.job_sources.contact_book import ContactBook, company_key
+from src.job_sources.hr_replies import (
+    CATEGORY_LABELS,
+    DraftStore,
+    company_uses_russian,
+    due_hh_reminders,
+    generate_first_message,
+    hh_reminder_text,
+)
+from src.job_sources.interview_calendar import build_ics
+from src.job_sources.interview_prep import evaluate_answer, generate_questions
 from src.job_sources.llm_provider import (
     PROVIDER_MODELS,
 )
@@ -91,49 +128,40 @@ from src.job_sources.llm_usage import (
 from src.job_sources.llm_usage import (
     summarize_usage,
 )
-from src.job_sources.preferences import effective_list
-from src.job_sources.telegram.client import (
-    TelegramLoginSession,
-    TelegramSourceClient,
-    TelegramStatusClient,
+from src.job_sources.market_stats import (
+    REGION_LABELS,
+    salary_stats,
+    skill_demand,
 )
-from src.job_sources.telegram_connect import get_bot_username, wait_for_start
-from src.job_sources.telegram_control import HELP_TEXT as _TELEGRAM_HELP_TEXT
-from src.direct.ats import discover_ats, fetch_jobs
-from src.direct.email_channel import build_message, send_email
-from src.direct.companies import load_companies, save_companies
-from src.direct.campaign import CAMPAIGNS_FILE, CampaignJob, CampaignStore, campaign_stats
-from src.direct import mail_guard
-from src.direct.dossier import collect_dossier
-from src.direct.importer import preview as import_preview
-from src.direct.importer import read_file, rows_from_table, rows_from_text
-from src.job_sources.block_detection import is_still_blocked
-from src.job_sources.telegram.watcher import TELEGRAM_FOLDER
-from src.job_sources.telegram_notify import bot_credentials
-from src.job_sources.contact_book import ContactBook, company_key
-from src.job_sources.hr_replies import (
-    CATEGORY_LABELS,
-    DraftStore,
-    generate_first_message,
-)
-from src.job_sources.interview_calendar import build_ics
-from src.job_sources.interview_prep import evaluate_answer, generate_questions
 from src.job_sources.offers import (
     add_offer,
     compare_with_market,
     load_offers,
     save_offers,
 )
-from src.job_sources.market_stats import (
-    REGION_LABELS,
-    salary_stats,
-    skill_demand,
+from src.job_sources.preferences import effective_list
+from src.job_sources.resume_routing import (
+    ROUTE_KEYS,
+    ResumeChannel,
+    available_resumes,
+    resolve_resume,
+    resolve_resume_name,
+    resume_relative_name,
 )
+from src.job_sources.telegram.client import (
+    TelegramLoginSession,
+    TelegramSourceClient,
+    TelegramStatusClient,
+    normalize_channel,
+)
+from src.job_sources.telegram.watcher import TELEGRAM_FOLDER
+from src.job_sources.telegram_connect import get_bot_username, wait_for_start
+from src.job_sources.telegram_control import HELP_TEXT as _TELEGRAM_HELP_TEXT
 from src.job_sources.telegram_conversations import TelegramConversations
-from src.job_sources.telegram_notify import send_notification
+from src.job_sources.telegram_notify import bot_credentials, send_notification
 from src.libs.resume_and_cover_builder import StyleManager
 from src.logging import logger
-from src.scheduler import DEFAULT_INTERVAL_HOURS, Scheduler
+from src.scheduler import CONTINUOUS_CYCLE_SOURCES, DEFAULT_INTERVAL_HOURS, Scheduler
 from src.scheduler_state import load_state
 from src.utils import autostart, daemon_service
 from src.utils.constants import RESUME_PDF, RESUME_PDF_LINKEDIN, SECRETS_YAML
@@ -306,7 +334,9 @@ def _start_mail_ticker() -> None:
                 _absorb_new_companies(ctx)
                 _check_campaign_sending(ctx.config, ctx.llm_api_key)
             except Exception as e:  # noqa: BLE001 — тикер не должен падать
-                logger.warning(f"Рассылка: проверка продолжения не удалась: {e}")
+                logger.warning(
+                    f"Рассылка: проверка продолжения не удалась: {e}"
+                )
             time.sleep(300)
 
     threading.Thread(target=loop, name="mail-ticker", daemon=True).start()
@@ -450,7 +480,13 @@ _ERROR_PATTERNS = (
         # "401" только как HTTP-статус: голое "401" попадалось в
         # шестнадцатеричных адресах стека chromedriver, и зависшая
         # страница hh показывалась как "неверный API-ключ LLM".
-        ("invalid_api_key", "incorrect api key", "error code: 401", "status code 401", "401 unauthorized"),
+        (
+            "invalid_api_key",
+            "incorrect api key",
+            "error code: 401",
+            "status code 401",
+            "401 unauthorized",
+        ),
         "Провайдер LLM не принял API-ключ — проверьте его в "
         "Настройки → Провайдер ИИ.",
     ),
@@ -537,6 +573,18 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
                 "auto_reply": bool(source_config.get("auto_reply")),
                 "auto_bump_resume": bool(
                     source_config.get("auto_bump_resume")
+                ),
+                "chat_cover_letter_followup": bool(
+                    source_config.get("chat_cover_letter_followup")
+                ),
+                "reminder_follow_up_days": source_config.get(
+                    "reminder_follow_up_days", 7
+                ),
+                "continuous_cycle_active": name in CONTINUOUS_CYCLE_SOURCES
+                and bool(
+                    (ctx.config.get("limits") or {}).get(
+                        "continuous_cycle_enabled"
+                    )
                 ),
                 "resume_id": source_config.get("resume_id") or "",
                 "interval_hours": source_config.get(
@@ -639,6 +687,14 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
         "chat_checks": chat_checks,
         "total_applied_today": ctx.applied_log.applied_today_count_all(),
         "total_daily_limit": _effective_total_daily_limit(ctx.config),
+        # Пока включён (Настройки → Лимиты откликов), свой interval_hours
+        # каждой площадки из CONTINUOUS_CYCLE_SOURCES игнорируется
+        # планировщиком (см. scheduler.run_once) — фронтенд блокирует
+        # это поле в карточке площадки, чтобы не создавать иллюзию, что
+        # оно на что-то влияет.
+        "continuous_cycle_enabled": bool(
+            (ctx.config.get("limits") or {}).get("continuous_cycle_enabled")
+        ),
     }
 
 
@@ -661,8 +717,10 @@ def get_results(ctx: AppContext = Depends(get_ctx)) -> dict:
     now = datetime.now().astimezone()
     week, prev = now - timedelta(days=7), now - timedelta(days=14)
     by_source: dict[str, dict] = {}
-    totals = {"week": {"applied": 0, "replies": 0, "interviews": 0},
-              "prev": {"applied": 0, "replies": 0, "interviews": 0}}
+    totals = {
+        "week": {"applied": 0, "replies": 0, "interviews": 0},
+        "prev": {"applied": 0, "replies": 0, "interviews": 0},
+    }
 
     def add(source: str, kind: str, at: str) -> None:
         when = datetime.fromisoformat(at)
@@ -671,7 +729,15 @@ def get_results(ctx: AppContext = Depends(get_ctx)) -> dict:
             return
         totals[period][kind] += 1
         if period == "week":
-            row = by_source.setdefault(source, {"source": source, "applied": 0, "replies": 0, "interviews": 0})
+            row = by_source.setdefault(
+                source,
+                {
+                    "source": source,
+                    "applied": 0,
+                    "replies": 0,
+                    "interviews": 0,
+                },
+            )
             row[kind] += 1
 
     for e in ctx.applied_log.find_by_company(""):
@@ -691,7 +757,9 @@ def get_results(ctx: AppContext = Depends(get_ctx)) -> dict:
                 add("email_campaign", "replies", item["replied_at"])
     return {
         **totals,
-        "by_source": sorted(by_source.values(), key=lambda r: (-r["replies"], -r["applied"])),
+        "by_source": sorted(
+            by_source.values(), key=lambda r: (-r["replies"], -r["applied"])
+        ),
     }
 
 
@@ -740,7 +808,9 @@ def post_application_stage(
     if body.stage and body.stage not in STAGES:
         raise HTTPException(status_code=400, detail="Неизвестный этап")
     found = ctx.applied_log.set_stage(
-        body.source, body.external_id, body.stage or None
+        body.source,
+        body.external_id,
+        cast(Optional[Stage], body.stage or None),
     )
     if not found:
         raise HTTPException(status_code=404, detail="Заявка не найдена")
@@ -826,14 +896,26 @@ def get_inbox(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
         for email, item in campaign["items"].items():
             if item["status"] != "replied":
                 continue
-            items.append({
-                "channel": "email", "source": "email_campaign", "external_id": None,
-                "company": item["company"], "title": "", "contact": email,
-                "link": f"https://mail.google.com/mail/u/0/#search/from%3A{email}",
-                "text": f"Ответили на письмо из рассылки «{campaign['name']}» — откройте переписку в Gmail",
-                "at": item.get("replied_at") or item.get("sent_at") or campaign["created_at"],
-                "unread": False, "stage": "replied",
-            })
+            items.append(
+                {
+                    "channel": "email",
+                    "source": "email_campaign",
+                    "external_id": None,
+                    "company": item["company"],
+                    "title": "",
+                    "contact": email,
+                    "link": "https://mail.google.com/mail/u/0/"
+                    f"#search/from%3A{email}",
+                    "text": "Ответили на письмо из рассылки "
+                    f"«{campaign['name']}» — откройте переписку в "
+                    "Gmail",
+                    "at": item.get("replied_at")
+                    or item.get("sent_at")
+                    or campaign["created_at"],
+                    "unread": False,
+                    "stage": "replied",
+                }
+            )
     return sorted(items, key=lambda i: i["at"], reverse=True)
 
 
@@ -854,6 +936,9 @@ class OutreachSettings(BaseModel):
     digest_quiet: Optional[bool] = None
     skip_us_only: Optional[bool] = None
     skip_europe_only: Optional[bool] = None
+    candidate_telegram: Optional[str] = None
+    candidate_whatsapp: Optional[str] = None
+    candidate_linkedin: Optional[str] = None
 
 
 @app.get("/api/settings/outreach")
@@ -868,9 +953,15 @@ def get_outreach_settings(ctx: AppContext = Depends(get_ctx)) -> dict:
     hunter = secrets.get("hunter_api_key") or ""
     return {
         "email_address": email.get("address") or "",
-        "email_connected": bool(email.get("address") and email.get("app_password")),
+        "email_connected": bool(
+            email.get("address") and email.get("app_password")
+        ),
         "hunter_preview": _mask_api_key(hunter) if hunter else "",
-        **{k: v for k, v in mail_guard.settings(ctx.config).items() if k != "daily_limit"},
+        **{
+            k: v
+            for k, v in mail_guard.settings(ctx.config).items()
+            if k != "daily_limit"
+        },
         "email_daily_limit": mail_guard.settings(ctx.config)["daily_limit"],
         "mail_plan": mail_guard.plan(ctx.config, ctx.output_folder),
         "auto_send": bool((ctx.config.get("direct") or {}).get("auto_send")),
@@ -882,6 +973,15 @@ def get_outreach_settings(ctx: AppContext = Depends(get_ctx)) -> dict:
         "digest_quiet": bool(digest.get("quiet")),
         "skip_us_only": "us_only" in (excluded or []),
         "skip_europe_only": "europe_only" in (excluded or []),
+        "candidate_telegram": (ctx.config.get("direct") or {}).get(
+            "candidate_telegram", ""
+        ),
+        "candidate_whatsapp": (ctx.config.get("direct") or {}).get(
+            "candidate_whatsapp", ""
+        ),
+        "candidate_linkedin": (ctx.config.get("direct") or {}).get(
+            "candidate_linkedin", ""
+        ),
     }
 
 
@@ -892,13 +992,20 @@ def post_outreach_settings(
     prefs = ctx.config_file
     if body.email_address is not None:
         set_source_field(
-            ctx.secrets_file, "email", "address", body.email_address.strip(), quote=True
+            ctx.secrets_file,
+            "email",
+            "address",
+            body.email_address.strip(),
+            quote=True,
         )
     if body.email_app_password:
         # Пароль приложения Google показывается блоками с пробелами.
         set_source_field(
-            ctx.secrets_file, "email", "app_password",
-            body.email_app_password.replace(" ", ""), quote=True,
+            ctx.secrets_file,
+            "email",
+            "app_password",
+            body.email_app_password.replace(" ", ""),
+            quote=True,
         )
         # Новый пароль — снимаем стоп «Gmail не принял пароль» с рассылок.
         store = CampaignStore(ctx.output_folder)
@@ -906,18 +1013,34 @@ def post_outreach_settings(
             if campaign.get("error"):
                 store.update(cid, error="", alerted="")
     if body.hunter_api_key:
-        set_top_level_field(ctx.secrets_file, "hunter_api_key", body.hunter_api_key.strip())
+        set_top_level_field(
+            ctx.secrets_file, "hunter_api_key", body.hunter_api_key.strip()
+        )
     if body.email_daily_limit is not None:
-        set_source_field(prefs, "direct", "email_daily_limit", min(300, max(1, body.email_daily_limit)))
+        set_source_field(
+            prefs,
+            "direct",
+            "email_daily_limit",
+            min(300, max(1, body.email_daily_limit)),
+        )
     if body.warmup is not None:
         set_source_field(prefs, "direct", "warmup", body.warmup)
     if body.auto_send is not None:
         set_source_field(prefs, "direct", "auto_send", body.auto_send)
     if body.bounce_stop is not None:
-        set_source_field(prefs, "direct", "bounce_stop", min(mail_guard.BOUNCE_STOP_MAX, max(1, body.bounce_stop)))
+        set_source_field(
+            prefs,
+            "direct",
+            "bounce_stop",
+            min(mail_guard.BOUNCE_STOP_MAX, max(1, body.bounce_stop)),
+        )
     if body.weekdays_only is not None:
         set_source_field(prefs, "direct", "weekdays_only", body.weekdays_only)
-    if body.send_from is not None and body.send_to is not None and 0 <= body.send_from < body.send_to <= 24:
+    if (
+        body.send_from is not None
+        and body.send_to is not None
+        and 0 <= body.send_from < body.send_to <= 24
+    ):
         set_source_field(prefs, "direct", "send_from", body.send_from)
         set_source_field(prefs, "direct", "send_to", body.send_to)
     if body.follow_up_days is not None:
@@ -928,7 +1051,9 @@ def post_outreach_settings(
     if body.digest_enabled is not None:
         set_source_field(prefs, "digest", "enabled", body.digest_enabled)
     if body.digest_hour is not None:
-        set_source_field(prefs, "digest", "hour", min(23, max(0, body.digest_hour)))
+        set_source_field(
+            prefs, "digest", "hour", min(23, max(0, body.digest_hour))
+        )
     if body.digest_quiet is not None:
         set_source_field(prefs, "digest", "quiet", body.digest_quiet)
     if body.skip_us_only is not None or body.skip_europe_only is not None:
@@ -936,12 +1061,41 @@ def post_outreach_settings(
         regions = [
             region
             for region, on in (
-                ("us_only", body.skip_us_only if body.skip_us_only is not None else current["skip_us_only"]),
-                ("europe_only", body.skip_europe_only if body.skip_europe_only is not None else current["skip_europe_only"]),
+                (
+                    "us_only",
+                    (
+                        body.skip_us_only
+                        if body.skip_us_only is not None
+                        else current["skip_us_only"]
+                    ),
+                ),
+                (
+                    "europe_only",
+                    (
+                        body.skip_europe_only
+                        if body.skip_europe_only is not None
+                        else current["skip_europe_only"]
+                    ),
+                ),
             )
             if on
         ]
         set_list_field(prefs, "excluded_remote_regions", regions)
+    # Необязательные контакты кандидата для подписи писем компаниям —
+    # только то, что человек сам вписал; LLM их не придумывает
+    # (см. build_contact_footer в hr_replies.py).
+    if body.candidate_telegram is not None:
+        set_source_field(
+            prefs, "direct", "candidate_telegram", body.candidate_telegram.strip()
+        )
+    if body.candidate_whatsapp is not None:
+        set_source_field(
+            prefs, "direct", "candidate_whatsapp", body.candidate_whatsapp.strip()
+        )
+    if body.candidate_linkedin is not None:
+        set_source_field(
+            prefs, "direct", "candidate_linkedin", body.candidate_linkedin.strip()
+        )
     ctx.reload_config()
     return get_outreach_settings(ctx)
 
@@ -974,7 +1128,10 @@ def get_hr_drafts(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
     напоминания в Telegram, письма HR) с вакансией, к которой относятся."""
     by_link = {e["link"]: e for e in ctx.applied_log.find_by_company("")}
     drafts = {
-        code: d for code, d in DraftStore(ctx.output_folder / HR_DRAFTS_FILE).all().items()
+        code: d
+        for code, d in DraftStore(ctx.output_folder / HR_DRAFTS_FILE)
+        .all()
+        .items()
         if not d.get("campaign")  # письма рассылки — в «Рассылках»
     }
     return sorted(
@@ -983,7 +1140,9 @@ def get_hr_drafts(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
                 "code": code,
                 **draft,
                 "channel": draft.get("channel", "telegram"),
-                "company": by_link.get(draft["job_link"], {}).get("company", ""),
+                "company": by_link.get(draft["job_link"], {}).get(
+                    "company", ""
+                ),
                 "title": by_link.get(draft["job_link"], {}).get("title", ""),
             }
             for code, draft in drafts.items()
@@ -1001,17 +1160,31 @@ def _backfill_contact_book(ctx: AppContext, book: ContactBook) -> None:
             book.add(
                 e["company"],
                 [
-                    {"kind": "email", "value": c, "source": "текст вакансии",
-                     "source_url": e["link"]}
+                    {
+                        "kind": "email",
+                        "value": c,
+                        "source": "текст вакансии",
+                        "source_url": e["link"],
+                    }
                     for c in e["contacts"]
                 ],
-                vacancy={"title": e["title"], "link": e["link"], "source": e["source"]},
+                vacancy={
+                    "title": e["title"],
+                    "link": e["link"],
+                    "source": e["source"],
+                },
             )
     if not book.path.exists():
         book._save({"companies": {}})
 
 
-def _contact_status(contact: dict, conversations, sent_by_email: dict, draft_contacts: set, campaign=None) -> str:
+def _contact_status(
+    contact: dict,
+    conversations,
+    sent_by_email: dict,
+    draft_contacts: set,
+    campaign=None,
+) -> str:
     """sent_by_email: email → отклики, где ему писали; draft_contacts —
     кому есть черновик (оба — заранее, иначе на тысячах компаний это
     перебор всех откликов для каждого контакта)."""
@@ -1027,7 +1200,9 @@ def _contact_status(contact: dict, conversations, sent_by_email: dict, draft_con
         return "bounced"
     if value in draft_contacts:
         return "draft"
-    if contact.get("sent_at") or (campaign and value in campaign.get("sent", ())):
+    if contact.get("sent_at") or (
+        campaign and value in campaign.get("sent", ())
+    ):
         return "written"
     if contact["kind"] == "telegram":
         conv = conversations.get(contact["value"])
@@ -1047,39 +1222,68 @@ def _contact_status(contact: dict, conversations, sent_by_email: dict, draft_con
 _STATUS_ORDER = ["new", "bounced", "draft", "written", "replied"]
 
 
-def _contact_events(ctx: AppContext, conversations, entries, drafts) -> dict[str, list[dict]]:
+def _contact_events(
+    ctx: AppContext, conversations, entries, drafts
+) -> dict[str, list[dict]]:
     """История по каждому контакту (email/@ник → [{at, text}]) — для
     «последнего действия» и истории в карточке компании."""
     events: dict[str, list[dict]] = {}
 
     def add(value: str, at: str, text: str) -> None:
         if value and at:
-            events.setdefault(value.lower(), []).append({"at": at, "text": text})
+            events.setdefault(value.lower(), []).append(
+                {"at": at, "text": text}
+            )
 
     for campaign in CampaignStore(ctx.output_folder).all().values():
         for email, item in campaign["items"].items():
             add(email, item.get("sent_at", ""), "письмо отправлено")
-            add(email, item.get("followed_up_at", ""), "напоминание отправлено")
+            add(
+                email, item.get("followed_up_at", ""), "напоминание отправлено"
+            )
             add(email, item.get("replied_at", ""), "ответили на письмо")
             if item["status"] == "bounced":
-                add(email, item.get("sent_at", ""), "письмо не дошло (возврат)")
+                add(
+                    email, item.get("sent_at", ""), "письмо не дошло (возврат)"
+                )
     for draft in drafts.values():
-        add(draft["contact"], draft.get("created_at", ""), "черновик ждёт отправки")
+        add(
+            draft["contact"],
+            draft.get("created_at", ""),
+            "черновик ждёт отправки",
+        )
     for conv in conversations.all():
         for m in conv["messages"]:
-            add(conv["contact"], m["at"], "ответ в Telegram" if m["direction"] == "in" else "написали в Telegram")
+            add(
+                conv["contact"],
+                m["at"],
+                (
+                    "ответ в Telegram"
+                    if m["direction"] == "in"
+                    else "написали в Telegram"
+                ),
+            )
     for e in entries:
-        add(e.get("outreach_email", ""), e.get("outreach_sent_at", ""), "письмо HR по вакансии")
+        add(
+            e.get("outreach_email", ""),
+            e.get("outreach_sent_at", ""),
+            "письмо HR по вакансии",
+        )
     for history in events.values():
         history.sort(key=lambda ev: ev["at"])
     return events
 
 
 def _source_kind(source: str) -> str:
-    """Для фильтра и значка в базе: file / telegram / sites / dossier / vacancy."""
+    """Для фильтра и значка в базе: file / telegram / sites / dossier /
+    vacancy."""
     group = _source_group(source)
-    return {"Telegram-каналы": "telegram", "Сайты компаний": "sites", "Досье компаний": "dossier",
-            "Тексты вакансий": "vacancy"}.get(group, "file")
+    return {
+        "Telegram-каналы": "telegram",
+        "Сайты компаний": "sites",
+        "Досье компаний": "dossier",
+        "Тексты вакансий": "vacancy",
+    }.get(group, "file")
 
 
 @app.get("/api/contacts")
@@ -1093,8 +1297,13 @@ def get_contacts(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
     # Пересчёт базы (статусы, история) дорогой на тысячах компаний, а
     # Главная спрашивает часто — считаем заново, только если изменился
     # какой-то из файлов, из которых она складывается, или чёрный список.
-    sources = [book.path, ctx.output_folder / CAMPAIGNS_FILE, ctx.output_folder / HR_DRAFTS_FILE,
-               ctx.output_folder / "telegram_conversations.json", ctx.applied_log.path]
+    sources = [
+        book.path,
+        ctx.output_folder / CAMPAIGNS_FILE,
+        ctx.output_folder / HR_DRAFTS_FILE,
+        ctx.output_folder / "telegram_conversations.json",
+        ctx.applied_log.path,
+    ]
     cache_key = (
         str(ctx.output_folder),
         tuple(p.stat().st_mtime_ns if p.exists() else 0 for p in sources),
@@ -1129,43 +1338,113 @@ def _build_contacts(ctx: AppContext, book: ContactBook) -> list[dict]:
             sent_by_email.setdefault(e["outreach_email"].lower(), []).append(e)
     draft_contacts = {d["contact"].lower() for d in drafts.values()}
     # Общий чёрный список из «Что ищу» действует и на рассылку.
-    blacklist = {company_key(c) for c in ctx.config.get("company_blacklist") or [] if company_key(c)}
+    blacklist = {
+        company_key(c)
+        for c in ctx.config.get("company_blacklist") or []
+        if company_key(c)
+    }
     cards = []
     for key, card in book.all().items():
         contacts = [
-            {**c, "status": _contact_status(c, conversations, sent_by_email, draft_contacts, campaign),
-             "source_kind": _source_kind(c.get("source", ""))}
+            {
+                **c,
+                "status": _contact_status(
+                    c, conversations, sent_by_email, draft_contacts, campaign
+                ),
+                "source_kind": _source_kind(c.get("source", "")),
+            }
             for c in card["contacts"]
         ]
         status = max(
-            (c["status"] for c in contacts), key=_STATUS_ORDER.index, default="new"
+            (c["status"] for c in contacts),
+            key=_STATUS_ORDER.index,
+            default="new",
         )
-        if card.get("do_not_contact") or company_key(card.get("company") or "") in blacklist:
+        if (
+            card.get("do_not_contact")
+            or company_key(card.get("company") or "") in blacklist
+        ):
             status = "skip"
         history = sorted(
-            [{"at": c.get("found_at", ""), "text": f"добавлен {c['value']} — {c.get('source') or 'источник не указан'}"} for c in card["contacts"]]
-            + [ev for c in card["contacts"] for ev in events.get(c["value"].lower(), [])]
-            + [{"at": c[f], "text": f"{text} {c['value']}"} for c in card["contacts"]
-               for f, text in (("sent_at", "письмо отправлено"), ("followed_up_at", "напоминание отправлено"),
-                               ("replied_at", "ответили"), ("bounced_at", "возврат письма")) if c.get(f)],
+            [
+                {
+                    "at": c.get("found_at", ""),
+                    "text": f"добавлен {c['value']} — "
+                    f"{c.get('source') or 'источник не указан'}",
+                }
+                for c in card["contacts"]
+            ]
+            + [
+                ev
+                for c in card["contacts"]
+                for ev in events.get(c["value"].lower(), [])
+            ]
+            + [
+                {"at": c[f], "text": f"{text} {c['value']}"}
+                for c in card["contacts"]
+                for f, text in (
+                    ("sent_at", "письмо отправлено"),
+                    ("followed_up_at", "напоминание отправлено"),
+                    ("replied_at", "ответили"),
+                    ("bounced_at", "возврат письма"),
+                )
+                if c.get(f)
+            ],
             key=lambda ev: ev["at"],
         )
-        primary = next((c for c in contacts if c["kind"] == "email"), contacts[0] if contacts else None)
-        cards.append({
-            "key": key, **card, "contacts": contacts, "status": status,
-            # Текст вакансии (до 4000 символов) интерфейсу не нужен — на
-            # тысячах компаний это мегабайты на каждое открытие Базы.
-            "vacancies": [{k: v for k, v in vac.items() if k != "text"} for vac in card["vacancies"]],
-            "primary": primary,
-            "hr": next((c["name"] for c in contacts if c.get("name")), ""),
-            # Компания из «Сайтов компаний» без найденного email — тоже «sites».
-            "files": sorted({_source_group(c.get("source", ""))[len("файл "):] for c in card["contacts"]
-                             if c.get("source", "").startswith("файл ")}),
-            "source_kinds": sorted({c["source_kind"] for c in contacts}
-                                   | ({"sites"} if any(v.get("source") == "direct" for v in card["vacancies"]) else set())),
-            "history": history,
-            "last": history[-1] if history else None,
-        })
+        primary = next(
+            (c for c in contacts if c["kind"] == "email"),
+            contacts[0] if contacts else None,
+        )
+        cards.append(
+            {
+                "key": key,
+                **card,
+                "contacts": contacts,
+                "status": status,
+                # Текст вакансии (до 4000 символов) интерфейсу не нужен — на
+                # тысячах компаний это мегабайты на каждое открытие Базы.
+                "vacancies": [
+                    {k: v for k, v in vac.items() if k != "text"}
+                    for vac in card["vacancies"]
+                ],
+                "primary": primary,
+                "hr": next((c["name"] for c in contacts if c.get("name")), ""),
+                # Компания из «Сайтов компаний» без найденного email — тоже
+                # «sites».
+                "files": sorted(
+                    {
+                        _source_group(c.get("source", ""))[len("файл ") :]
+                        for c in card["contacts"]
+                        if c.get("source", "").startswith("файл ")
+                    }
+                ),
+                "source_kinds": sorted(
+                    {c["source_kind"] for c in contacts}
+                    | (
+                        {"sites"}
+                        if any(
+                            v.get("source") == "direct"
+                            for v in card["vacancies"]
+                        )
+                        else set()
+                    )
+                ),
+                "history": history,
+                "last": history[-1] if history else None,
+                # Какое резюме уйдёт вложением, если написать этой
+                # компании (см. Настройки → Почта и письма → маршруты
+                # резюме) — видно прямо на карточке, не только в
+                # отдельной вкладке настроек.
+                "resume_hint": (
+                    lambda resume: resume.name if resume else ""
+                )(
+                    resolve_resume(
+                        ctx.config, "email", company_uses_russian(card)
+                    )
+                ),
+            }
+        )
     return sorted(cards, key=lambda c: c.get("updated_at", ""), reverse=True)
 
 
@@ -1175,7 +1454,9 @@ class ContactsBulk(BaseModel):
 
 
 @app.post("/api/contacts/bulk")
-def post_contacts_bulk(body: ContactsBulk, ctx: AppContext = Depends(get_ctx)) -> dict:
+def post_contacts_bulk(
+    body: ContactsBulk, ctx: AppContext = Depends(get_ctx)
+) -> dict:
     """Действия над выбранными компаниями базы. delete возвращает
     удалённые карточки — UI может «Отменить» через /api/contacts/restore."""
     book = ContactBook(ctx.output_folder)
@@ -1192,14 +1473,20 @@ class ContactsRestore(BaseModel):
 
 
 @app.post("/api/contacts/restore")
-def post_contacts_restore(body: ContactsRestore, ctx: AppContext = Depends(get_ctx)) -> dict:
+def post_contacts_restore(
+    body: ContactsRestore, ctx: AppContext = Depends(get_ctx)
+) -> dict:
     ContactBook(ctx.output_folder).restore(body.cards)
     return {"ok": True}
 
 
 _STATUS_TEXT = {
-    "new": "не писали", "bounced": "возврат", "draft": "черновик",
-    "written": "написали", "replied": "ответили", "skip": "не писать",
+    "new": "не писали",
+    "bounced": "возврат",
+    "draft": "черновик",
+    "written": "написали",
+    "replied": "ответили",
+    "skip": "не писать",
 }
 
 
@@ -1212,20 +1499,49 @@ def get_contacts_export(ctx: AppContext = Depends(get_ctx)) -> Response:
 
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=";")
-    writer.writerow(["Компания", "Email", "Telegram", "Имя HR", "Сайт", "Упор", "Источник", "Статус", "Последнее действие", "Дата"])
+    writer.writerow(
+        [
+            "Компания",
+            "Email",
+            "Telegram",
+            "Имя HR",
+            "Сайт",
+            "Упор",
+            "Источник",
+            "Статус",
+            "Последнее действие",
+            "Дата",
+        ]
+    )
     for card in get_contacts(ctx):
-        by_kind = lambda kind: ", ".join(c["value"] for c in card["contacts"] if c["kind"] == kind)  # noqa: E731
+
+        def by_kind(kind: str, card: dict = card) -> str:
+            return ", ".join(
+                c["value"] for c in card["contacts"] if c["kind"] == kind
+            )
+
         last = card["last"] or {}
-        writer.writerow([
-            card.get("company", ""), by_kind("email"), by_kind("telegram"), card["hr"],
-            card.get("website", ""), card.get("emphasis", ""),
-            "; ".join(sorted({c.get("source", "") for c in card["contacts"]})),
-            _STATUS_TEXT.get(card["status"], card["status"]), last.get("text", ""), (last.get("at") or "")[:10],
-        ])
+        writer.writerow(
+            [
+                card.get("company", ""),
+                by_kind("email"),
+                by_kind("telegram"),
+                card["hr"],
+                card.get("website", ""),
+                card.get("emphasis", ""),
+                "; ".join(
+                    sorted({c.get("source", "") for c in card["contacts"]})
+                ),
+                _STATUS_TEXT.get(card["status"], card["status"]),
+                last.get("text", ""),
+                (last.get("at") or "")[:10],
+            ]
+        )
     name = f"crossjob-companies-{datetime.now().strftime('%Y-%m-%d')}.csv"
     # utf-8-sig — чтобы Excel открыл кириллицу без «кракозябр».
     return Response(
-        buf.getvalue().encode("utf-8-sig"), media_type="text/csv",
+        buf.getvalue().encode("utf-8-sig"),
+        media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={name}"},
     )
 
@@ -1247,11 +1563,14 @@ def post_contact_dossier(
         raise HTTPException(404, "Компания не найдена")
     if body.website.strip():
         card = {**card, "website": body.website.strip()}
-    hunter = ConfigValidator.load_yaml(ctx.secrets_file).get("hunter_api_key") or ""
+    hunter = (
+        ConfigValidator.load_yaml(ctx.secrets_file).get("hunter_api_key") or ""
+    )
     dossier = collect_dossier(card, hunter)
     if not dossier["website"]:
         raise HTTPException(
-            404, "Сайт компании не найден — укажите его в карточке и повторите."
+            404,
+            "Сайт компании не найден — укажите его в карточке и повторите.",
         )
     before = len(card["contacts"])
     book.add(card["company"], dossier["contacts"], website=dossier["website"])
@@ -1276,57 +1595,113 @@ def get_todo(ctx: AppContext = Depends(get_ctx)) -> dict:
 
     items: list[dict] = []
     all_drafts = DraftStore(ctx.output_folder / HR_DRAFTS_FILE).all()
-    # Письма рассылки живут в «Рассылках», во «Входящих» — только личные ответы HR.
+    # Письма рассылки живут в «Рассылках», во «Входящих» — только личные ответы
+    # HR.
     drafts = {k: d for k, d in all_drafts.items() if not d.get("campaign")}
     campaign_drafts = len(all_drafts) - len(drafts)
     if campaign_drafts:
-        items.append({
-            "id": "campaign_drafts", "count": campaign_drafts, "view": "outreach",
-            "text": _plural(campaign_drafts, "письмо рассылки ждёт", "письма рассылки ждут", "писем рассылки ждут") + " отправки",
-        })
+        items.append(
+            {
+                "id": "campaign_drafts",
+                "count": campaign_drafts,
+                "view": "outreach",
+                "text": _plural(
+                    campaign_drafts,
+                    "письмо рассылки ждёт",
+                    "письма рассылки ждут",
+                    "писем рассылки ждут",
+                )
+                + " отправки",
+            }
+        )
     if drafts:
-        items.append({
-            "id": "drafts", "count": len(drafts), "view": "replies",
-            "text": _plural(len(drafts), "сообщение HR ждёт", "сообщения HR ждут", "сообщений HR ждут") + " вашего «Отправить»",
-        })
+        items.append(
+            {
+                "id": "drafts",
+                "count": len(drafts),
+                "view": "replies",
+                "text": _plural(
+                    len(drafts),
+                    "сообщение HR ждёт",
+                    "сообщения HR ждут",
+                    "сообщений HR ждут",
+                )
+                + " вашего «Отправить»",
+            }
+        )
     since = datetime.now().astimezone() - timedelta(days=3)
     entries = ctx.applied_log.find_by_company("")
     # Интервью и офферы — своей строкой ниже, здесь только «просто ответили»:
     # иначе одни и те же приглашения считались дважды.
     fresh = [
-        e for e in entries
+        e
+        for e in entries
         if effective_stage(e) == "replied"
-        and datetime.fromisoformat(e.get("state_at") or e.get("stage_at") or e["applied_at"]) >= since
+        and datetime.fromisoformat(
+            e.get("state_at") or e.get("stage_at") or e["applied_at"]
+        )
+        >= since
     ]
     unread = [
-        c for c in TelegramConversations(
+        c
+        for c in TelegramConversations(
             ctx.output_folder / "telegram_conversations.json"
         ).all()
         if c.get("unread")
     ]
     if fresh or unread:
-        items.append({
-            "id": "replies", "count": len(fresh) + len(unread), "view": "replies",
-            "text": _plural(len(fresh) + len(unread), "новый ответ", "новых ответа", "новых ответов") + " от работодателей за 3 дня",
-        })
+        items.append(
+            {
+                "id": "replies",
+                "count": len(fresh) + len(unread),
+                "view": "replies",
+                "text": _plural(
+                    len(fresh) + len(unread),
+                    "новый ответ",
+                    "новых ответа",
+                    "новых ответов",
+                )
+                + " от работодателей за 3 дня",
+            }
+        )
     interviews = [e for e in entries if effective_stage(e) == "interview"]
     if interviews:
-        items.append({
-            "id": "interviews", "count": len(interviews), "view": "replies",
-            "text": _plural(len(interviews), "интервью", "интервью", "интервью") + " — «Подготовиться» у каждого во «Входящих»",
-        })
+        items.append(
+            {
+                "id": "interviews",
+                "count": len(interviews),
+                "view": "replies",
+                "text": _plural(
+                    len(interviews), "интервью", "интервью", "интервью"
+                )
+                + " — «Подготовиться» у каждого во «Входящих»",
+            }
+        )
     # «Кому ещё не писали» — в карточке «Компании и рассылка» с кнопкой
     # «Написать письма»; второй раз в «Что сделать сейчас» не дублируем.
     paused = [
-        name for name, _ in ALL_SOURCES
+        name
+        for name, _ in ALL_SOURCES
         if is_still_blocked(ctx.output_folder, name)
     ]
     if paused:
-        items.append({
-            "id": "paused", "count": len(paused), "view": "overview",
-            "text": _plural(len(paused), "площадка на паузе", "площадки на паузе", "площадок на паузе") + " после капчи/блокировки: " + ", ".join(paused)
-            + f" — пройдите проверку на сайте и напишите боту /resume {paused[0]}",
-        })
+        items.append(
+            {
+                "id": "paused",
+                "count": len(paused),
+                "view": "overview",
+                "text": _plural(
+                    len(paused),
+                    "площадка на паузе",
+                    "площадки на паузе",
+                    "площадок на паузе",
+                )
+                + " после капчи/блокировки: "
+                + ", ".join(paused)
+                + " — пройдите проверку на сайте и напишите боту /resume "
+                f"{paused[0]}",
+            }
+        )
     items += _broken_later(ctx)
     return {
         "items": items,
@@ -1348,40 +1723,99 @@ def _setup_checklist(ctx: AppContext) -> list[dict]:
     telegram = ctx.config.get("telegram") or {}
     tg_logged_in = (ctx.output_folder / ".telegram_session.session").exists()
     profile_file = data_folder / "job_application_profile.yaml"
-    profile = ConfigValidator.load_yaml(profile_file) if profile_file.exists() else {}
+    profile = (
+        ConfigValidator.load_yaml(profile_file)
+        if profile_file.exists()
+        else {}
+    )
     # Порядок — это порядок шагов мастера на Главной. Первые три — нужные:
     # без них бот бесполезен; остальные — дополнительные каналы. «Запустить
     # бота» — не шаг настройки, а состояние: оно видно по кнопке в меню.
     checks = [
-        ("resume", "Резюме", (data_folder / RESUME_PDF).exists(),
-         "загрузите PDF — по нему пишутся письма и отклики", "resume"),
-        ("llm", "Ключ ИИ", bool(ctx.llm_api_key),
-         "нужен для писем и подбора вакансий — бесплатный ключ получается за минуту", "settings-llm"),
-        ("schedule", "Площадки", any((ctx.config.get(n) or {}).get("schedule_enabled") for n, _ in ALL_SOURCES)
-         or bool(telegram.get("watch_enabled")),
-         "выберите режим «Откликается сам» или «Только ищет» на карточках площадок ниже", ""),
-        ("salary", "Зарплатные ожидания",
-         bool(ctx.config.get("salary_expectations") or (
-             profile.get("salary_expectations") or {}
-         ).get("salary_range_usd")),
-         "нужны для подбора вакансий и ответов на анкеты", "settings-table"),
-        ("bot", "CrossJob-бот", bot_credentials(ctx.config) is not None,
-         "сюда приходят вакансии с кнопками и ответы HR", "settings-notifications"),
-        ("telegram", "Вход в Telegram", tg_logged_in,
-         "чтобы читать каналы с вакансиями", "telegram"),
+        (
+            "resume",
+            "Резюме",
+            (data_folder / RESUME_PDF).exists(),
+            "загрузите PDF — по нему пишутся письма и отклики",
+            "resume",
+        ),
+        (
+            "llm",
+            "Ключ ИИ",
+            bool(ctx.llm_api_key),
+            "нужен для писем и подбора вакансий — бесплатный ключ "
+            "получается за минуту",
+            "settings-llm",
+        ),
+        (
+            "schedule",
+            "Площадки",
+            any(
+                (ctx.config.get(n) or {}).get("schedule_enabled")
+                for n, _ in ALL_SOURCES
+            )
+            or bool(telegram.get("watch_enabled")),
+            "выберите режим «Откликается сам» или «Только ищет» на "
+            "карточках площадок ниже",
+            "",
+        ),
+        (
+            "salary",
+            "Зарплатные ожидания",
+            bool(
+                ctx.config.get("salary_expectations")
+                or (profile.get("salary_expectations") or {}).get(
+                    "salary_range_usd"
+                )
+            ),
+            "нужны для подбора вакансий и ответов на анкеты",
+            "settings-table",
+        ),
+        (
+            "bot",
+            "CrossJob-бот",
+            bot_credentials(ctx.config) is not None,
+            "сюда приходят вакансии с кнопками и ответы HR",
+            "settings-notifications",
+        ),
+        (
+            "telegram",
+            "Вход в Telegram",
+            tg_logged_in,
+            "чтобы читать каналы с вакансиями",
+            "telegram",
+        ),
     ]
     if tg_logged_in:
         checks.append(
-            ("watch", "Telegram-парсер", bool(telegram.get("watch_enabled")) and bool(telegram.get("channels")),
-             "включите и добавьте каналы — вакансии будут приходить за секунды", "settings-tg-quick")
+            (
+                "watch",
+                "Telegram-парсер",
+                bool(telegram.get("watch_enabled"))
+                and bool(telegram.get("channels")),
+                "включите и добавьте каналы — вакансии будут приходить за "
+                "секунды",
+                "settings-tg-quick",
+            )
         )
     checks += [
-        ("gmail", "Почта Gmail", bool((secrets.get("email") or {}).get("app_password")),
-         "для рассылки компаниям с резюме во вложении", "settings-outreach"),
+        (
+            "gmail",
+            "Почта Gmail",
+            bool((secrets.get("email") or {}).get("app_password")),
+            "для рассылки компаниям с резюме во вложении",
+            "settings-outreach",
+        ),
     ]
     return [
-        {"id": i, "label": label, "ok": ok, "hint": "" if ok else hint, "goto": goto,
-         "required": i in _REQUIRED_SETUP}
+        {
+            "id": i,
+            "label": label,
+            "ok": ok,
+            "hint": "" if ok else hint,
+            "goto": goto,
+            "required": i in _REQUIRED_SETUP,
+        }
         for i, label, ok, hint, goto in checks
     ]
 
@@ -1396,13 +1830,30 @@ def _broken_later(ctx: AppContext) -> list[dict]:
 
     items = []
     telegram = ctx.config.get("telegram") or {}
-    if telegram.get("watch_enabled") and not (ctx.output_folder / ".telegram_session.session").exists():
-        items.append({"id": "tg_login", "count": "!", "view": "telegram",
-                      "text": "Telegram-парсер включён, но вход в Telegram слетел — войдите снова"})
+    if (
+        telegram.get("watch_enabled")
+        and not (ctx.output_folder / ".telegram_session.session").exists()
+    ):
+        items.append(
+            {
+                "id": "tg_login",
+                "count": "!",
+                "view": "telegram",
+                "text": "Telegram-парсер включён, но вход в Telegram слетел "
+                "— войдите снова",
+            }
+        )
     watcher = active_watcher()
     if watcher is not None and not watcher.connected:
-        items.append({"id": "watch_conn", "count": "!", "view": "logs",
-                      "text": "Telegram-парсер переподключается — если долго, подробности в «Логах»"})
+        items.append(
+            {
+                "id": "watch_conn",
+                "count": "!",
+                "view": "logs",
+                "text": "Telegram-парсер переподключается — если долго, "
+                "подробности в «Логах»",
+            }
+        )
     return items
 
 
@@ -1423,13 +1874,22 @@ def post_contact_from_application(
         raise HTTPException(400, "У вакансии не указана компания")
     book = ContactBook(ctx.output_folder)
     contacts = [
-        {"kind": "email", "value": c, "source": "текст вакансии", "source_url": entry["link"]}
+        {
+            "kind": "email",
+            "value": c,
+            "source": "текст вакансии",
+            "source_url": entry["link"],
+        }
         for c in entry.get("contacts") or []
     ]
     key = book.add(
         entry["company"],
         contacts,
-        vacancy={"title": entry["title"], "link": entry["link"], "source": entry["source"]},
+        vacancy={
+            "title": entry["title"],
+            "link": entry["link"],
+            "source": entry["source"],
+        },
         website=entry.get("company_url") or "",
     )
     try:
@@ -1458,7 +1918,9 @@ def _written_emails(ctx: AppContext) -> set[str]:
 IMPORT_JOBS: dict[str, dict] = {}
 
 
-def _run_import(ctx: AppContext, token: str, filename: str, data: bytes) -> None:
+def _run_import(
+    ctx: AppContext, token: str, filename: str, data: bytes
+) -> None:
     """Разбор файла в фоне: большой PDF идёт к LLM частями, адреса
     проверяются параллельно — дашборд при этом не замирает."""
     import json as _json
@@ -1471,12 +1933,20 @@ def _run_import(ctx: AppContext, token: str, filename: str, data: bytes) -> None
             rows = rows_from_table(table)
         else:
             if not ctx.llm_api_key:
-                raise ValueError("Для текста/PDF нужен ключ ИИ — или сохраните файл как CSV/XLSX.")
+                raise ValueError(
+                    "Для текста/PDF нужен ключ ИИ — или сохраните файл как "
+                    "CSV/XLSX."
+                )
             if not text.strip():
-                raise ValueError("В файле нет текста (возможно, это скан) — сохраните список как CSV/XLSX.")
+                raise ValueError(
+                    "В файле нет текста (возможно, это скан) — сохраните "
+                    "список как CSV/XLSX."
+                )
 
             def progress(done: int, total: int) -> None:
-                job.update(stage="Раскладываю по компаниям", done=done, total=total)
+                job.update(
+                    stage="Раскладываю по компаниям", done=done, total=total
+                )
 
             rows = rows_from_text(text, ctx.llm_api_key, progress)
         if not rows:
@@ -1490,10 +1960,15 @@ def _run_import(ctx: AppContext, token: str, filename: str, data: bytes) -> None
         }
         result = import_preview(rows, known, _written_emails(ctx))
         (ctx.output_folder / IMPORT_PREVIEW_FILE).write_text(
-            _json.dumps({"token": token, "filename": filename, **result}, ensure_ascii=False),
+            _json.dumps(
+                {"token": token, "filename": filename, **result},
+                ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
-        job.update(state="done", stats=result["stats"], items=result["items"][:300])
+        job.update(
+            state="done", stats=result["stats"], items=result["items"][:300]
+        )
     except (ValueError, KeyError, IndexError, zipfile.BadZipFile) as e:
         job.update(state="error", detail=str(e) or "Не удалось разобрать файл")
     except Exception as e:
@@ -1514,8 +1989,16 @@ async def post_import_preview(
     data = await file.read()
     token = _secrets.token_hex(4)
     filename = file.filename or "file.txt"
-    IMPORT_JOBS[token] = {"state": "running", "stage": "Загружаю", "done": 0, "total": 0, "filename": filename}
-    threading.Thread(target=_run_import, args=(ctx, token, filename, data), daemon=True).start()
+    IMPORT_JOBS[token] = {
+        "state": "running",
+        "stage": "Загружаю",
+        "done": 0,
+        "total": 0,
+        "filename": filename,
+    }
+    threading.Thread(
+        target=_run_import, args=(ctx, token, filename, data), daemon=True
+    ).start()
     return {"token": token}
 
 
@@ -1533,7 +2016,9 @@ class ImportCommit(BaseModel):
 
 
 @app.post("/api/import/commit")
-def post_import_commit(body: ImportCommit, ctx: AppContext = Depends(get_ctx)) -> dict:
+def post_import_commit(
+    body: ImportCommit, ctx: AppContext = Depends(get_ctx)
+) -> dict:
     """Шаг 2: сохранить разобранное в общую базу контактов. Адреса с
     ошибкой (нет почтового сервера, неверный формат) не добавляются."""
     import json as _json
@@ -1550,23 +2035,47 @@ def post_import_commit(body: ImportCommit, ctx: AppContext = Depends(get_ctx)) -
     filename = saved.get("filename") or "файл"
     for item in saved["items"]:
         take_email = item["email"] and item["check"] in (
-            ("ok", "unknown", "written") if body.include_unverified else ("ok", "written")
+            ("ok", "unknown", "written")
+            if body.include_unverified
+            else ("ok", "written")
         )
         found = []
         source = f"файл {filename}, строка {item['row']}"
         if take_email:
-            found.append({"kind": "email", "value": item["email"], "name": item.get("name", ""),
-                          "position": item.get("position", ""), "source": source,
-                          "source_url": item.get("source_url", "")})
+            found.append(
+                {
+                    "kind": "email",
+                    "value": item["email"],
+                    "name": item.get("name", ""),
+                    "position": item.get("position", ""),
+                    "source": source,
+                    "source_url": item.get("source_url", ""),
+                }
+            )
         if item.get("telegram"):
-            found.append({"kind": "telegram", "value": item["telegram"], "name": item.get("name", ""), "source": source,
-                          "source_url": item.get("source_url", "")})
+            found.append(
+                {
+                    "kind": "telegram",
+                    "value": item["telegram"],
+                    "name": item.get("name", ""),
+                    "source": source,
+                    "source_url": item.get("source_url", ""),
+                }
+            )
         if not item.get("company") and not found:
             continue
         key = book.add(
-            item.get("company", ""), found,
-            vacancy=({"title": item.get("title", ""), "link": item.get("link", ""), "source": "import"}
-                     if item.get("link") else None),
+            item.get("company", ""),
+            found,
+            vacancy=(
+                {
+                    "title": item.get("title", ""),
+                    "link": item.get("link", ""),
+                    "source": "import",
+                }
+                if item.get("link")
+                else None
+            ),
             website=item.get("website", ""),
             emphasis=item.get("emphasis", ""),
         )
@@ -1574,7 +2083,11 @@ def post_import_commit(body: ImportCommit, ctx: AppContext = Depends(get_ctx)) -
             companies.add(key)
             contacts += len(found)
     path.unlink(missing_ok=True)
-    return {"companies": len(companies), "contacts": contacts, "filename": filename}
+    return {
+        "companies": len(companies),
+        "contacts": contacts,
+        "filename": filename,
+    }
 
 
 def _drop_lost_drafts(ctx: AppContext) -> None:
@@ -1586,28 +2099,44 @@ def _drop_lost_drafts(ctx: AppContext) -> None:
     for cid, campaign in store.all().items():
         for email, item in campaign["items"].items():
             if item["status"] == "draft" and item.get("code") not in drafts:
-                store.update_item(cid, email, status="skipped", reason="письмо удалено")
+                store.update_item(
+                    cid, email, status="skipped", reason="письмо удалено"
+                )
 
 
-def _campaign_view(ctx: AppContext, campaign: dict) -> dict:
+def _campaign_view(ctx: AppContext, campaign: Optional[dict]) -> dict:
+    if campaign is None:  # удалили, пока шёл запрос
+        raise HTTPException(404, "Рассылка не найдена")
     # Текст готовых писем — чтобы прочитать их прямо в рассылке.
     drafts = DraftStore(ctx.output_folder / HR_DRAFTS_FILE).all()
     return {
-        "id": campaign["id"], "name": campaign["name"], "created_at": campaign["created_at"],
+        "id": campaign["id"],
+        "name": campaign["name"],
+        "created_at": campaign["created_at"],
         "stats": {
             **campaign_stats(campaign),
-            "followed_up": sum(1 for i in campaign["items"].values() if i.get("followed_up_at")),
+            "followed_up": sum(
+                1
+                for i in campaign["items"].values()
+                if i.get("followed_up_at")
+            ),
         },
         "progress": CampaignJob.progress(campaign["id"]),
         "sending": bool(campaign.get("sending")),
         "items": [
             {
-                "email": email, **item,
+                "email": email,
+                **item,
                 "subject": drafts.get(item["code"], {}).get("subject", ""),
                 "text": drafts.get(item["code"], {}).get("text", ""),
                 # Готовое напоминание (молчат N дней) — если его не убрали.
-                "follow_up_text": drafts.get(item.get("follow_up_code", ""), {}).get("text", "")
-                if not item.get("followed_up_at") else "",
+                "follow_up_text": (
+                    drafts.get(item.get("follow_up_code", ""), {}).get(
+                        "text", ""
+                    )
+                    if not item.get("followed_up_at")
+                    else ""
+                ),
             }
             for email, item in campaign["items"].items()
         ],
@@ -1617,17 +2146,29 @@ def _campaign_view(ctx: AppContext, campaign: dict) -> dict:
 @app.get("/api/campaigns")
 def get_campaigns(ctx: AppContext = Depends(get_ctx)) -> dict:
     """Рассылки и сколько адресов из базы ещё можно в них взять."""
-    in_campaigns = set().union(
-        *[set(c["items"]) for c in CampaignStore(ctx.output_folder).all().values()]
-    ) if CampaignStore(ctx.output_folder).all() else set()
+    in_campaigns = (
+        set().union(
+            *[
+                set(c["items"])
+                for c in CampaignStore(ctx.output_folder).all().values()
+            ]
+        )
+        if CampaignStore(ctx.output_folder).all()
+        else set()
+    )
     sources: dict[str, int] = {}
     available = 0
     for card in get_contacts(ctx):
         if card["status"] == "skip":
             continue  # «не писать» — в рассылки не попадает
         email = next(
-            (c for c in card["contacts"] if c["kind"] == "email" and c["status"] == "new"
-             and c["value"].lower() not in in_campaigns),
+            (
+                c
+                for c in card["contacts"]
+                if c["kind"] == "email"
+                and c["status"] == "new"
+                and c["value"].lower() not in in_campaigns
+            ),
             None,
         )
         if email:
@@ -1636,7 +2177,9 @@ def get_campaigns(ctx: AppContext = Depends(get_ctx)) -> dict:
             sources[label] = sources.get(label, 0) + 1
     _drop_lost_drafts(ctx)
     campaigns = sorted(
-        CampaignStore(ctx.output_folder).all().values(), key=lambda c: c["created_at"], reverse=True
+        CampaignStore(ctx.output_folder).all().values(),
+        key=lambda c: c["created_at"],
+        reverse=True,
     )
     plan = mail_guard.plan(ctx.config, ctx.output_folder)
     return {
@@ -1648,7 +2191,11 @@ def get_campaigns(ctx: AppContext = Depends(get_ctx)) -> dict:
         "mail_status": _mail_status(ctx),
         # Сколько дней отправки займёт всё, что можно написать, — с разогревом.
         "days_needed": mail_guard.days_needed(plan, available),
-        "email_connected": bool((ConfigValidator.load_yaml(ctx.secrets_file).get("email") or {}).get("app_password")),
+        "email_connected": bool(
+            (
+                ConfigValidator.load_yaml(ctx.secrets_file).get("email") or {}
+            ).get("app_password")
+        ),
     }
 
 
@@ -1671,23 +2218,42 @@ class CampaignCreate(BaseModel):
     keys: list[str] = []  # выбранные в базе компании; пусто — все подходящие
 
 
-def _campaign_targets(ctx: AppContext, source: str = "", keys: list[str] | None = None) -> list[dict]:
+def _campaign_targets(
+    ctx: AppContext, source: str = "", keys: list[str] | None = None
+) -> list[dict]:
     """Кому можно написать: по одному новому email на компанию, которой ещё
     нет ни в одной рассылке и которую не отметили «не писать»."""
     store = CampaignStore(ctx.output_folder)
-    in_campaigns = set().union(*[set(c["items"]) for c in store.all().values()]) if store.all() else set()
+    in_campaigns = (
+        set().union(*[set(c["items"]) for c in store.all().values()])
+        if store.all()
+        else set()
+    )
     targets = []
     for card in get_contacts(ctx):
         if card["status"] == "skip":
             continue  # «не писать» — в рассылки не попадает
         email = next(
-            (c for c in card["contacts"] if c["kind"] == "email" and c["status"] == "new"
-             and c["value"].lower() not in in_campaigns
-             and (not source or _source_group(c.get("source", "")) == source)),
+            (
+                c
+                for c in card["contacts"]
+                if c["kind"] == "email"
+                and c["status"] == "new"
+                and c["value"].lower() not in in_campaigns
+                and (
+                    not source or _source_group(c.get("source", "")) == source
+                )
+            ),
             None,
         )
         if email and (not keys or card["key"] in keys):
-            targets.append({"key": card["key"], "email": email["value"], "company": card["company"] or email["value"]})
+            targets.append(
+                {
+                    "key": card["key"],
+                    "email": email["value"],
+                    "company": card["company"] or email["value"],
+                }
+            )
     return targets
 
 
@@ -1696,7 +2262,11 @@ def _absorb_new_companies(ctx: AppContext) -> int:
     выбранных вручную и не по одному источнику). Письма им пишутся первыми
     — см. сортировку по свежести в start_campaign_job."""
     store = CampaignStore(ctx.output_folder)
-    started = [c for c in store.all().values() if c.get("batch_day") and c.get("scope") == "all"]
+    started = [
+        c
+        for c in store.all().values()
+        if c.get("batch_day") and c.get("scope") == "all"
+    ]
     if not started:
         return 0
     latest = max(started, key=lambda c: c["created_at"])
@@ -1705,28 +2275,51 @@ def _absorb_new_companies(ctx: AppContext) -> int:
 
 
 @app.post("/api/campaigns")
-def post_campaign(body: CampaignCreate, ctx: AppContext = Depends(get_ctx)) -> dict:
+def post_campaign(
+    body: CampaignCreate, ctx: AppContext = Depends(get_ctx)
+) -> dict:
     """Новая рассылка: по одному адресу на компанию, кому ещё не писали."""
     store = CampaignStore(ctx.output_folder)
     targets = _campaign_targets(ctx, body.source, body.keys)
     if not targets:
-        raise HTTPException(400, "Среди выбранных нет компаний с email, которым вы ещё не писали" if body.keys
-                            else "Нет компаний с email, которым вы ещё не писали")
-    label = f"Выбранные ({len(targets)})" if body.keys else body.source or "Все источники"
-    name = body.name.strip() or f"{label} — {datetime.now().strftime('%d.%m %H:%M')}"
+        raise HTTPException(
+            400,
+            (
+                "Среди выбранных нет компаний с email, которым вы ещё не "
+                "писали"
+                if body.keys
+                else "Нет компаний с email, которым вы ещё не писали"
+            ),
+        )
+    label = (
+        f"Выбранные ({len(targets)})"
+        if body.keys
+        else body.source or "Все источники"
+    )
+    name = (
+        body.name.strip()
+        or f"{label} — {datetime.now().strftime('%d.%m %H:%M')}"
+    )
     campaign_id = store.create(name, targets)
     if not body.source and not body.keys:
-        store.update(campaign_id, scope="all")  # сюда же пойдут новые компании Базы
+        store.update(
+            campaign_id, scope="all"
+        )  # сюда же пойдут новые компании Базы
     return _campaign_view(ctx, store.get(campaign_id))
 
 
 class CampaignRun(BaseModel):
-    resume: str = ""  # имя PDF из data_folder/telegram или "" — основное резюме
+    resume: str = (
+        ""  # имя PDF из data_folder/telegram или "" — основное резюме
+    )
 
 
 @app.post("/api/campaigns/{campaign_id}/{action}")
 def post_campaign_action(
-    campaign_id: str, action: str, body: CampaignRun = CampaignRun(), ctx: AppContext = Depends(get_ctx)
+    campaign_id: str,
+    action: str,
+    body: CampaignRun = CampaignRun(),
+    ctx: AppContext = Depends(get_ctx),
 ) -> dict:
     """prepare — написать письма; send — отправить черновики; stop."""
     store = CampaignStore(ctx.output_folder)
@@ -1742,29 +2335,53 @@ def post_campaign_action(
         raise HTTPException(409, "По этой рассылке уже идёт работа")
     if action == "prepare":
         if not ctx.llm_api_key:
-            raise HTTPException(400, "Нужен ключ ИИ (Настройки → Провайдер ИИ)")
+            raise HTTPException(
+                400, "Нужен ключ ИИ (Настройки → Провайдер ИИ)"
+            )
         _absorb_new_companies(ctx)
-        _start_campaign_job(ctx.config, ctx.llm_api_key, campaign_id, "prepare")
+        _start_campaign_job(
+            ctx.config, ctx.llm_api_key, campaign_id, "prepare"
+        )
     elif action == "followups":
-        if not (ConfigValidator.load_yaml(ctx.secrets_file).get("email") or {}).get("app_password"):
-            raise HTTPException(400, "Подключите почту: Настройки → Контакты и письма")
-        _start_campaign_job(ctx.config, ctx.llm_api_key, campaign_id, "followups")
+        if not (
+            ConfigValidator.load_yaml(ctx.secrets_file).get("email") or {}
+        ).get("app_password"):
+            raise HTTPException(
+                400, "Подключите почту: Настройки → Контакты и письма"
+            )
+        _start_campaign_job(
+            ctx.config, ctx.llm_api_key, campaign_id, "followups"
+        )
     elif action == "send":
-        if not (ConfigValidator.load_yaml(ctx.secrets_file).get("email") or {}).get("app_password"):
-            raise HTTPException(400, "Подключите почту: Настройки → Контакты и письма")
+        if not (
+            ConfigValidator.load_yaml(ctx.secrets_file).get("email") or {}
+        ).get("app_password"):
+            raise HTTPException(
+                400, "Подключите почту: Настройки → Контакты и письма"
+            )
         resume = None
         if body.resume:
-            candidate = (ctx.config["dataFolder"] / TELEGRAM_FOLDER / body.resume).resolve()
-            if candidate.parent == (ctx.config["dataFolder"] / TELEGRAM_FOLDER).resolve() and candidate.exists():
+            candidate = (
+                ctx.config["dataFolder"] / TELEGRAM_FOLDER / body.resume
+            ).resolve()
+            if (
+                candidate.parent
+                == (ctx.config["dataFolder"] / TELEGRAM_FOLDER).resolve()
+                and candidate.exists()
+            ):
                 resume = candidate
-        _start_campaign_job(ctx.config, ctx.llm_api_key, campaign_id, "send", resume)
+        _start_campaign_job(
+            ctx.config, ctx.llm_api_key, campaign_id, "send", resume
+        )
     else:
         raise HTTPException(400, "Неизвестное действие")
     return _campaign_view(ctx, store.get(campaign_id))
 
 
 @app.delete("/api/campaigns/{campaign_id}")
-def delete_campaign(campaign_id: str, ctx: AppContext = Depends(get_ctx)) -> dict:
+def delete_campaign(
+    campaign_id: str, ctx: AppContext = Depends(get_ctx)
+) -> dict:
     if CampaignJob.RUNNING.get(campaign_id):
         raise HTTPException(409, "Сначала остановите рассылку")
     store = CampaignStore(ctx.output_folder)
@@ -1796,27 +2413,40 @@ def post_contact_draft(
     if card is None:
         raise HTTPException(404, "Компания не найдена")
     vacancy = card["vacancies"][-1] if card["vacancies"] else {}
-    person = {}
+    person: dict = {}
     resume_yaml = ctx.plain_text_resume_file
     if resume_yaml and Path(resume_yaml).exists():
         import yaml as _yaml
 
-        person = (_yaml.safe_load(Path(resume_yaml).read_text(encoding="utf-8")) or {}).get(
-            "personal_information"
-        ) or {}
+        person = (
+            _yaml.safe_load(Path(resume_yaml).read_text(encoding="utf-8"))
+            or {}
+        ).get("personal_information") or {}
     name = f"{person.get('name', '')} {person.get('surname', '')}".strip()
     resume = ctx.config["dataFolder"] / "resume.pdf"
     try:
         message = generate_first_message(
-            resume, name, card["company"], vacancy.get("title", ""),
-            vacancy.get("text", ""), body.kind, ctx.llm_api_key,
+            resume,
+            name,
+            card["company"],
+            vacancy.get("title", ""),
+            vacancy.get("text", ""),
+            body.kind,
+            ctx.llm_api_key,
         )
     except Exception as e:
         raise HTTPException(502, f"ИИ не ответил: {e}")
-    extra = {"channel": "email", "subject": message["subject"]} if body.kind == "email" else {}
+    extra = (
+        {"channel": "email", "subject": message["subject"]}
+        if body.kind == "email"
+        else {}
+    )
     code = DraftStore(ctx.output_folder / HR_DRAFTS_FILE).add(
-        body.value, message["text"], "first" if body.kind == "telegram" else "email",
-        vacancy.get("link", ""), **extra,
+        body.value,
+        message["text"],
+        "first" if body.kind == "telegram" else "email",
+        vacancy.get("link", ""),
+        **extra,
     )
     return {"code": code, "text": message["text"]}
 
@@ -1836,9 +2466,13 @@ def post_send_hr_draft(
 
 
 @app.put("/api/hr-drafts/{code}")
-def put_hr_draft(code: str, body: DraftSend, ctx: AppContext = Depends(get_ctx)) -> dict:
+def put_hr_draft(
+    code: str, body: DraftSend, ctx: AppContext = Depends(get_ctx)
+) -> dict:
     """Правка текста черновика до отправки (письмо рассылки)."""
-    if not body.text.strip() or not DraftStore(ctx.output_folder / HR_DRAFTS_FILE).update_text(code, body.text):
+    if not body.text.strip() or not DraftStore(
+        ctx.output_folder / HR_DRAFTS_FILE
+    ).update_text(code, body.text):
         raise HTTPException(status_code=404, detail="Черновик не найден")
     return {"ok": True}
 
@@ -1849,8 +2483,53 @@ def post_skip_hr_draft(code: str, ctx: AppContext = Depends(get_ctx)) -> dict:
     draft = store.get(code) or {}
     if draft.get("campaign") and draft["kind"] != "follow_up":
         # Письмо убрали из рассылки — адрес в ней «пропущен», счётчики честные.
-        CampaignStore(ctx.output_folder).update_item(draft["campaign"], draft["contact"], status="skipped")
+        CampaignStore(ctx.output_folder).update_item(
+            draft["campaign"], draft["contact"], status="skipped"
+        )
     store.remove(code)
+    return {"ok": True}
+
+
+@app.get("/api/headhunter/reminders")
+def get_headhunter_reminders(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
+    """Отклики HH, которые никто не просмотрел дольше
+    headhunter.reminder_follow_up_days (0 — выключено) — с готовым
+    текстом напоминания. Отправка — только по кнопке, вручную."""
+    days = int(
+        (ctx.config.get("headhunter") or {}).get("reminder_follow_up_days", 7)
+    )
+    entries = ctx.applied_log.entries_by_source_and_status(
+        "headhunter", "applied"
+    )
+    return [
+        {
+            "external_id": e["external_id"],
+            "company": e["company"],
+            "title": e["title"],
+            "link": e["link"],
+            "applied_at": e["applied_at"],
+            "text": hh_reminder_text(e),
+        }
+        for e in due_hh_reminders(entries, days)
+    ]
+
+
+class HeadhunterReminderSend(BaseModel):
+    external_id: str
+    text: str
+
+
+@app.post("/api/headhunter/reminders/send")
+def post_headhunter_reminder_send(
+    body: HeadhunterReminderSend, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    sent = _send_headhunter_reminder(
+        ctx.config, body.external_id, body.text.strip()
+    )
+    if not sent:
+        raise HTTPException(
+            502, "Не нашли чат этого отклика — разметка HH могла измениться"
+        )
     return {"ok": True}
 
 
@@ -1871,7 +2550,9 @@ def get_outreach_summary(ctx: AppContext = Depends(get_ctx)) -> dict:
     campaigns = get_campaigns(ctx)
     cards = get_contacts(ctx)
     week_ago = (datetime.now().astimezone() - timedelta(days=7)).isoformat()
-    added_week = {kind: 0 for kind in ("sites", "telegram", "file", "vacancy", "dossier")}
+    added_week = {
+        kind: 0 for kind in ("sites", "telegram", "file", "vacancy", "dossier")
+    }
     added_week_total = 0
     for card in cards:
         if card.get("created_at", "") >= week_ago:
@@ -1880,36 +2561,69 @@ def get_outreach_summary(ctx: AppContext = Depends(get_ctx)) -> dict:
                 added_week[kind] = added_week.get(kind, 0) + 1
     # Текущая рассылка — самая свежая, где ещё есть что писать или отправлять.
     current = next(
-        (c for c in campaigns["campaigns"] if c["progress"] or c["stats"]["pending"] or c["stats"]["draft"]),
+        (
+            c
+            for c in campaigns["campaigns"]
+            if c["progress"] or c["stats"]["pending"] or c["stats"]["draft"]
+        ),
         None,
     )
-    totals = {k: sum(c["stats"].get(k, 0) for c in campaigns["campaigns"]) for k in ("sent", "replied", "bounced")}
+    totals = {
+        k: sum(c["stats"].get(k, 0) for c in campaigns["campaigns"])
+        for k in ("sent", "replied", "bounced")
+    }
     return {
         "base_total": len(cards),
         "available": campaigns["available"],
         "added_week": added_week,
         "added_week_total": added_week_total,
-        "sites_enabled": bool((ctx.config.get("direct") or {}).get("schedule_enabled")),
+        "sites_enabled": bool(
+            (ctx.config.get("direct") or {}).get("schedule_enabled")
+        ),
         "auto_send": bool((ctx.config.get("direct") or {}).get("auto_send")),
         "email_connected": campaigns["email_connected"],
-        "current": {
-            "id": current["id"], "name": current["name"], "pending": current["stats"]["pending"],
-            "draft": current["stats"]["draft"], "progress": current["progress"],
-            # Для авторежима: сегодняшняя порция уже была? первую уже смотрели?
-            "batch_day": (CampaignStore(ctx.output_folder).get(current["id"]) or {}).get("batch_day", ""),
-            "reviewed": any(current["stats"].get(k) for k in ("sent", "replied", "bounced")),
-            "sending": current["sending"],
-            "drafts": [
-                {"code": i["code"], "company": i.get("company") or i["email"], "email": i["email"],
-                 "subject": i.get("subject", ""), "text": i.get("text", "")}
-                for i in current["items"] if i["status"] == "draft"
-            ],
-        } if current else None,
+        "current": (
+            {
+                "id": current["id"],
+                "name": current["name"],
+                "pending": current["stats"]["pending"],
+                "draft": current["stats"]["draft"],
+                "progress": current["progress"],
+                # Для авторежима: сегодняшняя порция уже была? первую уже
+                # смотрели?
+                "batch_day": (
+                    CampaignStore(ctx.output_folder).get(current["id"]) or {}
+                ).get("batch_day", ""),
+                "reviewed": any(
+                    current["stats"].get(k)
+                    for k in ("sent", "replied", "bounced")
+                ),
+                "sending": current["sending"],
+                "drafts": [
+                    {
+                        "code": i["code"],
+                        "company": i.get("company") or i["email"],
+                        "email": i["email"],
+                        "subject": i.get("subject", ""),
+                        "text": i.get("text", ""),
+                    }
+                    for i in current["items"]
+                    if i["status"] == "draft"
+                ],
+            }
+            if current
+            else None
+        ),
         "mail_status": campaigns["mail_status"],
         "plan": campaigns["mail_plan"],
         "days_needed": campaigns["days_needed"],
         **totals,
-        "followups": sum(1 for c in campaigns["campaigns"] for i in c["items"] if i.get("follow_up_text")),
+        "followups": sum(
+            1
+            for c in campaigns["campaigns"]
+            for i in c["items"]
+            if i.get("follow_up_text")
+        ),
     }
 
 
@@ -1930,10 +2644,17 @@ def get_direct_summary(ctx: AppContext = Depends(get_ctx)) -> dict:
         "wwr": direct.get("wwr", True) is not False,
         "hn": direct.get("hn", True) is not False,
         "in_base": len(cards),
-        "added_week": sum(1 for c in cards if c.get("created_at", "") >= week_ago),
+        "added_week": sum(
+            1 for c in cards if c.get("created_at", "") >= week_ago
+        ),
         "ready": sum(
-            1 for c in cards
-            if c["status"] != "skip" and any(x["kind"] == "email" and x["status"] == "new" for x in c["contacts"])
+            1
+            for c in cards
+            if c["status"] != "skip"
+            and any(
+                x["kind"] == "email" and x["status"] == "new"
+                for x in c["contacts"]
+            )
         ),
     }
 
@@ -1944,8 +2665,11 @@ class DirectSettings(BaseModel):
 
 
 @app.post("/api/direct/settings")
-def post_direct_settings(body: DirectSettings, ctx: AppContext = Depends(get_ctx)) -> dict:
-    """Доски удалёнки «Сайтов компаний»: We Work Remotely, HN «Who is hiring»."""
+def post_direct_settings(
+    body: DirectSettings, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Доски удалёнки «Сайтов компаний»: We Work Remotely,
+    HN «Who is hiring»."""
     for field in ("wwr", "hn"):
         value = getattr(body, field)
         if value is not None:
@@ -1975,7 +2699,8 @@ def post_direct_company(
             raise HTTPException(
                 404,
                 "Не нашли систему найма (Greenhouse/Lever/Ashby/Workable) на "
-                "сайте — укажите ATS и slug вручную или откликайтесь на сайте.",
+                "сайте — укажите ATS и slug вручную или откликайтесь на "
+                "сайте.",
             )
         ats, slug = found
     company = {
@@ -1997,7 +2722,9 @@ def post_direct_company(
 
 
 @app.delete("/api/direct/companies/{slug}")
-def delete_direct_company(slug: str, ctx: AppContext = Depends(get_ctx)) -> dict:
+def delete_direct_company(
+    slug: str, ctx: AppContext = Depends(get_ctx)
+) -> dict:
     data_folder = ctx.config["dataFolder"]
     save_companies(
         data_folder,
@@ -2023,7 +2750,9 @@ def post_interview_prep(
         raise HTTPException(404, "Заявка не найдена")
     prep = _prepare_interview(ctx.config, ctx.llm_api_key, entry)
     if not prep:
-        raise HTTPException(502, "Не удалось подготовить справку — ИИ не ответил")
+        raise HTTPException(
+            502, "Не удалось подготовить справку — ИИ не ответил"
+        )
     return {"prep": prep}
 
 
@@ -2069,7 +2798,9 @@ def get_interview_ics(
     return Response(
         build_ics(moment, title, entry["link"], entry["link"], duration),
         media_type="text/calendar",
-        headers={"Content-Disposition": 'attachment; filename="interview.ics"'},
+        headers={
+            "Content-Disposition": 'attachment; filename="interview.ics"'
+        },
     )
 
 
@@ -2083,7 +2814,9 @@ def post_interview_questions(
     if not questions:
         try:
             questions = generate_questions(
-                entry["title"], entry["company"], entry.get("gaps") or [],
+                entry["title"],
+                entry["company"],
+                entry.get("gaps") or [],
                 ctx.llm_api_key,
             )
         except Exception as e:
@@ -2219,6 +2952,10 @@ def post_block_employer(
     return {"started": True, "company": body.company}
 
 
+class BlacklistRequest(BaseModel):
+    companies: list[str]
+
+
 @app.post("/api/blacklist")
 def post_blacklist(
     body: BlacklistRequest, ctx: AppContext = Depends(get_ctx)
@@ -2238,8 +2975,10 @@ class SourceSettingsUpdate(BaseModel):
     # у resume_id для нерелевантных источников.
     auto_reply: Optional[bool] = None
     auto_bump_resume: Optional[bool] = None
+    chat_cover_letter_followup: Optional[bool] = None
+    reminder_follow_up_days: Optional[int] = None
     schedule_enabled: Optional[bool] = None
-    interval_hours: Optional[int] = None
+    interval_hours: Optional[float] = None
     resume_id: Optional[str] = None
     job_max_applications: Optional[int] = None
     daily_application_limit: Optional[int] = None
@@ -2270,12 +3009,22 @@ def post_settings(
         "auto_apply",
         "auto_reply",
         "auto_bump_resume",
+        "chat_cover_letter_followup",
+        "reminder_follow_up_days",
         "schedule_enabled",
-        "interval_hours",
     ):
         value = getattr(body, field)
         if value is not None:
             set_source_field(ctx.config_file, body.source, field, value)
+    if body.interval_hours is not None:
+        # 3 минуты (0.05ч) — минимум, чтобы почти реалтайм не выглядел
+        # ботом при агрессивных значениях ниже этого.
+        set_source_field(
+            ctx.config_file,
+            body.source,
+            "interval_hours",
+            max(0.05, body.interval_hours),
+        )
 
     # daily_application_limit/job_max_applications поддерживают
     # override-чекбокс в дашборде: чекбокс выключен → clear_* — поле
@@ -2327,6 +3076,9 @@ class LimitsSettingsUpdate(BaseModel):
     job_min_score: Optional[float] = None
     job_suitability_score: Optional[float] = None
     application_retention_days: Optional[int] = None
+    cover_letter_style: Optional[str] = None
+    continuous_cycle_enabled: Optional[bool] = None
+    continuous_cycle_gap_minutes: Optional[int] = None
 
 
 def _limits_snapshot(ctx: AppContext) -> dict:
@@ -2360,6 +3112,19 @@ def _limits_snapshot(ctx: AppContext) -> dict:
         # 0 — хранить историю откликов бессрочно (по умолчанию).
         "application_retention_days": limits.get(
             "application_retention_days", APPLICATION_RETENTION_DAYS
+        ),
+        # Стиль сопроводительного письма — только для откликов на
+        # площадках (HH и т.п.), не затрагивает email/Telegram.
+        "cover_letter_style": limits.get("cover_letter_style", "memorable"),
+        "cover_letter_style_labels": STYLE_LABELS,
+        # Постоянный цикл вместо расписания — см. src/scheduler.py,
+        # CONTINUOUS_CYCLE_SOURCES: пока включён, у площадок игнорируется
+        # их собственный interval_hours, все идут по общему кругу.
+        "continuous_cycle_enabled": bool(
+            limits.get("continuous_cycle_enabled")
+        ),
+        "continuous_cycle_gap_minutes": limits.get(
+            "continuous_cycle_gap_minutes", 3
         ),
     }
 
@@ -2397,6 +3162,32 @@ def post_limits_settings(
             "limits",
             "llm_daily_cost_alert_usd",
             body.llm_daily_cost_alert_usd,
+        )
+
+    if body.cover_letter_style is not None:
+        if body.cover_letter_style not in ("memorable", "neutral", "classic"):
+            raise HTTPException(400, "Неизвестный стиль письма")
+        set_source_field(
+            ctx.config_file,
+            "limits",
+            "cover_letter_style",
+            body.cover_letter_style,
+            quote=True,
+        )
+
+    if body.continuous_cycle_enabled is not None:
+        set_source_field(
+            ctx.config_file,
+            "limits",
+            "continuous_cycle_enabled",
+            body.continuous_cycle_enabled,
+        )
+    if body.continuous_cycle_gap_minutes is not None:
+        set_source_field(
+            ctx.config_file,
+            "limits",
+            "continuous_cycle_gap_minutes",
+            max(1, body.continuous_cycle_gap_minutes),
         )
 
     if body.application_retention_days is not None:
@@ -2559,6 +3350,33 @@ class TelegramSettingsUpdate(BaseModel):
     active_hours_start: Optional[int] = None
     active_hours_end: Optional[int] = None
     intro_message_template: Optional[str] = None
+    message_delay_min_seconds: Optional[int] = None
+    message_delay_max_seconds: Optional[int] = None
+
+
+def _normalize_telegram_channels(channels: list[str]) -> list[str]:
+    """Принимает username, @username и t.me-ссылки из интерфейса.
+
+    Пустые строки и повторы не должны попадать в конфиг: иначе один и тот
+    же канал обрабатывается несколько раз, а сохранённые варианты ссылок
+    выглядят как разные значения в UI.
+    """
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in channels:
+        channel = normalize_channel(raw)
+        if not channel:
+            continue
+        if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", channel):
+            raise HTTPException(
+                422,
+                "Канал должен быть публичным username Telegram (5–32 символа).",
+            )
+        key = channel.casefold()
+        if key not in seen:
+            normalized.append(channel)
+            seen.add(key)
+    return normalized
 
 
 def _telegram_settings_snapshot(ctx: AppContext) -> dict:
@@ -2573,6 +3391,13 @@ def _telegram_settings_snapshot(ctx: AppContext) -> dict:
         "intro_message_template": tg.get(
             "intro_message_template", TELEGRAM_INTRO_TEMPLATE_DEFAULT
         ),
+        "message_delay_min_seconds": tg.get(
+            "message_delay_min_seconds", MIN_TELEGRAM_MESSAGE_DELAY_SECONDS
+        ),
+        "message_delay_max_seconds": tg.get(
+            "message_delay_max_seconds", MAX_TELEGRAM_MESSAGE_DELAY_SECONDS
+        ),
+        "pending_sends": pending_telegram_sends_count(ctx.output_folder),
     }
 
 
@@ -2585,28 +3410,37 @@ def get_telegram_settings(ctx: AppContext = Depends(get_ctx)) -> dict:
 def post_telegram_settings(
     body: TelegramSettingsUpdate, ctx: AppContext = Depends(get_ctx)
 ) -> dict:
-    if body.channels is not None:
-        set_source_list_field(
-            ctx.config_file, "telegram", "channels", body.channels
-        )
-    for field in (
-        "max_post_age_days",
-        "auto_message",
-        "daily_message_limit",
-        "active_hours_start",
-        "active_hours_end",
-    ):
-        value = getattr(body, field)
-        if value is not None:
-            set_source_field(ctx.config_file, "telegram", field, value)
-    if body.intro_message_template is not None:
-        set_source_field(
-            ctx.config_file,
-            "telegram",
-            "intro_message_template",
-            body.intro_message_template,
-            quote=True,
-        )
+    try:
+        with stage_config_updates(ctx.config_file) as staged:
+            if body.channels is not None:
+                set_source_list_field(
+                    staged,
+                    "telegram",
+                    "channels",
+                    _normalize_telegram_channels(body.channels),
+                )
+            for field in (
+                "max_post_age_days",
+                "auto_message",
+                "daily_message_limit",
+                "active_hours_start",
+                "active_hours_end",
+                "message_delay_min_seconds",
+                "message_delay_max_seconds",
+            ):
+                value = getattr(body, field)
+                if value is not None:
+                    set_source_field(staged, "telegram", field, value)
+            if body.intro_message_template is not None:
+                set_source_field(
+                    staged,
+                    "telegram",
+                    "intro_message_template",
+                    body.intro_message_template,
+                    quote=True,
+                )
+    except ConfigWriteError as exc:
+        raise HTTPException(422, str(exc)) from exc
     ctx.reload_config()
     return _telegram_settings_snapshot(ctx)
 
@@ -2617,10 +3451,20 @@ class TelegramWatchUpdate(BaseModel):
     keywords: Optional[list[str]] = None
     stop_words: Optional[list[str]] = None
     forward_to: Optional[str] = None
+    auto_message: Optional[bool] = None
+    daily_message_limit: Optional[int] = None
+    active_hours_start: Optional[int] = None
+    active_hours_end: Optional[int] = None
+    message_delay_min_seconds: Optional[int] = None
+    message_delay_max_seconds: Optional[int] = None
+    channel_backfill_days: Optional[int] = None
 
 
 def _telegram_watch_snapshot(ctx: AppContext) -> dict:
-    from src.job_sources.telegram.watcher import active_watcher, default_keywords
+    from src.job_sources.telegram.watcher import (
+        active_watcher,
+        default_keywords,
+    )
 
     telegram = ctx.config.get("telegram") or {}
     watcher = active_watcher()
@@ -2637,14 +3481,34 @@ def _telegram_watch_snapshot(ctx: AppContext) -> dict:
         "matched": watcher.matched_count if watcher else 0,
         # Сколько контактов HR парсер уже положил в «Базу компаний».
         "contacts_collected": sum(
-            1 for card in ContactBook(ctx.output_folder).all().values()
-            for c in card.get("contacts") or [] if (c.get("source") or "").startswith("пост в @")
+            1
+            for card in ContactBook(ctx.output_folder).all().values()
+            for c in card.get("contacts") or []
+            if (c.get("source") or "").startswith("пост в @")
         ),
         "daemon_running": ctx.scheduler_thread is not None
         and ctx.scheduler_thread.is_alive(),
         "bot_connected": bot_credentials(ctx.config) is not None,
         "greeting": telegram.get("intro_message_template") or "",
         "resumes": _telegram_resume_list(ctx),
+        "resume_route_ru": (
+            lambda r: r.name if r else ""
+        )(resolve_resume(ctx.config, "telegram", True)),
+        "resume_route_en": (
+            lambda r: r.name if r else ""
+        )(resolve_resume(ctx.config, "telegram", False)),
+        "channel_backfill_days": telegram.get("channel_backfill_days", 14),
+        "auto_message": bool(telegram.get("auto_message")),
+        "daily_message_limit": telegram.get("daily_message_limit", 15),
+        "active_hours_start": telegram.get("active_hours_start"),
+        "active_hours_end": telegram.get("active_hours_end"),
+        "message_delay_min_seconds": telegram.get(
+            "message_delay_min_seconds", MIN_TELEGRAM_MESSAGE_DELAY_SECONDS
+        ),
+        "message_delay_max_seconds": telegram.get(
+            "message_delay_max_seconds", MAX_TELEGRAM_MESSAGE_DELAY_SECONDS
+        ),
+        "pending_sends": pending_telegram_sends_count(ctx.output_folder),
     }
 
 
@@ -2664,8 +3528,15 @@ async def post_telegram_resume(
     if not content.startswith(b"%PDF-"):
         raise HTTPException(400, "Файл не похож на PDF.")
     if len(content) > 20 * 1024 * 1024:
-        raise HTTPException(400, "Файл больше 20 МБ — Telegram такой не примет.")
-    stem = re.sub(r"[^\w\-]+", "_", Path(file.filename or "resume").stem).strip("_") or "resume"
+        raise HTTPException(
+            400, "Файл больше 20 МБ — Telegram такой не примет."
+        )
+    stem = (
+        re.sub(r"[^\w\-]+", "_", Path(file.filename or "resume").stem).strip(
+            "_"
+        )
+        or "resume"
+    )
     folder = ctx.config["dataFolder"] / TELEGRAM_FOLDER
     folder.mkdir(parents=True, exist_ok=True)
     (folder / f"{stem[:60]}.pdf").write_bytes(content)
@@ -2673,7 +3544,9 @@ async def post_telegram_resume(
 
 
 @app.delete("/api/telegram/resumes/{name}")
-def delete_telegram_resume(name: str, ctx: AppContext = Depends(get_ctx)) -> dict:
+def delete_telegram_resume(
+    name: str, ctx: AppContext = Depends(get_ctx)
+) -> dict:
     folder = ctx.config["dataFolder"] / TELEGRAM_FOLDER
     target = (folder / name).resolve()
     if target.parent != folder.resolve() or target.suffix != ".pdf":
@@ -2698,27 +3571,56 @@ def post_telegram_watch(
         set_source_field(prefs, "telegram", "watch_enabled", body.enabled)
     if body.keywords is not None:
         set_source_list_field(
-            prefs, "telegram", "watch_keywords",
+            prefs,
+            "telegram",
+            "watch_keywords",
             [k.strip() for k in body.keywords if k.strip()],
         )
     if body.stop_words is not None:
         set_source_list_field(
-            prefs, "telegram", "watch_stop_words",
+            prefs,
+            "telegram",
+            "watch_stop_words",
             [k.strip() for k in body.stop_words if k.strip()],
         )
     if body.forward_to is not None:
         set_source_field(
-            prefs, "telegram", "watch_forward_to",
-            body.forward_to.strip().lstrip("@") or "me", quote=True,
+            prefs,
+            "telegram",
+            "watch_forward_to",
+            body.forward_to.strip().lstrip("@") or "me",
+            quote=True,
         )
     if body.greeting is not None and body.greeting.strip():
         set_source_field(
-            prefs, "telegram", "intro_message_template", body.greeting.strip(), quote=True,
+            prefs,
+            "telegram",
+            "intro_message_template",
+            body.greeting.strip(),
+            quote=True,
         )
+    if body.auto_message is not None:
+        set_source_field(prefs, "telegram", "auto_message", body.auto_message)
+    for field in (
+        "daily_message_limit",
+        "active_hours_start",
+        "active_hours_end",
+        "message_delay_min_seconds",
+        "message_delay_max_seconds",
+        "channel_backfill_days",
+    ):
+        value = getattr(body, field)
+        if value is not None:
+            set_source_field(prefs, "telegram", field, value)
     ctx.reload_config()
-    daemon_running = ctx.scheduler_thread is not None and ctx.scheduler_thread.is_alive()
+    daemon_running = (
+        ctx.scheduler_thread is not None and ctx.scheduler_thread.is_alive()
+    )
     if body.enabled is not None and daemon_running:
-        from src.job_sources.telegram.watcher import active_watcher, start_telegram_watcher
+        from src.job_sources.telegram.watcher import (
+            active_watcher,
+            start_telegram_watcher,
+        )
 
         watcher = active_watcher()
         if body.enabled and watcher is None:
@@ -2787,14 +3689,22 @@ class TelegramKeys(BaseModel):
 
 
 @app.post("/api/telegram/keys")
-def post_telegram_keys(body: TelegramKeys, ctx: AppContext = Depends(get_ctx)) -> dict:
+def post_telegram_keys(
+    body: TelegramKeys, ctx: AppContext = Depends(get_ctx)
+) -> dict:
     """api_id/api_hash с my.telegram.org — из дашборда, без правки
     secrets.yaml руками. Нужны один раз, дальше — вход по коду."""
     api_id, api_hash = body.api_id.strip(), body.api_hash.strip()
     if not api_id.isdigit() or not re.fullmatch(r"[0-9a-f]{32}", api_hash):
-        raise HTTPException(400, "api_id — это число, api_hash — 32 символа (буквы a–f и цифры). Скопируйте их с my.telegram.org → API development tools.")
+        raise HTTPException(
+            400,
+            "api_id — это число, api_hash — 32 символа (буквы a–f и цифры). "
+            "Скопируйте их с my.telegram.org → API development tools.",
+        )
     set_source_field(ctx.secrets_file, "telegram", "api_id", int(api_id))
-    set_source_field(ctx.secrets_file, "telegram", "api_hash", api_hash, quote=True)
+    set_source_field(
+        ctx.secrets_file, "telegram", "api_hash", api_hash, quote=True
+    )
     return {"ok": True}
 
 
@@ -2809,7 +3719,9 @@ def post_telegram_login_start(
     creds = _telegram_secrets(ctx)
     if creds is None:
         raise HTTPException(
-            400, "Сначала вставьте api_id и api_hash: Общение → Telegram-парсер → «Подключение аккаунта»."
+            400,
+            "Сначала вставьте api_id и api_hash: Общение → Telegram-парсер "
+            "→ «Подключение аккаунта».",
         )
     if ctx.telegram_login_session is not None:
         ctx.telegram_login_session.close()
@@ -2979,7 +3891,9 @@ def post_telegram_message(
     creds = _telegram_secrets(ctx)
     if creds is None:
         raise HTTPException(
-            400, "Сначала вставьте api_id и api_hash: Общение → Telegram-парсер → «Подключение аккаунта»."
+            400,
+            "Сначала вставьте api_id и api_hash: Общение → Telegram-парсер "
+            "→ «Подключение аккаунта».",
         )
     if not body.text.strip():
         raise HTTPException(400, "Message text is empty")
@@ -3012,7 +3926,9 @@ def post_telegram_send_resume(
     creds = _telegram_secrets(ctx)
     if creds is None:
         raise HTTPException(
-            400, "Сначала вставьте api_id и api_hash: Общение → Telegram-парсер → «Подключение аккаунта»."
+            400,
+            "Сначала вставьте api_id и api_hash: Общение → Telegram-парсер "
+            "→ «Подключение аккаунта».",
         )
     resume_path = ctx.config["dataFolder"] / RESUME_PDF
     if not resume_path.exists():
@@ -3445,33 +4361,76 @@ def _mail_status(ctx: AppContext) -> Optional[dict]:
     не включена."""
     campaigns = CampaignStore(ctx.output_folder).all()
     sending = [
-        (cid, c) for cid, c in campaigns.items()
-        if c.get("sending") and any(i["status"] == "draft" for i in c["items"].values())
+        (cid, c)
+        for cid, c in campaigns.items()
+        if c.get("sending")
+        and any(i["status"] == "draft" for i in c["items"].values())
     ]
     if not sending:
         return None
     plan = mail_guard.plan(ctx.config, ctx.output_folder)
-    sent = [(i.get("sent_at"), i.get("company") or e) for c in campaigns.values()
-            for e, i in c["items"].items() if i.get("sent_at")]
+    sent = [
+        (i.get("sent_at"), i.get("company") or e)
+        for c in campaigns.values()
+        for e, i in c["items"].items()
+        if i.get("sent_at")
+    ]
     last = max(sent) if sent else None
-    waiting = sum(1 for _, c in sending for i in c["items"].values() if i["status"] == "draft")
-    base = {"campaign": sending[0][0], "sent_today": plan["sent_today"], "limit": plan["limit"],
-            "waiting": waiting, "last": {"at": last[0], "company": last[1]} if last else None}
+    waiting = sum(
+        1
+        for _, c in sending
+        for i in c["items"].values()
+        if i["status"] == "draft"
+    )
+    base = {
+        "campaign": sending[0][0],
+        "sent_today": plan["sent_today"],
+        "limit": plan["limit"],
+        "waiting": waiting,
+        "last": {"at": last[0], "company": last[1]} if last else None,
+    }
     error = next((c["error"] for _, c in sending if c.get("error")), "")
     if error:
-        return {**base, "state": "stopped", "text": f"Отправка остановлена: {error}", "goto": "settings-outreach"}
+        return {
+            **base,
+            "state": "stopped",
+            "text": f"Отправка остановлена: {error}",
+            "goto": "settings-outreach",
+        }
     if plan["bounce_stopped"]:
-        return {**base, "state": "stopped", "text": f"Отправка остановлена: {plan['reason']}. Проверьте адреса в Базе", "goto": "contacts"}
-    job = next((CampaignJob.RUNNING[cid] for cid, _ in sending if cid in CampaignJob.RUNNING), None)
+        return {
+            **base,
+            "state": "stopped",
+            "text": f"Отправка остановлена: {plan['reason']}. Проверьте "
+            "адреса в Базе",
+            "goto": "contacts",
+        }
+    job = next(
+        (
+            CampaignJob.RUNNING[cid]
+            for cid, _ in sending
+            if cid in CampaignJob.RUNNING
+        ),
+        None,
+    )
     if job is not None and job.kind == "send":
         progress = CampaignJob.progress(job.campaign_id) or {}
         minutes = round(progress.get("next_in", 0) / 60)
-        return {**base, "state": "active", "goto": "outreach",
-                "text": f"Отправляю письма: {plan['sent_today']} из {plan['limit']} сегодня"
-                        + (f" · следующее через ~{minutes} мин" if minutes else "")}
+        return {
+            **base,
+            "state": "active",
+            "goto": "outreach",
+            "text": f"Отправляю письма: {plan['sent_today']} из "
+            f"{plan['limit']} сегодня"
+            + (f" · следующее через ~{minutes} мин" if minutes else ""),
+        }
     reason = plan["reason"] or "продолжу в ближайшие минуты"
-    return {**base, "state": "waiting", "goto": "outreach",
-            "text": f"Рассылка ждёт ({waiting}): {reason[0].lower() + reason[1:]}"}
+    return {
+        **base,
+        "state": "waiting",
+        "goto": "outreach",
+        "text": f"Рассылка ждёт ({waiting}): {reason[0].lower() + reason[1:]}",
+    }
 
 
 @app.get("/api/activity")
@@ -3481,21 +4440,58 @@ def get_activity(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
     items = []
     mail = _mail_status(ctx)
     if mail:
-        items.append({"text": mail["text"], "state": mail["state"], "view": "outreach",
-                      "goto": mail["goto"], "done": 0, "total": 0})
+        items.append(
+            {
+                "text": mail["text"],
+                "state": mail["state"],
+                "view": "outreach",
+                "goto": mail["goto"],
+                "done": 0,
+                "total": 0,
+            }
+        )
     campaigns = CampaignStore(ctx.output_folder).all()
-    kind_text = {"prepare": "Пишу письма", "send": "Отправляю письма", "followups": "Отправляю напоминания"}
+    kind_text = {
+        "prepare": "Пишу письма",
+        "send": "Отправляю письма",
+        "followups": "Отправляю напоминания",
+    }
     for cid, job in list(CampaignJob.RUNNING.items()):
         if mail and job.kind == "send":
             continue  # уже в строке состояния отправки
         name = (campaigns.get(cid) or {}).get("name", "")
-        items.append({"text": f"{kind_text.get(job.kind, job.kind)} — {name}", "done": job.done,
-                      "total": len(job.emails), "view": "outreach"})
-    for job in IMPORT_JOBS.values():
-        if job["state"] == "running":
-            items.append({"text": f"Разбираю {job['filename']}", "done": job["done"], "total": job["total"], "view": "contacts"})
-    if ctx.run_now_thread is not None and ctx.run_now_thread.is_alive() and ctx.run_now_current_source:
-        items.append({"text": "Проверяю площадку", "source": ctx.run_now_current_source, "done": 0, "total": 0, "view": "overview"})
+        items.append(
+            {
+                "text": f"{kind_text.get(job.kind, job.kind)} — {name}",
+                "done": job.done,
+                "total": len(job.emails),
+                "view": "outreach",
+            }
+        )
+    for imp in IMPORT_JOBS.values():
+        if imp["state"] == "running":
+            items.append(
+                {
+                    "text": f"Разбираю {imp['filename']}",
+                    "done": imp["done"],
+                    "total": imp["total"],
+                    "view": "contacts",
+                }
+            )
+    if (
+        ctx.run_now_thread is not None
+        and ctx.run_now_thread.is_alive()
+        and ctx.run_now_current_source
+    ):
+        items.append(
+            {
+                "text": "Проверяю площадку",
+                "source": ctx.run_now_current_source,
+                "done": 0,
+                "total": 0,
+                "view": "overview",
+            }
+        )
     return items
 
 
@@ -3746,19 +4742,70 @@ _RESUME_UPLOAD_FILENAME = {
 def get_resumes(ctx: AppContext = Depends(get_ctx)) -> dict:
     """«Мои резюме»: основное, для международных площадок и дополнительные —
     есть ли файл, размер, когда обновлён."""
+
     def info(path: Path) -> dict:
         if not path.exists():
             return {"exists": False}
         stat = path.stat()
-        return {"exists": True, "name": path.name, "size": stat.st_size,
-                "updated_at": datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat()}
+        return {
+            "exists": True,
+            "name": path.name,
+            "size": stat.st_size,
+            "updated_at": datetime.fromtimestamp(stat.st_mtime)
+            .astimezone()
+            .isoformat(),
+        }
 
     data_folder: Path = ctx.config["dataFolder"]
     return {
         "primary": info(data_folder / RESUME_PDF),
         "linkedin": info(data_folder / RESUME_PDF_LINKEDIN),
-        "extra": [info(data_folder / TELEGRAM_FOLDER / r["name"]) for r in _telegram_resume_list(ctx)],
+        "extra": [
+            info(data_folder / TELEGRAM_FOLDER / r["name"])
+            for r in _telegram_resume_list(ctx)
+        ],
+        **_resume_routing_view(ctx),
     }
+
+
+def _resume_routing_view(ctx: AppContext) -> dict:
+    routing = {}
+    for key in ROUTE_KEYS:
+        channel, language = key.split("_", 1)
+        routing[key] = resume_relative_name(
+            ctx.config,
+            resolve_resume(
+                ctx.config, cast(ResumeChannel, channel), language == "ru"
+            ),
+        )
+    return {"routing": routing, "available": available_resumes(ctx.config)}
+
+
+class ResumeRoutingUpdate(BaseModel):
+    email_ru: str
+    email_en: str
+    telegram_ru: str
+    telegram_en: str
+
+
+@app.put("/api/resumes/routing")
+def put_resume_routing(
+    body: ResumeRoutingUpdate, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    values = body.model_dump()
+    for key in ROUTE_KEYS:
+        if resolve_resume_name(ctx.config, values[key]) is None:
+            raise HTTPException(400, f"Недоступный PDF для {key}")
+    for key in ROUTE_KEYS:
+        set_source_field(
+            ctx.config_file,
+            "resume_routing",
+            key,
+            values[key],
+            quote=True,
+        )
+    ctx.reload_config()
+    return _resume_routing_view(ctx)
 
 
 @app.post("/api/resume/upload")

@@ -10,7 +10,24 @@ from src.libs.resume_and_cover_builder.config import global_config
 from src.libs.resume_and_cover_builder.llm import (
     llm_generate_cover_letter_from_job as _llm_clj,
 )
+from src.libs.resume_and_cover_builder.letter_styles import (
+    cover_letter_template_for,
+)
 from src.libs.resume_and_cover_builder.module_loader import load_module
+
+# Стиль письма для откликов на площадках (Настройки → Лимиты откликов) —
+# НЕ email-рассылка и НЕ Telegram, у них свои промты в hr_replies.py.
+# Глобальная переменная, а не параметр во всех search_and_apply_* —
+# выставляется один раз за прогон в main.run_selected_sources, тем же
+# приёмом, что и global_config.API_KEY/STRINGS_MODULE_NAME чуть ниже.
+_cover_letter_style = "memorable"
+
+
+def set_cover_letter_style(style: str) -> None:
+    global _cover_letter_style
+    _cover_letter_style = (
+        style if style in ("memorable", "neutral", "classic") else "memorable"
+    )
 
 # В PyInstaller-сборке (desktop_app.spec) __file__ не указывает на
 # реальную папку с забандленным cover_letter_prompt/strings.py — он
@@ -96,6 +113,20 @@ def generate_cover_letter_for_job(
         str(global_config.STRINGS_MODULE_COVER_LETTER_JOB_DESCRIPTION_PATH),
         global_config.STRINGS_MODULE_NAME,
     )
+    # Стиль не трогает "html" (PDF-бланк письма, не текстовый отклик).
+    # Для ru_plain/en_plain язык закреплён площадкой заранее; для
+    # auto_plain (LinkedIn) определяем язык вакансии тем же способом,
+    # что уже используется в проекте для писем компаниям (hr_replies).
+    if template != "html" and _cover_letter_style != "memorable":
+        if template == "auto_plain":
+            from src.job_sources.hr_replies import _looks_russian
+
+            language = "ru" if _looks_russian(job.description or job.role) else "en"
+        else:
+            language = "ru" if template == "ru_plain" else "en"
+        strings.cover_letter_template = cover_letter_template_for(
+            _cover_letter_style, language, strings.cover_letter_template
+        )
     answerer = _llm_clj.LLMCoverLetterJobDescription(llm_api_key, strings)
     answerer.set_resume(resume_text)
     # template="ru_plain"/"en_plain" форсируют язык прямо в

@@ -22,12 +22,13 @@ def test_append_to_company_blacklist_inserts_after_existing_key():
         append_to_company_blacklist(config_file, ["Ghosted Inc"])
 
         text = config_file.read_text(encoding="utf-8")
-        assert "  - wayfair" in text
-        assert "  - Ghosted Inc" in text
+        assert "  - 'wayfair'" in text
+        assert "  - 'Ghosted Inc'" in text
         assert "title_blacklist:" in text
         lines = text.splitlines()
         blacklist_index = lines.index("company_blacklist:")
-        assert lines[blacklist_index + 1] == "  - Ghosted Inc"
+        assert lines[blacklist_index + 1] == "  - 'Ghosted Inc'"
+        assert config_file.with_suffix(".yaml.bak").exists()
 
 
 def test_append_to_company_blacklist_creates_key_if_missing():
@@ -39,7 +40,7 @@ def test_append_to_company_blacklist_creates_key_if_missing():
 
         text = config_file.read_text(encoding="utf-8")
         assert "company_blacklist:" in text
-        assert "  - Acme" in text
+        assert "  - 'Acme'" in text
 
 
 if __name__ == "__main__":

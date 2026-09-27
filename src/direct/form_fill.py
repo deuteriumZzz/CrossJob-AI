@@ -50,7 +50,9 @@ def prefill_application(
     заполненных полей (пустой — форма не распознана)."""
     phone = f"{person.get('phone_prefix', '')}{person.get('phone', '')}"
     full_name = f"{person.get('name', '')} {person.get('surname', '')}".strip()
-    location = ", ".join(filter(None, [person.get("city"), person.get("country")]))
+    location = ", ".join(
+        filter(None, [person.get("city"), person.get("country")])
+    )
 
     if "greenhouse.io" in job_link:
         driver.get(job_link)
@@ -77,7 +79,11 @@ def prefill_application(
             ("email", "input[name=email]", person.get("email", "")),
             ("phone", "input[name=phone]", phone),
             ("location", "input[name=location]", location),
-            ("linkedin", 'input[name="urls[LinkedIn]"]', person.get("linkedin", "")),
+            (
+                "linkedin",
+                'input[name="urls[LinkedIn]"]',
+                person.get("linkedin", ""),
+            ),
             ("github", 'input[name="urls[GitHub]"]', person.get("github", "")),
             ("cover_letter", "textarea[name=comments]", cover_letter),
         ]

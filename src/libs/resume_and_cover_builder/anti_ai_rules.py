@@ -101,18 +101,52 @@ something new; cut anything that only sounds important.
 # сам список в скилле; ложное срабатывание стоит одной лишней правки.
 _TELLS = [
     ("тире как связка", r"[—–]|\s--\s"),
-    ("«не просто X, а Y»", r"\bне просто\b|\bне только\b[^.]*\bно и\b|\bnot (just|only|merely)\b|\bit'?s not\b|\brather than\b"),
-    ("остатки чат-бота", r"надеюсь, это|буду рад ответить на любые|если (вам )?нужно что-то ещё|\bi hope this\b|\blet me know if\b|\bfeel free to\b|happy to answer any|\bcertainly!"),
-    ("разгон перед мыслью", r"позвольте представиться|давайте разбер[её]мся|скажу честно|let me introduce myself|here'?s the thing"),
-    ("раздутая значимость", r"играет (ключевую|важную) роль|уникальн\w* возможност|динамично развивающ|в современном мире|plays a (key|crucial|pivotal) role|fast-paced|evolving landscape"),
-    ("слова-маркеры нейросети", r"(?<!\w)(ключев\w*|инновационн\w*|передов\w*|синерги\w*|страст\w*|увлеч[её]нн\w*|с большим интересом|внимательно изучив|идеально подхож\w*|с нетерпением)(?!\w)|\b(delve\w*|crucial|pivotal|leverag\w*|robust|seamless\w*|cutting-edge|passionate|thrilled|excited to|showcas\w*|testament|tapestry|foster\w*|underscor\w*|meticulous\w*|additionally|align with|vibrant|proven track record|spearhead\w*|synerg\w*)\b"),
-    ("разметка и эмодзи", r"\*\*|^#+\s|^\s*[-•]\s+[^:\n]{1,30}:|[\U0001F300-\U0001FAFF→]"),
+    (
+        "«не просто X, а Y»",
+        r"\bне просто\b|\bне только\b[^.]*\bно и\b|\bnot "
+        r"(just|only|merely)\b|\bit'?s not\b|\brather than\b",
+    ),
+    (
+        "остатки чат-бота",
+        r"надеюсь, это|буду рад ответить на любые|если (вам )?нужно что-то "
+        r"ещё|\bi hope this\b|\blet me know if\b|\bfeel free to\b|happy to "
+        r"answer any|\bcertainly!",
+    ),
+    (
+        "разгон перед мыслью",
+        r"позвольте представиться|давайте разбер[её]мся|скажу честно|let me "
+        r"introduce myself|here'?s the thing",
+    ),
+    (
+        "раздутая значимость",
+        r"играет (ключевую|важную) роль|уникальн\w* возможност|динамично "
+        r"развивающ|в современном мире|plays a (key|crucial|pivotal) "
+        r"role|fast-paced|evolving landscape",
+    ),
+    (
+        "слова-маркеры нейросети",
+        r"(?<!\w)(ключев\w*|инновационн\w*|передов\w*|синерги\w*|страст\w*"
+        r"|увлеч[её]нн\w*|с большим интересом|внимательно изучив"
+        r"|идеально подхож\w*|с нетерпением)(?!\w)|\b(delve\w*|crucial|pivotal"
+        r"|leverag\w*|robust|seamless\w*|cutting-edge|passionate|thrilled"
+        r"|excited to|showcas\w*|testament|tapestry|foster\w*|underscor\w*"
+        r"|meticulous\w*|additionally|align with|vibrant|proven track record"
+        r"|spearhead\w*|synerg\w*)\b",
+    ),
+    (
+        "разметка и эмодзи",
+        r"\*\*|^#+\s|^\s*[-•]\s+[^:\n]{1,30}:|[\U0001F300-\U0001FAFF→]",
+    ),
 ]
 
 
 def ai_tells(text: str) -> list[str]:
     """Какие признаки текста от нейросети остались (пусто — чисто)."""
-    return [name for name, pattern in _TELLS if re.search(pattern, text, re.IGNORECASE | re.MULTILINE)]
+    return [
+        name
+        for name, pattern in _TELLS
+        if re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+    ]
 
 
 _REWRITE_PROMPT = """
@@ -143,21 +177,29 @@ def humanize(text: str, llm_api_key: str) -> str:
 
         from src.job_sources.llm_provider import get_chat_llm
 
-        russian = len(re.findall(r"[а-яё]", text, re.IGNORECASE)) > len(text) * 0.3
+        russian = (
+            len(re.findall(r"[а-яё]", text, re.IGNORECASE)) > len(text) * 0.3
+        )
         chain = (
             ChatPromptTemplate.from_template(_REWRITE_PROMPT)
             | get_chat_llm(llm_api_key, temperature=0.3)
             | StrOutputParser()
         )
-        rewritten = chain.invoke({
-            "tells": ", ".join(tells),
-            "rules": ANTI_AI_STRUCTURE_RU if russian else ANTI_AI_STRUCTURE_EN,
-            "text": text,
-        }).strip()
+        rewritten = chain.invoke(
+            {
+                "tells": ", ".join(tells),
+                "rules": (
+                    ANTI_AI_STRUCTURE_RU if russian else ANTI_AI_STRUCTURE_EN
+                ),
+                "text": text,
+            }
+        ).strip()
     except Exception as e:
         from src.logging import logger
 
-        logger.warning(f"Правка «как человек» не удалась, оставляю текст как есть: {e}")
+        logger.warning(
+            f"Правка «как человек» не удалась, оставляю текст как есть: {e}"
+        )
         return text
     # Пустой ответ или текст раздуло больше чем в полтора раза — не рискуем.
     if not rewritten or len(rewritten) > len(text) * 1.6:

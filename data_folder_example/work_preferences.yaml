@@ -141,6 +141,15 @@ getmatch:
 geekjob:
   auto_apply: false
 
+# Какой PDF прикладывать автоматически к русским/английским вакансиям
+# Telegram-парсера и компаниям из email-рассылки. Пути считаются от
+# data_folder. Удобнее менять в дашборде: «Мои резюме».
+resume_routing:
+  telegram_ru: telegram/resume_ru.pdf
+  telegram_en: telegram/resume_en.pdf
+  email_ru: resume.pdf
+  email_en: resume_linkedin.pdf
+
 # Optional: only needed for the "Search Telegram channels" action.
 # `positions` above is reused as the search keywords. Also editable from
 # the dashboard's own "Telegram" tab — see docs/GUIDE.md.
