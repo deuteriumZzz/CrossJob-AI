@@ -2592,7 +2592,7 @@ const render = {
         <td>${statusLabel(e.status)}${e.remote_region ? `<div class="muted small">${REGION_LABELS[e.remote_region] || ""}</div>` : ""}</td>
         <td>${e.status === "applied" ? stageSelectHtml(e) : `<span class="muted small">—</span>`}</td>
         <td title="${e.gaps && e.gaps.length ? escapeHtml(e.gaps.join("; ")) : ""}">
-          ${e.score ?? ""}
+          <span class="mono-cell">${e.score ?? ""}</span>
           ${
             e.gaps && e.gaps.length
               ? `<div class="readiness-note">${escapeHtml(truncate(e.gaps[0], 70))}${e.gaps.length > 1 ? ` (+${e.gaps.length - 1})` : ""}</div>`
@@ -2996,6 +2996,7 @@ const render = {
                 ? `<label class="limit-field">
                 <span>Зарплата для скрининга LinkedIn (USD/год)</span>
                 <input type="text" class="d-linkedin-salary" value="${salary.linkedin_salary_range_usd || ""}" placeholder="60000-80000" />
+                <span class="d-salary-hint muted small"></span>
               </label>`
                 : ""
             }
@@ -3030,6 +3031,7 @@ const render = {
               <label class="limit-field">
                 <span>Зарплата для автоответа в чате HH</span>
                 <input type="text" class="d-hh-salary" value="${salary.hh_salary_expectations || ""}" placeholder="250000-300000 RUR" />
+                <span class="d-salary-hint muted small"></span>
               </label>`
                 : `<label class="limit-field" style="justify-content:flex-end">
                 <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto-bump switch" ${s.auto_bump_resume ? "checked" : ""} />Поднимать профиль раз в 7 дней</span>
@@ -3064,6 +3066,22 @@ const render = {
       drawerBody
         .querySelectorAll(".d-positions, .d-locations")
         .forEach(initTagInput);
+      // Поле раньше молчало о неверном формате — пользователь узнавал
+      // об этом только по факту, что автоответ в чате не сработал.
+      // Подсказка не блокирует сохранение (мало ли какой формат
+      // площадка реально примет), только предупреждает заранее.
+      drawerBody.querySelectorAll(".d-hh-salary, .d-linkedin-salary").forEach((input) => {
+        const hint = input.parentElement.querySelector(".d-salary-hint");
+        if (!hint) return;
+        const validate = () => {
+          const v = input.value.trim();
+          const ok = !v || /^\d{4,}\s*[-–]\s*\d{4,}(\s*\S+)?$/.test(v);
+          hint.textContent = ok ? "" : `Ожидается диапазон вида «${input.placeholder}» — иначе бот может не понять сумму`;
+          hint.classList.toggle("warn-text", !ok);
+        };
+        input.addEventListener("input", validate);
+        validate();
+      });
       // Тот же паттерн inherited/override, что в Stripe/AWS для
       // лимитов бюджета: чекбокс "своё" выключен → инпут задизейблен
       // и показывает дефолт как placeholder, не как значение.
@@ -3290,12 +3308,32 @@ const render = {
 // незачем. Позиция прокрутки сохраняется при автообновлении раз в
 // 7с, кроме случая "уже был внизу" — тогда новые строки уезжают вниз
 // вместе с прокруткой, как ожидается от live-хвоста лога.
+// Формат строки задан в src/logging.py (loguru): "ГГГГ-ММ-ДД ЧЧ:ММ:СС.мс
+// | УРОВЕНЬ | модуль:функция:строка - сообщение". По умолчанию строка
+// "модуль:функция:строка" — код для разработчика, а не для соискателя,
+// который просто хочет знать, что бот сейчас делает. Человеческий вид
+// её прячет и убирает DEBUG, "Технические детали" возвращают как есть.
+const LOG_LINE_RE = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\.\d+ \| (\w+)\s*\| [^-]*- (.*)$/;
+const LOG_LEVEL_ICON = { WARNING: "⚠️ ", ERROR: "❌ ", CRITICAL: "❌ " };
+
+function humanizeLogLine(line) {
+  const m = line.match(LOG_LINE_RE);
+  if (!m) return line; // формат не распознан — показываем как есть, а не теряем строку
+  const [, , time, level, message] = m;
+  if (level === "DEBUG") return null;
+  return `${time}  ${LOG_LEVEL_ICON[level] || ""}${message}`;
+}
+
 function renderLogLines() {
   const pre = document.getElementById("log-output");
   const query = document.getElementById("log-search").value.trim().toLowerCase();
-  const lines = query
+  const raw = document.getElementById("log-raw-toggle").checked;
+  let lines = query
     ? lastLogsLines.filter((l) => l.toLowerCase().includes(query))
     : lastLogsLines;
+  if (!raw) {
+    lines = lines.map(humanizeLogLine).filter((l) => l !== null);
+  }
   const wasAtBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
   const prevScrollTop = pre.scrollTop;
   pre.textContent =
@@ -5432,6 +5470,21 @@ function initDashboard() {
       stop: ["Бот остановлен", "info"],
       resume: ["Бот продолжает работу", "info"],
     };
+    // Реальный запуск (отклики + письма) не подтверждался вообще, хотя
+    // ручной прогон одной площадки — подтверждается ("Запустить X
+    // прямо сейчас?" ниже). Спрашиваем один раз в день, а не на каждый
+    // клик — иначе быстро станет просто ещё одним экраном, который
+    // закрывают не читая.
+    if (endpoint === "start") {
+      const today = new Date().toISOString().slice(0, 10);
+      if (localStorage.getItem("cj-start-confirmed-on") !== today) {
+        const ok = await showConfirm(
+          "Запустить бота? Начнутся реальные отклики и/или письма по включённым площадкам и режимам — не тестовый прогон. Проверить, что найдётся, без отправки — кнопка «Проверить площадки, ничего не отправляя» рядом."
+        );
+        if (!ok) return;
+        localStorage.setItem("cj-start-confirmed-on", today);
+      }
+    }
     await withButtonLoading(btn, () => api(`/api/daemon/${endpoint}`, { method: "POST" }));
     showToast(...messages[endpoint]);
     render.overview();
@@ -5506,6 +5559,12 @@ function initDashboard() {
   document
     .getElementById("log-search")
     .addEventListener("input", () => renderLogLines());
+  const logRawToggle = document.getElementById("log-raw-toggle");
+  logRawToggle.checked = localStorage.getItem("cj-logs-raw") === "1";
+  logRawToggle.addEventListener("change", () => {
+    localStorage.setItem("cj-logs-raw", logRawToggle.checked ? "1" : "0");
+    renderLogLines();
+  });
   document
     .getElementById("replies-filter-query")
     .addEventListener("input", () => renderRepliesRows());

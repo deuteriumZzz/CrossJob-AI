@@ -10,7 +10,7 @@
   href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&display=swap"
   rel="stylesheet"
 />
-<link rel="stylesheet" href="/style.css?v=33" />
+<link rel="stylesheet" href="/style.css?v=34" />
 </head>
 <body>
 <div id="setup-screen" class="setup-screen" style="display:none">
@@ -590,6 +590,7 @@
           <label class="limit-field">
             <span>Должности (одна на строку)</span>
             <textarea id="search-positions" rows="3" placeholder="Python разработчик&#10;Backend developer"></textarea>
+            <span class="muted small">Каждая строка — отдельный поисковый запрос на площадках, как в строке поиска HH/LinkedIn: площадка сама подберёт похожие вакансии, не обязательно перечислять все варианты формулировки.</span>
           </label>
           <label class="limit-field">
             <span>Локации (одна на строку)</span>
@@ -617,6 +618,7 @@
           <label class="limit-field">
             <span>Чёрный список слов в названии (одно на строку)</span>
             <textarea id="search-title-blacklist" rows="3"></textarea>
+            <span class="muted small">Точное совпадение части слова, без учёта регистра, без ИИ — «джун» не поймает «junior», добавляйте оба варианта, если нужно оба.</span>
           </label>
           <label class="limit-field">
             <span>Чёрный список локаций (одна на строку)</span>
@@ -1157,6 +1159,7 @@
             <option value="djinni">Djinni</option>
           </select>
           <input id="log-search" type="text" placeholder="Поиск по тексту…" aria-label="Поиск по тексту лога" />
+          <label class="checkbox-row"><input id="log-raw-toggle" type="checkbox" /> Технические детали</label>
         </div>
       </div>
       <pre id="log-output" class="logs"></pre>
@@ -1307,6 +1310,6 @@
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=39"></script>
+<script src="/app.js?v=40"></script>
 </body>
 </html>
