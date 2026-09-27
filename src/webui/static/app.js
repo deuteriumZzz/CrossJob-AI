@@ -1126,6 +1126,7 @@ async function renderResults() {
           <p class="muted small">Источники с низким откликом можно выключить — бот потратит лимиты на те, что приносят ответы.</p>`
         : `<p class="muted small">За неделю пока ничего не отправлено — запустите бота или рассылку.</p>`
     }`;
+  updateAllTableScrollHints();
 }
 
 // 1 письмо, 2 письма, 5 писем.
@@ -3275,6 +3276,15 @@ const render = {
     }
 
     const list = document.getElementById("tg-conv-list");
+    // "Выберите диалог слева" в правой панели уместно, только пока
+    // список слева не пуст — иначе получаются два взаимоисключающих
+    // сообщения одновременно ("диалогов нет" + "выберите один из них").
+    const chatEmpty = document.getElementById("tg-chat-empty");
+    if (!activeTelegramContact) {
+      chatEmpty.textContent = conversations.length
+        ? "Выберите диалог слева."
+        : "Диалогов пока нет — появятся здесь, как только кто-то напишет.";
+    }
     if (!conversations.length) {
       list.innerHTML = '<p class="muted small">Пока нет диалогов.</p>';
     } else {
@@ -3823,13 +3833,24 @@ function settingsTabAnchor(btn) {
 // активный + уже настроенные с ключом, остальные шумят на экране.
 // Сворачиваем неактивные/без ключа за кнопку "Показать все", если
 // пользователь сам не развернул список.
-function updateHistoryScrollHint() {
-  const wrap = document.getElementById("history-table-wrap");
+// Изначально писалось только для "Вакансий" — тот же градиент нужен
+// любой широкой таблице (напр. "по источникам" в Аналитике), поэтому
+// это теперь общая функция плюс делегированный слушатель ниже, а не
+// разводка под каждую таблицу отдельно.
+function updateTableScrollHint(wrap) {
   if (!wrap) return;
   const overflowing =
     wrap.scrollWidth > wrap.clientWidth + 1 &&
     wrap.scrollLeft < wrap.scrollWidth - wrap.clientWidth - 1;
   wrap.classList.toggle("has-overflow-right", overflowing);
+}
+
+function updateHistoryScrollHint() {
+  updateTableScrollHint(document.getElementById("history-table-wrap"));
+}
+
+function updateAllTableScrollHints() {
+  document.querySelectorAll(".table-wrap").forEach(updateTableScrollHint);
 }
 
 function updateProviderVisibility() {
@@ -5080,7 +5101,15 @@ function renderFunnel(funnel) {
     el.innerHTML = emptyStateHtml("Пока нет реальных откликов.");
     return;
   }
-  const rows = [["applied", "Отклики"], ...Object.entries(STAGE_LABELS).map(([k, v]) => [k, v[0].toUpperCase() + v.slice(1)])];
+  // "Ответили" — это НЕ "дошли хотя бы до ответа" (тогда оно было бы ≥
+  // интервью+отказов), а именно "застряли на обычном ответе, не дошли
+  // ни до приглашения, ни до отказа" — funnel() в applied_log.py
+  // считает effective_stage() как один, взаимоисключающий этап на
+  // заявку, а не нарастающим итогом. Без явной оговорки цифры выглядят
+  // как баг (интервью может быть больше "ответили").
+  const stageLabel = (key, v) =>
+    key === "replied" ? "Ответили (без приглашения и отказа)" : v[0].toUpperCase() + v.slice(1);
+  const rows = [["applied", "Отклики"], ...Object.entries(STAGE_LABELS).map(([k, v]) => [k, stageLabel(k, v)])];
   el.innerHTML = rows
     .map(([key, label]) => {
       const value = funnel[key] ?? 0;
@@ -5579,14 +5608,18 @@ function initDashboard() {
     }
   });
 
-  // Таблица "Вакансии" обычно шире окна (8 колонок) — без подсказки
-  // пользователь не поймёт, что "Балл"/"Письмо" справа ещё есть, и
-  // просто не найдёт причину отказа. Градиент виден, только пока
-  // реально есть куда скроллить вправо.
-  document
-    .getElementById("history-table-wrap")
-    .addEventListener("scroll", updateHistoryScrollHint);
-  window.addEventListener("resize", updateHistoryScrollHint);
+  // Любая широкая таблица ("Вакансии", "по источникам" в Аналитике,
+  // будущие) — без подсказки не видно, что справа есть ещё колонки.
+  // Слушатель один, делегированный (scroll не всплывает, поэтому
+  // capture:true), а не разводка под каждую таблицу отдельно.
+  document.addEventListener(
+    "scroll",
+    (e) => {
+      if (e.target.classList?.contains("table-wrap")) updateTableScrollHint(e.target);
+    },
+    true
+  );
+  window.addEventListener("resize", updateAllTableScrollHints);
 
   document
     .getElementById("history-apply-filters")
