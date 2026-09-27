@@ -874,7 +874,12 @@
           предупреждения (капча, лимиты). Пишет он только вам — HR его не видят.
         </p>
         <div class="filters" id="telegram-connect-row">
-          <input type="text" id="telegram-bot-token" placeholder="Токен бота от @BotFather (/newbot)" style="flex:1;min-width:220px" />
+          <span style="position:relative;flex:1;min-width:220px;display:block">
+            <input type="password" id="telegram-bot-token" placeholder="Токен бота от @BotFather (/newbot)" autocomplete="off" style="width:100%;padding-right:34px" />
+            <button type="button" id="telegram-bot-token-toggle" class="copy-btn" style="position:absolute;right:6px;top:50%;transform:translateY(-50%)" title="Показать/скрыть токен" aria-label="Показать/скрыть токен">
+              <svg viewBox="0 0 20 20" fill="none"><path d="M2 10s3-5.5 8-5.5 8 5.5 8 5.5-3 5.5-8 5.5-8-5.5-8-5.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="10" cy="10" r="2.4" stroke="currentColor" stroke-width="1.6"/></svg>
+            </button>
+          </span>
           <button id="telegram-connect-btn" class="btn btn-primary">Подключить</button>
         </div>
         <p class="muted small" id="telegram-connect-status"></p>
@@ -1318,6 +1323,6 @@
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=51"></script>
+<script src="/app.js?v=52"></script>
 </body>
 </html>

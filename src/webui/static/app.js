@@ -4136,6 +4136,27 @@ function collectCommandItems(query) {
           },
         });
       });
+    // База компаний (1500+ строк) — раньше палитра искала только по
+    // разделам/вакансиям, будто половины данных не существует; та же
+    // мультиполевая логика, что уже в renderContactsList (компания/HR/
+    // сайт/контакты/вакансии), просто здесь только для подсказки.
+    lastContacts
+      .filter((c) =>
+        [c.company, c.hr, c.website, ...(c.contacts || []).map((x) => x.value), ...(c.vacancies || []).map((v) => v.title)]
+          .filter(Boolean)
+          .some((v) => v.toLowerCase().includes(q))
+      )
+      .slice(0, 8)
+      .forEach((c) => {
+        items.push({
+          label: c.company || c.hr || c.website || "Компания без названия",
+          hint: "База компаний",
+          action: () => {
+            document.getElementById("contacts-filter-query").value = c.company || "";
+            switchTab("contacts");
+          },
+        });
+      });
   }
   return items;
 }
@@ -5387,6 +5408,14 @@ function initDashboard() {
 
   document.getElementById("llm-key-toggle").addEventListener("click", () => {
     const input = document.getElementById("llm-key-input");
+    input.type = input.type === "password" ? "text" : "password";
+  });
+  // Токен бота — такой же полноценный секрет, как ключ ИИ (даёт
+  // управление ботом от вашего имени), но раньше был единственным
+  // незамаскированным полем в "Подключениях" — остальные три (ключ ИИ,
+  // пароль Gmail, ключ Hunter) уже type="password".
+  document.getElementById("telegram-bot-token-toggle").addEventListener("click", () => {
+    const input = document.getElementById("telegram-bot-token");
     input.type = input.type === "password" ? "text" : "password";
   });
   initDragReorder("source-grid-ru", "cj-source-order-ru");
