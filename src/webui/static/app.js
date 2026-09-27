@@ -5,6 +5,13 @@
   const saved = localStorage.getItem("cj-theme");
   if (saved === "light" || saved === "dark") {
     document.documentElement.dataset.theme = saved;
+  } else if (window.matchMedia?.("(prefers-color-scheme: light)").matches) {
+    // Ни разу не переключал тему сам — раньше первый запуск всегда был
+    // тёмным, даже если вся система у человека в светлой теме (:root
+    // ниже — это тёмная тема по умолчанию, светлая только явным
+    // data-theme="light"). Просто угадываем стартовое состояние из ОС,
+    // ничего не сохраняем — свой выбор через тумблер это не трогает.
+    document.documentElement.dataset.theme = "light";
   }
 })();
 
@@ -62,7 +69,10 @@ function sourceLabel(name) {
 function sourceIconHtml(name) {
   const icon = SOURCE_ICON[name];
   if (!icon) return "";
-  return `<span class="source-icon" style="background:${icon.color}">${icon.text}</span>`;
+  // Декоративная аббревиатура (hh/in/GM…) всегда стоит рядом с полным
+  // названием площадки (sourceLabel) — без aria-hidden скринридер
+  // объявлял бы его дважды подряд.
+  return `<span class="source-icon" aria-hidden="true" style="background:${icon.color}">${icon.text}</span>`;
 }
 
 function escapeHtml(text) {
@@ -2287,7 +2297,7 @@ function renderSpeedCard(enabled, pendingTelegram, hhRemindersDue) {
       ? `<a href="#" class="queue-badge" data-view="telegram">⏳ В очереди на отправку в Telegram: ${pendingTelegram}</a>`
       : "",
     hhRemindersDue
-      ? `<a href="#" class="queue-badge" data-view="replies">🔔 Молчат долго на HH: ${hhRemindersDue}</a>`
+      ? `<a href="#" class="queue-badge" data-view="replies">🔔 Молчат долго на HH: ${hhRemindersDue} ${plural(hhRemindersDue, "отклик", "отклика", "откликов")}</a>`
       : "",
   ]
     .filter(Boolean)
