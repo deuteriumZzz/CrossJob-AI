@@ -695,6 +695,24 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
         "continuous_cycle_enabled": bool(
             (ctx.config.get("limits") or {}).get("continuous_cycle_enabled")
         ),
+        # Для карточек-счётчиков на Главной — чтобы не заходить в
+        # «Общение» и «Входящие» каждый раз, только чтобы узнать, что
+        # там скопилось.
+        "pending_telegram_sends": pending_telegram_sends_count(
+            ctx.output_folder
+        ),
+        "hh_reminders_due": len(
+            due_hh_reminders(
+                ctx.applied_log.entries_by_source_and_status(
+                    "headhunter", "applied"
+                ),
+                int(
+                    (ctx.config.get("headhunter") or {}).get(
+                        "reminder_follow_up_days", 7
+                    )
+                ),
+            )
+        ),
     }
 
 

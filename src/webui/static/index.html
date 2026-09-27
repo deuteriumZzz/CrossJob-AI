@@ -140,7 +140,7 @@
     <details><summary>Почту Gmail не заблокируют?</summary><p>Рассылка устроена как письма живого человека: первые дни — 15 писем, потом больше; только в рабочие часы; случайные паузы; много возвратов за сутки (по умолчанию 3) — стоп до завтра. Лимит и часы — Настройки → Почта и письма → 🛡 Защита почты.</p></details>
     <details><summary>Рассылка идёт, если бот не запущен?</summary><p>Да: «▶ Запустить» — это поиск вакансий на площадках. Рассылка работает сама, пока открыто приложение.</p></details>
     <details><summary>Где хранятся мои данные?</summary><p>Только на вашем компьютере, в папке <code>data_folder</code>. База только пополняется — сама ничего не удаляет; раз в день делается запасная копия (хранятся копии за 7 дней). Выгрузить в Excel — Компании → «⬇ Скачать в Excel».</p></details>
-    <details><summary>Слишком много сообщений от бота</summary><p>Настройки → 🤖 CrossJob-бот → «Тихий режим»: несрочное придёт одним списком в утренней сводке.</p></details>
+    <details><summary>Слишком много сообщений от бота</summary><p>Настройки → 📣 Уведомления в Telegram → «Тихий режим»: несрочное придёт одним списком в утренней сводке.</p></details>
     <details><summary>Площадка на паузе после капчи</summary><p>Откройте сайт площадки в браузере бота, пройдите проверку и напишите боту <code>/resume hh</code> (или имя площадки).</p></details>
     <details><summary>Что-то не подключено или не работает</summary><p>Настройки → «Подключения» — там видно, что красное, и кнопка «Подключить». Подробности ошибок — Настройки → Логи.</p></details>
   </dialog>
@@ -156,6 +156,7 @@
       </div>
       <div id="todo-panel" class="panel todo-panel"></div>
       <div id="stats-row" class="stats-row"></div>
+      <div id="speed-card" class="panel speed-card"></div>
 
       <h3 class="section-subheading">📡 Свои каналы</h3>
       <div id="own-channels" class="source-grid"></div>
@@ -341,78 +342,79 @@
         </div>
       </div>
 
-      <div class="panel parser-panel">
-        <div class="parser-head">
-          <span id="tg-quick-line-status" class="parser-state">Парсер: …</span>
-          <span class="step-actions" style="margin:0">
-            <button type="button" class="btn btn-ghost btn-small" id="parser-open-base">Контакты из Telegram →</button>
-            <button type="button" class="btn btn-secondary btn-small" data-goto-settings="settings-tg-quick">Настроить</button>
-          </span>
-        </div>
-        <div class="results-numbers" id="parser-numbers"></div>
-      </div>
-
-      <details class="panel more" id="tg-connect-panel" open>
-        <summary><strong>Подключение аккаунта</strong></summary>
-        <ol class="howto small">
-          <li>Откройте <a href="https://my.telegram.org/apps" target="_blank" rel="noopener">my.telegram.org</a> → войдите по номеру → «API development tools» → создайте приложение (название любое). Скопируйте <b>api_id</b> и <b>api_hash</b> сюда:
-            <div class="filters" id="tg-keys-row">
-              <input type="text" id="tg-api-id" inputmode="numeric" placeholder="api_id, например 1234567" aria-label="api_id" />
-              <input type="text" id="tg-api-hash" placeholder="api_hash — 32 символа" aria-label="api_hash" style="flex:1;min-width:220px" />
-              <button type="button" id="tg-keys-save" class="btn btn-secondary">Сохранить</button>
+      <ol class="steps">
+        <li class="panel step">
+          <div class="step-head"><span class="step-num">1</span><h3>Подключить аккаунт</h3></div>
+          <details class="more" id="tg-connect-panel" open>
+            <summary>Как подключить</summary>
+            <ol class="howto small">
+              <li>Откройте <a href="https://my.telegram.org/apps" target="_blank" rel="noopener">my.telegram.org</a> → войдите по номеру → «API development tools» → создайте приложение (название любое). Скопируйте <b>api_id</b> и <b>api_hash</b> сюда:
+                <div class="filters" id="tg-keys-row">
+                  <input type="text" id="tg-api-id" inputmode="numeric" placeholder="api_id, например 1234567" aria-label="api_id" />
+                  <input type="text" id="tg-api-hash" placeholder="api_hash — 32 символа" aria-label="api_hash" style="flex:1;min-width:220px" />
+                  <button type="button" id="tg-keys-save" class="btn btn-secondary">Сохранить</button>
+                </div>
+              </li>
+              <li>Введите номер телефона и код, который пришлёт Telegram. Вход нужен один раз — дальше бот его помнит.</li>
+            </ol>
+            <div class="filters">
+              <button id="telegram-status-refresh" class="btn btn-secondary">Проверить подключение</button>
+              <span id="telegram-status-note" class="muted small"></span>
             </div>
-          </li>
-          <li>Введите номер телефона и код, который пришлёт Telegram. Вход нужен один раз — дальше бот его помнит.</li>
-        </ol>
-        <div class="filters">
-          <button id="telegram-status-refresh" class="btn btn-secondary">Проверить подключение</button>
-          <span id="telegram-status-note" class="muted small"></span>
-        </div>
-        <div class="filters" id="telegram-login-row">
-          <input type="text" id="telegram-login-phone" placeholder="Номер телефона, напр. +79991234567" style="flex:1;min-width:220px" />
-          <button id="telegram-login-send-code" class="btn btn-primary">Прислать код</button>
-        </div>
-        <div class="filters" id="telegram-login-code-row" style="display:none">
-          <input type="text" id="telegram-login-code" placeholder="Код из Telegram" style="flex:1;min-width:160px" />
-          <button id="telegram-login-submit-code" class="btn btn-primary">Подтвердить</button>
-        </div>
-        <div class="filters" id="telegram-login-password-row" style="display:none">
-          <input type="password" id="telegram-login-password" placeholder="Пароль двухфакторной аутентификации" style="flex:1;min-width:220px" />
-          <button id="telegram-login-submit-password" class="btn btn-primary">Войти</button>
-        </div>
-        <p class="muted small" id="telegram-login-status"></p>
-      </details>
+            <div class="filters" id="telegram-login-row">
+              <input type="text" id="telegram-login-phone" placeholder="Номер телефона, напр. +79991234567" style="flex:1;min-width:220px" />
+              <button id="telegram-login-send-code" class="btn btn-primary">Прислать код</button>
+            </div>
+            <div class="filters" id="telegram-login-code-row" style="display:none">
+              <input type="text" id="telegram-login-code" placeholder="Код из Telegram" style="flex:1;min-width:160px" />
+              <button id="telegram-login-submit-code" class="btn btn-primary">Подтвердить</button>
+            </div>
+            <div class="filters" id="telegram-login-password-row" style="display:none">
+              <input type="password" id="telegram-login-password" placeholder="Пароль двухфакторной аутентификации" style="flex:1;min-width:220px" />
+              <button id="telegram-login-submit-password" class="btn btn-primary">Войти</button>
+            </div>
+            <p class="muted small" id="telegram-login-status"></p>
+          </details>
+        </li>
 
-      <div class="panel parser-settings-link">
-        <span>Каналы, ключевые слова, текст «Здравствуйте» и резюме для кнопок — в одном месте.</span>
-        <button type="button" class="btn btn-secondary btn-small" data-goto-settings="settings-tg-quick">⚙ Настройки парсера</button>
-      </div>
-
-      <div class="panel">
-        <h3>Диалоги</h3>
-        <p class="muted small">Автоответа на входящие нет — только уведомление в CrossJob-бот и здесь. Отвечать нужно самому.</p>
-        <div class="telegram-layout">
-          <div id="tg-conv-list" class="conv-list">
-            <p class="muted small">Загрузка…</p>
+        <li class="panel step">
+          <div class="step-head"><span class="step-num">2</span><h3>Слушает и присылает вакансии</h3></div>
+          <div class="parser-head">
+            <span id="tg-quick-line-status" class="parser-state">Парсер: …</span>
+            <span class="step-actions" style="margin:0">
+              <button type="button" class="btn btn-ghost btn-small" id="parser-open-base">Контакты из Telegram →</button>
+              <button type="button" class="btn btn-secondary btn-small" data-goto-settings="settings-tg-quick" title="Каналы, ключевые слова, текст «Здравствуйте» и резюме для кнопок — в одном месте">Настроить</button>
+            </span>
           </div>
-          <div class="chat-thread">
-            <div id="tg-chat-empty" class="muted small">Выберите диалог слева.</div>
-            <div id="tg-chat-panel" style="display:none">
-              <div class="filters" style="justify-content:space-between;margin-bottom:8px">
-                <h3 id="tg-chat-contact" style="margin:0"></h3>
-                <button id="tg-chat-delete" class="btn btn-ghost btn-small" title="Удалить диалог из истории">🗑 Удалить диалог</button>
+          <div class="results-numbers" id="parser-numbers"></div>
+        </li>
+
+        <li class="panel step">
+          <div class="step-head"><span class="step-num">3</span><h3>Диалоги — отвечать нужно самому</h3></div>
+          <p class="muted small">Автоответа на входящие нет — только уведомление в CrossJob-бот и здесь.</p>
+          <div class="telegram-layout">
+            <div id="tg-conv-list" class="conv-list">
+              <p class="muted small">Загрузка…</p>
+            </div>
+            <div class="chat-thread">
+              <div id="tg-chat-empty" class="muted small">Выберите диалог слева.</div>
+              <div id="tg-chat-panel" style="display:none">
+                <div class="filters" style="justify-content:space-between;margin-bottom:8px">
+                  <h3 id="tg-chat-contact" style="margin:0"></h3>
+                  <button id="tg-chat-delete" class="btn btn-ghost btn-small" title="Удалить диалог из истории">🗑 Удалить диалог</button>
+                </div>
+                <div id="tg-chat-messages" class="chat-messages"></div>
+                <div class="chat-composer">
+                  <input id="tg-chat-input" type="text" placeholder="Написать сообщение…" aria-label="Текст сообщения" />
+                  <button id="tg-chat-attach-resume" class="btn btn-secondary" title="Отправить resume.pdf файлом">📎 Резюме</button>
+                  <button id="tg-chat-send" class="btn btn-primary">Отправить</button>
+                </div>
+                <span id="tg-chat-status" class="muted small"></span>
               </div>
-              <div id="tg-chat-messages" class="chat-messages"></div>
-              <div class="chat-composer">
-                <input id="tg-chat-input" type="text" placeholder="Написать сообщение…" aria-label="Текст сообщения" />
-                <button id="tg-chat-attach-resume" class="btn btn-secondary" title="Отправить resume.pdf файлом">📎 Резюме</button>
-                <button id="tg-chat-send" class="btn btn-primary">Отправить</button>
-              </div>
-              <span id="tg-chat-status" class="muted small"></span>
             </div>
           </div>
-        </div>
-      </div>
+        </li>
+      </ol>
     </section>
 
     <section id="view-resume" class="view">
@@ -547,18 +549,21 @@
       </div>
       <nav class="settings-jump" id="settings-jump">
         <div class="tab-indicator" id="settings-tab-indicator"></div>
+        <span class="settings-jump-label">Основное</span>
         <button type="button" class="active" data-settings-tab="settings-accounts">Подключения</button>
         <button type="button" data-settings-tab="settings-search">Что ищу</button>
+        <button type="button" data-settings-tab="settings-llm">Провайдер ИИ</button>
+        <span class="settings-jump-label">Площадки</span>
         <button type="button" data-settings-tab="settings-table">Площадки</button>
         <button type="button" data-settings-tab="settings-limits">Лимиты откликов</button>
+        <span class="settings-jump-label">Каналы отправки</span>
         <button type="button" data-settings-tab="settings-tg-quick">✈️ Telegram-парсер</button>
         <button type="button" data-settings-tab="settings-direct">🏢 Сайты компаний</button>
         <button type="button" data-settings-tab="settings-outreach">Почта и письма</button>
-        <button type="button" data-settings-tab="settings-notifications" title="Не путать с Telegram-парсером — это бот, который присылает вам уведомления">🤖 CrossJob-бот</button>
-        <button type="button" data-settings-tab="settings-llm">Провайдер ИИ</button>
         <details class="settings-more">
           <summary>Ещё ▾</summary>
           <div class="settings-more-menu">
+            <button type="button" data-settings-tab="settings-notifications">📣 Уведомления в Telegram</button>
             <button type="button" data-settings-tab="settings-autostart">Автозапуск</button>
             <button type="button" data-settings-tab="settings-usage">Расходы на ИИ</button>
           </div>
@@ -604,7 +609,8 @@
           <label class="checkbox-row"><input id="search-auto-all" type="checkbox" class="switch" /> Откликаться автоматически на всех включённых площадках</label>
           <span id="search-auto-note" class="muted small"></span>
         </div>
-        <div class="limits-grid" style="margin-top:14px">
+        <h4 style="margin-top:14px">Исключения</h4>
+        <div class="limits-grid">
           <label class="limit-field">
             <span>Чёрный список компаний (одна на строку) — не откликаемся и не пишем им в рассылке</span>
             <textarea id="search-company-blacklist" rows="3"></textarea>
@@ -829,7 +835,7 @@
       </div>
 
       <div class="panel settings-pane" id="settings-notifications">
-        <h3>🤖 CrossJob-бот</h3>
+        <h3>📣 Уведомления в Telegram</h3>
         <p class="muted small">
           Ваш личный бот — через него CrossJob общается с вами: присылает вакансии из Telegram-парсера
           с кнопками ответа, ответы работодателей, черновики на подтверждение, утреннюю сводку и

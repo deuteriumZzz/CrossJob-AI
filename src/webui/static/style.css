@@ -278,6 +278,25 @@ nav.tabs button.active {
   background: currentColor;
 }
 
+/* Счётчики "в очереди"/"молчат долго" на Главной (speed-card) — кликабельные
+   чипы, ведут прямо на экран, где это можно посмотреть/поправить. */
+.queue-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(224, 192, 90, 0.14);
+  color: var(--warn);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.queue-badge:hover {
+  background: rgba(224, 192, 90, 0.24);
+}
+
 .badge.on {
   background: rgba(111, 220, 140, 0.13);
   color: var(--ok);
@@ -587,6 +606,25 @@ main {
   font-family: inherit;
   cursor: pointer;
   transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+
+/* Подписи групп вкладок настроек — не кнопки, просто разделяют смысловые
+   блоки (Основное / Площадки / Каналы отправки), чтобы 11 вкладок подряд
+   не читались одним нерасчленённым рядом. */
+.settings-jump-label {
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  opacity: 0.7;
+  padding: 0 2px;
+}
+
+.settings-jump-label:not(:first-child) {
+  margin-left: 10px;
 }
 
 .settings-jump button:hover {

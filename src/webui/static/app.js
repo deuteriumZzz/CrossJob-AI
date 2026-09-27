@@ -2250,6 +2250,52 @@ function progressHtml(label, progress, id) {
     <div class="step-actions"><button type="button" class="btn btn-ghost btn-small" data-campaign="${id}" data-action="stop">Остановить</button></div>`;
 }
 
+// Карточка на Главной — "постоянный цикл" был спрятан внутри
+// Настроек → Лимиты откликов, а это прямой ответ на "успею ли я в
+// первые 30 кандидатов", так что вынесен на самое видное место.
+function renderSpeedCard(enabled, pendingTelegram, hhRemindersDue) {
+  const el = document.getElementById("speed-card");
+  const queueBadges = [
+    pendingTelegram
+      ? `<a href="#" class="queue-badge" data-view="telegram">⏳ В очереди на отправку в Telegram: ${pendingTelegram}</a>`
+      : "",
+    hhRemindersDue
+      ? `<a href="#" class="queue-badge" data-view="replies">🔔 Молчат долго на HH: ${hhRemindersDue}</a>`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("");
+  el.innerHTML = `
+    <div class="row" style="align-items:center">
+      <span>⚡ Работать без пауз между площадками</span>
+      <label class="checkbox-row" style="margin:0"><input type="checkbox" id="speed-card-toggle" class="switch" ${enabled ? "checked" : ""} /></label>
+    </div>
+    <p class="muted small" style="margin:6px 0 0">${enabled ? "Включено — площадки идут по кругу с короткой паузой, а не ждут часами." : "Выключено — у каждой площадки своё расписание (Настройки → Площадки)."} <a href="#" data-goto-settings="settings-limits">Подробнее в настройках</a></p>
+    ${queueBadges ? `<div class="filters" style="margin-top:10px">${queueBadges}</div>` : ""}
+  `;
+  document.getElementById("speed-card-toggle").addEventListener("change", async (e) => {
+    e.target.disabled = true;
+    try {
+      await api("/api/settings/limits", {
+        method: "POST",
+        body: JSON.stringify({ continuous_cycle_enabled: e.target.checked }),
+      });
+      renderSpeedCard(e.target.checked, pendingTelegram, hhRemindersDue);
+    } catch (err) {
+      showToast(err.message.replace(/^\d+: /, ""), "error");
+      e.target.checked = !e.target.checked;
+      e.target.disabled = false;
+    }
+  });
+  bindGotoSettings(el);
+  el.querySelectorAll(".queue-badge").forEach((a) => {
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      switchTab(a.dataset.view);
+    });
+  });
+}
+
 const render = {
   async contacts() {
     lastContacts = await api("/api/contacts");
@@ -2346,6 +2392,11 @@ const render = {
       statsRow.querySelectorAll(".value").forEach((el) => {
         countUp(el, parseInt(el.dataset.target, 10));
       });
+      renderSpeedCard(
+        status.continuous_cycle_enabled,
+        status.pending_telegram_sends,
+        status.hh_reminders_due
+      );
 
       // ponytail: чекбокс теперь ЕСТЬ schedule_enabled этой площадки —
       // единственный переключатель "площадка участвует в демоне", вместо
@@ -2937,6 +2988,27 @@ const render = {
               <textarea class="d-locations" rows="2" placeholder="оставить пустым — использовать общие">${(s.locations_override || []).join("\n")}</textarea>
             </label>
             ${
+              s.name === "linkedin"
+                ? `<label class="limit-field">
+                <span>Зарплата для скрининга LinkedIn (USD/год)</span>
+                <input type="text" class="d-linkedin-salary" value="${salary.linkedin_salary_range_usd || ""}" placeholder="60000-80000" />
+              </label>`
+                : ""
+            }
+          </div>
+          <p class="muted small">Сейчас реально ищет по: «${(s.effective_positions || []).join("», «") || "—"}»${
+        s.name === "linkedin"
+          ? " · локации LinkedIn настраиваются отдельно (linkedin.locations)"
+          : `, локации: «${(s.effective_locations || []).join("», «") || "любые"}»`
+      }.</p>
+        </div>
+
+        ${
+          s.name === "headhunter" || s.name === "djinni"
+            ? `<div class="drawer-section">
+          <h4>Автоматика в чате</h4>
+          <div class="limits-grid">
+            ${
               s.name === "headhunter"
                 ? `<label class="limit-field" style="justify-content:flex-end">
                 <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto-reply switch" ${s.auto_reply ? "checked" : ""} />Автоответ в чате HH</span>
@@ -2955,28 +3027,15 @@ const render = {
                 <span>Зарплата для автоответа в чате HH</span>
                 <input type="text" class="d-hh-salary" value="${salary.hh_salary_expectations || ""}" placeholder="250000-300000 RUR" />
               </label>`
-                : s.name === "djinni"
-                  ? `<label class="limit-field" style="justify-content:flex-end">
+                : `<label class="limit-field" style="justify-content:flex-end">
                 <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto-bump switch" ${s.auto_bump_resume ? "checked" : ""} />Поднимать профиль раз в 7 дней</span>
                 <span class="muted small">Кнопка «Bump My Profile» на Djinni — профиль снова наверху у рекрутеров. Бот нажимает её сам, как только Djinni разрешит.</span>
               </label>`
-                  : ""
-            }
-            ${
-              s.name === "linkedin"
-                ? `<label class="limit-field">
-                <span>Зарплата для скрининга LinkedIn (USD/год)</span>
-                <input type="text" class="d-linkedin-salary" value="${salary.linkedin_salary_range_usd || ""}" placeholder="60000-80000" />
-              </label>`
-                : ""
             }
           </div>
-          <p class="muted small">Сейчас реально ищет по: «${(s.effective_positions || []).join("», «") || "—"}»${
-        s.name === "linkedin"
-          ? " · локации LinkedIn настраиваются отдельно (linkedin.locations)"
-          : `, локации: «${(s.effective_locations || []).join("», «") || "любые"}»`
-      }.</p>
-        </div>
+        </div>`
+            : ""
+        }
 
         <div class="filters">
           <button class="btn btn-primary" id="platform-drawer-save">Сохранить</button>
