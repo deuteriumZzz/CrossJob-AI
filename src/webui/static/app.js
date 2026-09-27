@@ -4596,8 +4596,29 @@ function renderAutoAll(status) {
 
 // «Подключения»: сервисы (то же, что «Готовность» на Главной) и
 // площадки — вход, пауза после капчи, последняя ошибка.
+// Пока не пройдены обязательные шаги (резюме/ключ ИИ/площадка, см.
+// _REQUIRED_SETUP в api.py) — сворачиваем вкладки настроек, которые
+// имеют смысл только для уже работающего бота (стиль писем, каналы
+// отправки, автозапуск), чтобы новичок не видел все 8 вкладок сразу.
+// Ничего не блокируется навсегда — "Показать всё" снимает это в любой
+// момент и запоминает выбор.
+function updateSettingsOnboarding(todo) {
+  const jump = document.getElementById("settings-jump");
+  const hint = document.getElementById("settings-onboarding-hint");
+  if (!jump || !hint) return;
+  const missingRequired = (todo.setup || []).some((c) => c.required && !c.ok);
+  let revealed = false;
+  try {
+    revealed = localStorage.getItem("cj-settings-full-shown") === "1";
+  } catch (e) {}
+  const onboarding = missingRequired && !revealed;
+  jump.classList.toggle("onboarding", onboarding);
+  hint.style.display = onboarding ? "" : "none";
+}
+
 async function loadAccounts() {
   const [todo, status] = await Promise.all([api("/api/todo"), api("/api/status")]);
+  updateSettingsOnboarding(todo);
   const row = (ok, title, hint, action) => `
     <div class="account-row ${ok ? "is-ok" : "is-missing"}">
       <span class="account-mark">${ok ? "✓" : "✗"}</span>
@@ -5595,6 +5616,15 @@ function initDashboard() {
     localStorage.setItem("cj-logs-raw", logRawToggle.checked ? "1" : "0");
     renderLogLines();
   });
+  document
+    .getElementById("settings-onboarding-hint-reveal")
+    .addEventListener("click", () => {
+      try {
+        localStorage.setItem("cj-settings-full-shown", "1");
+      } catch (e) {}
+      document.getElementById("settings-jump").classList.remove("onboarding");
+      document.getElementById("settings-onboarding-hint").style.display = "none";
+    });
   document
     .getElementById("replies-filter-query")
     .addEventListener("input", () => renderRepliesRows());

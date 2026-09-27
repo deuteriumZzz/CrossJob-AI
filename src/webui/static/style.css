@@ -632,6 +632,16 @@ main {
   color: var(--accent);
 }
 
+/* Пока не пройдены обязательные шаги (резюме/ключ ИИ/площадка) — вкладки
+   про уже работающий процесс (стиль писем, каналы отправки, провайдер
+   ИИ) только шумят рядом с чек-листом на Главной. "Показать всё" в
+   заголовке снимает это в любой момент — ничего не заблокировано
+   навсегда, свёрнуто только по умолчанию. См. updateSettingsOnboarding()
+   в app.js. */
+#settings-jump.onboarding [data-onboarding-hide] {
+  display: none;
+}
+
 .settings-jump button.active {
   background: var(--accent);
   border-color: var(--accent);
