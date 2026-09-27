@@ -155,18 +155,25 @@
         </div>
       </div>
       <div id="todo-panel" class="panel todo-panel"></div>
-      <div id="stats-row" class="stats-row"></div>
-      <div id="speed-card" class="panel speed-card"></div>
 
-      <h3 class="section-subheading">📡 Свои каналы</h3>
-      <div id="own-channels" class="source-grid"></div>
+      <!-- Пока не пройдены обязательные шаги настройки (резюме, ключ ИИ,
+           хотя бы одна площадка) — ниже нечего показывать: пустая
+           статистика и карточки площадок без резюме только отвлекают от
+           чек-листа выше. render.overview() прячет/показывает этот блок
+           целиком через #dashboard-sections. -->
+      <div id="dashboard-sections">
+        <div id="stats-row" class="stats-row"></div>
+        <div id="speed-card" class="panel speed-card"></div>
 
-      <h3 class="section-subheading">🇷🇺 Русские площадки</h3>
-      <div id="source-grid-ru" class="source-grid"></div>
+        <h3 class="section-subheading">📡 Свои каналы</h3>
+        <div id="own-channels" class="source-grid"></div>
 
-      <h3 class="section-subheading">🌍 Зарубежные площадки</h3>
-      <div id="source-grid-intl" class="source-grid"></div>
+        <h3 class="section-subheading">🇷🇺 Русские площадки</h3>
+        <div id="source-grid-ru" class="source-grid"></div>
 
+        <h3 class="section-subheading">🌍 Зарубежные площадки</h3>
+        <div id="source-grid-intl" class="source-grid"></div>
+      </div>
     </section>
 
     <section id="view-history" class="view">
@@ -1310,6 +1317,6 @@
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=40"></script>
+<script src="/app.js?v=41"></script>
 </body>
 </html>

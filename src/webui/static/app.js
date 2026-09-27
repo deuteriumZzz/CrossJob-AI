@@ -1479,7 +1479,7 @@ async function renderTodo() {
   try {
     todo = await api("/api/todo");
   } catch (e) {
-    return;
+    return false; // сеть моргнула — не прячем дашборд из-за этого
   }
   lastTodoBadges = todo.badges || {};
   applySubnavBadges();
@@ -1552,7 +1552,7 @@ async function renderTodo() {
   if (!todo.items.length) {
     el.innerHTML = setupHtml + `<div class="todo-calm">✓ Сейчас ничего не ждёт вашего решения.</div>`;
     bindSetup();
-    return;
+    return !!missingRequired.length;
   }
   el.innerHTML = `${setupHtml}
     <h3 style="margin:0 0 10px">Что сделать сейчас</h3>
@@ -1569,6 +1569,7 @@ async function renderTodo() {
   el.querySelectorAll("[data-todo-view]").forEach((btn) => {
     btn.addEventListener("click", () => switchTab(btn.dataset.todoView));
   });  bindSetup();
+  return !!missingRequired.length;
 }
 
 function applySubnavBadges() {
@@ -2311,7 +2312,7 @@ const render = {
   },
 
   async overview() {
-    renderTodo();
+    const todoPromise = renderTodo();
     renderOwnChannels();
     if (!overviewLoaded) {
       document.getElementById("stats-row").innerHTML = skeletonStats();
@@ -2319,11 +2320,17 @@ const render = {
       document.getElementById("source-grid-intl").innerHTML = skeletonSourceGrid(3);
     }
 
-    const [status, stats, runNow] = await Promise.all([
+    const [status, stats, runNow, isOnboarding] = await Promise.all([
       api("/api/status"),
       api("/api/stats"),
       api("/api/run-now/status"),
+      todoPromise,
     ]);
+    // Обязательные шаги (резюме/ключ ИИ/площадка) не пройдены — ниже
+    // нечего показывать: пустая статистика и площадки без резюме
+    // только отвлекают от чек-листа выше него. См. #dashboard-sections
+    // в index.html.
+    document.getElementById("dashboard-sections").style.display = isOnboarding ? "none" : "";
 
     // ponytail: без этой проверки весь блок ниже (счётчики со
     // start-anew анимацией, карточки площадок, чекбоксы) пересобирался
