@@ -353,6 +353,25 @@ class AppliedLog:
             and datetime.fromisoformat(e["applied_at"]) >= since
         )
 
+    def count_in_previous_period(self, period: Period) -> int:
+        """То же скользящее окно, что у count_in_period(), но сдвинутое
+        на один период назад — для тренда "больше/меньше, чем в
+        предыдущие N дней" под счётчиками на Главной."""
+        now = datetime.now().astimezone()
+        if period == "day":
+            start_of_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            since, until = start_of_today - timedelta(days=1), start_of_today
+        elif period == "week":
+            since, until = now - timedelta(days=14), now - timedelta(days=7)
+        else:
+            since, until = now - timedelta(days=60), now - timedelta(days=30)
+        return sum(
+            1
+            for e in self._data["applications"]
+            if e["status"] == "applied"
+            and since <= datetime.fromisoformat(e["applied_at"]) < until
+        )
+
     def record(
         self,
         job: Job,

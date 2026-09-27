@@ -680,6 +680,17 @@ function renderTotalBudget(status, totalLimit) {
   `;
 }
 
+// "16" само по себе не говорит, хорошо это или плохо — сравнение с тем
+// же по длительности предыдущим окном (вчера/предыдущие 7д/предыдущие
+// 30д, см. count_in_previous_period) отвечает на этот вопрос сразу под
+// цифрой, тем же языком, что уже есть в "Результат за 7 дней" в Аналитике.
+function statTrendHtml(curr, prev) {
+  const delta = curr - prev;
+  if (!delta) return "";
+  const cls = delta > 0 ? "ok-text" : "err-text";
+  return `<div class="stat-trend small ${cls}">${delta > 0 ? "↑" : "↓"} ${Math.abs(delta)}</div>`;
+}
+
 function skeletonStats() {
   return Array.from(
     { length: 3 },
@@ -2399,9 +2410,9 @@ const render = {
       void statsRow.offsetWidth;
       statsRow.classList.add("content-fade-in");
       statsRow.innerHTML = `
-        <div class="stat-card"><div class="value" data-target="${stats.day}">0</div><div class="label">откликов сегодня</div></div>
-        <div class="stat-card"><div class="value" data-target="${stats.week}">0</div><div class="label">за неделю</div></div>
-        <div class="stat-card"><div class="value" data-target="${stats.month}">0</div><div class="label">за месяц</div></div>
+        <div class="stat-card"><div class="value" data-target="${stats.day}">0</div><div class="label">откликов сегодня</div>${statTrendHtml(stats.day, stats.prev_day)}</div>
+        <div class="stat-card"><div class="value" data-target="${stats.week}">0</div><div class="label">за неделю</div>${statTrendHtml(stats.week, stats.prev_week)}</div>
+        <div class="stat-card"><div class="value" data-target="${stats.month}">0</div><div class="label">за месяц</div>${statTrendHtml(stats.month, stats.prev_month)}</div>
       `;
       statsRow.querySelectorAll(".value").forEach((el) => {
         countUp(el, parseInt(el.dataset.target, 10));

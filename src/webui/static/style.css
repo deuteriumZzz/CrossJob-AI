@@ -698,6 +698,11 @@ p.muted {
   margin-top: 4px;
 }
 
+.stat-trend {
+  margin-top: 6px;
+  font-weight: 600;
+}
+
 /* ---------- Source cards ---------- */
 
 .source-grid {

@@ -204,7 +204,14 @@ def test_resumes_endpoint_exposes_effective_language_routes(client):
 
 def test_stats_empty_log_returns_zeros(client):
     response = client.get("/api/stats")
-    assert response.json() == {"day": 0, "week": 0, "month": 0}
+    assert response.json() == {
+        "day": 0,
+        "week": 0,
+        "month": 0,
+        "prev_day": 0,
+        "prev_week": 0,
+        "prev_month": 0,
+    }
 
 
 def test_settings_update_persists_and_reflects_in_status(client):

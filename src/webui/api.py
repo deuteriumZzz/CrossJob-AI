@@ -722,6 +722,9 @@ def get_stats(ctx: AppContext = Depends(get_ctx)) -> dict:
         "day": ctx.applied_log.count_in_period("day"),
         "week": ctx.applied_log.count_in_period("week"),
         "month": ctx.applied_log.count_in_period("month"),
+        "prev_day": ctx.applied_log.count_in_previous_period("day"),
+        "prev_week": ctx.applied_log.count_in_previous_period("week"),
+        "prev_month": ctx.applied_log.count_in_previous_period("month"),
     }
 
 
