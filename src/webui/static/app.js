@@ -807,6 +807,11 @@ function renderContactsList() {
 
   if (!lastContacts.length) {
     el.innerHTML = `<tr><td colspan="7">${emptyStateHtml("База пока пуста. Загрузите свой список компаний кнопкой «📥 Загрузить файл» — или включите Telegram-парсер: он сам добавляет HR из постов.")}</td></tr>`;
+    // База пуста — это ровно момент, когда вопрос "где взять список
+    // компаний" актуален; разворачиваем сам, а не оставляем свёрнутой
+    // строкой среди прочих <details> на экране. Для уже заполненной
+    // базы (у кого этот промт уже не нужен) поведение не меняется.
+    document.getElementById("import-help").open = true;
     renderBaseBulk();
     return;
   }
@@ -5299,7 +5304,27 @@ function initChangelogPopover() {
   });
 }
 
+// Бейдж непрочитанного виден только пока вкладка браузера открыта на
+// экране — свёрнутое окно/фоновая вкладка про новые ответы HR или
+// проблемную площадку никак не сигналит. MutationObserver, а не вызов
+// из каждого места, где меняются оба бейджа (их минимум три) — один
+// раз настроить и не думать про новые места в будущем.
+const BASE_DOCUMENT_TITLE = document.title;
+function updateDocumentTitleBadge() {
+  const unread = parseInt(document.getElementById("telegram-unread-badge")?.textContent || "0", 10) || 0;
+  const errorBadge = document.getElementById("overview-error-badge");
+  const hasErrors = errorBadge && errorBadge.style.display !== "none";
+  const count = unread + (hasErrors ? 1 : 0);
+  document.title = count ? `(${count}) ${BASE_DOCUMENT_TITLE}` : BASE_DOCUMENT_TITLE;
+}
+
 function initDashboard() {
+  const titleBadgeObserver = new MutationObserver(updateDocumentTitleBadge);
+  ["telegram-unread-badge", "overview-error-badge"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) titleBadgeObserver.observe(el, { attributes: true, attributeFilter: ["style"], childList: true, characterData: true, subtree: true });
+  });
+
   document.querySelectorAll("nav.tabs button").forEach((b) => {
     b.addEventListener("click", () => switchTab(b.dataset.tab));
   });
