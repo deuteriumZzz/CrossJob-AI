@@ -730,6 +730,13 @@ const CONTACT_STATUS = {
   bounced: "возврат",
   skip: "не писать",
 };
+// Статусы "возврат"/"не писать" сами по себе не объясняют, что
+// произошло и что теперь с этим делать — добавляем как title у чипа
+// фильтра в "База компаний" (см. renderContactsList).
+const CONTACT_STATUS_HINT = {
+  bounced: "Письмо вернулось — адрес не существует или ящик недоступен.",
+  skip: "Помечено вручную «не писать» — бот пропускает эту компанию в рассылке.",
+};
 const SOURCE_KIND = {
   file: "📄 мой файл",
   telegram: "✈️ Telegram",
@@ -778,7 +785,7 @@ function renderContactsList() {
     .filter(([k, , n]) => !k || n);
   const chipBox = document.getElementById("base-chips");
   chipBox.innerHTML = chips
-    .map(([k, label, n]) => `<button type="button" class="chip${k === baseState.status ? " active" : ""}" data-status="${k}">${label} <b>${n}</b></button>`)
+    .map(([k, label, n]) => `<button type="button" class="chip${k === baseState.status ? " active" : ""}" data-status="${k}"${CONTACT_STATUS_HINT[k] ? ` title="${escapeHtml(CONTACT_STATUS_HINT[k])}"` : ""}>${label} <b>${n}</b></button>`)
     .join("");
   chipBox.querySelectorAll("[data-status]").forEach((b) =>
     b.addEventListener("click", () => {
