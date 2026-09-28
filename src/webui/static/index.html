@@ -10,7 +10,7 @@
   href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&display=swap"
   rel="stylesheet"
 />
-<link rel="stylesheet" href="/style.css?v=40" />
+<link rel="stylesheet" href="/style.css?v=41" />
 </head>
 <body>
 <div id="setup-screen" class="setup-screen" style="display:none">
@@ -558,22 +558,22 @@
       <nav class="settings-jump" id="settings-jump">
         <div class="tab-indicator" id="settings-tab-indicator"></div>
         <span class="settings-jump-label">Основное</span>
-        <button type="button" class="active" data-settings-tab="settings-accounts">Подключения</button>
-        <button type="button" data-settings-tab="settings-search">Что ищу</button>
+        <button type="button" class="active" data-settings-tab="settings-accounts"><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M8 12l4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M7.5 13.5l-1 1a2.5 2.5 0 0 1-3.5-3.5l2-2a2.5 2.5 0 0 1 3.5 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12.5 6.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-2 2a2.5 2.5 0 0 1-3.5 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Подключения</button>
+        <button type="button" data-settings-tab="settings-search"><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3.5 17V12M3.5 9.5V3M10 17V10.5M10 8V3M16.5 17V13.5M16.5 11V3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M1.5 12h4M8 10.5h4M14.5 13.5h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Что ищу</button>
         <span class="settings-jump-label">Площадки</span>
-        <button type="button" data-settings-tab="settings-table">Площадки</button>
-        <button type="button" data-settings-tab="settings-limits" data-onboarding-hide>Как отвечать и лимиты</button>
+        <button type="button" data-settings-tab="settings-table"><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.5 3 6.5l7 4 7-4-7-4Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M3 11l7 4 7-4" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Площадки</button>
+        <button type="button" data-settings-tab="settings-limits" data-onboarding-hide><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 5.5A2 2 0 0 1 5 3.5h10a2 2 0 0 1 2 2V12a2 2 0 0 1-2 2H8l-3.5 3V14H5a2 2 0 0 1-2-2V5.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Как отвечать и лимиты</button>
         <span class="settings-jump-label" data-onboarding-hide>Каналы отправки</span>
-        <button type="button" data-settings-tab="settings-tg-quick" data-onboarding-hide>✈️ Telegram-парсер</button>
-        <button type="button" data-settings-tab="settings-direct" data-onboarding-hide>🏢 Сайты компаний</button>
-        <button type="button" data-settings-tab="settings-outreach" data-onboarding-hide>Почта и письма</button>
+        <button type="button" data-settings-tab="settings-tg-quick" data-onboarding-hide><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M17 3 2.5 9.2c-.7.3-.6 1.3.1 1.5l4 1.2 1.6 4.4c.3.8 1.3.9 1.8.2l1.9-2.6 3.6 2.7c.6.4 1.5.1 1.6-.7L18.9 3.8c.1-.7-.5-1.2-1.1-.9Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M7 11.9 17 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Telegram-парсер</button>
+        <button type="button" data-settings-tab="settings-direct" data-onboarding-hide><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 17V4a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M13 17v-8a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M2 17h16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M6.5 6.5h.01M6.5 9.5h.01M6.5 12.5h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Сайты компаний</button>
+        <button type="button" data-settings-tab="settings-outreach" data-onboarding-hide><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="4.5" width="15" height="11" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="m3 6 7 5 7-5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Почта и письма</button>
         <details class="settings-more">
           <summary>Продвинутое ▾</summary>
           <div class="settings-more-menu">
-            <button type="button" data-settings-tab="settings-llm">Провайдер ИИ</button>
-            <button type="button" data-settings-tab="settings-notifications" data-onboarding-hide>📣 Уведомления в Telegram</button>
-            <button type="button" data-settings-tab="settings-autostart" data-onboarding-hide>Автозапуск</button>
-            <button type="button" data-settings-tab="settings-backups" data-onboarding-hide>Резервные копии</button>
+            <button type="button" data-settings-tab="settings-llm"><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 3.5 11.3 8 15.5 9.3 11.3 10.6 10 15 8.7 10.6 4.5 9.3 8.7 8 10 3.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M16 12.5l.6 1.7 1.7.6-1.7.6-.6 1.7-.6-1.7-1.7-.6 1.7-.6.6-1.7Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Провайдер ИИ</button>
+            <button type="button" data-settings-tab="settings-notifications" data-onboarding-hide><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M6 8.2a4 4 0 0 1 8 0c0 4.5 1.8 5.8 1.8 5.8H4.2S6 12.7 6 8.2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8.6 16.3a1.5 1.5 0 0 0 2.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Уведомления в Telegram</button>
+            <button type="button" data-settings-tab="settings-autostart" data-onboarding-hide><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M14.2 5.3a6.5 6.5 0 1 1-8.4 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M10 2.5v7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Автозапуск</button>
+            <button type="button" data-settings-tab="settings-backups"><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="3" width="15" height="4" rx="1" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M4 7v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M8.2 11h3.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Резервные копии</button>
           </div>
         </details>
       </nav>

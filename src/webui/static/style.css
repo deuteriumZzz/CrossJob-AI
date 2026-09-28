@@ -622,6 +622,8 @@ main {
 }
 
 .settings-jump button {
+  display: inline-flex;
+  align-items: center;
   border: 1px solid transparent;
   padding: 7px 13px;
   border-radius: 999px;
@@ -632,6 +634,34 @@ main {
   font-family: inherit;
   cursor: pointer;
   transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+
+.settings-tab-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  margin-right: 6px;
+  opacity: 0.75;
+  transition: transform 0.22s var(--ease-out), opacity 0.15s ease;
+}
+
+.settings-more-menu .settings-tab-icon {
+  opacity: 0.65;
+}
+
+.settings-jump button:hover .settings-tab-icon {
+  opacity: 1;
+}
+
+.settings-jump button.active .settings-tab-icon {
+  opacity: 1;
+  transform: scale(1.15);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-tab-icon {
+    transition: none;
+  }
 }
 
 /* Подписи групп вкладок настроек — не кнопки, просто разделяют смысловые
@@ -3472,12 +3502,12 @@ details.panel.more[open] > summary {
 }
 .settings-more-menu {
   position: absolute;
-  right: 0;
+  left: 0;
   top: calc(100% + 6px);
   z-index: 20;
   display: grid;
   gap: 2px;
-  min-width: 180px;
+  min-width: 220px;
   padding: 6px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
