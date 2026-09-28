@@ -1072,8 +1072,9 @@
 
           <section class="tgq-block">
             <h4>3. Текст «Здравствуйте»</h4>
+            <label class="checkbox-row"><input id="tgq-smart-greeting" type="checkbox" class="switch" /> Писать умно через ИИ, под конкретную вакансию — шаблон ниже остаётся резервным, если ИИ недоступен</label>
             <label class="limit-field">
-              <span>Уходит HR по кнопке 👋. <code>{role}</code> — название вакансии, <code>{link}</code> — ссылка на пост</span>
+              <span>Уходит HR по кнопке 👋, когда ИИ выключен или недоступен. <code>{role}</code> — название вакансии, <code>{link}</code> — ссылка на пост</span>
               <textarea id="tgq-greeting" rows="3"></textarea>
             </label>
             <p class="muted small">Пример: <span id="tgq-greeting-preview"></span></p>
@@ -1338,6 +1339,6 @@
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=54"></script>
+<script src="/app.js?v=55"></script>
 </body>
 </html>

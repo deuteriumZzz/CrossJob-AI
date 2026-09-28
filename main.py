@@ -5066,6 +5066,35 @@ def _handle_vacancy_button(
             "обсудить."
         )
         text = template.format(role=post["title"], link=post["link"])
+        # Тумблер "Настройки → Telegram-парсер" — по умолчанию включён:
+        # раньше кнопка "👋" единственная из трёх способов написать
+        # HR не использовала LLM вообще, хотя рядом "✍️ письмо" и
+        # автоотправка уже персонализируют текст под вакансию. Шаблон
+        # остаётся как есть при сбое LLM (нет ключа/сеть/пустой ответ) —
+        # тот же fail-open, что уже в _auto_message_text (watcher.py).
+        if (parameters.get("telegram") or {}).get(
+            "smart_greeting", True
+        ) and llm_api_key:
+            try:
+                resume_for_llm = (
+                    resumes[resume_index]
+                    if 0 <= resume_index < len(resumes)
+                    else (resumes[0] if resumes else data_folder / RESUME_PDF)
+                )
+                smart = generate_first_message(
+                    resume_for_llm,
+                    candidate_name(parameters, resume_for_llm),
+                    "",
+                    post["title"],
+                    post["text"],
+                    "telegram",
+                    llm_api_key,
+                )
+                text = smart["text"] or text
+            except Exception as e:
+                logger.warning(
+                    f"Кнопка 👋: LLM недоступна, отправляю шаблон как есть: {e}"
+                )
         with _telegram_client(parameters) as client:
             client.send_message(contact["value"], text)
             if resume_index >= 0:

@@ -3397,6 +3397,7 @@ class TelegramSettingsUpdate(BaseModel):
     active_hours_start: Optional[int] = None
     active_hours_end: Optional[int] = None
     intro_message_template: Optional[str] = None
+    smart_greeting: Optional[bool] = None
     message_delay_min_seconds: Optional[int] = None
     message_delay_max_seconds: Optional[int] = None
 
@@ -3438,6 +3439,10 @@ def _telegram_settings_snapshot(ctx: AppContext) -> dict:
         "intro_message_template": tg.get(
             "intro_message_template", TELEGRAM_INTRO_TEMPLATE_DEFAULT
         ),
+        # По умолчанию включено — кнопка "👋" раньше была единственным
+        # из трёх способов написать HR (она сама, "✍️ письмо",
+        # автоотправка), который не использовал LLM вообще.
+        "smart_greeting": tg.get("smart_greeting", True),
         "message_delay_min_seconds": tg.get(
             "message_delay_min_seconds", MIN_TELEGRAM_MESSAGE_DELAY_SECONDS
         ),
@@ -3469,6 +3474,7 @@ def post_telegram_settings(
             for field in (
                 "max_post_age_days",
                 "auto_message",
+                "smart_greeting",
                 "daily_message_limit",
                 "active_hours_start",
                 "active_hours_end",
@@ -3499,6 +3505,7 @@ class TelegramWatchUpdate(BaseModel):
     stop_words: Optional[list[str]] = None
     forward_to: Optional[str] = None
     auto_message: Optional[bool] = None
+    smart_greeting: Optional[bool] = None
     daily_message_limit: Optional[int] = None
     active_hours_start: Optional[int] = None
     active_hours_end: Optional[int] = None
@@ -3537,6 +3544,7 @@ def _telegram_watch_snapshot(ctx: AppContext) -> dict:
         and ctx.scheduler_thread.is_alive(),
         "bot_connected": bot_credentials(ctx.config) is not None,
         "greeting": telegram.get("intro_message_template") or "",
+        "smart_greeting": bool(telegram.get("smart_greeting", True)),
         "resumes": _telegram_resume_list(ctx),
         "resume_route_ru": (
             lambda r: r.name if r else ""
@@ -3648,6 +3656,10 @@ def post_telegram_watch(
         )
     if body.auto_message is not None:
         set_source_field(prefs, "telegram", "auto_message", body.auto_message)
+    if body.smart_greeting is not None:
+        set_source_field(
+            prefs, "telegram", "smart_greeting", body.smart_greeting
+        )
     for field in (
         "daily_message_limit",
         "active_hours_start",

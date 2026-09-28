@@ -1812,6 +1812,7 @@ async function loadTelegramWatch() {
   greeting.value = w.greeting;
   updateGreetingPreview();
   document.getElementById("tgq-auto-message").checked = w.auto_message;
+  document.getElementById("tgq-smart-greeting").checked = w.smart_greeting;
   document.getElementById("tgq-delay-min").value = Math.round((w.message_delay_min_seconds || 0) / 60);
   document.getElementById("tgq-delay-max").value = Math.round((w.message_delay_max_seconds || 0) / 60);
   document.getElementById("tgq-hours-start").value = w.active_hours_start ?? "";
@@ -1964,6 +1965,7 @@ async function saveTelegramWatch() {
         stop_words: tagItemsOf(document.getElementById("tgq-stop")),
         greeting: document.getElementById("tgq-greeting").value,
         auto_message: document.getElementById("tgq-auto-message").checked,
+        smart_greeting: document.getElementById("tgq-smart-greeting").checked,
         message_delay_min_seconds: Math.max(0, parseInt(document.getElementById("tgq-delay-min").value, 10) || 0) * 60,
         message_delay_max_seconds: Math.max(0, parseInt(document.getElementById("tgq-delay-max").value, 10) || 0) * 60,
         active_hours_start: parseInt(document.getElementById("tgq-hours-start").value, 10) || 0,
