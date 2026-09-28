@@ -4474,6 +4474,76 @@ function rowActionsHtml(e, i) {
   return `<details class="row-actions"><summary>Действия ▾</summary><div class="row-actions-menu">${actions.join("")}</div></details>`;
 }
 
+// Карточка "черновик, ждущий решения" — общая для очереди HR-черновиков
+// и очереди HH-напоминаний (раньше обе держали textarea всегда открытым:
+// при 5-10 письмах страница превращалась в стену текста). <details> вместо
+// самодельного JS-состояния открыт/закрыт — нативный сворачиваемый блок,
+// доступный с клавиатуры бесплатно. Кнопки лежат в <summary>, поэтому их
+// клик глушит propagation — иначе он же переключал бы разворот карточки.
+function decisionCardHtml(item) {
+  return `
+    <details class="hr-draft" data-draft-code="${escapeHtml(item.code)}">
+      <summary>
+        <div class="hr-draft-summary-text">
+          <div class="muted small">${item.headlineHtml}</div>
+          <div class="hr-draft-preview small">${escapeHtml(truncate(item.text, 90))}</div>
+        </div>
+        <div class="hr-draft-actions">
+          <button type="button" class="btn btn-primary btn-small" data-draft-send>${escapeHtml(item.sendLabel)}</button>
+          ${item.skip ? `<button type="button" class="btn btn-ghost btn-small" data-draft-skip>Пропустить</button>` : ""}
+        </div>
+      </summary>
+      <div class="hr-draft-body">
+        ${item.detailHtml || ""}
+        <textarea rows="${item.rows}" aria-label="Текст черновика">${escapeHtml(item.text)}</textarea>
+      </div>
+    </details>`;
+}
+
+function wireDecisionCard(box, item, onDone) {
+  const stop = (ev) => ev.stopPropagation();
+  const sendBtn = box.querySelector("[data-draft-send]");
+  sendBtn.addEventListener("click", async (ev) => {
+    stop(ev);
+    sendBtn.disabled = true;
+    try {
+      await item.send(box.querySelector("textarea").value);
+      onDone();
+    } catch (err) {
+      showToast(err.message.replace(/^\d+: /, ""), "error");
+      sendBtn.disabled = false;
+    }
+  });
+  box.querySelector("[data-draft-skip]")?.addEventListener("click", async (ev) => {
+    stop(ev);
+    await item.skip();
+    onDone();
+  });
+}
+
+// "Отправить всё как есть" — одобряет пачкой без открытия каждой карточки,
+// текст берёт исходный (неотредактированный); ошибки по отдельным письмам
+// не прерывают остальные, статус — краткая сводка одним тостом.
+async function sendAllAsIs(items, statusEl, refresh) {
+  statusEl.textContent = `Отправляю 0 из ${items.length}…`;
+  let sent = 0;
+  let failed = 0;
+  for (const item of items) {
+    try {
+      await item.send(item.text);
+      sent++;
+    } catch (e) {
+      failed++;
+    }
+    statusEl.textContent = `Отправляю ${sent + failed} из ${items.length}…`;
+  }
+  showToast(
+    failed ? `Отправлено ${sent}, не удалось ${failed}` : `Отправлено ${sent}`,
+    failed ? "error" : "success"
+  );
+  refresh();
+}
+
 // Очередь "Ждут вашего решения" — все черновики (ответы и напоминания в
 // Telegram, письма HR): правка текста, отправить или пропустить.
 async function renderDraftsQueue() {
@@ -4485,53 +4555,46 @@ async function renderDraftsQueue() {
   }
   const KIND = { reply: "Ответ HR", follow_up: "Напоминание", email: "Письмо HR" };
   el.style.display = "";
+  const items = drafts.map((d) => ({
+    code: d.code,
+    text: d.text,
+    rows: 4,
+    sendLabel: "Отправить",
+    headlineHtml: `${d.channel === "email" ? "✉️" : "✈️"} ${KIND[d.kind] || "Сообщение"} →
+      ${d.channel === "email" ? escapeHtml(d.contact) : "@" + escapeHtml(d.contact)}
+      ${d.company ? ` · ${escapeHtml(d.company)}${d.title ? " — " + escapeHtml(d.title) : ""}` : ""}
+      ${d.job_link ? ` · <a href="${escapeHtml(d.job_link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">вакансия</a>` : ""}`,
+    detailHtml: d.resume_file
+      ? `<div class="muted small">📎 Приложится резюме: <b>${escapeHtml(d.resume_file)}</b>${
+          d.resume_russian === true ? " (для русской вакансии)" : d.resume_russian === false ? " (для зарубежной вакансии)" : ""
+        }</div>`
+      : d.channel === "email" && d.kind !== "follow_up"
+      ? `<div class="err-text small">⚠️ Резюме для вложения не найдено — загрузите в «Мои резюме», иначе письмо не уйдёт</div>`
+      : "",
+    send: async (text) => {
+      const res = await api(`/api/hr-drafts/${d.code}/send`, {
+        method: "POST",
+        body: JSON.stringify({ text }),
+      });
+      showToast(res.message, "success");
+    },
+    skip: async () => {
+      await api(`/api/hr-drafts/${d.code}/skip`, { method: "POST" });
+    },
+  }));
   el.innerHTML = `
-    <h3 style="margin-top:0">Ждут вашего решения · ${drafts.length}</h3>
-    ${drafts
-      .map(
-        (d) => `
-      <div class="hr-draft" data-draft-code="${escapeHtml(d.code)}">
-        <div class="muted small">
-          ${d.channel === "email" ? "✉️" : "✈️"} ${KIND[d.kind] || "Сообщение"} →
-          ${d.channel === "email" ? escapeHtml(d.contact) : "@" + escapeHtml(d.contact)}
-          ${d.company ? ` · ${escapeHtml(d.company)}${d.title ? " — " + escapeHtml(d.title) : ""}` : ""}
-          ${d.job_link ? ` · <a href="${escapeHtml(d.job_link)}" target="_blank" rel="noopener">вакансия</a>` : ""}
-        </div>
-        ${d.resume_file
-          ? `<div class="muted small">📎 Приложится резюме: <b>${escapeHtml(d.resume_file)}</b>${
-              d.resume_russian === true ? " (для русской вакансии)" : d.resume_russian === false ? " (для зарубежной вакансии)" : ""
-            }</div>`
-          : d.channel === "email" && d.kind !== "follow_up"
-          ? `<div class="err-text small">⚠️ Резюме для вложения не найдено — загрузите в «Мои резюме», иначе письмо не уйдёт</div>`
-          : ""}
-        <textarea rows="4" aria-label="Текст черновика">${escapeHtml(d.text)}</textarea>
-        <div>
-          <button type="button" class="btn btn-primary btn-small" data-draft-send>Отправить</button>
-          <button type="button" class="btn btn-ghost btn-small" data-draft-skip>Пропустить</button>
-        </div>
-      </div>`
-      )
-      .join("")}`;
-  el.querySelectorAll("[data-draft-code]").forEach((box) => {
-    const code = box.dataset.draftCode;
-    box.querySelector("[data-draft-send]").addEventListener("click", async (ev) => {
-      ev.target.disabled = true;
-      try {
-        const res = await api(`/api/hr-drafts/${code}/send`, {
-          method: "POST",
-          body: JSON.stringify({ text: box.querySelector("textarea").value }),
-        });
-        showToast(res.message, "success");
-        renderDraftsQueue();
-      } catch (err) {
-        showToast(err.message.replace(/^\d+: /, ""), "error");
-        ev.target.disabled = false;
-      }
-    });
-    box.querySelector("[data-draft-skip]").addEventListener("click", async () => {
-      await api(`/api/hr-drafts/${code}/skip`, { method: "POST" });
-      renderDraftsQueue();
-    });
+    <div class="hr-draft-queue-head">
+      <h3 style="margin:0">Ждут вашего решения · ${drafts.length}</h3>
+      <button type="button" class="btn btn-secondary btn-small" id="drafts-send-all">Отправить все как есть</button>
+    </div>
+    <p class="muted small" id="drafts-send-all-status" role="status"></p>
+    ${items.map(decisionCardHtml).join("")}`;
+  el.querySelectorAll("[data-draft-code]").forEach((box, i) =>
+    wireDecisionCard(box, items[i], renderDraftsQueue)
+  );
+  el.querySelector("#drafts-send-all").addEventListener("click", (ev) => {
+    ev.target.disabled = true;
+    sendAllAsIs(items, document.getElementById("drafts-send-all-status"), renderDraftsQueue);
   });
 }
 
@@ -4551,38 +4614,36 @@ async function renderHhRemindersQueue() {
     return;
   }
   el.style.display = "";
-  document.getElementById("hh-reminders-list").innerHTML = reminders
-    .map(
-      (r) => `
-    <div class="hr-draft" data-reminder-id="${escapeHtml(r.external_id)}">
-      <div class="muted small">🔔 ${escapeHtml(r.company)}${r.title ? " — " + escapeHtml(r.title) : ""} · откликнулись ${fmtDay(r.applied_at)}</div>
-      <textarea rows="3">${escapeHtml(r.text)}</textarea>
-      <div class="filters">
-        <button type="button" data-reminder-send class="btn btn-primary btn-small">🔔 Напомнить о себе</button>
-        <a href="${escapeHtml(r.link)}" target="_blank" rel="noopener" class="muted small">Открыть вакансию</a>
-      </div>
-    </div>`
-    )
-    .join("");
-  el.querySelectorAll("[data-reminder-id]").forEach((box) => {
-    const externalId = box.dataset.reminderId;
-    box.querySelector("[data-reminder-send]").addEventListener("click", async (ev) => {
-      ev.target.disabled = true;
-      try {
-        await api("/api/headhunter/reminders/send", {
-          method: "POST",
-          body: JSON.stringify({
-            external_id: externalId,
-            text: box.querySelector("textarea").value,
-          }),
-        });
-        showToast("Напоминание отправлено", "success");
-        renderHhRemindersQueue();
-      } catch (err) {
-        showToast(err.message.replace(/^\d+: /, ""), "error");
-        ev.target.disabled = false;
-      }
-    });
+  const items = reminders.map((r) => ({
+    code: r.external_id,
+    text: r.text,
+    rows: 3,
+    sendLabel: "🔔 Напомнить",
+    headlineHtml: `🔔 ${escapeHtml(r.company)}${r.title ? " — " + escapeHtml(r.title) : ""} · откликнулись ${fmtDay(r.applied_at)}
+      · <a href="${escapeHtml(r.link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">вакансия</a>`,
+    detailHtml: "",
+    send: async (text) => {
+      await api("/api/headhunter/reminders/send", {
+        method: "POST",
+        body: JSON.stringify({ external_id: r.external_id, text }),
+      });
+      showToast("Напоминание отправлено", "success");
+    },
+    skip: null,
+  }));
+  document.getElementById("hh-reminders-list").innerHTML = `
+    <div class="hr-draft-queue-head">
+      <span></span>
+      <button type="button" class="btn btn-secondary btn-small" id="hh-reminders-send-all">Отправить все как есть</button>
+    </div>
+    <p class="muted small" id="hh-reminders-send-all-status" role="status"></p>
+    ${items.map(decisionCardHtml).join("")}`;
+  el.querySelectorAll("[data-draft-code]").forEach((box, i) =>
+    wireDecisionCard(box, items[i], renderHhRemindersQueue)
+  );
+  el.querySelector("#hh-reminders-send-all").addEventListener("click", (ev) => {
+    ev.target.disabled = true;
+    sendAllAsIs(items, document.getElementById("hh-reminders-send-all-status"), renderHhRemindersQueue);
   });
 }
 

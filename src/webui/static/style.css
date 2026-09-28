@@ -2880,8 +2880,41 @@ kbd {
 
 .hr-draft {
   margin-top: 8px;
+}
+.hr-draft > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  list-style: none;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.hr-draft > summary::-webkit-details-marker {
+  display: none;
+}
+.hr-draft-summary-text {
+  min-width: 0;
+  flex: 1;
+}
+.hr-draft-preview {
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hr-draft[open] .hr-draft-preview {
+  display: none;
+}
+.hr-draft-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.hr-draft-body {
   display: grid;
   gap: 6px;
+  margin: 8px 0 4px;
 }
 .hr-draft textarea {
   width: 100%;
@@ -2894,8 +2927,11 @@ kbd {
   color: var(--text);
   resize: vertical;
 }
-.hr-draft .btn {
-  justify-self: start;
+.hr-draft-queue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .company-row {
