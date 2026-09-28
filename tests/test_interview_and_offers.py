@@ -156,6 +156,7 @@ def test_interview_invite_sent_only_with_exact_time(monkeypatch):
 
 def test_ics_and_trainer_endpoints(client, monkeypatch):  # noqa: F811
     ctx = api.get_ctx()
+    (ctx.config["dataFolder"] / "resume.pdf").write_bytes(b"%PDF-fake")
     ctx.applied_log.record(
         Job(
             role="Dev",
@@ -221,3 +222,67 @@ def test_ics_and_trainer_endpoints(client, monkeypatch):  # noqa: F811
         ).status_code
         == 400
     )
+
+    # LinkedIn-источник должен читать resume_linkedin.pdf, не общий
+    # resume.pdf — раньше было захардкожено на resume.pdf всегда.
+    (ctx.config["dataFolder"] / "resume_linkedin.pdf").write_bytes(
+        b"%PDF-fake-en"
+    )
+    resumes_used = []
+    monkeypatch.setattr(
+        api,
+        "evaluate_answer",
+        lambda resume, *a: resumes_used.append(Path(resume).name) or "ok",
+    )
+    monkeypatch.setattr(api, "generate_questions", lambda *a: ["Q1"])
+    ctx.applied_log.record(
+        Job(
+            role="Dev",
+            company="Intl Co",
+            link="https://j/t2",
+            source="linkedin",
+            external_id="t2",
+        ),
+        "",
+        "",
+        "applied",
+        8,
+        [],
+    )
+    linkedin_body = {"source": "linkedin", "external_id": "t2"}
+    client.post("/api/interview/questions", json=linkedin_body)
+    res = client.post(
+        "/api/interview/feedback",
+        json={**linkedin_body, "question": "Q1", "answer": "My answer"},
+    )
+    assert res.status_code == 200
+    assert resumes_used == ["resume_linkedin.pdf"]
+
+
+def test_interview_feedback_404s_with_clear_message_when_no_resume(
+    client, monkeypatch  # noqa: F811
+):
+    ctx = api.get_ctx()  # data_folder from the fixture has no resume.pdf
+    ctx.applied_log.record(
+        Job(
+            role="Dev",
+            company="Co",
+            link="https://j/t1",
+            source="headhunter",
+            external_id="t1",
+        ),
+        "",
+        "",
+        "applied",
+        8,
+        [],
+    )
+    monkeypatch.setattr(api, "generate_questions", lambda *a: ["Q1"])
+    body = {"source": "headhunter", "external_id": "t1"}
+    client.post("/api/interview/questions", json=body)
+    res = client.post(
+        "/api/interview/feedback",
+        json={**body, "question": "Q1", "answer": "My answer"},
+    )
+    assert res.status_code == 404
+    assert "резюме" in res.json()["detail"].lower()

@@ -2916,7 +2916,21 @@ def post_interview_feedback(
     if not body.answer.strip():
         raise HTTPException(400, "Пустой ответ")
     data_folder = ctx.config["dataFolder"]
-    resume = data_folder / "resume.pdf"
+    # Было захардкожено на resume.pdf независимо от площадки — тренажёр
+    # оценивал ответы на международную вакансию (LinkedIn и т.п.) по
+    # русскому резюме, а если resume.pdf вообще не было загружено (только
+    # resume_linkedin.pdf), падало с "ИИ не ответил" — вводящей в
+    # заблуждение ошибкой не про ИИ, а про отсутствующий файл. Тот же
+    # выбор файла по площадке, что уже в _resume_readiness().
+    resume = data_folder / _RESUME_FILENAME_BY_SOURCE.get(
+        body.source, RESUME_PDF
+    )
+    if not resume.exists():
+        resume = data_folder / RESUME_PDF
+    if not resume.exists():
+        raise HTTPException(
+            404, "Резюме не найдено — загрузите в «Мои резюме»"
+        )
     try:
         feedback = evaluate_answer(
             resume, entry["title"], body.question, body.answer, ctx.llm_api_key
