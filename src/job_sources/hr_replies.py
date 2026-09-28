@@ -558,6 +558,49 @@ def _personal_info_from_resume(parameters: dict) -> dict:
     return (data or {}).get("personal_information") or {}
 
 
+def _candidate_own_contacts(parameters: dict) -> list[str]:
+    """Email и телефон кандидата, известные заранее — сырые значения
+    для _strip_model_signoff (не готовая строка для письма, этим
+    занимается build_contact_footer)."""
+    import yaml
+
+    try:
+        secrets_data = (
+            yaml.safe_load(
+                Path(parameters["secretsFile"]).read_text(encoding="utf-8")
+            )
+            or {}
+        )
+    except (OSError, ValueError):
+        secrets_data = {}
+    direct = parameters.get("direct") or {}
+    personal = _personal_info_from_resume(parameters)
+    email = (secrets_data.get("email") or {}).get("address") or ""
+    phone = direct.get("candidate_whatsapp") or "".join(
+        filter(
+            None, [personal.get("phone_prefix", ""), personal.get("phone", "")]
+        )
+    )
+    return [c for c in (email, phone) if c]
+
+
+def _strip_model_signoff(text: str, contacts: list[str]) -> str:
+    """Промпт прямо просит не писать подпись и контакты в письме — но
+    слабые (бесплатные) модели это правило иногда всё же нарушают и
+    дописывают "Best regards, Имя, email, телефон" в конце, задваивая
+    наш собственный footer (см. build_contact_footer). Контакты
+    кандидата известны заранее, так что если модель их всё-таки
+    вписала — это и есть начало самодеятельной подписи, обрезаем
+    текст с начала этого абзаца."""
+    cut_at = min(
+        (text.find(c) for c in contacts if c and c in text), default=-1
+    )
+    if cut_at == -1:
+        return text.strip()
+    para_start = text.rfind("\n\n", 0, cut_at)
+    return text[: para_start if para_start != -1 else cut_at].strip()
+
+
 def build_contact_footer(parameters: dict, resume_pdf_path: Path) -> str:
     """Строка контактов в конце письма — собирается кодом, не моделью,
     чтобы не придумывала лишнего. Источник по умолчанию — уже
@@ -582,11 +625,21 @@ def build_contact_footer(parameters: dict, resume_pdf_path: Path) -> str:
     direct = parameters.get("direct") or {}
     personal = _personal_info_from_resume(parameters)
 
-    parts: list[str] = []
+    # Первая строка: голые email/телефон, без подписей — самоочевидны.
+    # Вторая: соцсети/код с подписью-лейблом ("Telegram: ", "GitHub: ",
+    # "LinkedIn: "), потому что сама ссылка не всегда говорит, что это.
+    line1: list[str] = []
     email = (secrets_data.get("email") or {}).get("address") or ""
     if email:
-        parts.append(email)
+        line1.append(email)
 
+    whatsapp = direct.get("candidate_whatsapp") or "".join(
+        filter(None, [personal.get("phone_prefix", ""), personal.get("phone", "")])
+    )
+    if whatsapp:
+        line1.append(whatsapp)
+
+    line2: list[str] = []
     telegram = direct.get("candidate_telegram") or ""
     if not telegram:
         try:
@@ -597,31 +650,33 @@ def build_contact_footer(parameters: dict, resume_pdf_path: Path) -> str:
         except Exception:
             telegram = ""
     if telegram:
-        parts.append(
-            telegram if "t.me" in telegram else f"t.me/{telegram.lstrip('@')}"
-        )
+        handle = telegram.strip()
+        if "t.me/" in handle:
+            handle = handle.rsplit("t.me/", 1)[-1]
+        elif handle.startswith("http"):
+            handle = handle.rsplit("/", 1)[-1]
+        handle = handle.lstrip("@").strip("/")
+        if handle:
+            line2.append(f"Telegram: @{handle}")
 
     github_user = (secrets_data.get("github") or {}).get(
         "username"
     ) or personal.get("github", "")
     if github_user:
-        parts.append(
+        github_display = (
             github_user
             if github_user.startswith("http")
             else f"github.com/{github_user.lstrip('@')}"
         )
-
-    whatsapp = direct.get("candidate_whatsapp") or "".join(
-        filter(None, [personal.get("phone_prefix", ""), personal.get("phone", "")])
-    )
-    if whatsapp:
-        parts.append(f"WhatsApp {whatsapp}")
+        line2.append(f"GitHub: {github_display}")
 
     linkedin = direct.get("candidate_linkedin") or personal.get("linkedin", "")
     if linkedin:
-        parts.append(linkedin)
+        line2.append(f"LinkedIn: {linkedin}")
 
-    return " | ".join(parts)
+    return "\n".join(
+        " | ".join(line) for line in (line1, line2) if line
+    )
 
 
 def generate_company_email(
@@ -663,6 +718,11 @@ def generate_company_email(
     text = re.sub(
         r"\[(?:Your|Ваш[аеи]?)[^\]]*\]", candidate_name, text
     ).strip()
+    # Промпт прямо просит не писать подпись/контакты, но модель это
+    # иногда игнорирует ("Best regards, Имя, email, телефон") — обрезаем
+    # раньше humanize(), чтобы та не тратилась на переписывание блока,
+    # который всё равно будет отброшен.
+    text = _strip_model_signoff(text, _candidate_own_contacts(parameters))
     # Вторая проверка по скиллу humanizer: остались признаки — одна правка.
     text = humanize(text, llm_api_key)
     footer = build_contact_footer(parameters, resume_pdf_path)

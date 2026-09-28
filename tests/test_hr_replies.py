@@ -327,8 +327,8 @@ def test_company_email_language_by_domain_and_text():
 def test_build_contact_footer_prefers_resume_over_manual_override():
     """Резюме — источник по умолчанию; поле в настройках побеждает,
     только когда явно заполнено; пусто и там, и там — просто нет в
-    подписи, ничего не выдумывается (без телефона в резюме и без
-    ручного WhatsApp — WhatsApp не попадает в подпись)."""
+    подписи, ничего не выдумывается. Формат — email/телефон на первой
+    строке без подписи, Telegram/GitHub/LinkedIn на второй с лейблом."""
     from src.job_sources.hr_replies import build_contact_footer
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -349,16 +349,42 @@ def test_build_contact_footer_prefers_resume_over_manual_override():
             "secretsFile": secrets,
             "plainTextResumeFile": resume_yaml,
             "dataFolder": data,
-            "direct": {"candidate_linkedin": "linkedin.com/in/override"},
+            "direct": {
+                "candidate_linkedin": "linkedin.com/in/override",
+                "candidate_telegram": "t.me/dmitry_kaizen",
+                "candidate_whatsapp": "+7 953 759 35 71",
+            },
         }
         footer = build_contact_footer(params, data / "resume.pdf")
-        assert "me@gmail.com" in footer
-        assert "github.com/deuteriumZzz" in footer
+        lines = footer.split("\n")
+        assert lines[0] == "me@gmail.com | +7 953 759 35 71"
+        assert lines[1] == (
+            "Telegram: @dmitry_kaizen | GitHub: github.com/deuteriumZzz"
+            " | LinkedIn: linkedin.com/in/override"
+        )
         # Ручное поле явно заполнено — побеждает над резюме.
-        assert "linkedin.com/in/override" in footer
         assert "linkedin.com/in/dmitry" not in footer
-        # Нет WhatsApp ни в резюме, ни в настройках — не выдумываем.
-        assert "WhatsApp" not in footer
+
+
+def test_strip_model_signoff_removes_leaked_contacts():
+    """Промпт просит модель не писать подпись/контакты — если она это
+    всё же нарушила (наблюдалось на реальном письме), обрезаем с начала
+    абзаца, где всплыл email или телефон кандидата, а не оставляем как
+    есть рядом с нашим собственным footer."""
+    from src.job_sources.hr_replies import _strip_model_signoff
+
+    text = (
+        "I'm available for a call this week.\n\n"
+        "Best regards,\nDmitry Vologdin\n"
+        "You can reach me at me@gmail.com or +7 953 759 35 71."
+    )
+    cleaned = _strip_model_signoff(text, ["me@gmail.com", "+7 953 759 35 71"])
+    assert cleaned == "I'm available for a call this week."
+    assert "me@gmail.com" not in cleaned
+
+    # Ничего не найдено — текст не трогаем (кроме обрезки пробелов).
+    clean_text = "I'm available for a call this week."
+    assert _strip_model_signoff(clean_text, ["me@gmail.com"]) == clean_text
 
 
 def test_due_hh_reminders_skips_viewed_and_already_reminded():
