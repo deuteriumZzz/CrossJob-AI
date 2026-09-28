@@ -1029,3 +1029,80 @@ def test_post_llm_provider_base_url_rejects_unknown_provider(client):
         json={"provider": "not-a-real-provider", "base_url": "https://x"},
     )
     assert response.status_code == 400
+
+
+def _with_telegram_creds(ctx) -> None:
+    ctx.secrets_file.write_text(
+        ctx.secrets_file.read_text(encoding="utf-8")
+        + "telegram:\n  api_id: '123'\n  api_hash: 'abc'\n",
+        encoding="utf-8",
+    )
+
+
+class _FakeTelegramClient:
+    """Captures send_file calls instead of touching a real Telegram
+    session — used to verify which resume file /send-resume picks."""
+
+    sent: list = []
+
+    def __init__(self, *a, **k):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def send_file(self, contact, path):
+        _FakeTelegramClient.sent.append((contact, Path(path).name))
+
+
+def test_telegram_send_resume_picks_language_by_conversation(
+    client, monkeypatch  # noqa: F811
+):
+    from src.job_sources.telegram_conversations import TelegramConversations
+
+    ctx = api.get_ctx()
+    _with_telegram_creds(ctx)
+    data_folder = ctx.config["dataFolder"]
+    (data_folder / "resume.pdf").write_bytes(b"%PDF-ru")
+    (data_folder / "resume_linkedin.pdf").write_bytes(b"%PDF-en")
+
+    conv_path = ctx.output_folder / "telegram_conversations.json"
+    TelegramConversations(conv_path).record_outbound(
+        "intl_hr", "Hi! Thanks for reaching out about the role."
+    )
+    TelegramConversations(conv_path).record_outbound(
+        "ru_hr", "Здравствуйте! Увидел вакансию, буду рад пообщаться."
+    )
+
+    _FakeTelegramClient.sent = []
+    monkeypatch.setattr(api, "TelegramSourceClient", _FakeTelegramClient)
+
+    assert (
+        client.post("/api/telegram/conversations/intl_hr/send-resume").status_code
+        == 200
+    )
+    assert (
+        client.post("/api/telegram/conversations/ru_hr/send-resume").status_code
+        == 200
+    )
+    assert _FakeTelegramClient.sent == [
+        ("intl_hr", "resume_linkedin.pdf"),
+        ("ru_hr", "resume.pdf"),
+    ]
+
+
+def test_telegram_send_resume_404s_with_clear_message_when_no_resume(
+    client, monkeypatch  # noqa: F811
+):
+    ctx = api.get_ctx()  # data_folder from the fixture has no resume.pdf
+    _with_telegram_creds(ctx)
+    _FakeTelegramClient.sent = []
+    monkeypatch.setattr(api, "TelegramSourceClient", _FakeTelegramClient)
+
+    res = client.post("/api/telegram/conversations/someone/send-resume")
+    assert res.status_code == 400
+    assert "резюме" in res.json()["detail"].lower()
+    assert _FakeTelegramClient.sent == []

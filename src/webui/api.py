@@ -4035,10 +4035,14 @@ def post_telegram_message(
 def post_telegram_send_resume(
     contact: str, ctx: AppContext = Depends(get_ctx)
 ) -> dict:
-    """Кнопка "📎 Резюме" в чате — отправляет уже существующий
-    data_folder/resume.pdf файлом, только по явному нажатию (не
-    автоматически с первым сообщением, см. риск-баннер на вкладке
-    Telegram про то, почему)."""
+    """Кнопка "📎 Резюме" в чате — отправляет резюме файлом, только по
+    явному нажатию (не автоматически с первым сообщением, см.
+    риск-баннер на вкладке Telegram про то, почему). Было жёстко зашито
+    на resume.pdf независимо от языка переписки — теперь определяем
+    язык по уже отправленным сообщениям в этом диалоге (та же логика,
+    что для Telegram-роутинга в resume_routing.py) и откатываемся на
+    resume.pdf, если языкового резюме нет — тот же fallback, что и в
+    _resume_readiness()."""
     creds = _telegram_secrets(ctx)
     if creds is None:
         raise HTTPException(
@@ -4046,9 +4050,19 @@ def post_telegram_send_resume(
             "Сначала вставьте api_id и api_hash: Общение → Telegram-парсер "
             "→ «Подключение аккаунта».",
         )
-    resume_path = ctx.config["dataFolder"] / RESUME_PDF
+    conversations = TelegramConversations(
+        ctx.output_folder / "telegram_conversations.json"
+    )
+    conv = conversations.get(contact)
+    sample = " ".join(m["text"] for m in (conv or {}).get("messages", []))
+    russian = _looks_russian(sample) if sample else True
+    resume_path = resolve_resume(ctx.config, "telegram", russian)
+    if resume_path is None:
+        resume_path = ctx.config["dataFolder"] / RESUME_PDF
     if not resume_path.exists():
-        raise HTTPException(400, f"{RESUME_PDF} not found in data_folder")
+        raise HTTPException(
+            400, "Резюме не найдено — загрузите в «Мои резюме»"
+        )
     try:
         with TelegramSourceClient(
             int(creds[0]), creds[1], _telegram_session_path(ctx)
@@ -4057,11 +4071,8 @@ def post_telegram_send_resume(
     except Exception as e:
         raise HTTPException(502, f"Failed to send resume: {e}")
 
-    conversations = TelegramConversations(
-        ctx.output_folder / "telegram_conversations.json"
-    )
     conversations.record_outbound(
-        contact, f"📎 Отправлено резюме ({RESUME_PDF})"
+        contact, f"📎 Отправлено резюме ({resume_path.name})"
     )
     conv = conversations.get(contact)
     if conv is None:
