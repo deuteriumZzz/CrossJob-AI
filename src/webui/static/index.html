@@ -10,7 +10,7 @@
   href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&display=swap"
   rel="stylesheet"
 />
-<link rel="stylesheet" href="/style.css?v=38" />
+<link rel="stylesheet" href="/style.css?v=40" />
 </head>
 <body>
 <div id="setup-screen" class="setup-screen" style="display:none">
@@ -206,7 +206,7 @@
           <option value="skipped_easy_apply_failed">Пропущено (форма Easy Apply)</option>
         </select>
         <label class="checkbox-row"><input id="filter-show-rejected" type="checkbox" class="switch" /> Показать также отклонённые</label>
-        <input id="filter-query" type="text" placeholder="Поиск по компании/названию" aria-label="Поиск по компании/названию" />
+        <input id="filter-query" type="text" class="search-input" placeholder="Поиск по компании/названию" aria-label="Поиск по компании/названию" />
         <button id="history-apply-filters" class="btn btn-secondary">Применить</button>
       </div>
       <div class="table-wrap" id="history-table-wrap">
@@ -234,7 +234,7 @@
       </div>
       <div class="filters">
         <div class="chip-group" id="replies-kind" role="group" aria-label="Что показать"></div>
-        <input id="replies-filter-query" type="text" placeholder="Поиск по компании или вакансии" aria-label="Поиск по компании или вакансии" />
+        <input id="replies-filter-query" type="text" class="search-input" placeholder="Поиск по компании или вакансии" aria-label="Поиск по компании или вакансии" />
       </div>
       <div id="replies-rows" class="inbox-list"></div>
     </section>
@@ -279,7 +279,7 @@
 
       <div class="chip-group" id="base-chips" role="group" aria-label="Статус"></div>
       <div class="filters">
-        <input id="contacts-filter-query" type="text" placeholder="Поиск: компания, email, HR, вакансия" aria-label="Поиск" />
+        <input id="contacts-filter-query" type="text" class="search-input" placeholder="Поиск: компания, email, HR, вакансия" aria-label="Поиск" />
         <select id="contacts-filter-source" aria-label="Источник">
           <option value="">Любой источник</option>
           <option value="file">📄 Мой файл</option>
@@ -1187,7 +1187,7 @@
             <option value="himalayas">Himalayas</option>
             <option value="djinni">Djinni</option>
           </select>
-          <input id="log-search" type="text" placeholder="Поиск по тексту…" aria-label="Поиск по тексту лога" />
+          <input id="log-search" type="text" class="search-input" placeholder="Поиск по тексту…" aria-label="Поиск по тексту лога" />
           <label class="checkbox-row"><input id="log-raw-toggle" type="checkbox" /> Без перевода (сырой лог)</label>
         </div>
       </div>
@@ -1200,7 +1200,7 @@
 
 <div id="command-overlay" class="command-overlay" style="display:none">
   <div class="command-palette">
-    <input id="command-input" type="text" placeholder="Куда перейти? Настройки, История, Telegram…" autocomplete="off" />
+    <input id="command-input" type="text" class="search-input" placeholder="Куда перейти? Настройки, История, Telegram…" autocomplete="off" />
     <div id="command-results" class="command-results"></div>
   </div>
 </div>
@@ -1339,6 +1339,6 @@
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=55"></script>
+<script src="/app.js?v=56"></script>
 </body>
 </html>

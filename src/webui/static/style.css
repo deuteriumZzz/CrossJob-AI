@@ -76,6 +76,23 @@
   opacity: 1;
 }
 
+/* Лупа слева — узнаваемый паттерн для полей поиска (filter-query,
+   contacts-filter-query, log-search, replies-filter-query,
+   command-input), без обёртки и без JS: просто фоновая картинка поля
+   плюс место под неё слева. */
+.search-input {
+  /* !important на каждом под-свойстве отдельно (не на весь background)
+     — контекстные правила вида ".filters input { background: var(--panel-2) }"
+     специфичнее одного класса и идут позже в каскаде; сброс шортхендом
+     иначе стирал бы именно image/repeat/position/size, но не мешает
+     им же самим задавать background-color. */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'><circle cx='8.5' cy='8.5' r='6' stroke='%238b93a1' stroke-width='1.6'/><path d='M13 13l4.5 4.5' stroke='%238b93a1' stroke-width='1.6' stroke-linecap='round'/></svg>") !important;
+  background-repeat: no-repeat !important;
+  background-position: 10px center !important;
+  background-size: 15px 15px !important;
+  padding-left: 32px !important;
+}
+
 html,
 body {
   height: 100%;
@@ -1905,6 +1922,20 @@ nav.tabs button.active,
   animation: save-flash 0.6s var(--ease-out);
 }
 
+/* Играет один раз в момент, когда поле переходит из валидного в
+   невалидное (см. JS — не на каждую клавишу, пока уже невалидно,
+   иначе трясло бы всё время ввода). */
+@keyframes field-shake {
+  10%, 90% { transform: translateX(-1px); }
+  20%, 80% { transform: translateX(2px); }
+  30%, 50%, 70% { transform: translateX(-3px); }
+  40%, 60% { transform: translateX(3px); }
+}
+.field-shake {
+  animation: field-shake 0.4s ease;
+  border-color: var(--err) !important;
+}
+
 /* ---------- Generation progress bar ---------- */
 
 .gen-progress {
@@ -2461,12 +2492,12 @@ kbd {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 6px;
-  font-size: 9px;
+  width: 23px;
+  height: 23px;
+  border-radius: 7px;
+  font-size: 10.5px;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
   color: #fff;
   text-transform: none;
   vertical-align: middle;

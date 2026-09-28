@@ -3127,11 +3127,20 @@ const render = {
       drawerBody.querySelectorAll(".d-hh-salary, .d-linkedin-salary").forEach((input) => {
         const hint = input.parentElement.querySelector(".d-salary-hint");
         if (!hint) return;
+        let wasOk = true;
         const validate = () => {
           const v = input.value.trim();
           const ok = !v || /^\d{4,}\s*[-–]\s*\d{4,}(\s*\S+)?$/.test(v);
           hint.textContent = ok ? "" : `Ожидается диапазон вида «${input.placeholder}» — иначе бот может не понять сумму`;
           hint.classList.toggle("warn-text", !ok);
+          // Один раз в момент, когда поле только что стало невалидным —
+          // не на каждую клавишу, пока человек ещё дописывает диапазон.
+          if (!ok && wasOk) {
+            input.classList.remove("field-shake");
+            void input.offsetWidth;
+            input.classList.add("field-shake");
+          }
+          wasOk = ok;
         };
         input.addEventListener("input", validate);
         validate();
@@ -4055,9 +4064,18 @@ function initAutosave() {
       if (pane.dataset.needsLoad && pane.dataset.loaded !== "1") return; // ещё не загрузили
       clearTimeout(timer);
       note.textContent = "Сохраняю…";
+      const field = e.target;
       timer = setTimeout(() => {
         btn.click();
-        setTimeout(() => (note.textContent = "✓ Сохранено"), 700);
+        setTimeout(() => {
+          note.textContent = "✓ Сохранено";
+          // Раньше "сохранено" было видно только далёкой надписью у
+          // кнопки — само поле, которое человек только что поправил,
+          // никак не подтверждало это на месте.
+          field.classList.remove("save-flash");
+          void field.offsetWidth;
+          field.classList.add("save-flash");
+        }, 700);
       }, 900);
     });
   });
