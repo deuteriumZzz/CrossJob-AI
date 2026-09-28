@@ -5091,6 +5091,7 @@ def _handle_vacancy_button(
             "обсудить."
         )
         text = template.format(role=post["title"], link=post["link"])
+        used_llm = False
         # Тумблер "Настройки → Telegram-парсер" — по умолчанию включён:
         # раньше кнопка "👋" единственная из трёх способов написать
         # HR не использовала LLM вообще, хотя рядом "✍️ письмо" и
@@ -5115,7 +5116,9 @@ def _handle_vacancy_button(
                     "telegram",
                     llm_api_key,
                 )
-                text = smart["text"] or text
+                if smart["text"]:
+                    text = smart["text"]
+                    used_llm = True
             except Exception as e:
                 logger.warning(
                     f"Кнопка 👋: LLM недоступна, отправляю шаблон как есть: {e}"
@@ -5131,6 +5134,22 @@ def _handle_vacancy_button(
             f"✅ Отправлено @{contact['value']}"
             + (" + резюме" if resume_index >= 0 else "")
         )
+        # В отличие от шаблона (его текст и так виден в Настройках),
+        # текст от ИИ отправляется без предпросмотра — единственный из
+        # трёх способов написать HR без этого шага (у "✍️ письмо" есть
+        # черновик, у автоотправки — осознанный компромисс скорости).
+        # Присылаем, что реально ушло, сразу после отправки — не
+        # предотвращает плохой текст, но хотя бы не прячет его молча.
+        if used_llm:
+            bot_request(
+                bot_token,
+                "sendMessage",
+                {
+                    "chat_id": message["chat"]["id"],
+                    "reply_to_message_id": message["message_id"],
+                    "text": f"Отправлено @{contact['value']} (ИИ):\n\n{text}",
+                },
+            )
     elif parts[0] == "l":
         bot_request(
             bot_token,
