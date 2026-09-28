@@ -968,6 +968,7 @@ function bindBaseDetail(el) {
           body: JSON.stringify({ key: btn.dataset.key, website: site ? site.value.trim() : "" }),
         });
         showToast(res.added ? `Найдено новых контактов: ${res.added}` : "Новых контактов на сайте нет", res.added ? "success" : "info");
+        if (res.hunter_error) showToast(res.hunter_error, "error", 8000);
         render.contacts();
       } catch (err) {
         showToast(err.message.replace(/^\d+: /, ""), "error", 6000);

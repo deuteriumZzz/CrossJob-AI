@@ -142,6 +142,7 @@ def collect_dossier(card: dict, hunter_key: str = "") -> dict:
         break
 
     domain = urlparse(website).netloc.removeprefix("www.") if website else ""
+    hunter_error = ""
     if hunter_key and domain:
         try:
             for person in hunter_hr_contacts(domain, hunter_key):
@@ -155,6 +156,27 @@ def collect_dossier(card: dict, hunter_key: str = "") -> dict:
                         "source_url": f"https://hunter.io/search/{domain}",
                     }
                 )
+        except httpx.HTTPStatusError as e:
+            # Раньше падало молча — "+0 контактов" неотличимо от "у
+            # компании правда нет HR-почт в Hunter", хотя причина могла
+            # быть в неверном ключе или исчерпанном бесплатном лимите.
+            status = e.response.status_code
+            if status == 401:
+                hunter_error = (
+                    "Hunter не принял API-ключ — проверьте его в "
+                    "Настройки → Почта и письма."
+                )
+            elif status == 429:
+                hunter_error = (
+                    "Hunter: исчерпан бесплатный лимит запросов на "
+                    "этот месяц."
+                )
+            else:
+                hunter_error = f"Hunter временно недоступен (код {status})."
         except httpx.HTTPError:
-            pass
-    return {"website": website, "contacts": contacts}
+            hunter_error = "Не удалось связаться с Hunter — проверьте сеть."
+    return {
+        "website": website,
+        "contacts": contacts,
+        "hunter_error": hunter_error,
+    }

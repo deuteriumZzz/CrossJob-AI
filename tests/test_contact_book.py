@@ -285,6 +285,62 @@ def test_dossier_collects_from_site_pages(monkeypatch):
     }
 
 
+def test_dossier_reports_hunter_api_errors(monkeypatch):
+    """Раньше любая ошибка Hunter (неверный ключ, исчерпанный лимит,
+    сеть) глушилась except httpx.HTTPError: pass — "+0 контактов"
+    выглядело неотличимо от "у компании правда нет HR-почт в Hunter"."""
+    import httpx
+
+    from src.direct import dossier
+
+    monkeypatch.setattr(
+        dossier.httpx,
+        "get",
+        lambda url, **kw: httpx.Response(
+            200, text="", request=httpx.Request("GET", url)
+        ),
+    )
+    card = {
+        "company": "Acme",
+        "website": "https://acme.io",
+        "contacts": [],
+        "vacancies": [],
+    }
+
+    def raise_status(status):
+        def _raise(domain, key):
+            request = httpx.Request(
+                "GET", "https://api.hunter.io/v2/email-count"
+            )
+            response = httpx.Response(status, request=request)
+            raise httpx.HTTPStatusError(
+                str(status), request=request, response=response
+            )
+
+        return _raise
+
+    monkeypatch.setattr(dossier, "hunter_hr_contacts", raise_status(401))
+    result = dossier.collect_dossier(card, hunter_key="bad-key")
+    assert "ключ" in result["hunter_error"]
+
+    monkeypatch.setattr(dossier, "hunter_hr_contacts", raise_status(429))
+    result = dossier.collect_dossier(card, hunter_key="a-key")
+    assert "лимит" in result["hunter_error"]
+
+    monkeypatch.setattr(
+        dossier,
+        "hunter_hr_contacts",
+        lambda domain, key: (_ for _ in ()).throw(httpx.ConnectError("nope")),
+    )
+    result = dossier.collect_dossier(card, hunter_key="a-key")
+    assert "сеть" in result["hunter_error"]
+
+    # Без ключа Hunter вообще не спрашиваем — не сообщать пустую ошибку.
+    monkeypatch.setattr(dossier, "hunter_hr_contacts", raise_status(401))
+    result = dossier.collect_dossier(card, hunter_key="")
+    assert result["hunter_error"] == ""
+
+
 def test_todo_and_find_hr(client, monkeypatch):  # noqa: F811
     ctx = api.get_ctx()
     assert client.get("/api/todo").json()["items"] == []

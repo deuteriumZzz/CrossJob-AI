@@ -1658,7 +1658,11 @@ def post_contact_dossier(
     before = len(card["contacts"])
     book.add(card["company"], dossier["contacts"], website=dossier["website"])
     after = len((book.get(body.key) or card)["contacts"])
-    return {"website": dossier["website"], "added": after - before}
+    return {
+        "website": dossier["website"],
+        "added": after - before,
+        "hunter_error": dossier.get("hunter_error", ""),
+    }
 
 
 def _plural(n: int, one: str, few: str, many: str) -> str:
