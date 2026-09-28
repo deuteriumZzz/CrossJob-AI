@@ -546,6 +546,31 @@ def test_daily_backup_keeps_a_week(tmp_path):
     assert (tmp_path / "backups" / "2026-09-10" / "contact_book.json").exists()
 
 
+def test_daily_backup_race_does_not_warn(tmp_path):
+    """daily_backup() запускается и из планировщика, и из api.get_ctx()
+    — на старте приложения оба могут почти одновременно пройти
+    "target.exists() == False" и оба вызвать mkdir(); кто-то один
+    выигрывает, второй должен молча уйти, а не пугать пользователя
+    предупреждением про уже сделанную копию (наблюдалось в реальном
+    логе: "File exists" при старте). loguru не ловится через caplog
+    (это не stdlib logging) — патчим logger напрямую, как уже делает
+    test_linkedin_easy_apply.py для того же logger."""
+    from datetime import date
+    from unittest.mock import patch
+
+    from src.utils.backup import daily_backup
+
+    out = tmp_path / "output"
+    out.mkdir()
+    (out / "contact_book.json").write_text("{}", encoding="utf-8")
+    with patch(
+        "pathlib.Path.mkdir", side_effect=FileExistsError()
+    ), patch("src.utils.backup.logger") as fake_logger:
+        result = daily_backup(out, date(2026, 9, 1))
+    assert result is None
+    fake_logger.warning.assert_not_called()
+
+
 def test_base_bulk_actions_export_and_domain_merge(client):  # noqa: F811
     ctx = api.get_ctx()
     book = ContactBook(ctx.output_folder)
