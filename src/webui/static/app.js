@@ -4495,7 +4495,9 @@ async function renderDraftsQueue() {
           ${d.job_link ? ` · <a href="${escapeHtml(d.job_link)}" target="_blank" rel="noopener">вакансия</a>` : ""}
         </div>
         ${d.resume_file
-          ? `<div class="muted small">📎 Приложится резюме: <b>${escapeHtml(d.resume_file)}</b></div>`
+          ? `<div class="muted small">📎 Приложится резюме: <b>${escapeHtml(d.resume_file)}</b>${
+              d.resume_russian === true ? " (для русской вакансии)" : d.resume_russian === false ? " (для зарубежной вакансии)" : ""
+            }</div>`
           : d.channel === "email" && d.kind !== "follow_up"
           ? `<div class="err-text small">⚠️ Резюме для вложения не найдено — загрузите в «Мои резюме», иначе письмо не уйдёт</div>`
           : ""}
