@@ -103,6 +103,7 @@ from src.job_sources.contact_book import ContactBook, company_key
 from src.job_sources.hr_replies import (
     CATEGORY_LABELS,
     DraftStore,
+    _looks_russian,
     company_uses_russian,
     due_hh_reminders,
     generate_first_message,
@@ -1164,6 +1165,21 @@ def post_test_email(ctx: AppContext = Depends(get_ctx)) -> dict:
     return {"ok": True}
 
 
+def _draft_resume_display(config: dict, draft: dict) -> str:
+    """Имя PDF, что реально уйдёт вложением при отправке — та же логика
+    выбора, что и в main._send_email_draft, только для показа в очереди
+    черновиков (письмо ушло непонятно с каким резюме — путали пользователя)."""
+    if draft.get("channel") != "email" or draft.get("kind") == "follow_up":
+        return ""
+    resume_path = resolve_resume_name(config, draft.get("resume"))
+    if resume_path is None:
+        russian = bool(
+            draft.get("russian", _looks_russian(draft.get("subject", "")))
+        )
+        resume_path = resolve_resume(config, "email", russian)
+    return resume_path.name if resume_path else ""
+
+
 @app.get("/api/hr-drafts")
 def get_hr_drafts(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
     """Очередь «Ждут вашего решения»: все черновики (ответы и
@@ -1186,6 +1202,7 @@ def get_hr_drafts(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
                     "company", ""
                 ),
                 "title": by_link.get(draft["job_link"], {}).get("title", ""),
+                "resume_file": _draft_resume_display(ctx.config, draft),
             }
             for code, draft in drafts.items()
         ),

@@ -4494,6 +4494,11 @@ async function renderDraftsQueue() {
           ${d.company ? ` · ${escapeHtml(d.company)}${d.title ? " — " + escapeHtml(d.title) : ""}` : ""}
           ${d.job_link ? ` · <a href="${escapeHtml(d.job_link)}" target="_blank" rel="noopener">вакансия</a>` : ""}
         </div>
+        ${d.resume_file
+          ? `<div class="muted small">📎 Приложится резюме: <b>${escapeHtml(d.resume_file)}</b></div>`
+          : d.channel === "email" && d.kind !== "follow_up"
+          ? `<div class="err-text small">⚠️ Резюме для вложения не найдено — загрузите в «Мои резюме», иначе письмо не уйдёт</div>`
+          : ""}
         <textarea rows="4" aria-label="Текст черновика">${escapeHtml(d.text)}</textarea>
         <div>
           <button type="button" class="btn btn-primary btn-small" data-draft-send>Отправить</button>
