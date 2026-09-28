@@ -4624,6 +4624,10 @@ async function loadOutreachSettings() {
   document.getElementById("outreach-candidate-telegram").value = s.candidate_telegram;
   document.getElementById("outreach-candidate-whatsapp").value = s.candidate_whatsapp;
   document.getElementById("outreach-candidate-linkedin").value = s.candidate_linkedin;
+  document.getElementById("outreach-resume-route").innerHTML =
+    `📎 <b>Автовыбор при отправке письма:</b> компания РФ/СНГ → ${
+      s.resume_route_ru ? escapeHtml(s.resume_route_ru) : "⚠️ не найдено"
+    }, зарубежная → ${s.resume_route_en ? escapeHtml(s.resume_route_en) : "⚠️ не найдено"}`;
 }
 
 async function saveOutreachSettings() {

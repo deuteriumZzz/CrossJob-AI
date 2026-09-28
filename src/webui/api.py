@@ -1006,6 +1006,16 @@ def get_outreach_settings(ctx: AppContext = Depends(get_ctx)) -> dict:
         "candidate_linkedin": (ctx.config.get("direct") or {}).get(
             "candidate_linkedin", ""
         ),
+        # Тот же явный "автовыбор резюме", что уже показан на вкладке
+        # Telegram-парсера — здесь его не было, хотя роутинг email_ru/
+        # email_en настраивается в том же «Мои резюме» и работает
+        # точно так же (resolve_resume).
+        "resume_route_ru": (
+            lambda r: r.name if r else ""
+        )(resolve_resume(ctx.config, "email", True)),
+        "resume_route_en": (
+            lambda r: r.name if r else ""
+        )(resolve_resume(ctx.config, "email", False)),
     }
 
 
