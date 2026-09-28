@@ -31,17 +31,20 @@ const SOURCE_LABELS = {
 // ponytail: настоящие логотипы площадок — товарные знаки, тащить их к себе
 // рискованно. Вместо этого — монограмма (1-2 буквы) на цветном бейдже,
 // свой цвет на площадку для быстрого узнавания глазами в таблицах/карточках.
+// Цвета подобраны так, чтобы белый текст поверх держал WCAG AA (4.5:1) —
+// исходные оттенки (например #35a8e0 для telegram, 2.68:1) были слишком
+// светлыми, буквы на них не читались. Тот же оттенок, просто темнее.
 const SOURCE_ICON = {
-  headhunter: { text: "hh", color: "#d64545" },
-  geekjob: { text: "GJ", color: "#3fb37f" },
-  telegram: { text: "TG", color: "#35a8e0" },
-  getmatch: { text: "GM", color: "#8a6fd1" },
-  linkedin: { text: "in", color: "#2f6fed" },
-  habr_career: { text: "HC", color: "#e0954a" },
+  headhunter: { text: "hh", color: "#d43d3d" },
+  geekjob: { text: "GJ", color: "#2e825c" },
+  telegram: { text: "TG", color: "#1a7aa9" },
+  getmatch: { text: "GM", color: "#7d60cc" },
+  linkedin: { text: "in", color: "#2a6ced" },
+  habr_career: { text: "HC", color: "#a7621d" },
   wellfound: { text: "WF", color: "#c23b6b" },
-  himalayas: { text: "HM", color: "#5b7fd6" },
-  djinni: { text: "DJ", color: "#2f9e6e" },
-  direct: { text: "→", color: "#4f9d8f" },
+  himalayas: { text: "HM", color: "#476fd1" },
+  djinni: { text: "DJ", color: "#27825b" },
+  direct: { text: "→", color: "#407e73" },
 };
 
 // Площадки, нацеленные на зарубежный рынок — остальные площадки RU.
