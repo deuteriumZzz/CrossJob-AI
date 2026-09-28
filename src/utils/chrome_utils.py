@@ -283,6 +283,20 @@ def _with_resilient_get(driver):
     return driver
 
 
+def _clear_stale_webdriver_manager_cache() -> None:
+    """webdriver_manager (ChromeDriverManager) кеширует метаданные о
+    версии драйвера в ~/.wdm — если запись повреждена или неполна
+    (частый сетевой сбой при первом скачивании), install() падает с
+    "tuple index out of range" при разборе кеша, а не при самом
+    скачивании (подтверждено в проде). Тот же приём, что уже есть ниже
+    для зависшего SingletonLock профиля Chrome: второй попытке нечего
+    терять — свежий кеш webdriver_manager соберёт сам при следующем
+    install()."""
+    cache_dir = Path.home() / ".wdm"
+    if cache_dir.exists():
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+
 def launch_chrome_with_retry(
     build_driver: Callable[[], webdriver.Chrome],
     profile_dir: Optional[Path],
@@ -298,6 +312,8 @@ def launch_chrome_with_retry(
     for attempt in range(1, attempts + 1):
         if profile_dir is not None:
             clear_stale_chrome_lock(profile_dir, force=attempt > 1)
+        if attempt > 1:
+            _clear_stale_webdriver_manager_cache()
         try:
             return _with_resilient_get(build_driver())
         except Exception as e:
