@@ -2509,7 +2509,18 @@ def post_contact_draft(
             or {}
         ).get("personal_information") or {}
     name = f"{person.get('name', '')} {person.get('surname', '')}".strip()
-    resume = ctx.config["dataFolder"] / "resume.pdf"
+    # Было жёстко зашито на resume.pdf независимо от языка/площадки
+    # компании — тот же баг, что уже чинил в тренажёре интервью и
+    # кнопке "📎 Резюме" в Telegram-чате. company_uses_russian — та же
+    # логика, что main._check_contact_book_mail уже использует для
+    # рассылки этой же Базе компаний.
+    resume = resolve_resume(ctx.config, body.kind, company_uses_russian(card))
+    if resume is None:
+        resume = ctx.config["dataFolder"] / RESUME_PDF
+    if not resume.exists():
+        raise HTTPException(
+            404, "Резюме не найдено — загрузите в «Мои резюме»"
+        )
     try:
         message = generate_first_message(
             resume,
@@ -2532,6 +2543,8 @@ def post_contact_draft(
         message["text"],
         "first" if body.kind == "telegram" else "email",
         vacancy.get("link", ""),
+        russian=company_uses_russian(card),
+        resume=resume_relative_name(ctx.config, resume),
         **extra,
     )
     return {"code": code, "text": message["text"]}

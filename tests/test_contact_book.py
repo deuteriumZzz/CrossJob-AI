@@ -156,6 +156,7 @@ def test_contacts_api_status_backfill_and_draft(
         "generate_first_message",
         lambda *a: {"subject": "Dev — Application", "text": "Hello"},
     )
+    (ctx.config["dataFolder"] / "resume.pdf").write_bytes(b"%PDF-fake")
     res = client.post(
         "/api/contacts/draft",
         json={
@@ -183,6 +184,59 @@ def test_contacts_api_status_backfill_and_draft(
         ).status_code
         == 400
     )
+
+
+def test_contact_draft_routes_resume_by_language_and_404s_when_missing(
+    client, monkeypatch  # noqa: F811
+):
+    """Тот же баг, что был в тренажёре интервью и кнопке "📎 Резюме" в
+    Telegram: /api/contacts/draft жёстко зашивал resume.pdf независимо
+    от языка компании. Международная карточка (не РФ/СНГ) должна
+    получить resume_linkedin.pdf, а без резюме вообще — понятную 404,
+    не "ИИ не ответил"."""
+    ctx = api.get_ctx()
+    book = ContactBook(ctx.output_folder)
+    key = book.add(
+        "GlobalTech Inc",
+        [{"kind": "email", "value": "jobs@globaltech.io", "source": "site"}],
+        website="globaltech.io",
+        vacancy={
+            "title": "Python Backend Engineer",
+            "link": "https://globaltech.io/careers/1",
+            "source": "direct",
+            "text": "We are looking for a Python backend engineer.",
+        },
+    )
+
+    # Резюме вообще не загружено — понятная ошибка, не 502 "ИИ не ответил".
+    res = client.post(
+        "/api/contacts/draft",
+        json={"key": key, "kind": "email", "value": "jobs@globaltech.io"},
+    )
+    assert res.status_code == 404
+    assert "резюме" in res.json()["detail"].lower()
+
+    resumes_used = []
+    monkeypatch.setattr(
+        api,
+        "generate_first_message",
+        lambda resume, *a: resumes_used.append(Path(resume).name)
+        or {"subject": "Application", "text": "Hello"},
+    )
+    (ctx.config["dataFolder"] / "resume_linkedin.pdf").write_bytes(
+        b"%PDF-fake-en"
+    )
+    res = client.post(
+        "/api/contacts/draft",
+        json={"key": key, "kind": "email", "value": "jobs@globaltech.io"},
+    )
+    assert res.status_code == 200
+    assert resumes_used == ["resume_linkedin.pdf"]
+    draft = DraftStore(ctx.output_folder / main.HR_DRAFTS_FILE).get(
+        res.json()["code"]
+    )
+    assert draft["russian"] is False
+    assert draft["resume"] == "resume_linkedin.pdf"
 
 
 def test_dossier_collects_from_site_pages(monkeypatch):
