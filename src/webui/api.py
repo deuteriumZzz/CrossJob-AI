@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import random
 import re
+import smtplib
+import socket
 import sys
 import threading
 import zipfile
@@ -1137,6 +1139,25 @@ def post_test_email(ctx: AppContext = Depends(get_ctx)) -> dict:
                 "CrossJob-AI: проверка почты",
                 "Почта подключена — письма HR будут уходить с этого адреса.",
             ),
+        )
+    # Раньше любая ошибка отдавалась текстом самого исключения — для
+    # неверного пароля это был бы сырой ответ SMTP-сервера ("535, b'5.7.8
+    # Username and Password not accepted...'"), для сети — traceback
+    # socket. Оба самых частых случая — своим текстом, остальное (редкое)
+    # — как раньше, тем же сообщением.
+    except smtplib.SMTPAuthenticationError:
+        raise HTTPException(
+            401,
+            "Gmail не принял пароль приложения — проверьте, что "
+            "скопировали все 16 символов без пробелов и что это "
+            "именно пароль приложения (myaccount.google.com/"
+            "apppasswords), а не обычный пароль от почты.",
+        )
+    except (smtplib.SMTPConnectError, socket.gaierror, TimeoutError, OSError):
+        raise HTTPException(
+            502,
+            "Не удалось подключиться к серверу Gmail — проверьте "
+            "интернет-соединение и попробуйте ещё раз.",
         )
     except Exception as e:
         raise HTTPException(502, f"Не удалось отправить: {e}")
