@@ -17,6 +17,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from src.job_sources.applied_log import AppliedLog, Stage, effective_stage
+from src.job_sources.html_text import html_letter_to_plain_text
 from src.job_sources.llm_provider import get_chat_llm
 from src.libs.resume_and_cover_builder.anti_ai_rules import (
     ANTI_AI_STRUCTURE_RU,
@@ -555,7 +556,16 @@ def _personal_info_from_resume(parameters: dict) -> dict:
         data = yaml.safe_load(Path(resume_yaml).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    return (data or {}).get("personal_information") or {}
+    personal = (data or {}).get("personal_information") or {}
+    # Незаполненные поля шаблона резюме остаются как "[Your Phone
+    # Number]"/"[Your GitHub Profile URL]" — заметил в реальном
+    # отправленном письме, что такой плейсхолдер сам утёк в подпись.
+    # Значение целиком в квадратных скобках — не настоящий ответ.
+    return {
+        k: v
+        for k, v in personal.items()
+        if not (isinstance(v, str) and v.strip().startswith("[") and v.strip().endswith("]"))
+    }
 
 
 def _candidate_own_contacts(parameters: dict) -> list[str]:
@@ -713,7 +723,11 @@ def generate_company_email(
             }
         ),
     )
-    text = result.letter.strip()
+    # Модель иногда возвращает <br>/другие теги вместо переносов строк
+    # (подтверждено на реальном отправленном письме — Gmail шлёт это
+    # как обычный текст, теги видны получателю буквально). Тот же
+    # чистильщик, что уже используется для cover letter на GetMatch/hh.
+    text = html_letter_to_plain_text(result.letter)
     # Модель иногда оставляет заготовки вида «[Your Name]» — не отправляем их.
     text = re.sub(
         r"\[(?:Your|Ваш[аеи]?)[^\]]*\]", candidate_name, text

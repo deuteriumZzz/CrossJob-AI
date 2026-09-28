@@ -366,6 +366,38 @@ def test_build_contact_footer_prefers_resume_over_manual_override():
         assert "linkedin.com/in/dmitry" not in footer
 
 
+def test_personal_info_ignores_unfilled_template_placeholders():
+    """Незаполненные поля резюме-шаблона остаются как "[Your Phone
+    Number]"/"[Your GitHub Profile URL]" — подтверждено на реальном
+    отправленном письме, где такой плейсхолдер утёк прямо в подпись.
+    Значение целиком в квадратных скобках должно считаться отсутствующим,
+    не настоящим ответом."""
+    from src.job_sources.hr_replies import build_contact_footer
+
+    with tempfile.TemporaryDirectory() as tmp:
+        data = Path(tmp)
+        secrets = data / "secrets.yaml"
+        secrets.write_text("email:\n  address: me@gmail.com\n", encoding="utf-8")
+        resume_yaml = data / "plain_text_resume.yaml"
+        resume_yaml.write_text(
+            "personal_information:\n"
+            "  phone_prefix: '[Your Phone Prefix]'\n"
+            "  phone: '[Your Phone Number]'\n"
+            "  github: '[Your GitHub Profile URL]'\n"
+            "  linkedin: '[Your LinkedIn Profile URL]'\n",
+            encoding="utf-8",
+        )
+        params = {
+            "secretsFile": secrets,
+            "plainTextResumeFile": resume_yaml,
+            "dataFolder": data,
+            "direct": {},
+        }
+        footer = build_contact_footer(params, data / "resume.pdf")
+        assert footer == "me@gmail.com"
+        assert "[Your" not in footer
+
+
 def test_strip_model_signoff_removes_leaked_contacts():
     """Промпт просит модель не писать подпись/контакты — если она это
     всё же нарушила (наблюдалось на реальном письме), обрезаем с начала
