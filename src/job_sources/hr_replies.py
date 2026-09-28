@@ -73,6 +73,44 @@ def classify_reply(message_text: str, llm_api_key: str) -> Category:
     return result.category
 
 
+_OPT_OUT_PROMPT = ChatPromptTemplate.from_template(
+    """
+    Ответ на холодное письмо кандидата компании — просят ли здесь
+    больше не писать/не присылать письма/убрать из рассылки (в любой
+    форме, включая "это письмо не по адресу", "ошиблись адресатом",
+    "не занимаемся наймом", жёсткое "перестаньте спамить")? Обычный
+    отказ по вакансии ("сейчас нет позиций", "не подходите") — НЕ
+    просьба прекратить писать, это true только для явного требования
+    остановить переписку насовсем.
+
+    Сообщение:
+    {message_text}
+    """
+)
+
+
+class _OptOut(BaseModel):
+    stop_contact: bool = Field(
+        description="Просят прекратить присылать письма"
+    )
+
+
+def looks_like_opt_out(message_text: str, llm_api_key: str) -> bool:
+    """True — ответ на холодное письмо компании просит больше не
+    писать. Отдельная (не classify_reply) бинарная проверка: та
+    классифицирует ответ HR по уже идущей вакансии на 4 категории,
+    здесь же нужен только один явный сигнал для базы компаний —
+    смешивать их в одну функцию усложнило бы обе."""
+    llm = cast(BaseChatModel, get_chat_llm(llm_api_key, temperature=0))
+    result = cast(
+        _OptOut,
+        llm.with_structured_output(_OptOut).invoke(
+            _OPT_OUT_PROMPT.format(message_text=message_text)
+        ),
+    )
+    return result.stop_contact
+
+
 # Без тире и дежурных фраз — по правилам humanizer (anti_ai_rules.py).
 FOLLOW_UP_TEXT = (
     "Здравствуйте! Хотел уточнить, актуальна ли ещё вакансия. "
@@ -628,10 +666,22 @@ def generate_company_email(
     # Вторая проверка по скиллу humanizer: остались признаки — одна правка.
     text = humanize(text, llm_api_key)
     footer = build_contact_footer(parameters, resume_pdf_path)
+    # Холодное письмо тысячам компаний — без явной опции "не писать
+    # больше" получатель может только молча пожаловаться на спам (бьёт
+    # по репутации ящика, см. "Защита почты от блокировки") вместо
+    # простого ответа. Одна строка, не блок текста — не должна выглядеть
+    # как рассылка с юридической плашкой.
+    opt_out = (
+        "\n\nЕсли это письмо не по адресу или вы не хотите получать "
+        "такие письма — просто ответьте, и я больше не буду писать."
+        if russian
+        else "\n\nIf this isn't relevant or you'd rather not hear from "
+        "me again, just reply and I won't follow up."
+    )
     if footer:
-        text = f"{text}\n\n{candidate_name}\n{footer}"
+        text = f"{text}\n\n{candidate_name}\n{footer}{opt_out}"
     else:
-        text = f"{text}\n\n{candidate_name}"
+        text = f"{text}\n\n{candidate_name}{opt_out}"
     role = result.role_in_letter_language.strip() or target_position
     subject = (
         f"{role} — отклик — {candidate_name}"

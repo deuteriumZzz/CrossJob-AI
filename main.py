@@ -40,6 +40,7 @@ from src.direct.dossier import collect_dossier
 from src.direct.email_channel import (
     bounced_addresses,
     build_message,
+    reply_texts,
     send_email,
     senders_replied,
 )
@@ -140,6 +141,7 @@ from src.job_sources.hr_replies import (
     format_draft_notification,
     generate_company_email,
     generate_first_message,
+    looks_like_opt_out,
 )
 from src.job_sources.interview_calendar import (
     build_ics,
@@ -3499,14 +3501,16 @@ def _mark_contact_mail(
         )
 
 
-def _check_contact_book_mail(parameters: dict, credentials: dict) -> None:
+def _check_contact_book_mail(
+    parameters: dict, credentials: dict, llm_api_key: str = ""
+) -> None:
     """Ответы, возвраты и напоминания по письмам, отмеченным на контактах
     Базы (не из рассылок и не к откликам) — так же, как у рассылок."""
     output_folder: Path = parameters["outputFileDirectory"]
     book = ContactBook(output_folder)
     sent = {
-        c["value"].lower(): (card.get("company") or c["value"], c)
-        for card in book.all().values()
+        c["value"].lower(): (card.get("company") or c["value"], c, key)
+        for key, card in book.all().items()
         for c in card["contacts"]
         if c["kind"] == "email"
         and c.get("sent_at")
@@ -3522,18 +3526,39 @@ def _check_contact_book_mail(parameters: dict, credentials: dict) -> None:
     replied = {
         a.lower() for a in senders_replied(credentials, list(sent))
     } - bounced
+    # "Не пишите нам больше" — компания есть, но текст ответа никогда
+    # не читался, только факт "ответили" — do_not_contact выставлялся
+    # исключительно вручную чипом в Базе. Смотрим только тех, кто уже
+    # найден отвечавшим (не весь sent) и только если есть ключ ИИ —
+    # без него просто помечаем "ответили", как раньше.
+    opted_out: set[str] = set()
+    if replied and llm_api_key:
+        try:
+            for email, body in reply_texts(credentials, list(replied)).items():
+                if body.strip() and looks_like_opt_out(body, llm_api_key):
+                    opted_out.add(email)
+        except Exception as e:
+            logger.warning(f"Не удалось разобрать ответы на 'не писать': {e}")
     for email in replied:
         book.update_contact(email, replied_at=now.isoformat())
-        notify(
-            parameters,
-            f"✉️ Ответ на письмо: {sent[email][0]} ({email}). Проверьте "
-            "почту.",
-        )
+        if email in opted_out:
+            book.update([sent[email][2]], do_not_contact=True)
+            notify(
+                parameters,
+                f"🚫 {sent[email][0]} ({email}) попросили больше не писать "
+                "— компания помечена «не писать» в Базе.",
+            )
+        else:
+            notify(
+                parameters,
+                f"✉️ Ответ на письмо: {sent[email][0]} ({email}). Проверьте "
+                "почту.",
+            )
     days = int((parameters.get("direct") or {}).get("follow_up_days", 7))
     if days <= 0:
         return
     drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
-    for email, (company, c) in sent.items():
+    for email, (company, c, _key) in sent.items():
         if (
             email in bounced
             or email in replied
@@ -3717,7 +3742,7 @@ def check_email_replies(parameters: dict, llm_api_key: str) -> None:
     except Exception as e:
         logger.warning(f"Не удалось проверить ответы по рассылкам: {e}")
     try:
-        _check_contact_book_mail(parameters, credentials)
+        _check_contact_book_mail(parameters, credentials, llm_api_key)
     except Exception as e:
         logger.warning(f"Не удалось проверить ответы на письма из Базы: {e}")
     applied_log = AppliedLog(output_folder / "applied_log.json")

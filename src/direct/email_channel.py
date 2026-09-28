@@ -76,6 +76,39 @@ def senders_replied(
     return replied
 
 
+def reply_texts(
+    credentials: dict, addresses: list[str], days: int = 60
+) -> dict[str, str]:
+    """Текст последнего письма от каждого из addresses, кто написал за
+    days дней — только чтение, отдельный проход IMAP от
+    senders_replied() (та лишь считает, этой нужен текст). Используется
+    для автоопределения "не пишите нам больше" в
+    main._check_contact_book_mail, не для полноценного чтения почты —
+    поэтому только последнее письмо и обрезка до 2000 символов."""
+    if not addresses:
+        return {}
+    since = (datetime.now() - timedelta(days=days)).strftime("%d-%b-%Y")
+    texts: dict[str, str] = {}
+    with imaplib.IMAP4_SSL(IMAP_HOST) as imap:
+        imap.login(credentials["address"], credentials["app_password"])
+        imap.select("INBOX", readonly=True)
+        for address in addresses:
+            status, data = imap.search(
+                None, f'(FROM "{address}" SINCE {since})'
+            )
+            if status != "OK" or not data or not data[0]:
+                continue
+            last_num = data[0].split()[-1]
+            status, parts = imap.fetch(last_num, "(BODY.PEEK[TEXT])")
+            if status != "OK":
+                continue
+            body = b"".join(
+                p[1] for p in parts if isinstance(p, tuple)
+            ).decode("utf-8", "ignore")
+            texts[address] = body[:2000]
+    return texts
+
+
 def bounced_addresses(
     credentials: dict, addresses: list[str], days: int = 30
 ) -> set[str]:
