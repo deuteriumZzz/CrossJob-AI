@@ -97,6 +97,65 @@ def test_send_missing_cover_letters_does_not_mark_on_failed_send():
     applied_log.mark_cover_letter_sent_via_chat.assert_not_called()
 
 
+def test_send_due_hh_reminders_sends_and_marks():
+    """headhunter.auto_reminder: те же кандидаты, что due_hh_reminders()
+    выбрал бы для ручной кнопки «Напомнить о себе» — отправляются сами,
+    без подтверждения, и помечаются reminder_sent_at, чтобы не
+    напомнить дважды (see due_hh_reminders())."""
+    from datetime import datetime, timedelta
+
+    now = datetime.now().astimezone()
+    applied_log = MagicMock()
+    applied_log.entries_by_source_and_status.return_value = [
+        {
+            "external_id": "1",
+            "company": "Acme",
+            "title": "Python разработчик",
+            "applied_at": (now - timedelta(days=10)).isoformat(),
+            "last_known_state": None,
+            "reminder_sent_at": None,
+        },
+        {
+            # Уже просмотрели — не молчание, напоминать не нужно.
+            "external_id": "2",
+            "company": "Seen",
+            "title": "Dev",
+            "applied_at": (now - timedelta(days=10)).isoformat(),
+            "last_known_state": "Просмотрен",
+            "reminder_sent_at": None,
+        },
+    ]
+    parameters = {"headhunter": {"reminder_follow_up_days": 7}}
+    with patch(
+        "main.send_chat_cover_letter", return_value=True
+    ) as send_mock, patch("main.notify_routine") as notify_mock:
+        main._send_due_hh_reminders(parameters, MagicMock(), applied_log)
+    send_mock.assert_called_once_with(ANY, "1", ANY)
+    applied_log.mark_reminder_sent.assert_called_once_with("headhunter", "1")
+    notify_mock.assert_called_once()
+
+
+def test_send_due_hh_reminders_does_not_mark_on_failed_send():
+    from datetime import datetime, timedelta
+
+    now = datetime.now().astimezone()
+    applied_log = MagicMock()
+    applied_log.entries_by_source_and_status.return_value = [
+        {
+            "external_id": "1",
+            "company": "Acme",
+            "title": "Dev",
+            "applied_at": (now - timedelta(days=10)).isoformat(),
+            "last_known_state": None,
+            "reminder_sent_at": None,
+        }
+    ]
+    parameters = {"headhunter": {"reminder_follow_up_days": 7}}
+    with patch("main.send_chat_cover_letter", return_value=False):
+        main._send_due_hh_reminders(parameters, MagicMock(), applied_log)
+    applied_log.mark_reminder_sent.assert_not_called()
+
+
 if __name__ == "__main__":
     test_answer_headhunter_messages_retries_once_then_succeeds()
     test_answer_headhunter_messages_gives_up_after_second_failure()

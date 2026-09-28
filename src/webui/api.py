@@ -583,6 +583,7 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
                 "reminder_follow_up_days": source_config.get(
                     "reminder_follow_up_days", 7
                 ),
+                "auto_reminder": bool(source_config.get("auto_reminder")),
                 "continuous_cycle_active": name in CONTINUOUS_CYCLE_SOURCES
                 and bool(
                     (ctx.config.get("limits") or {}).get(
@@ -641,7 +642,8 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
             "label": "HeadHunter — статусы откликов и чат",
             "note": (
                 "Приглашения/отказы → «Входящие». Автоответ в чате — "
-                "если включён headhunter.auto_reply."
+                "если включён headhunter.auto_reply, напоминания молчащим "
+                "работодателям — если включён headhunter.auto_reminder."
             ),
         },
         {
@@ -3075,6 +3077,7 @@ class SourceSettingsUpdate(BaseModel):
     auto_bump_resume: Optional[bool] = None
     chat_cover_letter_followup: Optional[bool] = None
     reminder_follow_up_days: Optional[int] = None
+    auto_reminder: Optional[bool] = None
     schedule_enabled: Optional[bool] = None
     interval_hours: Optional[float] = None
     resume_id: Optional[str] = None
@@ -3109,6 +3112,7 @@ def post_settings(
         "auto_bump_resume",
         "chat_cover_letter_followup",
         "reminder_follow_up_days",
+        "auto_reminder",
         "schedule_enabled",
     ):
         value = getattr(body, field)

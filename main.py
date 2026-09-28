@@ -138,9 +138,11 @@ from src.job_sources.hr_replies import (
     classify_reply,
     company_uses_russian,
     due_follow_ups,
+    due_hh_reminders,
     format_draft_notification,
     generate_company_email,
     generate_first_message,
+    hh_reminder_text,
     looks_like_opt_out,
 )
 from src.job_sources.interview_calendar import (
@@ -4620,6 +4622,8 @@ def check_headhunter_replies(parameters: dict, llm_api_key: str):
             )
         if hh_preferences.get("chat_cover_letter_followup"):
             _send_missing_cover_letters(driver, applied_log)
+        if hh_preferences.get("auto_reminder"):
+            _send_due_hh_reminders(parameters, driver, applied_log)
     finally:
         driver.quit()
 
@@ -4645,6 +4649,48 @@ def send_headhunter_reminder(
     if sent:
         applied_log.mark_reminder_sent("headhunter", external_id)
     return sent
+
+
+def _send_due_hh_reminders(
+    parameters: dict, driver, applied_log: AppliedLog
+) -> None:
+    """headhunter.auto_reminder: досылает "напоминание о себе" молчащим
+    работодателям без ручного подтверждения на каждый — тот же текст и
+    та же защита от повтора (reminder_sent_at), что у кнопки «🔔
+    Напомнить о себе» во «Входящих» (см. due_hh_reminders/
+    hh_reminder_text) — ровно одно напоминание на отклик, никогда не
+    спамит. Выключено по умолчанию, как и остальные auto_*-флаги."""
+    days = int(
+        (parameters.get("headhunter") or {}).get(
+            "reminder_follow_up_days", 7
+        )
+    )
+    entries = applied_log.entries_by_source_and_status(
+        "headhunter", "applied"
+    )
+    for entry in due_hh_reminders(entries, days):
+        try:
+            sent = send_chat_cover_letter(
+                driver, entry["external_id"], hh_reminder_text(entry)
+            )
+        except Exception as e:
+            logger.warning(
+                f"Не удалось отправить напоминание в чат {entry['company']}: {e}"
+            )
+            continue
+        if sent:
+            applied_log.mark_reminder_sent(
+                "headhunter", entry["external_id"]
+            )
+            logger.info(
+                f"Напоминание отправлено: {entry['company']} — "
+                f"{entry['title']}"
+            )
+            notify_routine(
+                parameters,
+                f"🔔 Напоминание отправлено: {entry['company']} — "
+                f"{entry['title']}",
+            )
 
 
 def _send_missing_cover_letters(driver, applied_log: AppliedLog) -> None:

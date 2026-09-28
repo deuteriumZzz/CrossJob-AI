@@ -3082,8 +3082,11 @@ const render = {
                 <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-chat-cover-letter-followup switch" ${s.chat_cover_letter_followup ? "checked" : ""} />💬 Если отклик ушёл без письма — досылать его в чат</span>
               </label>
               <label class="limit-field">
-                <span title="0 — выключить напоминания. Список готовых напоминаний — во «Входящих»; отправка только по кнопке, не автоматически">Напомнить о себе, если не просмотрели, через (дней)</span>
+                <span title="0 — выключить напоминания. Список готовых напоминаний — во «Входящих»">Напомнить о себе, если не просмотрели, через (дней)</span>
                 <input type="number" class="d-reminder-days" min="0" value="${s.reminder_follow_up_days ?? 7}" style="width:80px" />
+              </label>
+              <label class="limit-field" style="justify-content:flex-end">
+                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto-reminder switch" ${s.auto_reminder ? "checked" : ""} />Отправлять напоминания самому, без подтверждения</span>
               </label>
               <label class="limit-field">
                 <span>Зарплата для автоответа в чате HH</span>
@@ -3180,6 +3183,7 @@ const render = {
             ".d-chat-cover-letter-followup"
           );
           const reminderDaysEl = drawerBody.querySelector(".d-reminder-days");
+          const autoReminderEl = drawerBody.querySelector(".d-auto-reminder");
           await api("/api/settings", {
             method: "POST",
             body: JSON.stringify({
@@ -3211,6 +3215,9 @@ const render = {
                       parseInt(reminderDaysEl.value, 10) || 0
                     ),
                   }
+                : {}),
+              ...(autoReminderEl
+                ? { auto_reminder: autoReminderEl.checked }
                 : {}),
               ...(jobMaxOverride
                 ? {
