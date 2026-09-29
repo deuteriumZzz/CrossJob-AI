@@ -3885,9 +3885,11 @@ async function addDirectCompany() {
 function switchSettingsTab(paneId) {
   if (paneId === "settings-direct") loadDirectSettings().catch(() => {});
   if (paneId === "settings-backups") loadBackups().catch(() => {});
-  document
-    .querySelectorAll("#settings-jump button")
-    .forEach((b) => b.classList.toggle("active", b.dataset.settingsTab === paneId));
+  document.querySelectorAll("#settings-jump button").forEach((b) => {
+    const isTarget = b.dataset.settingsTab === paneId;
+    b.classList.toggle("active", isTarget);
+    b.setAttribute("aria-selected", String(isTarget));
+  });
   document.querySelectorAll(".settings-pane").forEach((pane) => {
     const isTarget = pane.id === paneId;
     pane.classList.toggle("active", isTarget);
@@ -5402,7 +5404,9 @@ function copyToClipboard(text, btn) {
   navigator.clipboard.writeText(text).then(() => {
     btn.classList.add("copied");
     const original = btn.innerHTML;
-    btn.innerHTML = `<svg viewBox="0 0 20 20" fill="none"><path d="m4 10.5 4 4 8-9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    btn.innerHTML = `<svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="m4 10.5 4 4 8-9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    const announcer = document.getElementById("sr-announcer");
+    if (announcer) announcer.textContent = "Скопировано";
     setTimeout(() => {
       btn.classList.remove("copied");
       btn.innerHTML = original;
