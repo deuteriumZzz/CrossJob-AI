@@ -17,6 +17,21 @@ HC_BASE = "https://career.habr.com"
 PAGE_LOAD_WAIT_SECONDS = 3
 _APPLY_BUTTON_TEXT = "откликнуться"
 _ALREADY_APPLIED_MARKERS = ("посмотреть отклик", "редактировать")
+# id значения <select> "Квалификация" на /vacancies (`qid=`) —
+# подтверждено вживую 2026-09-29: открыт фильтр-сайдбар на живой
+# странице, для каждого варианта выбран option и прочитан итоговый
+# location.href (qid=5 для Senior и т.д.). Пропуск id=2 в исходной
+# разметке сайта — не опечатка, площадка сама его не использует.
+QUALIFICATION_IDS = {
+    "intern": 1,
+    "junior": 3,
+    "middle": 4,
+    "senior": 5,
+    "lead": 6,
+}
+# Значения <select> "Тип занятости" (`employment_type=`) — тот же
+# живой прогон, что и QUALIFICATION_IDS.
+EMPLOYMENT_TYPES = frozenset({"full_time", "part_time"})
 
 
 class HabrCareerClient:
@@ -70,10 +85,31 @@ class HabrCareerClient:
             )
         return init_browser(self.profile_dir), True
 
-    def search_html(self, position: str, page: int = 1) -> str:
+    def search_html(
+        self,
+        position: str,
+        page: int = 1,
+        remote_only: bool = False,
+        qualification: Optional[str] = None,
+        employment_type: Optional[str] = None,
+    ) -> str:
+        """Фильтры сайдбара /vacancies — подтверждено вживую
+        2026-09-29 (см. QUALIFICATION_IDS/EMPLOYMENT_TYPES выше):
+        чекбокс "Можно удалённо" -> `remote=true`, выпадающий список
+        "Квалификация" (одиночный выбор, не чекбоксы) -> `qid=<id>`,
+        выпадающий список "Тип занятости" -> `employment_type=
+        full_time|part_time`. Неизвестный qualification/employment_type
+        молча игнорируется — HabrCareerSource уже фильтрует по
+        известным значениям до вызова этого метода."""
         params = {"q": position}
         if page > 1:
             params["page"] = str(page)
+        if remote_only:
+            params["remote"] = "true"
+        if qualification in QUALIFICATION_IDS:
+            params["qid"] = str(QUALIFICATION_IDS[qualification])
+        if employment_type in EMPLOYMENT_TYPES:
+            params["employment_type"] = employment_type
         response = self._client.get("/vacancies", params=params)
         response.raise_for_status()
         raise_if_blocked(response)

@@ -25,6 +25,7 @@ const SOURCE_LABELS = {
   wellfound: "Wellfound",
   himalayas: "Himalayas",
   djinni: "Djinni",
+  avito: "Авито Работа",
   direct: "Сайты компаний",
 };
 
@@ -44,6 +45,7 @@ const SOURCE_ICON = {
   wellfound: { text: "WF", color: "#c23b6b" },
   himalayas: { text: "HM", color: "#476fd1" },
   djinni: { text: "DJ", color: "#27825b" },
+  avito: { text: "AV", color: "#6b4c9a" },
   direct: { text: "→", color: "#407e73" },
 };
 
@@ -1817,6 +1819,8 @@ async function loadTelegramWatch() {
   updateGreetingPreview();
   document.getElementById("tgq-auto-message").checked = w.auto_message;
   document.getElementById("tgq-smart-greeting").checked = w.smart_greeting;
+  document.getElementById("tgq-llm-vacancy-filter").checked =
+    w.llm_vacancy_filter;
   document.getElementById("tgq-delay-min").value = Math.round((w.message_delay_min_seconds || 0) / 60);
   document.getElementById("tgq-delay-max").value = Math.round((w.message_delay_max_seconds || 0) / 60);
   document.getElementById("tgq-hours-start").value = w.active_hours_start ?? "";
@@ -1970,6 +1974,8 @@ async function saveTelegramWatch() {
         greeting: document.getElementById("tgq-greeting").value,
         auto_message: document.getElementById("tgq-auto-message").checked,
         smart_greeting: document.getElementById("tgq-smart-greeting").checked,
+        llm_vacancy_filter: document.getElementById("tgq-llm-vacancy-filter")
+          .checked,
         message_delay_min_seconds: Math.max(0, parseInt(document.getElementById("tgq-delay-min").value, 10) || 0) * 60,
         message_delay_max_seconds: Math.max(0, parseInt(document.getElementById("tgq-delay-max").value, 10) || 0) * 60,
         active_hours_start: parseInt(document.getElementById("tgq-hours-start").value, 10) || 0,
@@ -2841,6 +2847,11 @@ const render = {
         el.value = (list || []).join("\n");
         initTagInput(el);
       });
+      document.getElementById("search-remote").checked = !!search.remote;
+      document.getElementById("search-hybrid").checked = !!search.hybrid;
+      document.getElementById("search-onsite").checked = !!search.onsite;
+      document.getElementById("search-only-with-salary").checked =
+        !!search.only_with_salary;
     });
 
     api("/api/settings/llm").then((llm) => {
@@ -3058,6 +3069,76 @@ const render = {
               </label>`
                 : ""
             }
+            ${
+              s.name === "avito"
+                ? `<label class="limit-field" style="justify-content:flex-end">
+                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-remote-only switch" ${s.remote_only ? "checked" : ""} />Только удалённые вакансии</span>
+              </label>
+              <label class="limit-field">
+                <span>Опыт работы (пусто — любой)</span>
+                <select class="d-hc-qualification">
+                  <option value="" ${!s.qualification ? "selected" : ""}>Любой</option>
+                  <option value="no_experience" ${s.qualification === "no_experience" ? "selected" : ""}>Без опыта</option>
+                  <option value="under_1_year" ${s.qualification === "under_1_year" ? "selected" : ""}>До 1 года</option>
+                  <option value="over_1_year" ${s.qualification === "over_1_year" ? "selected" : ""}>Более 1 года</option>
+                  <option value="over_3_years" ${s.qualification === "over_3_years" ? "selected" : ""}>Более 3 лет</option>
+                  <option value="over_5_years" ${s.qualification === "over_5_years" ? "selected" : ""}>Более 5 лет</option>
+                  <option value="over_10_years" ${s.qualification === "over_10_years" ? "selected" : ""}>Более 10 лет</option>
+                </select>
+              </label>
+              <label class="limit-field">
+                <span>Занятость (пусто — любая)</span>
+                <select class="d-hc-employment-type">
+                  <option value="" ${!s.employment_type ? "selected" : ""}>Любая</option>
+                  <option value="full_time" ${s.employment_type === "full_time" ? "selected" : ""}>Полная</option>
+                  <option value="part_time" ${s.employment_type === "part_time" ? "selected" : ""}>Частичная</option>
+                  <option value="temporary" ${s.employment_type === "temporary" ? "selected" : ""}>Временная</option>
+                </select>
+              </label>`
+                : ""
+            }
+            ${
+              s.name === "getmatch"
+                ? `<label class="limit-field" style="justify-content:flex-end">
+                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-remote-only switch" ${s.remote_only ? "checked" : ""} />Только удалённые вакансии</span>
+              </label>
+              <label class="limit-field">
+                <span>Уровень вакансии (пусто — любой)</span>
+                <select class="d-gm-experience-level" multiple size="4">
+                  <option value="junior" ${(s.experience_level || []).includes("junior") ? "selected" : ""}>Junior</option>
+                  <option value="middle" ${(s.experience_level || []).includes("middle") ? "selected" : ""}>Middle</option>
+                  <option value="senior" ${(s.experience_level || []).includes("senior") ? "selected" : ""}>Senior</option>
+                  <option value="lead" ${(s.experience_level || []).includes("lead") ? "selected" : ""}>Lead / Manager</option>
+                </select>
+              </label>`
+                : ""
+            }
+            ${
+              s.name === "habr_career"
+                ? `<label class="limit-field" style="justify-content:flex-end">
+                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-remote-only switch" ${s.remote_only ? "checked" : ""} />Только удалённые вакансии</span>
+              </label>
+              <label class="limit-field">
+                <span>Квалификация (пусто — любая)</span>
+                <select class="d-hc-qualification">
+                  <option value="" ${!s.qualification ? "selected" : ""}>Любая</option>
+                  <option value="intern" ${s.qualification === "intern" ? "selected" : ""}>Стажёр (Intern)</option>
+                  <option value="junior" ${s.qualification === "junior" ? "selected" : ""}>Младший (Junior)</option>
+                  <option value="middle" ${s.qualification === "middle" ? "selected" : ""}>Средний (Middle)</option>
+                  <option value="senior" ${s.qualification === "senior" ? "selected" : ""}>Старший (Senior)</option>
+                  <option value="lead" ${s.qualification === "lead" ? "selected" : ""}>Ведущий (Lead)</option>
+                </select>
+              </label>
+              <label class="limit-field">
+                <span>Тип занятости (пусто — любой)</span>
+                <select class="d-hc-employment-type">
+                  <option value="" ${!s.employment_type ? "selected" : ""}>Любой</option>
+                  <option value="full_time" ${s.employment_type === "full_time" ? "selected" : ""}>Полный рабочий день</option>
+                  <option value="part_time" ${s.employment_type === "part_time" ? "selected" : ""}>Неполный рабочий день</option>
+                </select>
+              </label>`
+                : ""
+            }
           </div>
           <p class="muted small">Сейчас реально ищет по: «${(s.effective_positions || []).join("», «") || "—"}»${
         s.name === "linkedin"
@@ -3185,6 +3266,16 @@ const render = {
           );
           const reminderDaysEl = drawerBody.querySelector(".d-reminder-days");
           const autoReminderEl = drawerBody.querySelector(".d-auto-reminder");
+          const remoteOnlyEl = drawerBody.querySelector(".d-remote-only");
+          const gmExperienceLevelEl = drawerBody.querySelector(
+            ".d-gm-experience-level"
+          );
+          const hcQualificationEl = drawerBody.querySelector(
+            ".d-hc-qualification"
+          );
+          const hcEmploymentTypeEl = drawerBody.querySelector(
+            ".d-hc-employment-type"
+          );
           await api("/api/settings", {
             method: "POST",
             body: JSON.stringify({
@@ -3219,6 +3310,22 @@ const render = {
                 : {}),
               ...(autoReminderEl
                 ? { auto_reminder: autoReminderEl.checked }
+                : {}),
+              ...(remoteOnlyEl
+                ? { remote_only: remoteOnlyEl.checked }
+                : {}),
+              ...(gmExperienceLevelEl
+                ? {
+                    experience_level: Array.from(
+                      gmExperienceLevelEl.selectedOptions
+                    ).map((o) => o.value),
+                  }
+                : {}),
+              ...(hcQualificationEl
+                ? { qualification: hcQualificationEl.value }
+                : {}),
+              ...(hcEmploymentTypeEl
+                ? { employment_type: hcEmploymentTypeEl.value }
                 : {}),
               ...(jobMaxOverride
                 ? {
@@ -3825,11 +3932,17 @@ async function loadDirectSettings() {
   const d = await api("/api/direct/summary");
   document.getElementById("direct-wwr").checked = d.wwr;
   document.getElementById("direct-hn").checked = d.hn;
+  document.getElementById("direct-include-telegram-leads").checked =
+    d.include_telegram_leads;
   loadDirectCompanies();
 }
 
 async function saveDirectSetting(e) {
-  const field = { "direct-wwr": "wwr", "direct-hn": "hn" }[e.target.id];
+  const field = {
+    "direct-wwr": "wwr",
+    "direct-hn": "hn",
+    "direct-include-telegram-leads": "include_telegram_leads",
+  }[e.target.id];
   if (!field) return;
   try {
     await api("/api/direct/settings", { method: "POST", body: JSON.stringify({ [field]: e.target.checked }) });
@@ -6203,6 +6316,12 @@ function initDashboard() {
             company_blacklist: linesOf("search-company-blacklist"),
             title_blacklist: linesOf("search-title-blacklist"),
             location_blacklist: linesOf("search-location-blacklist"),
+            remote: document.getElementById("search-remote").checked,
+            hybrid: document.getElementById("search-hybrid").checked,
+            onsite: document.getElementById("search-onsite").checked,
+            only_with_salary: document.getElementById(
+              "search-only-with-salary"
+            ).checked,
           }),
         });
         status.textContent = "Сохранено.";

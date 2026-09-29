@@ -195,6 +195,7 @@
           <option value="wellfound">Wellfound</option>
           <option value="himalayas">Himalayas</option>
           <option value="djinni">Djinni</option>
+          <option value="avito">Авито Работа</option>
           <option value="direct">Сайты компаний</option>
         </select>
         <select id="filter-status">
@@ -610,6 +611,14 @@
           <button id="search-generate-positions" class="btn btn-primary">🪄 Сгенерировать должности из резюме</button>
           <span id="search-generate-status" class="muted small"></span>
         </div>
+        <h4 style="margin-top:14px">Формат работы (только HeadHunter)</h4>
+        <p class="muted small">Как на hh.ru в фильтре «Формат работы» — можно включить несколько сразу.</p>
+        <div class="filters">
+          <label class="checkbox-row"><input id="search-remote" type="checkbox" class="switch" /> Удалённо</label>
+          <label class="checkbox-row"><input id="search-hybrid" type="checkbox" class="switch" /> Гибрид</label>
+          <label class="checkbox-row"><input id="search-onsite" type="checkbox" class="switch" /> На месте работодателя</label>
+          <label class="checkbox-row"><input id="search-only-with-salary" type="checkbox" class="switch" /> Только с указанной зарплатой</label>
+        </div>
         <div class="filters">
           <label class="checkbox-row"><input id="outreach-skip-us" type="checkbox" class="switch" /> Пропускать удалёнку «только из США»</label>
           <label class="checkbox-row"><input id="outreach-skip-eu" type="checkbox" class="switch" /> Пропускать удалёнку «только из Европы»</label>
@@ -625,9 +634,9 @@
             <textarea id="search-company-blacklist" rows="3"></textarea>
           </label>
           <label class="limit-field">
-            <span>Чёрный список слов в названии (одно на строку)</span>
+            <span>Чёрный список слов — в названии или описании (одно на строку)</span>
             <textarea id="search-title-blacklist" rows="3"></textarea>
-            <span class="muted small">Точное совпадение части слова, без учёта регистра, без ИИ — «джун» не поймает «junior», добавляйте оба варианта, если нужно оба.</span>
+            <span class="muted small">Точное совпадение части слова, без учёта регистра, без ИИ — «джун» не поймает «junior», добавляйте оба варианта, если нужно оба. Работает и для русских, и для английских слов одинаково.</span>
           </label>
           <label class="limit-field">
             <span>Чёрный список локаций (одна на строку)</span>
@@ -974,6 +983,8 @@
         <h4>Где искать</h4>
         <label class="checkbox-row"><input id="direct-wwr" type="checkbox" /> We Work Remotely — доска удалённых вакансий</label>
         <label class="checkbox-row"><input id="direct-hn" type="checkbox" /> Hacker News «Who is hiring» — ежемесячная ветка с вакансиями</label>
+        <label class="checkbox-row"><input id="direct-include-telegram-leads" type="checkbox" /> Автоматически включать контакты из Telegram-постов в рассылку «всем»</label>
+        <p class="muted small">Выключено по умолчанию — контакт из поста в Telegram-канале (например, из чужого объявления «Ищу работу») не всегда компания. Без этой галочки такие контакты не попадают в уже идущую рассылку сами — только если вы явно выберете источник «Telegram-каналы» при создании новой рассылки.</p>
 
         <h4>Отслеживаемые компании</h4>
         <p class="muted small">Введите адрес сайта — бот сам найдёт, где компания публикует вакансии (Greenhouse, Lever, Ashby, Workable).</p>
@@ -1058,6 +1069,7 @@
               <span>Стоп-слова — такие посты не присылать</span>
               <textarea id="tgq-stop" rows="2"></textarea>
             </label>
+            <p class="muted small">Плюс всегда включены встроенные: «ищу работу», «ищу вакансию», «резюме:», «open to work» и похожие — отсеивают посты кандидатов, а не вакансий, их нельзя выключить. Здесь — только ваши дополнительные.</p>
             <label class="limit-field">
               <span>Досмотреть историю нового канала за последние дни (вакансия могла появиться до того, как вы его добавили, и всё ещё быть открыта) — 0 отключает</span>
               <input id="tgq-backfill-days" class="num-input" type="number" min="0" max="60" style="width:80px" />
@@ -1073,6 +1085,7 @@
           <section class="tgq-block">
             <h4>3. Текст «Здравствуйте»</h4>
             <label class="checkbox-row"><input id="tgq-smart-greeting" type="checkbox" class="switch" /> Писать умно через ИИ, под конкретную вакансию — шаблон ниже остаётся резервным, если ИИ недоступен</label>
+            <label class="checkbox-row"><input id="tgq-llm-vacancy-filter" type="checkbox" class="switch" /> Доп. проверка через ИИ: «это вакансия?» — после стоп-слов, только для уже совпавших постов</label>
             <label class="limit-field">
               <span>Уходит HR по кнопке 👋, когда ИИ выключен или недоступен. <code>{role}</code> — название вакансии, <code>{link}</code> — ссылка на пост</span>
               <textarea id="tgq-greeting" rows="3"></textarea>
@@ -1187,6 +1200,7 @@
             <option value="wellfound">Wellfound</option>
             <option value="himalayas">Himalayas</option>
             <option value="djinni">Djinni</option>
+            <option value="avito">Авито Работа</option>
           </select>
           <input id="log-search" type="text" class="search-input" placeholder="Поиск по тексту…" aria-label="Поиск по тексту лога" />
           <label class="checkbox-row"><input id="log-raw-toggle" type="checkbox" /> Без перевода (сырой лог)</label>

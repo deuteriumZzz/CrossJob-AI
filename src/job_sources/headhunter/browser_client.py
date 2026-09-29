@@ -131,13 +131,30 @@ class HeadHunterBrowserClient:
         )
 
     def search_vacancies_html(
-        self, query: str, remote_only: bool, page: int = 0
+        self,
+        query: str,
+        remote_only: bool,
+        page: int = 0,
+        work_formats: tuple[str, ...] = (),
+        only_with_salary: bool = False,
     ) -> str:
+        """work_formats — значения "Формат работы" hh.ru (REMOTE/
+        HYBRID/ON_SITE, подтверждено вживую 2026-09-29), каждое —
+        отдельный повторяющийся query-параметр `work_format`.
+        remote_only остаётся отдельным параметром для обратной
+        совместимости старых вызовов без work_formats; если оба
+        заданы — work_formats имеет приоритет для REMOTE (не
+        задваиваем параметр)."""
         driver, owns_it = self._acquire_driver()
         try:
             params = f"text={query}&area={HH_AREA_RUSSIA}&page={page}"
-            if remote_only:
-                params += "&schedule=remote"
+            formats = set(work_formats)
+            if remote_only and not formats:
+                formats.add("REMOTE")
+            for work_format in sorted(formats):
+                params += f"&work_format={work_format}"
+            if only_with_salary:
+                params += "&only_with_salary=true"
             driver.get(f"{HH_BASE}/search/vacancy?{params}")
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
             raise_if_blocked(visible_text(driver))

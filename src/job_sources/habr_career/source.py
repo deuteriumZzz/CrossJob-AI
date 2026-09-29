@@ -19,6 +19,11 @@ class HabrCareerSource:
         self.client = client
 
     def search(self, preferences: dict) -> list[Job]:
+        hc_preferences = preferences.get("habr_career") or {}
+        remote_only = bool(hc_preferences.get("remote_only"))
+        qualification = hc_preferences.get("qualification") or None
+        employment_type = hc_preferences.get("employment_type") or None
+
         seen_ids: set = set()
         jobs: list[Job] = []
 
@@ -31,7 +36,12 @@ class HabrCareerSource:
             # того, чтобы дать _acquire_driver пересоздать драйвер на
             # следующем вызове.
             try:
-                html = self.client.search_html(position)
+                html = self.client.search_html(
+                    position,
+                    remote_only=remote_only,
+                    qualification=qualification,
+                    employment_type=employment_type,
+                )
             except PlatformBlockedError:
                 raise
             except Exception as e:

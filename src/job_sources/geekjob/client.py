@@ -9,6 +9,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 
 from src.job_sources.block_detection import raise_if_blocked, visible_text
+from src.job_sources.html_text import html_letter_to_plain_text
 from src.utils.chrome_utils import init_browser, is_driver_dead
 
 GJ_BASE = "https://geekjob.ru"
@@ -79,7 +80,9 @@ class GeekjobClient:
             if owns_it:
                 driver.quit()
 
-    def apply(self, vacancy_url: str, profile_dir: Path) -> bool:
+    def apply(
+        self, vacancy_url: str, profile_dir: Path, cover_letter: str = ""
+    ) -> bool:
         """Best-effort, НЕ проверено на живом аккаунте (в отличие от
         HH/GetMatch): анонимно на странице вакансии подтверждено
         только, что раздел "Откликнуться на вакансию" требует входа
@@ -89,7 +92,15 @@ class GeekjobClient:
         Ищем кнопку с текстом "Откликнуться" внутри самой страницы
         (не якорную ссылку в шапке — та просто прокручивает к разделу)
         — если её там нет, возвращаем False и вызывающий код
-        записывает как dry-run, ничего не ломая."""
+        записывает как dry-run, ничего не ломая.
+
+        ponytail: раньше клик был единственным действием — geekjob
+        после клика подставляет свой дефолтный "быстрый отклик"
+        (просто ссылка на резюме, без письма), сгенерированный
+        cover_letter нигде не использовался. Тот же приём, что у
+        GetMatchClient.apply: после клика ищем textarea (если форма её
+        показала) и вписываем письмо перед тем, как искать кнопку
+        отправки — если поля нет, просто остаёмся на quick-apply."""
         driver = init_browser(profile_dir)
         try:
             driver.get(vacancy_url)
@@ -103,6 +114,27 @@ class GeekjobClient:
                 return False
             buttons[0].click()
             time.sleep(1)
+            if cover_letter:
+                textareas = driver.find_elements(By.TAG_NAME, "textarea")
+                if textareas:
+                    # geekjob подставляет в это поле свой дефолтный
+                    # шаблон ("Меня заинтересовала вакансия ...,
+                    # можете посмотреть резюме по ссылке ...") — без
+                    # clear() наше письмо дописывалось бы ПОСЛЕ этого
+                    # шаблона, а не вместо него (подтверждено вживую:
+                    # именно этот шаблонный текст и уходил отдельно).
+                    textareas[0].clear()
+                    textareas[0].send_keys(
+                        html_letter_to_plain_text(cover_letter)
+                    )
+                    submit_buttons = driver.find_elements(
+                        By.XPATH,
+                        '//button[contains(normalize-space(), '
+                        '"Отправить")]',
+                    )
+                    if submit_buttons:
+                        submit_buttons[0].click()
+                        time.sleep(1)
             return True
         finally:
             driver.quit()

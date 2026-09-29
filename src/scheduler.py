@@ -28,6 +28,7 @@ CONTINUOUS_CYCLE_SOURCES = {
     "wellfound",
     "himalayas",
     "djinni",
+    "avito",
 }
 
 

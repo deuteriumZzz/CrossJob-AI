@@ -2,6 +2,32 @@ from src.job import Job
 from src.job_sources.blacklist_filter import passes_blacklists
 
 
+def test_title_blacklist_checks_description_not_only_role():
+    """Некоторые нежелательные вакансии (военные контракты и т.п.) не
+    называют это в заголовке — слово всплывает только в описании."""
+    job = Job(
+        role="Инженер-программист",
+        company="Acme",
+        description="Служба по контракту от Мин. Обороны РФ.",
+        source="avito",
+    )
+    assert not passes_blacklists(
+        job, {"title_blacklist": ["служба по контракту"]}
+    )
+
+
+def test_title_blacklist_still_matches_role():
+    job = Job(role="Военный инженер БПЛА", company="Acme", source="avito")
+    assert not passes_blacklists(job, {"title_blacklist": ["бпла"]})
+
+
+def test_title_blacklist_case_insensitive_for_ru_and_en():
+    job_ru = Job(role="Junior разработчик", company="Acme", source="avito")
+    job_en = Job(role="Junior Developer", company="Acme", source="avito")
+    assert not passes_blacklists(job_ru, {"title_blacklist": ["junior"]})
+    assert not passes_blacklists(job_en, {"title_blacklist": ["junior"]})
+
+
 def test_locations_allowlist_does_not_zero_out_sources_without_location():
     """telegram never populates job.location (see blacklist_filter.py) —
     a locations allowlist must not silently drop every vacancy from

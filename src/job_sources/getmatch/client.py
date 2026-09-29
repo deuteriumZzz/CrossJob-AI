@@ -20,6 +20,11 @@ from src.utils.chrome_utils import init_browser, is_driver_dead
 _WIZARD_STEP_RE = re.compile(r"Шаг \d+ из \d+")
 
 GM_BASE = "https://getmatch.ru"
+# Значения чекбоксов "Уровень вакансии" на /vacancies, подтверждённые
+# вживую 2026-09-29 (см. search_vacancies_html) — используется и
+# GetMatchSource, чтобы отбрасывать мусор из experience_level в
+# work_preferences.yaml, не долетая до сайта.
+EXPERIENCE_LEVELS = frozenset({"junior", "middle", "senior", "lead"})
 # ponytail: раньше здесь был фиксированный sleep вместо явного ожидания
 # элемента — не успевал за первой загрузкой
 # /vacancies на свежезапущенном Chrome (холодный старт — JS-бандл ещё не
@@ -30,7 +35,7 @@ GM_BASE = "https://getmatch.ru"
 # Bounded-poll вместо sleep — тот же приём, что у HeadHunterBrowserClient.
 # _wait_for_any (см. его докстринг: та же гонка чинилась там для клика
 # "Откликнуться").
-VACANCIES_PAGE_TIMEOUT_SECONDS = 10.0
+VACANCIES_PAGE_TIMEOUT_SECONDS = 20.0
 VACANCIES_PAGE_POLL_INTERVAL_SECONDS = 0.5
 
 
@@ -102,7 +107,11 @@ class GetMatchClient:
         return init_browser(self.profile_dir), True
 
     def search_vacancies_html(
-        self, page: int = 1, specializations: Optional[list] = None
+        self,
+        page: int = 1,
+        specializations: Optional[list] = None,
+        remote_only: bool = False,
+        experience_levels: Optional[list] = None,
     ) -> str:
         """Без текстового запроса — GetMatch убрал его со страницы
         /vacancies (подтверждено вживую 2026-09-02: `?q=...` в URL
@@ -116,15 +125,26 @@ class GetMatchClient:
         нашей стороне (см. GetMatchSource.search()). Пагинация — тем
         же `page`, что и раньше (подтверждено вживую: `p=10` за
         концом списка отдаёт 0 карточек, не ошибку — чистый
-        стоп-сигнал, как у GeekjobClient)."""
+        стоп-сигнал, как у GeekjobClient).
+
+        remote_only/experience_levels — те же чекбоксы "Регион и
+        формат работы" / "Уровень вакансии", что раньше были
+        зашиты в URL под одного пользователя; подтверждено вживую
+        2026-09-29 кликом по чекбоксам и чтением итогового URL:
+        `l=remote` (формат работы "Удалённо"), `se=junior|middle|
+        senior|lead` (можно передать несколько — площадка отдаёт
+        объединение, тот же принцип, что у `sp=`; "C-level" в
+        чекбоксах есть, но его se= не проверялся вживую — намеренно
+        не поддержан, чтобы не угадывать). Без remote_only/
+        experience_levels — прежнее умолчание убрано: показывает
+        весь список без этих двух фильтров."""
         driver, owns_it = self._acquire_driver()
         try:
-            # l=remote, se=junior/middle — подтверждено кликом по
-            # реальным чекбоксам фильтра "Регион и формат работы" /
-            # "Уровень вакансии" на живой странице и чтением итогового
-            # URL, а не угадано; кандидат ищет только удалённую работу
-            # уровня junior/middle.
-            url = f"{GM_BASE}/vacancies?p={page}&l=remote&se=junior&se=middle"
+            url = f"{GM_BASE}/vacancies?p={page}"
+            if remote_only:
+                url += "&l=remote"
+            for level in experience_levels or []:
+                url += f"&se={level}"
             for slug in specializations or []:
                 url += f"&sp={slug}"
             driver.get(url)

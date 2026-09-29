@@ -1,6 +1,13 @@
+# "Формат работы" на hh.ru (только HeadHunter) — три независимых
+# чекбокса, можно включить несколько сразу, каждый добавляет свой
+# work_format=REMOTE/HYBRID/ON_SITE к поиску. Редактируется в
+# дашборде: Настройки → Что ищу → «Формат работы».
 remote: true
 hybrid: true
 onsite: true
+# "Указан доход" на hh.ru (только HeadHunter) — скрывает вакансии без
+# указанной зарплаты.
+only_with_salary: false
 
 experience_level:
   internship: false
@@ -131,6 +138,16 @@ getmatch:
   # specializations:
   #   - python
 
+  # "Регион и формат работы" -> Удалённо, and "Уровень вакансии"
+  # checkboxes on the same page — confirmed live 2026-09-29 by
+  # clicking them and reading the resulting URL (`l=remote`,
+  # `se=junior|middle|senior|lead`). Both default to off/unset — the
+  # unfiltered list, same as specializations above.
+  remote_only: false
+  # experience_level:
+  #   - junior
+  #   - middle
+
 # Optional: only needed for the "Search & Apply on geekjob.ru" action.
 # Logs in only via OAuth (Google, VK, Mail.Ru, etc.) — no password is
 # ever entered by code, you complete login by hand in the browser
@@ -140,6 +157,25 @@ getmatch:
 # found, it just falls back to dry-run.
 geekjob:
   auto_apply: false
+
+# Optional: only needed for the "Search & Apply on Avito" action. Только
+# вакансии с меткой "Отклик с резюме" (остальные ведут в чат с
+# работодателем — не отклик). Вход — вручную (телефон + SMS-код) в
+# открывшемся окне браузера, как у HH. Keep auto_apply: false until
+# you've reviewed a dry run — the apply button on the vacancy page is
+# unverified against a live account (see src/job_sources/avito/apply.py).
+# remote_only: true фильтрует только "Удалённо" на самом avito.ru
+# (отдельный URL-путь с фильтрами сайта, а не наш собственный фильтр).
+avito:
+  auto_apply: false
+  remote_only: false
+  # "Опыт работы" (одиночный выбор, как на avito.ru): no_experience |
+  # under_1_year | over_1_year | over_3_years | over_5_years |
+  # over_10_years. Применяется кликом по живой странице, не URL — см.
+  # src/job_sources/avito/search.py.
+  # qualification: over_3_years
+  # "Занятость": full_time | part_time | temporary.
+  # employment_type: full_time
 
 # Какой PDF прикладывать автоматически к русским/английским вакансиям
 # Telegram-парсера и компаниям из email-рассылки. Пути считаются от
@@ -224,6 +260,15 @@ linkedin:
 # unverified against a live career.habr.com account, see docs/GUIDE.md.
 habr_career:
   auto_apply: false
+
+  # /vacancies filter sidebar — confirmed live 2026-09-29: "Можно
+  # удалённо" checkbox, "Квалификация" and "Тип занятости" dropdowns
+  # (opened the sidebar, picked each option, read the resulting URL:
+  # remote=true, qid=<1|3|4|5|6>, employment_type=full_time|part_time).
+  # All unset/empty by default — the unfiltered list.
+  remote_only: false
+  # qualification: senior  # intern | junior | middle | senior | lead
+  # employment_type: full_time  # full_time | part_time
 
 # Optional: only needed for the "Search & Apply on Wellfound" action.
 # Keep auto_apply: false until you've reviewed a dry run — this flow is

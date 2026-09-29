@@ -89,7 +89,11 @@ def test_period_days_prefers_shortest_enabled_window():
     assert _period_days({}) is None
 
 
-def test_build_search_params_sets_remote_schedule_only_when_remote_only():
+def test_build_search_params_sets_work_format_per_enabled_flag():
+    # "Формат работы" на hh.ru — три независимых чекбокса, все три
+    # можно включить одновременно (work_format — повторяющийся
+    # query-параметр, подтверждено вживую 2026-09-29), в отличие от
+    # старого одиночного schedule=remote.
     preferences = {
         "remote": True,
         "hybrid": False,
@@ -99,13 +103,36 @@ def test_build_search_params_sets_remote_schedule_only_when_remote_only():
         "job_types": {},
     }
     params = _build_search_params(preferences, text="Software engineer")
-    assert params["schedule"] == "remote"
+    assert params["work_format"] == ["REMOTE"]
 
     preferences_mixed = {**preferences, "hybrid": True}
     params_mixed = _build_search_params(
         preferences_mixed, text="Software engineer"
     )
-    assert "schedule" not in params_mixed
+    assert params_mixed["work_format"] == ["HYBRID", "REMOTE"]
+
+    preferences_none = {**preferences, "remote": False}
+    params_none = _build_search_params(
+        preferences_none, text="Software engineer"
+    )
+    assert "work_format" not in params_none
+
+
+def test_build_search_params_sets_only_with_salary():
+    # "Указан доход" на hh.ru — подтверждено вживую 2026-09-29.
+    preferences = {
+        "date": {},
+        "experience_level": {},
+        "job_types": {},
+        "only_with_salary": True,
+    }
+    params = _build_search_params(preferences, text="Software engineer")
+    assert params["only_with_salary"] is True
+
+    params_off = _build_search_params(
+        {**preferences, "only_with_salary": False}, text="Software engineer"
+    )
+    assert "only_with_salary" not in params_off
 
 
 if __name__ == "__main__":
@@ -117,5 +144,6 @@ if __name__ == "__main__":
     test_hh_experience_values_maps_enabled_levels()
     test_hh_employment_values_maps_known_job_types_only()
     test_period_days_prefers_shortest_enabled_window()
-    test_build_search_params_sets_remote_schedule_only_when_remote_only()
+    test_build_search_params_sets_work_format_per_enabled_flag()
+    test_build_search_params_sets_only_with_salary()
     print("All tests passed.")

@@ -832,6 +832,42 @@ def test_company_sites_collect_into_base_for_campaign(client):  # noqa: F811
     assert len(created["items"]) == 1
 
 
+def test_telegram_leads_excluded_from_auto_absorb_by_default(
+    client,  # noqa: F811
+):
+    """Инцидент: пост кандидата "Ищу работу" в Telegram-канале совпал по
+    ключевому слову, его email ушёл в Базу, и уже идущая рассылка «всем»
+    подхватила его сама — письмо ушло кандидату как работодателю. Теперь
+    Telegram-контакты не подмешиваются в _absorb_new_companies, пока
+    direct.include_telegram_leads не включён явно."""
+    ctx = api.get_ctx()
+    book = ContactBook(ctx.output_folder)
+    book.add(
+        "",
+        [
+            {
+                "kind": "email",
+                "value": "candidate@example.com",
+                "source": "пост в @somechannel",
+            }
+        ],
+        vacancy={
+            "title": "Python developer",
+            "link": "https://t.me/somechannel/1",
+            "source": "telegram",
+        },
+    )
+    store = camp.CampaignStore(ctx.output_folder)
+    campaign_id = store.create("Все источники", [])
+    store.update(campaign_id, scope="all", batch_day="2026-01-01")
+
+    assert api._absorb_new_companies(ctx) == 0
+
+    client.post("/api/direct/settings", json={"include_telegram_leads": True})
+    ctx.reload_config()
+    assert api._absorb_new_companies(ctx) == 1
+
+
 def test_campaign_prepares_in_daily_batches(monkeypatch):
     """3 адреса при лимите 2: сегодня — 2 письма, остальное ждёт; на
     следующий день, когда порция ушла, готовится следующая."""

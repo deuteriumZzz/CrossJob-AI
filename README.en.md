@@ -40,6 +40,7 @@ This is an experimental alpha. Read the warnings on the release page before usin
 - [Platforms](#platforms)
 - [Chances of landing a job, by platform](#chances-of-landing-a-job-by-platform-2026)
 - [Quick start](#quick-start)
+- [First run: what to expect](#first-run-what-to-expect)
 - [Dashboard](#dashboard)
 - [CrossJob bot in Telegram](#crossjob-bot-in-telegram)
 - [Building a company base with AI](#building-a-company-base-with-ai)
@@ -59,7 +60,7 @@ Use one of them or all at once.
 
 | | How it works | What you do |
 |---|---|---|
-| **1. Job boards** | On a schedule, the bot searches 9 platforms, an LLM scores resume fit (1–10), writes a cover letter and applies by itself — or only shows what it found | Turn platforms on and pick a mode: "Applies by itself" or "Search only" |
+| **1. Job boards** | On a schedule, the bot searches 10 platforms, an LLM scores resume fit (1–10), writes a cover letter and applies by itself — or only shows what it found | Turn platforms on and pick a mode: "Applies by itself" or "Search only" |
 | **2. Telegram parser** | Listens to job channels non-stop. A post with your keywords reaches your CrossJob bot within seconds, with "Hello", "+ resume" and "Cover letter" buttons | Press a button — the message goes to HR from your personal account |
 | **3. Your own company base and outreach** | The base fills itself — from the Telegram parser and the "🏢 Company sites" channel — plus your own lists (Excel, CSV, PDF, open datasets such as [careerLauncher](https://github.com/byborh/careerLauncher)). Outreach writes a personal email to every company and sends it from your Gmail with your resume attached — one by one, during working hours, like a person would | Upload a list, review the emails, press "Start sending" |
 
@@ -68,7 +69,7 @@ The third way end to end: **companies land in the Base → "Outreach" writes the
 ## Features
 
 **Search and applications**
-- 🔍 Search by your positions and cities on 9 platforms, blacklists for companies, words and locations, a "US/Europe only" remote filter.
+- 🔍 Search by your positions and cities on 10 platforms, blacklists for companies, words (checked against both the title and the description, works equally in Russian and English) and locations, a "US/Europe only" remote filter.
 - 🎯 Fit scoring: an LLM gives a 1–10 score and explains what's missing; weak matches don't burn an application.
 - 🚀 Auto-apply or "Search only" mode, daily limits, pauses between applications; one vacancy posted on several platforms gets one application.
 - 🧪 "Check platforms without sending anything" — a dry run to see what the bot would find.
@@ -104,11 +105,12 @@ The third way end to end: **companies land in the Base → "Outreach" writes the
 |---|---|---|---|
 | **HeadHunter** | ✅ browser, SMS login | ✅ auto-apply, application statuses, chat auto-reply, resume bump | ✅ |
 | **Habr Career** | ✅ via Habr SSO | ✅ one-click apply | ✅ 2026-08-28 |
-| **GetMatch** | ✅ login with a code from Telegram | ✅ | ✅ |
-| **geekjob** | ✅ | ✅ best-effort | 🟡 login not verified |
+| **GetMatch** | ✅ login with a code from Telegram | ✅ apply + cover letter in the modal | ✅ 2026-09-30: search, login, apply, letter |
+| **geekjob** | ✅ | ✅ best-effort, letter replaces geekjob's default template | ✅ 2026-09-30: login, apply, letter |
 | **Telegram channels** | ⚡ real-time Telegram parser + scheduled search | buttons in the CrossJob bot, optional auto-messages | ✅ |
 | **LinkedIn** | ✅ remote, by country | ✅ Easy Apply, an LLM answers the screening questions | ✅ 2026-08-23 |
 | **Djinni** | ✅ public listings, no browser | ✅ a message to the recruiter with the cover letter; vacancies Djinni won't let you apply to (experience, country, English, salary) are filtered out up front with the reason; profile bump every 7 days | ✅ 2026-09-25: search, login, filtering, bump |
+| **Avito Rabota** | ✅ SMS login, "Remote only" filter | ✅ one-click apply ("Откликнуться") | ✅ 2026-09-29: a real application was sent and recorded |
 | **Wellfound** | ✅ JSON-LD | 🟡 best-effort | 🟡 applying not verified |
 | **Himalayas** | 🟡 | 🟡 | 🟡 the site is behind an anti-bot check |
 | **🏢 Company sites** | ✅ company career pages (Greenhouse, Lever, Ashby, Workable), We Work Remotely, HN "Who is hiring" | doesn't apply — adds companies with an HR email to the Base for one-button outreach | ✅ 2026-09-24 |
@@ -159,6 +161,16 @@ python main.py --daemon           # built-in scheduler instead of cron
 ```
 
 On first run without a `data_folder/`, it's created from the `data_folder_example/` template. Step by step — in the [full guide](docs/GUIDE.md) (RU).
+
+## First run: what to expect
+
+The first time you press "▶ Start", **real Chrome windows will start popping up by themselves** — one at a time, for each platform that needs a login. **That's expected** — it's not a virus and it's not hijacking your computer, it's your own browser, and the bot is logging in exactly the way you would yourself.
+
+- **What to do in the window that opens.** Log in by hand, as usual: phone number + SMS code (HeadHunter, Avito), email/password (LinkedIn, Himalayas), a code from Telegram (GetMatch) — every platform has its own method, the bot never picks it or types a password for you. Details per platform — in [GUIDE.md](docs/GUIDE.md#шаг-4-первый-запуск) (RU).
+- **It's one-time.** After the first login, the session is saved in a persistent browser profile on your own computer — on later runs the window opens and closes by itself, no action needed from you.
+- **Windows don't all open at once** — they open one by one as the bot works through the platform list; feel free to switch to something else, the window doesn't need to stay focused.
+- **If a window looks stuck or shows a captcha** — solve it by hand right in that window and send `/resume <platform>` to the CrossJob bot (e.g. `/resume avito`) — the platform was put on a 24h pause for exactly this case, and the command lifts the pause early.
+- **How to tell the first run went well.** The log (the "Logs" tab, or `log/app.log`) will show a line like `[avito] funnel: found=84 already_seen=1 low_fit=17 applied=1 dry_run=0` — how many vacancies it found, how many it scored, and how many made it to an application. New vacancies show up under "Vacancies".
 
 ## Dashboard
 
@@ -292,7 +304,7 @@ These limits are our own pacing settings, not official platform numbers. They ch
 |---|---|---|---|
 | HeadHunter | 15 (±70–100% at random) | 5 | 24h pause on a captcha or ban |
 | LinkedIn | 8 (±70–100%) | 5 | No official API — see the caveat in [GUIDE.md](docs/GUIDE.md) (RU) |
-| Habr Career, Wellfound, Himalayas, Djinni | the shared daily limit or the platform's own | 5 | 24h pause on a captcha or ban |
+| Habr Career, Wellfound, Himalayas, Djinni, Avito | the shared daily limit or the platform's own | 5 | 24h pause on a captcha or ban |
 | geekjob, GetMatch | none of their own — the per-run limit | 5 | 24h pause on a captcha or ban |
 | Telegram | 15 cold messages a day (if auto-messages are on) | — | Personal account |
 | Email outreach | `email_daily_limit` (30 by default) with warm-up from 15 a day | one by one, random pauses across the working day | Sending hours, stop on bounces (3 a day by default) — see [Outreach without getting Gmail blocked](#outreach-without-getting-gmail-blocked) |

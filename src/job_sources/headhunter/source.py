@@ -90,14 +90,39 @@ def _build_search_params(preferences: dict, text: str) -> dict:
     if employment_values:
         params["employment"] = employment_values
 
-    if (
-        preferences.get("remote")
-        and not preferences.get("hybrid")
-        and not preferences.get("onsite")
-    ):
-        params["schedule"] = "remote"
+    work_formats = _hh_work_formats(preferences)
+    if work_formats:
+        params["work_format"] = work_formats
+
+    if preferences.get("only_with_salary"):
+        # "Указан доход" в фильтрах hh.ru — подтверждено вживую
+        # 2026-09-29 (число вакансий у чекбокса совпало один в один с
+        # ?only_with_salary=true).
+        params["only_with_salary"] = True
 
     return params
+
+
+_WORK_FORMAT_TO_HH = {
+    "remote": "REMOTE",
+    "hybrid": "HYBRID",
+    "onsite": "ON_SITE",
+}
+
+
+def _hh_work_formats(preferences: dict) -> list[str]:
+    """ "Формат работы" на hh.ru — три независимых чекбокса (Удалённо/
+    Гибрид/На месте работодателя), подтверждено вживую 2026-09-29
+    кликом по реальному фильтру: `work_format` принимает несколько
+    значений одновременно (повторяющийся query-параметр), а не один
+    выбор "или-или", как было в старом `schedule=remote`."""
+    return sorted(
+        {
+            _WORK_FORMAT_TO_HH[key]
+            for key, enabled in preferences.items()
+            if enabled and key in _WORK_FORMAT_TO_HH
+        }
+    )
 
 
 def _with_company_description(

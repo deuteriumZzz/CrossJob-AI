@@ -54,6 +54,37 @@ def test_headhunter_client_reuses_one_driver_inside_with_block():
         assert driver.quit.call_count == 1
 
 
+def test_headhunter_client_builds_work_format_query_params():
+    """work_formats — "Формат работы" hh.ru (REMOTE/HYBRID/ON_SITE),
+    подтверждено вживую 2026-09-29: каждое значение — свой
+    повторяющийся query-параметр `work_format`, не одиночный
+    schedule=remote, как было раньше."""
+    with patch(
+        "src.job_sources.headhunter.browser_client.init_browser"
+    ) as mock_init, patch(
+        "src.job_sources.headhunter.browser_client.raise_if_blocked"
+    ), patch(
+        "src.job_sources.headhunter.browser_client.visible_text",
+        return_value="",
+    ), patch(
+        "src.job_sources.headhunter.browser_client.time.sleep"
+    ):
+        mock_init.return_value.find_elements.return_value = []
+
+        with HeadHunterBrowserClient("profile") as client:
+            client.search_vacancies_html(
+                "python",
+                remote_only=False,
+                page=0,
+                work_formats=("REMOTE", "HYBRID"),
+            )
+
+        requested_url = mock_init.return_value.get.call_args[0][0]
+        assert "work_format=HYBRID" in requested_url
+        assert "work_format=REMOTE" in requested_url
+        assert "schedule=remote" not in requested_url
+
+
 def test_headhunter_client_without_with_opens_and_closes_per_call():
     with patch(
         "src.job_sources.headhunter.browser_client.init_browser"

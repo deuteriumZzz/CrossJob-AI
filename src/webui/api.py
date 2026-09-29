@@ -67,6 +67,7 @@ from src.config_patch import (
     set_list_field,
     set_source_field,
     set_source_list_field,
+    set_top_level_bool_field,
     set_top_level_field,
     stage_config_updates,
     unset_source_field,
@@ -422,6 +423,7 @@ _CREDENTIAL_REQUIREMENTS: dict = {
     "wellfound": None,
     "himalayas": None,
     "djinni": None,
+    "avito": None,
 }
 
 
@@ -611,6 +613,17 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
                 # в дашборде (см. effective_list).
                 "positions_override": source_config.get("positions") or [],
                 "locations_override": source_config.get("locations") or [],
+                # Площадко-специфичные фильтры сайта (Avito —
+                # src/job_sources/avito/search.py, GetMatch —
+                # src/job_sources/getmatch/client.py, Habr Career —
+                # src/job_sources/habr_career/client.py) — для
+                # остальных площадок просто останутся false/пусто,
+                # безвредно.
+                "remote_only": bool(source_config.get("remote_only")),
+                "experience_level": source_config.get("experience_level")
+                or [],
+                "qualification": source_config.get("qualification") or "",
+                "employment_type": source_config.get("employment_type") or "",
                 "effective_positions": effective_list(
                     ctx.config, name, "positions"
                 ),
@@ -2333,10 +2346,17 @@ class CampaignCreate(BaseModel):
 
 
 def _campaign_targets(
-    ctx: AppContext, source: str = "", keys: list[str] | None = None
+    ctx: AppContext,
+    source: str = "",
+    keys: list[str] | None = None,
+    exclude_source: str = "",
 ) -> list[dict]:
     """Кому можно написать: по одному новому email на компанию, которой ещё
-    нет ни в одной рассылке и которую не отметили «не писать»."""
+    нет ни в одной рассылке и которую не отметили «не писать».
+    exclude_source — обратный фильтр к source (см. _absorb_new_companies:
+    свежие компании из Telegram по умолчанию не подмешиваются в идущую
+    рассылку «всем» автоматически, вручную выбранный источник это не
+    затрагивает)."""
     store = CampaignStore(ctx.output_folder)
     in_campaigns = (
         set().union(*[set(c["items"]) for c in store.all().values()])
@@ -2357,6 +2377,10 @@ def _campaign_targets(
                 and (
                     not source or _source_group(c.get("source", "")) == source
                 )
+                and (
+                    not exclude_source
+                    or _source_group(c.get("source", "")) != exclude_source
+                )
             ),
             None,
         )
@@ -2374,7 +2398,15 @@ def _campaign_targets(
 def _absorb_new_companies(ctx: AppContext) -> int:
     """Новые компании Базы — в очередь идущей рассылки «всем» (не для
     выбранных вручную и не по одному источнику). Письма им пишутся первыми
-    — см. сортировку по свежести в start_campaign_job."""
+    — см. сортировку по свежести в start_campaign_job.
+
+    Telegram — исключение: подтверждённый вживую инцидент — пост
+    кандидата "Ищу работу" совпал по ключевому слову, его контакт ушёл
+    в Базу и автоматическая рассылка «всем» отправила туда письмо как
+    работодателю. По умолчанию такие компании сюда не подмешиваются —
+    только через direct.include_telegram_leads: true (или вручную
+    выбрав источник "Telegram-каналы" при создании рассылки — это
+    осознанное решение пользователя, не затрагивается)."""
     store = CampaignStore(ctx.output_folder)
     started = [
         c
@@ -2384,7 +2416,12 @@ def _absorb_new_companies(ctx: AppContext) -> int:
     if not started:
         return 0
     latest = max(started, key=lambda c: c["created_at"])
-    targets = _campaign_targets(ctx)
+    include_telegram = bool(
+        (ctx.config.get("direct") or {}).get("include_telegram_leads")
+    )
+    targets = _campaign_targets(
+        ctx, exclude_source="" if include_telegram else "Telegram-каналы"
+    )
     return store.add_items(latest["id"], targets) if targets else 0
 
 
@@ -2772,6 +2809,7 @@ def get_direct_summary(ctx: AppContext = Depends(get_ctx)) -> dict:
         "companies": len(all_companies(ctx.config)),
         "wwr": direct.get("wwr", True) is not False,
         "hn": direct.get("hn", True) is not False,
+        "include_telegram_leads": bool(direct.get("include_telegram_leads")),
         "in_base": len(cards),
         "added_week": sum(
             1 for c in cards if c.get("created_at", "") >= week_ago
@@ -2791,6 +2829,11 @@ def get_direct_summary(ctx: AppContext = Depends(get_ctx)) -> dict:
 class DirectSettings(BaseModel):
     wwr: Optional[bool] = None
     hn: Optional[bool] = None
+    # По умолчанию выключено — см. _absorb_new_companies: подтверждённый
+    # вживую инцидент, когда пост кандидата "Ищу работу" ушёл в Базу и
+    # автоматическая рассылка «всем» отправила туда письмо как
+    # работодателю.
+    include_telegram_leads: Optional[bool] = None
 
 
 @app.post("/api/direct/settings")
@@ -2799,7 +2842,7 @@ def post_direct_settings(
 ) -> dict:
     """Доски удалёнки «Сайтов компаний»: We Work Remotely,
     HN «Who is hiring»."""
-    for field in ("wwr", "hn"):
+    for field in ("wwr", "hn", "include_telegram_leads"):
         value = getattr(body, field)
         if value is not None:
             set_source_field(ctx.config_file, "direct", field, value)
@@ -3118,6 +3161,11 @@ class SourceSettingsUpdate(BaseModel):
     # у resume_id для нерелевантных источников.
     auto_reply: Optional[bool] = None
     auto_bump_resume: Optional[bool] = None
+    # Общий "только удалённые вакансии" флаг — Avito/GetMatch/Habr
+    # Career сейчас читают его (см. соответствующие source.py), для
+    # остальных площадок игнорируется тем же паттерном, что auto_reply
+    # у HH.
+    remote_only: Optional[bool] = None
     chat_cover_letter_followup: Optional[bool] = None
     reminder_follow_up_days: Optional[int] = None
     auto_reminder: Optional[bool] = None
@@ -3136,6 +3184,16 @@ class SourceSettingsUpdate(BaseModel):
     # означает "используй общие из панели Поиск" (см. effective_list).
     positions: Optional[list[str]] = None
     locations: Optional[list[str]] = None
+    # GetMatch-специфичный список ("Уровень вакансии" — junior/middle/
+    # senior/lead, см. src/job_sources/getmatch/client.py). Для
+    # остальных площадок игнорируется тем же паттерном, что positions.
+    experience_level: Optional[list[str]] = None
+    # Habr Career-специфичные фильтры сайдбара /vacancies ("Квалификация"
+    # — одиночный выбор, не список, в отличие от GetMatch; "Тип
+    # занятости"), см. src/job_sources/habr_career/client.py. Для
+    # остальных площадок игнорируется тем же паттерном, что auto_reply.
+    qualification: Optional[str] = None
+    employment_type: Optional[str] = None
 
 
 @app.post("/api/settings")
@@ -3153,6 +3211,9 @@ def post_settings(
         "auto_apply",
         "auto_reply",
         "auto_bump_resume",
+        "remote_only",
+        "qualification",
+        "employment_type",
         "chat_cover_letter_followup",
         "reminder_follow_up_days",
         "auto_reminder",
@@ -3207,6 +3268,13 @@ def post_settings(
     if body.locations is not None:
         set_source_list_field(
             ctx.config_file, body.source, "locations", body.locations
+        )
+    if body.experience_level is not None:
+        set_source_list_field(
+            ctx.config_file,
+            body.source,
+            "experience_level",
+            body.experience_level,
         )
     ctx.reload_config()
     return {"source": body.source, "updated": True}
@@ -3459,6 +3527,10 @@ _SEARCH_LIST_FIELDS = (
     "title_blacklist",
     "location_blacklist",
 )
+# "Формат работы" hh.ru (см. HeadHunterSource/HeadHunterBrowserSource) —
+# top-level булевы флаги, а не список, поэтому отдельный кортеж со своей
+# ветвью сохранения ниже (set_top_level_bool_field, не set_list_field).
+_SEARCH_BOOL_FIELDS = ("remote", "hybrid", "onsite", "only_with_salary")
 
 
 class SearchSettingsUpdate(BaseModel):
@@ -3467,12 +3539,20 @@ class SearchSettingsUpdate(BaseModel):
     company_blacklist: Optional[list[str]] = None
     title_blacklist: Optional[list[str]] = None
     location_blacklist: Optional[list[str]] = None
+    remote: Optional[bool] = None
+    hybrid: Optional[bool] = None
+    onsite: Optional[bool] = None
+    only_with_salary: Optional[bool] = None
 
 
 def _search_snapshot(ctx: AppContext) -> dict:
-    return {
+    snapshot = {
         field: ctx.config.get(field) or [] for field in _SEARCH_LIST_FIELDS
     }
+    snapshot.update(
+        {field: bool(ctx.config.get(field)) for field in _SEARCH_BOOL_FIELDS}
+    )
+    return snapshot
 
 
 @app.get("/api/settings/search")
@@ -3493,6 +3573,10 @@ def post_search_settings(
         value = getattr(body, field)
         if value is not None:
             set_list_field(ctx.config_file, field, value)
+    for field in _SEARCH_BOOL_FIELDS:
+        value = getattr(body, field)
+        if value is not None:
+            set_top_level_bool_field(ctx.config_file, field, value)
     ctx.reload_config()
     return _search_snapshot(ctx)
 
@@ -3512,6 +3596,7 @@ class TelegramSettingsUpdate(BaseModel):
     active_hours_end: Optional[int] = None
     intro_message_template: Optional[str] = None
     smart_greeting: Optional[bool] = None
+    llm_vacancy_filter: Optional[bool] = None
     message_delay_min_seconds: Optional[int] = None
     message_delay_max_seconds: Optional[int] = None
 
@@ -3558,6 +3643,12 @@ def _telegram_settings_snapshot(ctx: AppContext) -> dict:
         # из трёх способов написать HR (она сама, "✍️ письмо",
         # автоотправка), который не использовал LLM вообще.
         "smart_greeting": tg.get("smart_greeting", True),
+        # Короткий LLM-запрос "это вакансия или нет?" после стоп-слов —
+        # только для постов, уже прошедших ключевые слова (не на весь
+        # поток каналов). Выключено по умолчанию — стоп-слова уже
+        # закрывают основной случай (посты кандидатов) бесплатно,
+        # включайте, если каналов много и мусор всё равно проходит.
+        "llm_vacancy_filter": bool(tg.get("llm_vacancy_filter")),
         "message_delay_min_seconds": tg.get(
             "message_delay_min_seconds", MIN_TELEGRAM_MESSAGE_DELAY_SECONDS
         ),
@@ -3590,6 +3681,7 @@ def post_telegram_settings(
                 "max_post_age_days",
                 "auto_message",
                 "smart_greeting",
+                "llm_vacancy_filter",
                 "daily_message_limit",
                 "active_hours_start",
                 "active_hours_end",
@@ -3621,6 +3713,7 @@ class TelegramWatchUpdate(BaseModel):
     forward_to: Optional[str] = None
     auto_message: Optional[bool] = None
     smart_greeting: Optional[bool] = None
+    llm_vacancy_filter: Optional[bool] = None
     daily_message_limit: Optional[int] = None
     active_hours_start: Optional[int] = None
     active_hours_end: Optional[int] = None
@@ -3660,6 +3753,7 @@ def _telegram_watch_snapshot(ctx: AppContext) -> dict:
         "bot_connected": bot_credentials(ctx.config) is not None,
         "greeting": telegram.get("intro_message_template") or "",
         "smart_greeting": bool(telegram.get("smart_greeting", True)),
+        "llm_vacancy_filter": bool(telegram.get("llm_vacancy_filter")),
         "resumes": _telegram_resume_list(ctx),
         "resume_route_ru": (lambda r: r.name if r else "")(
             resolve_resume(ctx.config, "telegram", True)
@@ -3774,6 +3868,10 @@ def post_telegram_watch(
     if body.smart_greeting is not None:
         set_source_field(
             prefs, "telegram", "smart_greeting", body.smart_greeting
+        )
+    if body.llm_vacancy_filter is not None:
+        set_source_field(
+            prefs, "telegram", "llm_vacancy_filter", body.llm_vacancy_filter
         )
     for field in (
         "daily_message_limit",

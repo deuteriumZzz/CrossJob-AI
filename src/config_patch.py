@@ -158,6 +158,26 @@ def set_top_level_field(config_file: Path, key: str, value: str) -> None:
     _write_valid_yaml(config_file, "\n".join(lines) + "\n")
 
 
+def set_top_level_bool_field(config_file: Path, key: str, value: bool) -> None:
+    """Как set_top_level_field, но для булевых top-level ключей
+    (remote/hybrid/onsite в work_preferences.yaml) — без кавычек,
+    той же текстовой техникой."""
+    text = config_file.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    value_text = _format_yaml_scalar(value)
+
+    for index, line in enumerate(lines):
+        if line.strip().startswith(f"{key}:") and not line.startswith(
+            (" ", "\t")
+        ):
+            lines[index] = f"{key}: {value_text}"
+            _write_valid_yaml(config_file, "\n".join(lines) + "\n")
+            return
+
+    lines.insert(0, f"{key}: {value_text}")
+    _write_valid_yaml(config_file, "\n".join(lines) + "\n")
+
+
 def set_source_field(
     config_file: Path,
     source: str,

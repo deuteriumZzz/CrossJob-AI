@@ -6,6 +6,7 @@ from src.job_sources.headhunter.browser_mapping import (
     hh_html_vacancy_to_job,
     parse_search_results,
 )
+from src.job_sources.headhunter.source import _hh_work_formats
 from src.job_sources.preferences import effective_list
 from src.logging import logger
 
@@ -20,11 +21,7 @@ class HeadHunterBrowserSource:
         self.client = client
 
     def search(self, preferences: dict) -> list[Job]:
-        remote_only = bool(
-            preferences.get("remote")
-            and not preferences.get("hybrid")
-            and not preferences.get("onsite")
-        )
+        work_formats = tuple(_hh_work_formats(preferences))
 
         seen_ids: set = set()
         jobs: list[Job] = []
@@ -32,7 +29,11 @@ class HeadHunterBrowserSource:
         for position in effective_list(preferences, "headhunter", "positions"):
             for page in range(PAGES_PER_POSITION):
                 html = self.client.search_vacancies_html(
-                    position, remote_only, page=page
+                    position,
+                    remote_only=False,
+                    page=page,
+                    work_formats=work_formats,
+                    only_with_salary=bool(preferences.get("only_with_salary")),
                 )
                 items = parse_search_results(html)
                 if not items:

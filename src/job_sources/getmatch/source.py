@@ -1,16 +1,17 @@
 from src.job import Job
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import PlatformBlockedError
-from src.job_sources.getmatch.client import GetMatchClient
+from src.job_sources.getmatch.client import EXPERIENCE_LEVELS, GetMatchClient
 from src.job_sources.getmatch.mapping import parse_search_results
 from src.job_sources.preferences import effective_list
 from src.logging import logger
 
 # Сам поиск живёт здесь; реальный клик "Откликнуться" — в
-# GetMatchClient.apply() (main.py вызывает его при auto_apply: true),
-# подтверждён на живом аккаунте. Сопроводительное письмо генерируется
-# для истории отклика, но никуда на самом GetMatch не вставляется —
-# сайт нигде его не показывает.
+# GetMatchClient.apply() (main.py вызывает его при auto_apply: true).
+# Сопроводительное письмо вписывается в реальное поле на GetMatch —
+# см. GetMatchClient.apply() (textarea в модалке "Откликнуться"), кроме
+# случаев, когда сайт вместо модалки открывает многошаговый мастер
+# анкеты без этого поля (см. _WIZARD_STEP_RE в client.py).
 
 
 # ponytail: полнофразовое совпадение ("python разработчик" целиком)
@@ -60,6 +61,12 @@ class GetMatchSource:
     def search(self, preferences: dict) -> list[Job]:
         gm_preferences = preferences.get("getmatch") or {}
         specializations = gm_preferences.get("specializations") or []
+        remote_only = bool(gm_preferences.get("remote_only"))
+        experience_levels = [
+            level
+            for level in gm_preferences.get("experience_level") or []
+            if level in EXPERIENCE_LEVELS
+        ]
         # ponytail: с specializations сайт уже фильтрует сам через
         # sp= (чекбоксы "Сфера" на живой странице) — точнее и дешевле,
         # чем тащить весь общий список и грепать по словам (см.
@@ -80,7 +87,10 @@ class GetMatchSource:
             # getmatch.search() целиком.
             try:
                 html = self.client.search_vacancies_html(
-                    page=page, specializations=specializations
+                    page=page,
+                    specializations=specializations,
+                    remote_only=remote_only,
+                    experience_levels=experience_levels,
                 )
             except PlatformBlockedError:
                 raise

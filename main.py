@@ -55,6 +55,9 @@ from src.job_sources.apply_pacing import (
     wait_between_sources,
     within_active_hours,
 )
+from src.job_sources.avito.apply import apply_to_job as apply_to_avito_job
+from src.job_sources.avito.auth import AvitoSession
+from src.job_sources.avito.source import AvitoSource
 from src.job_sources.base import JobSource
 from src.job_sources.block_detection import (
     PlatformBlockedError,
@@ -1688,7 +1691,7 @@ def search_geekjob(
 
         if auto_apply:
             try:
-                applied = client.apply(job.link, profile_dir)
+                applied = client.apply(job.link, profile_dir, cover_letter)
             except Exception as e:
                 logger.exception(
                     f"geekjob apply form crashed for {job.role} at "
@@ -2987,6 +2990,194 @@ def search_and_apply_himalayas(
         session.quit()
 
 
+def search_and_apply_avito(
+    parameters: dict,
+    llm_api_key: str,
+    stop_event: Optional[threading.Event] = None,
+):
+    """
+    Ищет вакансии на avito.ru (роли из positions в work_preferences.yaml
+    ищутся через /all/vakansii?q=...) среди тех, что помечены "Отклик с
+    резюме" (остальные ведут в чат с работодателем — не отклик, бот
+    туда не пишет). Если avito.auto_apply выставлен в true, пробует
+    откликнуться через apply_to_avito_job — best-effort, НЕ проверено
+    на живом залогиненном аккаунте: детальная страница вакансии
+    отдаёт "Доступ ограничен: проверка безопасности" без реального
+    браузерного отпечатка (см. docstring init_avito_browser), поэтому
+    саму кнопку отклика увидеть было нечем — тот же класс риска, что у
+    Himalayas при первом добавлении.
+
+    Вход — вручную в открывшемся браузере (AvitoSession,
+    undetected-chromedriver — как и у Himalayas/LinkedIn), бот никогда
+    не создаёт аккаунт и не подставляет пароль/SMS-код сам. Один
+    Chrome-процесс переиспользуется на весь прогон (поиск + все
+    отклики).
+
+    auto_apply: false по умолчанию независимо от того, что в итоге
+    стоит в work_preferences.yaml — первый запуск всегда dry-run,
+    смотрите лог "Found N matching avito.ru vacancies" и при 0
+    результатах пришлите разработчику разметку страницы для правки
+    селекторов, прежде чем включать auto_apply.
+    """
+    data_folder: Path = parameters["dataFolder"]
+    resume_pdf_path = data_folder / RESUME_PDF
+    if not resume_pdf_path.exists():
+        raise FileNotFoundError(
+            f"Resume PDF not found: {resume_pdf_path}. Place your "
+            f"resume as '{RESUME_PDF}' in {data_folder}."
+        )
+
+    av_preferences = parameters.get("avito") or {}
+    auto_apply = bool(av_preferences.get("auto_apply", False))
+
+    output_folder: Path = parameters["outputFileDirectory"]
+    applied_log = AppliedLog(output_folder / "applied_log.json")
+
+    if is_still_blocked(output_folder, "avito"):
+        logger.warning("avito.ru is cooling down after a block — skipping.")
+        return
+
+    session = AvitoSession(output_folder / ".chrome_profile_avito")
+    try:
+        # Поиск (/all/vakansii) работает анонимно — вход нужен только
+        # для самого отклика, поэтому на dry-run не запрашивается.
+        # warm_up() всё равно заходит на главную первой — реальный
+        # прогон 2026-09-29 показал блокировку при прямом заходе на
+        # глубокий поисковый URL с чистого профиля без этого.
+        if auto_apply:
+            session.ensure_logged_in(parameters)
+        else:
+            session.warm_up()
+        source: JobSource = AvitoSource(session.driver)
+        try:
+            jobs = source.search(parameters)
+        except PlatformBlockedError as e:
+            logger.error(f"avito.ru appears to have blocked us: {e}")
+            mark_blocked(output_folder, "avito")
+            notify(
+                parameters,
+                f"avito.ru: похоже на блокировку ({e}). Площадка "
+                "поставлена на паузу на 24ч.",
+            )
+            return
+        logger.info(f"Found {len(jobs)} matching avito.ru vacancies.")
+        already_seen = sum(
+            1 for job in jobs if applied_log.already_applied(job)
+        )
+        run_start = datetime.now().astimezone()
+
+        sent_count = 0
+        job_max_applications = _job_max_applications(parameters, "avito")
+        daily_limit = randomized_daily_limit(_daily_limit(parameters, "avito"))
+        for job in jobs:
+            if stop_event is not None and stop_event.is_set():
+                logger.info(
+                    "Stop requested — прерываю перед следующей вакансией."
+                )
+                break
+            if sent_count >= job_max_applications:
+                logger.info(
+                    f"Reached JOB_MAX_APPLICATIONS "
+                    f"({job_max_applications}) for this run."
+                )
+                break
+            if _total_daily_limit_reached(parameters, applied_log):
+                break
+            if applied_log.already_applied(job):
+                continue
+            if (
+                auto_apply
+                and applied_log.applied_today_count("avito") >= daily_limit
+            ):
+                logger.info(
+                    f"Reached daily application limit ({daily_limit}) "
+                    "for avito.ru today."
+                )
+                break
+
+            fit = score_job_fit(
+                resume_pdf_path,
+                job,
+                llm_api_key,
+                salary_expectations=_job_salary_expectations(parameters),
+            )
+            tier = classify_fit(
+                fit.score,
+                _job_min_score(parameters),
+                _job_suitability_score(parameters),
+            )
+            if tier == "skip":
+                logger.info(
+                    f"Skipping {job.role} at {job.company}: fit score "
+                    f"{fit.score}/10 below minimum."
+                )
+                applied_log.record(
+                    job, "", "", "skipped_low_fit", fit.score, fit.gaps
+                )
+                continue
+            if tier == "weak":
+                logger.info(
+                    f"{job.role} at {job.company}: weak fit "
+                    f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
+                )
+
+            try:
+                cover_letter = generate_cover_letter_for_job(
+                    resume_pdf_path, job, llm_api_key
+                )
+            except Exception as e:
+                logger.exception(
+                    f"Failed to generate cover letter for {job.role} at "
+                    f"{job.company}, skipping this vacancy: {e}"
+                )
+                continue
+
+            if auto_apply:
+                try:
+                    applied = apply_to_avito_job(session.driver, job.link)
+                except Exception as e:
+                    logger.exception(
+                        f"avito apply form crashed for {job.role} at "
+                        f"{job.company} ({job.link}) — skipping without "
+                        f"recording so a future run retries it: {e}"
+                    )
+                    continue
+                if applied:
+                    status: Literal["applied", "dry_run"] = "applied"
+                    logger.info(
+                        f"Applied to {job.role} at {job.company} "
+                        f"({job.link})"
+                    )
+                else:
+                    status = "dry_run"
+                    logger.warning(
+                        "Кнопка отклика не найдена на "
+                        f"{job.link} — записано как dry-run."
+                    )
+            else:
+                status = "dry_run"
+                logger.info(
+                    f"[manual apply needed] {job.role} at {job.company} "
+                    f"({job.link})"
+                )
+
+            applied_log.record(
+                job,
+                cover_letter,
+                resume_id="",
+                status=status,
+                score=fit.score,
+                gaps=fit.gaps,
+            )
+            sent_count += 1
+
+        _log_funnel_summary(
+            "avito", applied_log, len(jobs), already_seen, run_start
+        )
+    finally:
+        session.quit()
+
+
 def search_direct(
     parameters: dict,
     llm_api_key: str,
@@ -4041,6 +4232,7 @@ ALL_SOURCES: list[Tuple[str, Callable[..., Any]]] = [
     ("wellfound", search_and_apply_wellfound),
     ("himalayas", search_and_apply_himalayas),
     ("djinni", search_and_apply_djinni),
+    ("avito", search_and_apply_avito),
     ("direct", search_direct),
 ]
 
@@ -5975,6 +6167,10 @@ def handle_inquiries(
                 logger.info("Searching djinni.co...")
                 search_and_apply_djinni(parameters, llm_api_key)
 
+            if "Search & Apply on Avito" == selected_actions:
+                logger.info("Searching avito.ru...")
+                search_and_apply_avito(parameters, llm_api_key)
+
             if "Search selected sources" == selected_actions:
                 names = prompt_selected_sources()
                 if names:
@@ -6025,6 +6221,7 @@ def prompt_user_action() -> str:
                     "Search & Apply on Wellfound",
                     "Search & Apply on Himalayas",
                     "Search & Apply on Djinni",
+                    "Search & Apply on Avito",
                     "Search selected sources",
                     "Check HeadHunter replies",
                     "Clean up stale HeadHunter negotiations",
@@ -6078,6 +6275,10 @@ def prompt_selected_sources() -> list[str]:
                     "Djinni (apply not verified live yet)",
                     "djinni",
                 ),
+                (
+                    "Avito (experimental, not verified live)",
+                    "avito",
+                ),
             ],
         ),
     ]
@@ -6093,7 +6294,7 @@ def prompt_selected_sources() -> list[str]:
     help=(
         "Run non-interactively (for cron) instead of showing the menu: "
         "one of headhunter/geekjob/telegram/"
-        "getmatch/linkedin/habr_career/wellfound/himalayas/djinni/all/"
+        "getmatch/linkedin/habr_career/wellfound/himalayas/djinni/avito/all/"
         "check_hh_replies/"
         "check_telegram_replies/"
         "cleanup_hh_negotiations, or "
@@ -6229,6 +6430,10 @@ def main(auto: Optional[str], daemon: bool):
 
         if auto == "djinni":
             search_and_apply_djinni(config, llm_api_key)
+            return
+
+        if auto == "avito":
+            search_and_apply_avito(config, llm_api_key)
             return
 
         if auto == "all":

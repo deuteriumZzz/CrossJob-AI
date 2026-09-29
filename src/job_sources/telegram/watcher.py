@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import re
 import threading
+import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable, Coroutine, Optional
@@ -69,13 +71,43 @@ def default_keywords(positions: list[str]) -> list[str]:
     return words
 
 
+# Маркеры "это пост кандидата, а не вакансии" — подтверждённый вживую
+# инцидент: пост "Ищу работу Python-разработчиком, мой контакт:
+# ..." совпал по ключевому слову "python" (оно и должно совпадать —
+# кандидат честно написал свою специализацию), контакт из поста ушёл
+# в Базу компаний как "работодатель", и рассылка на автомате отправила
+# туда письмо — кандидату вместо HR. Проблема не в самом слове
+# "python" (сузить keywords до целой фразы отсеет реальные вакансии с
+# другой формулировкой), а в том, что пост вообще не вакансия — эти
+# фразы такие посты выдают почти всегда, независимо от специализации.
+CANDIDATE_SELF_POST_MARKERS = (
+    "ищу работу",
+    "ищу вакансию",
+    "в поиске работы",
+    "рассматриваю предложения",
+    "рассматриваю офферы",
+    "open to work",
+    "резюме:",
+    "моё резюме",
+    "мое резюме",
+    "мой резюме",
+    "хочу найти работу",
+    "ищу проект",
+)
+
+
 def match_keywords(
     text: str, keywords: list[str], stop_words: list[str]
 ) -> list[str]:
     """Совпавшие ключевые слова (по вхождению, без учёта регистра) или
-    пустой список, если совпадений нет или есть стоп-слово."""
+    пустой список, если совпадений нет или есть стоп-слово (свои из
+    watch_stop_words + встроенные CANDIDATE_SELF_POST_MARKERS —
+    последние нельзя выключить, см. их докстринг)."""
     lowered = text.casefold()
-    if any(stop.casefold() in lowered for stop in stop_words if stop.strip()):
+    all_stop_words = (*stop_words, *CANDIDATE_SELF_POST_MARKERS)
+    if any(
+        stop.casefold() in lowered for stop in all_stop_words if stop.strip()
+    ):
         return []
     return [k for k in keywords if k.strip() and k.casefold() in lowered]
 
@@ -83,6 +115,133 @@ def match_keywords(
 def _fingerprint(text: str) -> str:
     normalized = re.sub(r"\s+", " ", text.casefold())[:400]
     return hashlib.sha1(normalized.encode("utf-8")).hexdigest()
+
+
+_VACANCY_CLASSIFIER_PROMPT = (
+    "Пост из Telegram-канала о работе. Это объявление вакансии (ищут "
+    "сотрудника), а не резюме/реклама/вопрос? Ответь одним словом: "
+    "ДА или НЕТ.\n\nПост:\n{text}"
+)
+
+
+# Секунды ожидания перед каждым повтором при rate limit — не растёт
+# бесконечно (лимиты обычно сбрасываются за минуты, не часы), суммарно
+# держит один пост в очереди не больше ~100с, пока идёт reset окна
+# лимита у провайдера. Другие посты (свои executor-потоки) это не
+# блокирует — см. run_in_executor в _handle_post.
+_RATE_LIMIT_RETRY_DELAYS_SECONDS = (10, 30, 60)
+_RATE_LIMIT_MARKERS = ("429", "rate limit", "rate_limit", "too many requests")
+
+
+def _llm_says_vacancy(text: str, llm_api_key: str) -> bool:
+    """Короткий LLM-классификатор поверх стоп-слов (telegram.
+    llm_vacancy_filter, выключен по умолчанию) — вызывается только для
+    постов, уже прошедших match_keywords, не на весь поток каналов;
+    промпт и ответ в одно слово держат токены к минимуму.
+
+    Rate limit — не сразу fail-open: 50+ каналов легко дают всплеск
+    запросов разом, а лимит провайдера обычно сбрасывается за минуты —
+    ждём и пробуем снова (см. _RATE_LIMIT_RETRY_DELAYS_SECONDS), чтобы
+    не пропускать проверку молча именно в момент нагрузки, когда она
+    нужнее всего. Любая другая ошибка (плохой ключ, сеть, пустой
+    ответ) — fail-open сразу, как и раньше (_auto_message_text), нет
+    смысла ждать то, что само не пройдёт."""
+    if not llm_api_key:
+        return True
+    from src.job_sources.llm_provider import get_chat_llm
+
+    prompt = _VACANCY_CLASSIFIER_PROMPT.format(text=text[:600])
+    attempts = len(_RATE_LIMIT_RETRY_DELAYS_SECONDS) + 1
+    for attempt in range(attempts):
+        try:
+            llm = get_chat_llm(llm_api_key, temperature=0)
+            answer = llm.invoke(prompt)
+            content = str(getattr(answer, "content", answer)).strip().lower()
+            return not content.startswith("нет")
+        except Exception as e:
+            is_rate_limit = any(
+                m in str(e).lower() for m in _RATE_LIMIT_MARKERS
+            )
+            if not is_rate_limit or attempt == attempts - 1:
+                logger.warning(
+                    f"Telegram-парсер: LLM-классификатор недоступен "
+                    f"(попытка {attempt + 1}/{attempts}): {e}"
+                )
+                return True
+            delay = _RATE_LIMIT_RETRY_DELAYS_SECONDS[attempt]
+            logger.info(
+                f"Telegram-парсер: LLM rate limit, повтор через {delay}с "
+                f"(попытка {attempt + 1}/{attempts})"
+            )
+            time.sleep(delay)
+    return True
+
+
+# Структурные сигналы реальной вакансии — зарплата и формат работы
+# почти всегда есть в тексте вакансии, у постов "ищу работу"/рекламы
+# реже. Не замена LLM-классификатору, а способ не тратить на него
+# токены, когда пост и так явно похож на вакансию.
+_SALARY_RE = re.compile(
+    r"\d[\d\s]{2,}\s?(?:₽|руб|\$|usd|eur|€|k\b)|\bот\s+\d{2,}", re.IGNORECASE
+)
+_WORK_FORMAT_RE = re.compile(
+    r"удал[её]нн?о|remote|гибрид|офис|hybrid|on-?site", re.IGNORECASE
+)
+
+
+def _has_vacancy_structure(text: str) -> bool:
+    return bool(_SALARY_RE.search(text)) and bool(_WORK_FORMAT_RE.search(text))
+
+
+_CHANNEL_TRUST_FILE = ".channel_trust.json"
+# Меньше — можно наказать канал по паре случайных совпадений; больше —
+# долго терпим откровенно мусорный канал, пока не наберётся данных.
+_TRUST_MIN_SAMPLES = 5
+_TRUST_REJECT_THRESHOLD = 0.5
+
+
+def _record_channel_verdict(
+    output_folder: Path, channel: str, is_vacancy: bool
+) -> None:
+    """Копит долю отклонённых LLM-классификатором постов на канал —
+    основа для _channel_is_untrusted. Пишется только когда
+    llm_vacancy_filter реально вызвал LLM (см. _handle_post), не на
+    каждый матч по ключевым словам."""
+    path = output_folder / _CHANNEL_TRUST_FILE
+    try:
+        data = (
+            json.loads(path.read_text(encoding="utf-8"))
+            if path.exists()
+            else {}
+        )
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    entry = data.setdefault(channel, {"checked": 0, "rejected": 0})
+    entry["checked"] += 1
+    if not is_vacancy:
+        entry["rejected"] += 1
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def _channel_is_untrusted(output_folder: Path, channel: str) -> bool:
+    """Канал с высокой долей отклонённых постов (не менее
+    _TRUST_MIN_SAMPLES проверок) теряет право на "скидку" по
+    _has_vacancy_structure — для него LLM-проверка идёт всегда, даже
+    если структурные сигналы выглядят убедительно."""
+    path = output_folder / _CHANNEL_TRUST_FILE
+    if not path.exists():
+        return False
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    entry = data.get(channel)
+    if not entry or entry["checked"] < _TRUST_MIN_SAMPLES:
+        return False
+    return entry["rejected"] / entry["checked"] >= _TRUST_REJECT_THRESHOLD
 
 
 class TelegramWatcher(threading.Thread):
@@ -374,11 +533,22 @@ class TelegramWatcher(threading.Thread):
         if len(self._seen) > _SEEN_LIMIT:
             self._seen.popitem(last=False)
 
+        tg_prefs = self.parameters.get("telegram") or {}
+        if tg_prefs.get("llm_vacancy_filter") and (
+            _channel_is_untrusted(self.output_folder, channel)
+            or not _has_vacancy_structure(text)
+        ):
+            is_vacancy = await asyncio.get_event_loop().run_in_executor(
+                None, _llm_says_vacancy, text, self.llm_api_key
+            )
+            _record_channel_verdict(self.output_folder, channel, is_vacancy)
+            if not is_vacancy:
+                return
+
         link = f"https://t.me/{channel}/{message.id}"
         contacts = contacts_from_text(text, exclude=(channel,))
         self.matched_count += 1
 
-        tg_prefs = self.parameters.get("telegram") or {}
         telegram_contacts = [c for c in contacts if c["kind"] == "telegram"]
         if tg_prefs.get("auto_message") and len(telegram_contacts) == 1:
             from src.job_sources.apply_pacing import (

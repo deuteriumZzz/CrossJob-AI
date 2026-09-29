@@ -1,7 +1,10 @@
+from unittest.mock import MagicMock
+
 from src.job_sources.habr_career.mapping import (
     habr_vacancy_to_job,
     parse_search_results,
 )
+from src.job_sources.habr_career.source import HabrCareerSource
 
 SEARCH_HTML = """
 <div class="vacancy-card">
@@ -81,10 +84,54 @@ def test_habr_vacancy_to_job_extracts_city_location():
     assert habr_vacancy_to_job(html, "111").location == "Новосибирск"
 
 
+def test_source_search_passes_remote_only_and_qualification_filters():
+    """preferences.habr_career.{remote_only,qualification,employment_type}
+    должны долетать до client.search_html как есть (см. remote=true/
+    qid=/employment_type= в src/job_sources/habr_career/client.py)."""
+    client = MagicMock()
+    client.search_html.return_value = ""
+    source = HabrCareerSource(client)
+
+    source.search(
+        {
+            "habr_career": {
+                "positions": ["python"],
+                "remote_only": True,
+                "qualification": "senior",
+                "employment_type": "full_time",
+            }
+        }
+    )
+
+    client.search_html.assert_called_with(
+        "python",
+        remote_only=True,
+        qualification="senior",
+        employment_type="full_time",
+    )
+
+
+def test_source_search_without_filters_passes_none():
+    client = MagicMock()
+    client.search_html.return_value = ""
+    source = HabrCareerSource(client)
+
+    source.search({"habr_career": {"positions": ["python"]}})
+
+    client.search_html.assert_called_with(
+        "python",
+        remote_only=False,
+        qualification=None,
+        employment_type=None,
+    )
+
+
 if __name__ == "__main__":
     test_parse_search_results_dedupes()
     test_habr_vacancy_to_job_maps_fields()
     test_habr_vacancy_to_job_missing_fields_degrades_gracefully()
     test_habr_vacancy_to_job_extracts_remote_location()
     test_habr_vacancy_to_job_extracts_city_location()
+    test_source_search_passes_remote_only_and_qualification_filters()
+    test_source_search_without_filters_passes_none()
     print("All tests passed.")

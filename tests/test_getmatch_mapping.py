@@ -70,7 +70,12 @@ def test_source_search_filters_by_position_keyword():
     jobs = source.search({"getmatch": {"positions": ["backend"]}})
 
     assert [j.role for j in jobs] == ["Backend Engineer"]
-    client.search_vacancies_html.assert_called_with(page=2, specializations=[])
+    client.search_vacancies_html.assert_called_with(
+        page=2,
+        specializations=[],
+        remote_only=False,
+        experience_levels=[],
+    )
 
 
 def test_source_search_ignores_generic_role_word_and_separator():
@@ -126,7 +131,35 @@ def test_source_search_with_specializations_skips_keyword_filter():
         "Backend Engineer",
     ]
     client.search_vacancies_html.assert_any_call(
-        page=1, specializations=["python", "data_science"]
+        page=1,
+        specializations=["python", "data_science"],
+        remote_only=False,
+        experience_levels=[],
+    )
+
+
+def test_source_search_passes_remote_only_and_experience_level():
+    """remote_only/experience_level из preferences должны долетать до
+    client.search_vacancies_html как есть (см. l=remote/se= в
+    src/job_sources/getmatch/client.py), а неизвестный уровень —
+    отбрасываться (EXPERIENCE_LEVELS)."""
+    client = _one_page_client(SEARCH_HTML)
+    source = GetMatchSource(client)
+
+    source.search(
+        {
+            "getmatch": {
+                "remote_only": True,
+                "experience_level": ["senior", "not_a_real_level"],
+            }
+        }
+    )
+
+    client.search_vacancies_html.assert_any_call(
+        page=1,
+        specializations=[],
+        remote_only=True,
+        experience_levels=["senior"],
     )
 
 
@@ -137,4 +170,5 @@ if __name__ == "__main__":
     test_source_search_ignores_generic_role_word_and_separator()
     test_source_search_without_positions_returns_everything()
     test_source_search_with_specializations_skips_keyword_filter()
+    test_source_search_passes_remote_only_and_experience_level()
     print("All tests passed.")

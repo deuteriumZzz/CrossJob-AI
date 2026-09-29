@@ -22,7 +22,14 @@ def passes_blacklists(job: Job, preferences: dict) -> bool:
 
     if matches_any(job.company, preferences.get("company_blacklist", [])):
         return False
-    if matches_any(job.role, preferences.get("title_blacklist", [])):
+    title_blacklist = preferences.get("title_blacklist", [])
+    # Не только заголовок — некоторые нежелательные вакансии (военные
+    # контракты и т.п.) не называют это прямо в title, слово всплывает
+    # только в тексте описания. Одинаково работает для RU/EN: обычное
+    # совпадение подстроки, без учёта регистра, языку всё равно.
+    if matches_any(job.role, title_blacklist) or matches_any(
+        job.description, title_blacklist
+    ):
         return False
     if matches_any(job.location, preferences.get("location_blacklist", [])):
         return False

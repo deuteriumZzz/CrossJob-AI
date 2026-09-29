@@ -25,6 +25,139 @@ def test_match_keywords_and_defaults():
     ]
 
 
+def test_llm_says_vacancy_fails_open_without_key():
+    assert w._llm_says_vacancy("любой текст", "") is True
+
+
+def test_llm_says_vacancy_fails_open_on_error(monkeypatch):
+    def _boom(*args, **kwargs):
+        raise RuntimeError("no llm configured")
+
+    monkeypatch.setattr("src.job_sources.llm_provider.get_chat_llm", _boom)
+    assert w._llm_says_vacancy("любой текст", "key") is True
+
+
+def test_llm_says_vacancy_retries_on_rate_limit_then_succeeds(monkeypatch):
+    """Всплеск запросов (много каналов разом) не должен превращаться в
+    мгновенный fail-open — ждём сброса лимита и пробуем снова."""
+    monkeypatch.setattr(w, "_RATE_LIMIT_RETRY_DELAYS_SECONDS", (0, 0))
+    sleeps: list[float] = []
+    monkeypatch.setattr(w.time, "sleep", sleeps.append)
+
+    calls = {"n": 0}
+
+    class _FakeLLM:
+        def invoke(self, prompt):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise RuntimeError("Error 429: rate limit exceeded")
+            return SimpleNamespace(content="ДА")
+
+    monkeypatch.setattr(
+        "src.job_sources.llm_provider.get_chat_llm",
+        lambda *a, **kw: _FakeLLM(),
+    )
+    assert w._llm_says_vacancy("Ищем Python-разработчика", "key") is True
+    assert calls["n"] == 3
+    assert sleeps == [0, 0]
+
+
+def test_llm_says_vacancy_fails_open_after_exhausting_retries(monkeypatch):
+    monkeypatch.setattr(w, "_RATE_LIMIT_RETRY_DELAYS_SECONDS", (0,))
+    monkeypatch.setattr(w.time, "sleep", lambda *a: None)
+
+    def _always_rate_limited(*args, **kwargs):
+        raise RuntimeError("429 Too Many Requests")
+
+    monkeypatch.setattr(
+        "src.job_sources.llm_provider.get_chat_llm", _always_rate_limited
+    )
+    assert w._llm_says_vacancy("текст", "key") is True
+
+
+def test_has_vacancy_structure_needs_salary_and_format():
+    assert w._has_vacancy_structure(
+        "Ищем Python-разработчика, зарплата от 250000 руб, удалённо"
+    )
+    assert not w._has_vacancy_structure("Ищем Python-разработчика")
+    assert not w._has_vacancy_structure("Зарплата от 250000 руб")
+
+
+def test_channel_trust_flags_channel_after_enough_rejections(tmp_path):
+    for _ in range(2):
+        w._record_channel_verdict(tmp_path, "spammy", True)
+    for _ in range(3):
+        w._record_channel_verdict(tmp_path, "spammy", False)
+    assert w._channel_is_untrusted(tmp_path, "spammy") is True
+    assert w._channel_is_untrusted(tmp_path, "unknown_channel") is False
+
+
+def test_channel_trust_ignores_channel_below_min_samples(tmp_path):
+    for _ in range(3):
+        w._record_channel_verdict(tmp_path, "new_channel", False)
+    assert w._channel_is_untrusted(tmp_path, "new_channel") is False
+
+
+def test_llm_says_vacancy_parses_short_answer(monkeypatch):
+    class _FakeLLM:
+        def invoke(self, prompt):
+            assert "Пост:" in prompt
+            return SimpleNamespace(content="НЕТ, это резюме кандидата")
+
+    monkeypatch.setattr(
+        "src.job_sources.llm_provider.get_chat_llm",
+        lambda *a, **kw: _FakeLLM(),
+    )
+    assert w._llm_says_vacancy("Ищу работу", "key") is False
+
+
+def test_handle_post_skips_llm_call_when_flag_disabled(monkeypatch):
+    called = []
+    monkeypatch.setattr(
+        w, "_llm_says_vacancy", lambda *a, **kw: called.append(1) or True
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        watcher = w.TelegramWatcher(
+            1,
+            "h",
+            Path(tmp) / "s",
+            ["geekjobs"],
+            ["python"],
+            [],
+            "me",
+            {"outputFileDirectory": Path(tmp), "dataFolder": Path(tmp)},
+        )
+        watcher.client = _FakeClient()
+        asyncio.run(
+            watcher._on_channel_post(_event("Ищем Python-разработчика"))
+        )
+    assert called == []
+
+
+def test_match_keywords_rejects_candidate_self_posts():
+    """Инцидент: пост "Ищу работу Python-разработчиком" совпал по
+    ключевому слову "python" (законно — кандидат написал свою
+    специализацию), но это не вакансия — контакт из такого поста не
+    должен уходить в Базу компаний."""
+    assert (
+        w.match_keywords(
+            "Ищу работу Python-разработчиком, вот мой контакт: ...",
+            ["python"],
+            [],
+        )
+        == []
+    )
+    assert (
+        w.match_keywords(
+            "Резюме: Python developer, 3 года опыта", ["python"], []
+        )
+        == []
+    )
+    assert w.match_keywords(
+        "Ищем Python backend-разработчика в команду", ["python"], []
+    ) == ["python"]
+
+
 class _FakeClient:
     def __init__(self, history=None):
         self.forwarded, self.sent = [], []
