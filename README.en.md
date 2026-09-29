@@ -25,10 +25,10 @@ to companies go out only after you press the button.
 
 ## Download
 
-Current alpha release: **[v0.1.0-alpha](https://github.com/deuteriumZzz/CrossJob-AI/releases/tag/v0.1.0-alpha)**.
+Current alpha release: **[v0.2.0-alpha](https://github.com/deuteriumZzz/CrossJob-AI/releases/tag/v0.2.0-alpha)**.
 
-- [Download for macOS](https://github.com/deuteriumZzz/CrossJob-AI/releases/download/v0.1.0-alpha/CrossJob-AI-macOS.zip)
-- [Download for Windows](https://github.com/deuteriumZzz/CrossJob-AI/releases/download/v0.1.0-alpha/CrossJob-AI-Windows.zip)
+- [Download for macOS](https://github.com/deuteriumZzz/CrossJob-AI/releases/download/v0.2.0-alpha/CrossJob-AI-macOS.zip)
+- [Download for Windows](https://github.com/deuteriumZzz/CrossJob-AI/releases/download/v0.2.0-alpha/CrossJob-AI-Windows.zip)
 - [All releases and release notes](https://github.com/deuteriumZzz/CrossJob-AI/releases)
 
 This is an experimental alpha. Read the warnings on the release page before using it.

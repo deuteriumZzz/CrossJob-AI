@@ -10,6 +10,9 @@ venv/
 # PyInstaller build output (desktop_app.spec) — 1GB+ per build, never commit.
 build/
 dist/
+# Packaged release zips (CrossJob-AI-macOS.zip / -Windows.zip) — built and
+# published by .github/workflows/release.yml on a v* tag, never committed.
+*.zip
 
 # Real user data — secrets, resume, generated output. Never commit this;
 # only data_folder_example/ is meant to be shared.
