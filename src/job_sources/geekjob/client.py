@@ -129,7 +129,7 @@ class GeekjobClient:
                     )
                     submit_buttons = driver.find_elements(
                         By.XPATH,
-                        '//button[contains(normalize-space(), '
+                        "//button[contains(normalize-space(), "
                         '"Отправить")]',
                     )
                     if submit_buttons:
