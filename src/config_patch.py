@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import stat
 import tempfile
-import json
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -64,7 +64,8 @@ def _write_valid_yaml(config_file: Path, text: str) -> None:
         ) from exc
     if not isinstance(parsed, dict):
         raise ConfigWriteError(
-            f"Refusing to write invalid YAML to {config_file}: root must be a mapping"
+            f"Refusing to write invalid YAML to {config_file}: "
+            "root must be a mapping"
         )
 
     parent = config_file.parent

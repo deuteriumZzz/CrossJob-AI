@@ -189,7 +189,9 @@ class TelegramWatcher(threading.Thread):
         start, end = tg_prefs.get("active_hours_start"), tg_prefs.get(
             "active_hours_end"
         )
-        active_hours = (start, end) if start is not None and end is not None else None
+        active_hours = (
+            (start, end) if start is not None and end is not None else None
+        )
         flush_pending_telegram_sends(
             lambda contact, text: self.call(
                 lambda c: c.send_message(contact, text)
@@ -394,7 +396,10 @@ class TelegramWatcher(threading.Thread):
                 and conversations.sent_today_count() < daily_limit
             ):
                 title = text.splitlines()[0][:120]
-                intro_text, resume_path = await asyncio.get_event_loop().run_in_executor(
+                (
+                    intro_text,
+                    resume_path,
+                ) = await asyncio.get_event_loop().run_in_executor(
                     None, self._auto_message_text, title, text, link
                 )
                 queue_telegram_send(
@@ -536,8 +541,10 @@ class TelegramWatcher(threading.Thread):
             )
             return message["text"] or fallback, str(resume_pdf)
         except Exception as e:
-            logger.warning(f"Telegram auto_message: LLM недоступна, "
-                            f"шаблон как есть: {e}")
+            logger.warning(
+                f"Telegram auto_message: LLM недоступна, "
+                f"шаблон как есть: {e}"
+            )
             return fallback, ""
 
     def _remember_contacts(
@@ -766,7 +773,9 @@ def flush_pending_telegram_sends(
                 f"Не удалось отправить отложенное сообщение "
                 f"@{entry['contact']}: {e}"
             )
-    path.write_text(json.dumps(remaining, ensure_ascii=False), encoding="utf-8")
+    path.write_text(
+        json.dumps(remaining, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 # --- Кнопки под вакансией: посты, резюме и письма для Telegram ----------

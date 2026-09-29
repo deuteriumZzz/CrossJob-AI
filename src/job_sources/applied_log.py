@@ -359,7 +359,9 @@ class AppliedLog:
         предыдущие N дней" под счётчиками на Главной."""
         now = datetime.now().astimezone()
         if period == "day":
-            start_of_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            start_of_today = now.replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
             since, until = start_of_today - timedelta(days=1), start_of_today
         elif period == "week":
             since, until = now - timedelta(days=14), now - timedelta(days=7)

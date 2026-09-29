@@ -42,10 +42,7 @@ from main import _daily_limit as _effective_daily_limit
 from main import _job_max_applications as _effective_job_max_applications
 from main import _total_daily_limit as _effective_total_daily_limit
 from main import append_to_company_blacklist as _append_to_blacklist
-from main import (
-    apply_llm_provider_override,
-    block_headhunter_employer,
-)
+from main import apply_llm_provider_override, block_headhunter_employer
 from main import bootstrap_data_folder as _bootstrap_data_folder
 from main import check_campaign_sending as _check_campaign_sending
 from main import create_cover_letter as _create_cover_letter
@@ -56,20 +53,10 @@ from main import force_refresh_plain_text_resume as _refresh_plain_text
 from main import generate_positions_from_resume as _generate_positions
 from main import prefill_direct_application as _prefill_direct_application
 from main import prepare_interview as _prepare_interview
-from main import (
-    run_selected_sources,
-)
+from main import run_selected_sources
 from main import send_headhunter_reminder as _send_headhunter_reminder
 from main import send_hr_draft as _send_hr_draft
 from main import start_campaign_job as _start_campaign_job
-from src.job_sources.apply_pacing import (
-    MAX_TELEGRAM_MESSAGE_DELAY_SECONDS,
-    MIN_TELEGRAM_MESSAGE_DELAY_SECONDS,
-)
-from src.job_sources.telegram.watcher import (
-    pending_telegram_sends_count,
-)
-from src.libs.resume_and_cover_builder.letter_styles import STYLE_LABELS
 from src.config_patch import (
     ConfigWriteError,
     set_list_field,
@@ -98,6 +85,10 @@ from src.job_sources.applied_log import (
     Stage,
     effective_stage,
 )
+from src.job_sources.apply_pacing import (
+    MAX_TELEGRAM_MESSAGE_DELAY_SECONDS,
+    MIN_TELEGRAM_MESSAGE_DELAY_SECONDS,
+)
 from src.job_sources.block_detection import is_still_blocked
 from src.job_sources.contact_book import ContactBook, company_key
 from src.job_sources.hr_replies import (
@@ -111,9 +102,7 @@ from src.job_sources.hr_replies import (
 )
 from src.job_sources.interview_calendar import build_ics
 from src.job_sources.interview_prep import evaluate_answer, generate_questions
-from src.job_sources.llm_provider import (
-    PROVIDER_MODELS,
-)
+from src.job_sources.llm_provider import PROVIDER_MODELS
 from src.job_sources.llm_provider import get_active_provider as _active_llm
 from src.job_sources.llm_provider import (
     set_fallback_base_urls as _set_llm_fallback_base_urls,
@@ -128,9 +117,7 @@ from src.job_sources.llm_usage import (
 from src.job_sources.llm_usage import (
     set_output_folder as set_llm_usage_output_folder,
 )
-from src.job_sources.llm_usage import (
-    summarize_usage,
-)
+from src.job_sources.llm_usage import summarize_usage
 from src.job_sources.market_stats import (
     REGION_LABELS,
     salary_stats,
@@ -157,14 +144,22 @@ from src.job_sources.telegram.client import (
     TelegramStatusClient,
     normalize_channel,
 )
-from src.job_sources.telegram.watcher import TELEGRAM_FOLDER
+from src.job_sources.telegram.watcher import (
+    TELEGRAM_FOLDER,
+    pending_telegram_sends_count,
+)
 from src.job_sources.telegram_connect import get_bot_username, wait_for_start
 from src.job_sources.telegram_control import HELP_TEXT as _TELEGRAM_HELP_TEXT
 from src.job_sources.telegram_conversations import TelegramConversations
 from src.job_sources.telegram_notify import bot_credentials, send_notification
 from src.libs.resume_and_cover_builder import StyleManager
+from src.libs.resume_and_cover_builder.letter_styles import STYLE_LABELS
 from src.logging import logger
-from src.scheduler import CONTINUOUS_CYCLE_SOURCES, DEFAULT_INTERVAL_HOURS, Scheduler
+from src.scheduler import (
+    CONTINUOUS_CYCLE_SOURCES,
+    DEFAULT_INTERVAL_HOURS,
+    Scheduler,
+)
 from src.scheduler_state import load_state
 from src.utils import autostart, daemon_service
 from src.utils.constants import RESUME_PDF, RESUME_PDF_LINKEDIN, SECRETS_YAML
@@ -1019,12 +1014,12 @@ def get_outreach_settings(ctx: AppContext = Depends(get_ctx)) -> dict:
         # Telegram-парсера — здесь его не было, хотя роутинг email_ru/
         # email_en настраивается в том же «Мои резюме» и работает
         # точно так же (resolve_resume).
-        "resume_route_ru": (
-            lambda r: r.name if r else ""
-        )(resolve_resume(ctx.config, "email", True)),
-        "resume_route_en": (
-            lambda r: r.name if r else ""
-        )(resolve_resume(ctx.config, "email", False)),
+        "resume_route_ru": (lambda r: r.name if r else "")(
+            resolve_resume(ctx.config, "email", True)
+        ),
+        "resume_route_en": (lambda r: r.name if r else "")(
+            resolve_resume(ctx.config, "email", False)
+        ),
     }
 
 
@@ -1129,15 +1124,24 @@ def post_outreach_settings(
     # (см. build_contact_footer в hr_replies.py).
     if body.candidate_telegram is not None:
         set_source_field(
-            prefs, "direct", "candidate_telegram", body.candidate_telegram.strip()
+            prefs,
+            "direct",
+            "candidate_telegram",
+            body.candidate_telegram.strip(),
         )
     if body.candidate_whatsapp is not None:
         set_source_field(
-            prefs, "direct", "candidate_whatsapp", body.candidate_whatsapp.strip()
+            prefs,
+            "direct",
+            "candidate_whatsapp",
+            body.candidate_whatsapp.strip(),
         )
     if body.candidate_linkedin is not None:
         set_source_field(
-            prefs, "direct", "candidate_linkedin", body.candidate_linkedin.strip()
+            prefs,
+            "direct",
+            "candidate_linkedin",
+            body.candidate_linkedin.strip(),
         )
     ctx.reload_config()
     return get_outreach_settings(ctx)
@@ -1216,6 +1220,7 @@ def get_hr_drafts(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
         .items()
         if not d.get("campaign")  # письма рассылки — в «Рассылках»
     }
+
     def _entry(code: str, draft: dict) -> dict:
         resume = _draft_resume_display(ctx.config, draft)
         return {
@@ -1519,9 +1524,7 @@ def _build_contacts(ctx: AppContext, book: ContactBook) -> list[dict]:
                 # компании (см. Настройки → Почта и письма → маршруты
                 # резюме) — видно прямо на карточке, не только в
                 # отдельной вкладке настроек.
-                "resume_hint": (
-                    lambda resume: resume.name if resume else ""
-                )(
+                "resume_hint": (lambda resume: resume.name if resume else "")(
                     resolve_resume(
                         ctx.config, "email", company_uses_russian(card)
                     )
@@ -1900,8 +1903,13 @@ def _setup_checklist(ctx: AppContext) -> list[dict]:
     # инструкция "как исправить", которая после ok теряет смысл, а у
     # этих трёх — короткое постоянное описание роли.
     _ok_hint = {
-        "bot": "личный бот в Telegram — сюда приходят вакансии с кнопками и ответы HR",
-        "telegram": "вход в Telegram под вашим аккаунтом — им читаются каналы ниже",
+        "bot": (
+            "личный бот в Telegram — сюда приходят вакансии с кнопками "
+            "и ответы HR"
+        ),
+        "telegram": (
+            "вход в Telegram под вашим аккаунтом — им читаются каналы ниже"
+        ),
         "watch": "мониторит добавленные каналы по словам-фильтрам",
     }
     return [
@@ -2525,7 +2533,9 @@ def post_contact_draft(
     # кнопке "📎 Резюме" в Telegram-чате. company_uses_russian — та же
     # логика, что main._check_contact_book_mail уже использует для
     # рассылки этой же Базе компаний.
-    resume = resolve_resume(ctx.config, body.kind, company_uses_russian(card))
+    resume = resolve_resume(
+        ctx.config, cast(ResumeChannel, body.kind), company_uses_russian(card)
+    )
     if resume is None:
         resume = ctx.config["dataFolder"] / RESUME_PDF
     if not resume.exists():
@@ -3513,7 +3523,8 @@ def _normalize_telegram_channels(channels: list[str]) -> list[str]:
         if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", channel):
             raise HTTPException(
                 422,
-                "Канал должен быть публичным username Telegram (5–32 символа).",
+                "Канал должен быть публичным username Telegram "
+                "(5–32 символа).",
             )
         key = channel.casefold()
         if key not in seen:
@@ -3641,12 +3652,12 @@ def _telegram_watch_snapshot(ctx: AppContext) -> dict:
         "greeting": telegram.get("intro_message_template") or "",
         "smart_greeting": bool(telegram.get("smart_greeting", True)),
         "resumes": _telegram_resume_list(ctx),
-        "resume_route_ru": (
-            lambda r: r.name if r else ""
-        )(resolve_resume(ctx.config, "telegram", True)),
-        "resume_route_en": (
-            lambda r: r.name if r else ""
-        )(resolve_resume(ctx.config, "telegram", False)),
+        "resume_route_ru": (lambda r: r.name if r else "")(
+            resolve_resume(ctx.config, "telegram", True)
+        ),
+        "resume_route_en": (lambda r: r.name if r else "")(
+            resolve_resume(ctx.config, "telegram", False)
+        ),
         "channel_backfill_days": telegram.get("channel_backfill_days", 14),
         "auto_message": bool(telegram.get("auto_message")),
         "daily_message_limit": telegram.get("daily_message_limit", 15),
@@ -4398,7 +4409,11 @@ def get_backups(ctx: AppContext = Depends(get_ctx)) -> dict:
         return {"backups": []}
     backups = []
     for day_dir in sorted(
-        (p for p in root.iterdir() if p.is_dir() and p.name != "_before_restore"),
+        (
+            p
+            for p in root.iterdir()
+            if p.is_dir() and p.name != "_before_restore"
+        ),
         reverse=True,
     ):
         files = [f for f in day_dir.iterdir() if f.is_file()]

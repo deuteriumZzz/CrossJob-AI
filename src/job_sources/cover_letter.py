@@ -7,11 +7,11 @@ from pdfminer.high_level import extract_text
 from src.job import Job
 from src.libs.resume_and_cover_builder.anti_ai_rules import humanize
 from src.libs.resume_and_cover_builder.config import global_config
-from src.libs.resume_and_cover_builder.llm import (
-    llm_generate_cover_letter_from_job as _llm_clj,
-)
 from src.libs.resume_and_cover_builder.letter_styles import (
     cover_letter_template_for,
+)
+from src.libs.resume_and_cover_builder.llm import (
+    llm_generate_cover_letter_from_job as _llm_clj,
 )
 from src.libs.resume_and_cover_builder.module_loader import load_module
 
@@ -28,6 +28,7 @@ def set_cover_letter_style(style: str) -> None:
     _cover_letter_style = (
         style if style in ("memorable", "neutral", "classic") else "memorable"
     )
+
 
 # В PyInstaller-сборке (desktop_app.spec) __file__ не указывает на
 # реальную папку с забандленным cover_letter_prompt/strings.py — он
@@ -121,7 +122,9 @@ def generate_cover_letter_for_job(
         if template == "auto_plain":
             from src.job_sources.hr_replies import _looks_russian
 
-            language = "ru" if _looks_russian(job.description or job.role) else "en"
+            language = (
+                "ru" if _looks_russian(job.description or job.role) else "en"
+            )
         else:
             language = "ru" if template == "ru_plain" else "en"
         strings.cover_letter_template = cover_letter_template_for(

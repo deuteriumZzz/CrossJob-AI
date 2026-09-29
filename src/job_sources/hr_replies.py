@@ -547,6 +547,7 @@ def _personal_info_from_resume(parameters: dict) -> dict:
     уже используют prefill_direct_application и генерация PDF-резюме.
     Ничего не парсит заново: просто читает то, что там уже разложено."""
     import yaml
+
     from src.utils.constants import PLAIN_TEXT_RESUME_YAML
 
     resume_yaml = parameters.get("plainTextResumeFile") or (
@@ -564,7 +565,11 @@ def _personal_info_from_resume(parameters: dict) -> dict:
     return {
         k: v
         for k, v in personal.items()
-        if not (isinstance(v, str) and v.strip().startswith("[") and v.strip().endswith("]"))
+        if not (
+            isinstance(v, str)
+            and v.strip().startswith("[")
+            and v.strip().endswith("]")
+        )
     }
 
 
@@ -644,7 +649,9 @@ def build_contact_footer(parameters: dict, resume_pdf_path: Path) -> str:
         line1.append(email)
 
     whatsapp = direct.get("candidate_whatsapp") or "".join(
-        filter(None, [personal.get("phone_prefix", ""), personal.get("phone", "")])
+        filter(
+            None, [personal.get("phone_prefix", ""), personal.get("phone", "")]
+        )
     )
     if whatsapp:
         line1.append(whatsapp)
@@ -684,9 +691,7 @@ def build_contact_footer(parameters: dict, resume_pdf_path: Path) -> str:
     if linkedin:
         line2.append(f"LinkedIn: {linkedin}")
 
-    return "\n".join(
-        " | ".join(line) for line in (line1, line2) if line
-    )
+    return "\n".join(" | ".join(line) for line in (line1, line2) if line)
 
 
 def generate_company_email(

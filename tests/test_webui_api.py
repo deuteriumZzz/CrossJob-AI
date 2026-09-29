@@ -708,11 +708,17 @@ def test_post_telegram_settings_updates_channels(client):
     )
     assert response.status_code == 200
     assert response.json()["channels"] == ["chan_one", "chan_two"]
-    assert response.json()["intro_message_template"] == "Новое сообщение для {role}"
+    assert (
+        response.json()["intro_message_template"]
+        == "Новое сообщение для {role}"
+    )
 
     follow_up = client.get("/api/settings/telegram")
     assert follow_up.json()["channels"] == ["chan_one", "chan_two"]
-    assert follow_up.json()["intro_message_template"] == "Новое сообщение для {role}"
+    assert (
+        follow_up.json()["intro_message_template"]
+        == "Новое сообщение для {role}"
+    )
 
 
 def test_post_telegram_settings_rejects_invalid_channel_without_saving(client):
@@ -1081,11 +1087,15 @@ def test_telegram_send_resume_picks_language_by_conversation(
     monkeypatch.setattr(api, "TelegramSourceClient", _FakeTelegramClient)
 
     assert (
-        client.post("/api/telegram/conversations/intl_hr/send-resume").status_code
+        client.post(
+            "/api/telegram/conversations/intl_hr/send-resume"
+        ).status_code
         == 200
     )
     assert (
-        client.post("/api/telegram/conversations/ru_hr/send-resume").status_code
+        client.post(
+            "/api/telegram/conversations/ru_hr/send-resume"
+        ).status_code
         == 200
     )
     assert _FakeTelegramClient.sent == [

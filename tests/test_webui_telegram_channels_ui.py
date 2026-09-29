@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 STATIC_DIR = Path(__file__).parents[1] / "src" / "webui" / "static"
 
 

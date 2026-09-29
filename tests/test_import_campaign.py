@@ -563,9 +563,9 @@ def test_daily_backup_race_does_not_warn(tmp_path):
     out = tmp_path / "output"
     out.mkdir()
     (out / "contact_book.json").write_text("{}", encoding="utf-8")
-    with patch(
-        "pathlib.Path.mkdir", side_effect=FileExistsError()
-    ), patch("src.utils.backup.logger") as fake_logger:
+    with patch("pathlib.Path.mkdir", side_effect=FileExistsError()), patch(
+        "src.utils.backup.logger"
+    ) as fake_logger:
         result = daily_backup(out, date(2026, 9, 1))
     assert result is None
     fake_logger.warning.assert_not_called()
@@ -938,7 +938,9 @@ def test_campaign_uses_language_specific_resume_for_each_company(monkeypatch):
         monkeypatch.setattr(main, "candidate_name", lambda *a: "Ann")
         monkeypatch.setattr(main, "_notify_with_buttons", lambda *a: None)
 
-        def fake_generate(resume, name, position, card, contact, key, parameters):
+        def fake_generate(
+            resume, name, position, card, contact, key, parameters
+        ):
             used[card["company"]] = Path(resume).name
             return {"subject": "s", "text": "t"}
 

@@ -442,7 +442,10 @@ def test_classify_error_does_not_mistake_stack_addresses_for_401():
         "API-ключ"
         in api._classify_error("Error code: 401 - invalid key")["summary"]
     )
-    assert "Chrome закрылся" in api._classify_error(
-        "Message: invalid session id: session deleted as the browser "
-        "has closed the connection"
-    )["summary"]
+    assert (
+        "Chrome закрылся"
+        in api._classify_error(
+            "Message: invalid session id: session deleted as the browser "
+            "has closed the connection"
+        )["summary"]
+    )

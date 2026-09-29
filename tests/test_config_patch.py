@@ -324,9 +324,10 @@ def test_settings_write_creates_backup_and_keeps_yaml_valid():
             config_file, "telegram", "channels", ["new_channel"]
         )
 
-        assert config_file.with_suffix(".yaml.bak").read_text(
-            encoding="utf-8"
-        ) == original
+        assert (
+            config_file.with_suffix(".yaml.bak").read_text(encoding="utf-8")
+            == original
+        )
         assert yaml.safe_load(config_file.read_text(encoding="utf-8")) == {
             "telegram": {
                 "channels": ["new_channel"],
@@ -371,9 +372,10 @@ def test_staged_updates_commit_once_and_support_multiline_text():
                 quote=True,
             )
 
-        assert config_file.with_suffix(".yaml.bak").read_text(
-            encoding="utf-8"
-        ) == original
+        assert (
+            config_file.with_suffix(".yaml.bak").read_text(encoding="utf-8")
+            == original
+        )
         assert yaml.safe_load(config_file.read_text(encoding="utf-8")) == {
             "telegram": {
                 "channels": ["new_channel"],

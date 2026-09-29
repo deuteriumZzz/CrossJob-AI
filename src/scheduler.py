@@ -97,7 +97,9 @@ class Scheduler:
         daily_backup(self.output_folder)
         limits = self.parameters.get("limits") or {}
         continuous = bool(limits.get("continuous_cycle_enabled"))
-        gap_hours = max(1, int(limits.get("continuous_cycle_gap_minutes", 3))) / 60
+        gap_hours = (
+            max(1, int(limits.get("continuous_cycle_gap_minutes", 3))) / 60
+        )
 
         due = self.due_sources()
         if continuous:

@@ -166,7 +166,7 @@ def test_resilient_get_retries_once_after_renderer_timeout():
 
 
 def test_launch_chrome_with_retry_clears_wdm_cache_only_on_retry():
-    """"tuple index out of range" из ChromeDriverManager.install() —
+    """ "tuple index out of range" из ChromeDriverManager.install() —
     реальная ошибка в проде — обычно значит повреждённый кеш ~/.wdm.
     Первая попытка не трогает кеш (нет причин, если он и так в порядке);
     только вторая, раз первая уже провалилась."""
@@ -181,8 +181,9 @@ def test_launch_chrome_with_retry_clears_wdm_cache_only_on_retry():
         build_driver = MagicMock(
             side_effect=[Exception("tuple index out of range"), MagicMock()]
         )
-        with patch("src.utils.chrome_utils.Path.home", return_value=fake_home), \
-             patch("src.utils.chrome_utils.time.sleep"):
+        with patch(
+            "src.utils.chrome_utils.Path.home", return_value=fake_home
+        ), patch("src.utils.chrome_utils.time.sleep"):
             launch_chrome_with_retry(build_driver, profile_dir=None)
         assert build_driver.call_count == 2
         assert not wdm_cache.exists()

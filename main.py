@@ -67,10 +67,7 @@ from src.job_sources.cover_letter import (
     generate_cover_letter_for_job,
     set_cover_letter_style,
 )
-from src.job_sources.djinni.apply import (
-    DjinniProfileRequired,
-    DjinniSession,
-)
+from src.job_sources.djinni.apply import DjinniProfileRequired, DjinniSession
 from src.job_sources.djinni.apply import apply_to_job as apply_to_djinni_job
 from src.job_sources.djinni.apply import bump_profile as bump_djinni_profile
 from src.job_sources.djinni.apply import (
@@ -1211,7 +1208,10 @@ def _total_daily_limit_reached(
     бот действительно перестаёт откликаться и писать до завтра, не
     только уведомляет."""
     total_limit = _total_daily_limit(parameters)
-    if total_limit is not None and applied_log.applied_today_count_all() >= total_limit:
+    if (
+        total_limit is not None
+        and applied_log.applied_today_count_all() >= total_limit
+    ):
         logger.info(
             f"Reached total daily application limit ({total_limit}) "
             "across all platforms combined."
@@ -1222,9 +1222,7 @@ def _total_daily_limit_reached(
             "площадки вместе достигнут.",
         )
         return True
-    token_limit = (parameters.get("limits") or {}).get(
-        "llm_daily_token_limit"
-    )
+    token_limit = (parameters.get("limits") or {}).get("llm_daily_token_limit")
     if token_limit and daily_token_limit_reached(
         applied_log.path.parent, int(token_limit)
     ):
@@ -4661,13 +4659,9 @@ def _send_due_hh_reminders(
     hh_reminder_text) — ровно одно напоминание на отклик, никогда не
     спамит. Выключено по умолчанию, как и остальные auto_*-флаги."""
     days = int(
-        (parameters.get("headhunter") or {}).get(
-            "reminder_follow_up_days", 7
-        )
+        (parameters.get("headhunter") or {}).get("reminder_follow_up_days", 7)
     )
-    entries = applied_log.entries_by_source_and_status(
-        "headhunter", "applied"
-    )
+    entries = applied_log.entries_by_source_and_status("headhunter", "applied")
     for entry in due_hh_reminders(entries, days):
         try:
             sent = send_chat_cover_letter(
@@ -4675,13 +4669,12 @@ def _send_due_hh_reminders(
             )
         except Exception as e:
             logger.warning(
-                f"Не удалось отправить напоминание в чат {entry['company']}: {e}"
+                f"Не удалось отправить напоминание в чат "
+                f"{entry['company']}: {e}"
             )
             continue
         if sent:
-            applied_log.mark_reminder_sent(
-                "headhunter", entry["external_id"]
-            )
+            applied_log.mark_reminder_sent("headhunter", entry["external_id"])
             logger.info(
                 f"Напоминание отправлено: {entry['company']} — "
                 f"{entry['title']}"
@@ -5867,9 +5860,9 @@ def append_to_company_blacklist(
     config_file: Path, companies: list[str]
 ) -> None:
     """Добавляет компании через проверенную атомарную запись YAML."""
-    current = ConfigValidator.load_yaml(config_file).get(
-        "company_blacklist"
-    ) or []
+    current = (
+        ConfigValidator.load_yaml(config_file).get("company_blacklist") or []
+    )
     merged = list(dict.fromkeys([*companies, *current]))
     set_list_field(config_file, "company_blacklist", merged)
 

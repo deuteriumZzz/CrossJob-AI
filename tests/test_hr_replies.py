@@ -6,11 +6,7 @@ from pathlib import Path
 import main
 from src.job import Job
 from src.job_sources.applied_log import AppliedLog, effective_stage
-from src.job_sources.hr_replies import (
-    DraftStore,
-    build_digest,
-    due_follow_ups,
-)
+from src.job_sources.hr_replies import DraftStore, build_digest, due_follow_ups
 from src.job_sources.telegram_control import poll_control_commands
 from src.job_sources.telegram_conversations import TelegramConversations
 from tests.test_webui_api import client  # noqa: F401  (fixture)
@@ -341,8 +337,7 @@ def test_build_contact_footer_prefers_resume_over_manual_override():
         )
         resume_yaml = data / "plain_text_resume.yaml"
         resume_yaml.write_text(
-            "personal_information:\n"
-            "  linkedin: linkedin.com/in/dmitry\n",
+            "personal_information:\n" "  linkedin: linkedin.com/in/dmitry\n",
             encoding="utf-8",
         )
         params = {
@@ -377,7 +372,9 @@ def test_personal_info_ignores_unfilled_template_placeholders():
     with tempfile.TemporaryDirectory() as tmp:
         data = Path(tmp)
         secrets = data / "secrets.yaml"
-        secrets.write_text("email:\n  address: me@gmail.com\n", encoding="utf-8")
+        secrets.write_text(
+            "email:\n  address: me@gmail.com\n", encoding="utf-8"
+        )
         resume_yaml = data / "plain_text_resume.yaml"
         resume_yaml.write_text(
             "personal_information:\n"
@@ -465,9 +462,18 @@ def test_greeting_time_phrase_follows_moscow_hour():
     from src.job_sources.hr_replies import greeting_time_phrase
 
     tz = ZoneInfo("Europe/Moscow")
-    assert greeting_time_phrase(datetime(2026, 1, 1, 8, 0, tzinfo=tz)) == "доброе утро"
-    assert greeting_time_phrase(datetime(2026, 1, 1, 14, 0, tzinfo=tz)) == "добрый день"
-    assert greeting_time_phrase(datetime(2026, 1, 1, 20, 0, tzinfo=tz)) == "добрый вечер"
+    assert (
+        greeting_time_phrase(datetime(2026, 1, 1, 8, 0, tzinfo=tz))
+        == "доброе утро"
+    )
+    assert (
+        greeting_time_phrase(datetime(2026, 1, 1, 14, 0, tzinfo=tz))
+        == "добрый день"
+    )
+    assert (
+        greeting_time_phrase(datetime(2026, 1, 1, 20, 0, tzinfo=tz))
+        == "добрый вечер"
+    )
     assert greeting_time_phrase(datetime(2026, 1, 1, 3, 0, tzinfo=tz)) == ""
     # UTC-момент, который в Москве уже день (+3ч: 11:30 -> 14:30) —
     # считается по Москве, а не по UTC/локальному времени сервера.
@@ -491,7 +497,8 @@ def test_fit_telegram_length_cuts_at_sentence_boundary():
     long_text = (
         "Здравствуйте! Заинтересовала ваша вакансия Python-разработчика. "
         "У меня два года опыта с Django и FastAPI, строил CRM с нуля. "
-        "Буду рад обсудить детали, если позиция ещё открыта, спасибо за внимание."
+        "Буду рад обсудить детали, если позиция ещё открыта, "
+        "спасибо за внимание."
     )
     fitted = _fit_telegram_length(long_text)
     assert len(fitted) <= _TELEGRAM_MESSAGE_LIMIT
