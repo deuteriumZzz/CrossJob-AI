@@ -5,6 +5,7 @@ __pycache__/
 .serena/
 .claude/
 venv/
+.DS_Store
 
 # PyInstaller build output (desktop_app.spec) — 1GB+ per build, never commit.
 build/

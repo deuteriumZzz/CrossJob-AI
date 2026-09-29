@@ -179,6 +179,7 @@ Six sections, each with one job:
 - Settings save themselves; keys and passwords have their own button.
 - The "?" button — a short "How to use" guide.
 - Light and dark theme, works on narrow screens too.
+- ♿ Accessibility: keyboard navigation with a visible focus ring, dialogs and tabs marked up with ARIA (`role="dialog"`, `role="tablist"`), text passes WCAG AA contrast in both themes. A consistent SVG icon set and design-system tokens instead of colors picked ad hoc.
 
 ## CrossJob bot in Telegram
 
