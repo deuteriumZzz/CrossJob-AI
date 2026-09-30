@@ -371,6 +371,34 @@ async function refreshTelegramConnectStatus() {
   return true;
 }
 
+async function refreshTelegramGroupConnectStatus() {
+  const statusEl = document.getElementById("telegram-connect-group-status");
+  if (!statusEl) return true;
+  try {
+    const data = await api("/api/settings/telegram/connect-group/status");
+    if (data.status === "connected") {
+      statusEl.innerHTML = `✅ Группа подключена (chat_id: ${escapeHtml(String(data.chat_id))}) <button type="button" class="copy-btn" title="Скопировать chat_id" aria-label="Скопировать chat_id">${COPY_ICON_SVG}</button> — теперь включите «Темы» в настройках группы и сделайте бота админом с правом «Управление темами».`;
+      statusEl.querySelector(".copy-btn").addEventListener("click", (e) => {
+        copyToClipboard(String(data.chat_id), e.currentTarget);
+      });
+      return true;
+    }
+    if (data.status === "timeout") {
+      statusEl.textContent =
+        "Группа не была выбрана за 3 минуты — попробуйте снова.";
+      return true;
+    }
+    if (data.status === "waiting") {
+      statusEl.textContent = "Ждём, когда вы выберете группу в Telegram…";
+      return false;
+    }
+    statusEl.textContent = "";
+  } catch (e) {
+    // тихая фоновая проверка
+  }
+  return true;
+}
+
 // 5 разделов в меню вместо 9 вкладок: подразделы показываются строкой
 // над содержимым раздела. Ключ — раздел (data-tab кнопки меню), значение —
 // его подразделы (id view-*) с подписями; первый — открывается по клику.
@@ -5833,6 +5861,39 @@ function initDashboard() {
         statusEl.textContent = `Ошибка: ${e.message}`;
       }
     });
+
+  const telegramGroupBtn = document.getElementById(
+    "telegram-connect-group-btn"
+  );
+  if (telegramGroupBtn) {
+    refreshTelegramGroupConnectStatus();
+    telegramGroupBtn.addEventListener("click", async () => {
+      const statusEl = document.getElementById(
+        "telegram-connect-group-status"
+      );
+      statusEl.textContent = "Открываю выбор группы в Telegram…";
+      try {
+        const { username } = await api(
+          "/api/settings/telegram/connect-group",
+          { method: "POST" }
+        );
+        if (username) {
+          window.open(
+            `https://t.me/${username}?startgroup=connect`,
+            "_blank"
+          );
+        }
+        statusEl.textContent =
+          "Выберите группу в открывшемся Telegram — дальше подхватится само…";
+        const timer = setInterval(async () => {
+          const done = await refreshTelegramGroupConnectStatus();
+          if (done) clearInterval(timer);
+        }, 3000);
+      } catch (e) {
+        statusEl.textContent = `Ошибка: ${e.message}`;
+      }
+    });
+  }
 
   document
     .getElementById("autostart-toggle")

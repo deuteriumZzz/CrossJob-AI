@@ -50,3 +50,48 @@ def wait_for_start(
             if text.startswith("/start"):
                 return str(message["chat"]["id"])
     return None
+
+
+def wait_for_group_added(
+    bot_token: str, timeout_seconds: int = 180
+) -> Optional[str]:
+    """Как wait_for_start, но для добавления бота в группу/супергруппу
+    (см. связку с ?startgroup= deep-link на t.me/<bot>, который
+    открывает нативный выбор группы у пользователя — без ручного
+    инвайта). Ловит my_chat_member (бот получает этот update всегда,
+    сразу как только его статус в чате меняется на "member"/
+    "administrator" — надёжнее, чем ждать любое текстовое сообщение,
+    которое участник может и не отправить)."""
+    deadline = time.monotonic() + timeout_seconds
+    offset = 0
+    while time.monotonic() < deadline:
+        remaining = max(1, int(deadline - time.monotonic()))
+        poll_timeout = min(25, remaining)
+        try:
+            response = httpx.get(
+                f"{TELEGRAM_API_BASE}/bot{bot_token}/getUpdates",
+                params={
+                    "offset": offset,
+                    "timeout": poll_timeout,
+                    "allowed_updates": '["my_chat_member","message"]',
+                },
+                timeout=poll_timeout + 10,
+            )
+            response.raise_for_status()
+        except httpx.HTTPError:
+            time.sleep(2)
+            continue
+        for update in response.json().get("result", []):
+            offset = max(offset, update.get("update_id", 0) + 1)
+            member_update = update.get("my_chat_member")
+            if member_update:
+                chat = member_update.get("chat") or {}
+                status = (member_update.get("new_chat_member") or {}).get(
+                    "status"
+                )
+                if chat.get("type") in ("group", "supergroup") and status in (
+                    "member",
+                    "administrator",
+                ):
+                    return str(chat["id"])
+    return None

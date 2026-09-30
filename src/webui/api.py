@@ -42,10 +42,7 @@ from main import _daily_limit as _effective_daily_limit
 from main import _job_max_applications as _effective_job_max_applications
 from main import _total_daily_limit as _effective_total_daily_limit
 from main import append_to_company_blacklist as _append_to_blacklist
-from main import (
-    apply_llm_provider_override,
-    block_headhunter_employer,
-)
+from main import apply_llm_provider_override, block_headhunter_employer
 from main import bootstrap_data_folder as _bootstrap_data_folder
 from main import check_campaign_sending as _check_campaign_sending
 from main import create_cover_letter as _create_cover_letter
@@ -56,9 +53,7 @@ from main import force_refresh_plain_text_resume as _refresh_plain_text
 from main import generate_positions_from_resume as _generate_positions
 from main import prefill_direct_application as _prefill_direct_application
 from main import prepare_interview as _prepare_interview
-from main import (
-    run_selected_sources,
-)
+from main import run_selected_sources
 from main import send_headhunter_reminder as _send_headhunter_reminder
 from main import send_hr_draft as _send_hr_draft
 from main import start_campaign_job as _start_campaign_job
@@ -108,9 +103,7 @@ from src.job_sources.hr_replies import (
 )
 from src.job_sources.interview_calendar import build_ics
 from src.job_sources.interview_prep import evaluate_answer, generate_questions
-from src.job_sources.llm_provider import (
-    PROVIDER_MODELS,
-)
+from src.job_sources.llm_provider import PROVIDER_MODELS
 from src.job_sources.llm_provider import get_active_provider as _active_llm
 from src.job_sources.llm_provider import (
     set_fallback_base_urls as _set_llm_fallback_base_urls,
@@ -125,9 +118,7 @@ from src.job_sources.llm_usage import (
 from src.job_sources.llm_usage import (
     set_output_folder as set_llm_usage_output_folder,
 )
-from src.job_sources.llm_usage import (
-    summarize_usage,
-)
+from src.job_sources.llm_usage import summarize_usage
 from src.job_sources.market_stats import (
     REGION_LABELS,
     salary_stats,
@@ -158,7 +149,11 @@ from src.job_sources.telegram.watcher import (
     TELEGRAM_FOLDER,
     pending_telegram_sends_count,
 )
-from src.job_sources.telegram_connect import get_bot_username, wait_for_start
+from src.job_sources.telegram_connect import (
+    get_bot_username,
+    wait_for_group_added,
+    wait_for_start,
+)
 from src.job_sources.telegram_control import HELP_TEXT as _TELEGRAM_HELP_TEXT
 from src.job_sources.telegram_conversations import TelegramConversations
 from src.job_sources.telegram_notify import bot_credentials, send_notification
@@ -235,6 +230,8 @@ class AppContext:
         self.generate_result: dict = {}
         self.telegram_connect_thread: Optional[threading.Thread] = None
         self.telegram_connect_status: dict = {"status": "idle"}
+        self.telegram_group_connect_thread: Optional[threading.Thread] = None
+        self.telegram_group_connect_status: dict = {"status": "idle"}
         self.telegram_login_session: Optional[TelegramLoginSession] = None
 
     def reload_config(self) -> None:
@@ -4959,6 +4956,81 @@ def get_telegram_connect_status(ctx: AppContext = Depends(get_ctx)) -> dict:
         if notifications.get("telegram_bot_token") and chat_id:
             return {"status": "connected", "chat_id": chat_id}
     return ctx.telegram_connect_status
+
+
+@app.post("/api/settings/telegram/connect-group")
+def post_telegram_connect_group(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Как /connect, но для группы с Темами — открывается через
+    ?startgroup= deep-link (нативный выбор группы у пользователя, без
+    ручного инвайта), детектится через my_chat_member (см.
+    wait_for_group_added). chat_id группы заменяет прежний (личный
+    чат с ботом), т.к. вся эта настройка — переезд уведомлений в
+    группу с темами, не дополнение к личке."""
+    secrets = ConfigValidator.load_yaml(ctx.secrets_file)
+    bot_token = (secrets.get("notifications") or {}).get("telegram_bot_token")
+    if not bot_token:
+        raise HTTPException(400, "Сначала сохраните bot_token.")
+    if (
+        ctx.telegram_group_connect_thread is not None
+        and ctx.telegram_group_connect_thread.is_alive()
+    ):
+        return ctx.telegram_group_connect_status
+    try:
+        username = get_bot_username(bot_token)
+    except Exception as e:
+        raise HTTPException(400, f"Неверный токен бота: {e}")
+
+    ctx.telegram_group_connect_status = {
+        "status": "waiting",
+        "username": username,
+    }
+
+    def _poll() -> None:
+        chat_id = wait_for_group_added(bot_token, timeout_seconds=180)
+        if chat_id is None:
+            ctx.telegram_group_connect_status = {"status": "timeout"}
+            return
+        set_source_field(
+            ctx.secrets_file,
+            "notifications",
+            "telegram_chat_id",
+            chat_id,
+            quote=True,
+        )
+        try:
+            send_notification(
+                bot_token,
+                chat_id,
+                "✅ CrossJob-AI подключён к этой группе!\n\n"
+                "Осталось два шага вручную (Telegram Bot API не может "
+                "сделать их сам за вас):\n"
+                "1. Включите «Темы» в настройках группы.\n"
+                "2. Сделайте CrossJob-AI администратором с правом "
+                "«Управление темами».\n\n"
+                "После этого бот сам создаст темы по площадкам "
+                "(Avito, HeadHunter, Ошибки, Ответы HR и т.д.) и "
+                "будет раскладывать уведомления по ним. Подробности — "
+                "в GUIDE.md.",
+            )
+        except Exception:
+            pass
+        ctx.telegram_group_connect_status = {
+            "status": "connected",
+            "chat_id": chat_id,
+        }
+
+    ctx.telegram_group_connect_thread = threading.Thread(
+        target=_poll, daemon=True
+    )
+    ctx.telegram_group_connect_thread.start()
+    return ctx.telegram_group_connect_status
+
+
+@app.get("/api/settings/telegram/connect-group/status")
+def get_telegram_connect_group_status(
+    ctx: AppContext = Depends(get_ctx),
+) -> dict:
+    return ctx.telegram_group_connect_status
 
 
 @app.post("/api/resume/refresh-plain-text")
