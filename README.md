@@ -154,7 +154,7 @@ uvicorn src.webui.api:app
 
 ```bash
 python main.py                    # меню
-python main.py --auto headhunter  # или geekjob / getmatch / telegram / linkedin / habr_career / wellfound / himalayas / djinni / all
+python main.py --auto headhunter  # или geekjob / getmatch / telegram / linkedin / habr_career / wellfound / himalayas / djinni / avito / all
 python main.py --daemon           # встроенный планировщик вместо cron
 ```
 

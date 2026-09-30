@@ -156,7 +156,7 @@ Without the UI — a console menu or a scheduled run:
 
 ```bash
 python main.py                    # menu
-python main.py --auto headhunter  # or geekjob / getmatch / telegram / linkedin / habr_career / wellfound / himalayas / djinni / all
+python main.py --auto headhunter  # or geekjob / getmatch / telegram / linkedin / habr_career / wellfound / himalayas / djinni / avito / all
 python main.py --daemon           # built-in scheduler instead of cron
 ```
 
