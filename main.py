@@ -70,7 +70,10 @@ from src.job_sources.cover_letter import (
     generate_cover_letter_for_job,
     set_cover_letter_style,
 )
-from src.job_sources.djinni.apply import DjinniProfileRequired, DjinniSession
+from src.job_sources.djinni.apply import (
+    DjinniProfileRequired,
+    DjinniSession,
+)
 from src.job_sources.djinni.apply import apply_to_job as apply_to_djinni_job
 from src.job_sources.djinni.apply import bump_profile as bump_djinni_profile
 from src.job_sources.djinni.apply import (
