@@ -923,6 +923,63 @@ def test_campaign_prepares_in_daily_batches(monkeypatch):
         assert started == []
 
 
+def test_campaign_skips_contact_already_written_from_bot(monkeypatch):
+    """Письмо ушло кнопкой под постом Telegram-парсера — рассылка второе не
+    шлёт: ни при подготовке, ни если её черновик уже был готов."""
+    with tempfile.TemporaryDirectory() as tmp:
+        out, data = Path(tmp) / "out", Path(tmp) / "data"
+        out.mkdir()
+        data.mkdir()
+        (data / main.RESUME_PDF).write_bytes(b"%PDF")
+        params = {
+            "outputFileDirectory": out,
+            "dataFolder": data,
+            "direct": {"email_daily_limit": 10},
+        }
+        monkeypatch.setattr(camp.CampaignJob, "start", lambda self: self.run())
+        monkeypatch.setattr(main, "candidate_name", lambda *a: "Ann")
+        monkeypatch.setattr(
+            main,
+            "generate_company_email",
+            lambda *a: {"subject": "s", "text": "t"},
+        )
+        monkeypatch.setattr(main, "_notify_with_buttons", lambda *a, **k: None)
+        book = ContactBook(out)
+        for company, email in (("A", "hr@a.io"), ("B", "hr@b.io")):
+            book.add(
+                company, [{"kind": "email", "value": email, "source": "t"}]
+            )
+        book.update_contact("hr@a.io", sent_at="2026-09-01T10:00:00+03:00")
+        store = camp.CampaignStore(out)
+        cid = store.create(
+            "t",
+            [
+                {"key": "a", "email": "hr@a.io", "company": "A"},
+                {"key": "b", "email": "hr@b.io", "company": "B"},
+            ],
+        )
+
+        main.start_campaign_job(params, "key", cid, "prepare")
+        items = store.get(cid)["items"]
+        assert items["hr@a.io"]["status"] == "skipped"
+        assert items["hr@b.io"]["status"] == "draft"
+
+        # Пока черновик ждал «Отправить все», вы написали из бота.
+        book.update_contact("hr@b.io", sent_at="2026-09-02T10:00:00+03:00")
+        monkeypatch.setattr(
+            main.mail_guard, "plan", lambda *a, **k: {"can_send": True}
+        )
+        monkeypatch.setattr(main.mail_guard, "human_pause", lambda *a: 0)
+        sent = []
+        monkeypatch.setattr(
+            main, "send_hr_draft", lambda *a, **k: sent.append(a) or ""
+        )
+        main.start_campaign_job(params, "key", cid, "send")
+        assert sent == []
+        assert store.get(cid)["items"]["hr@b.io"]["status"] == "skipped"
+        assert DraftStore(out / main.HR_DRAFTS_FILE).all() == {}
+
+
 def test_campaign_uses_language_specific_resume_for_each_company(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp:
         out, data = Path(tmp) / "out", Path(tmp) / "data"

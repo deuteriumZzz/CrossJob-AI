@@ -19,7 +19,7 @@ import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Callable, Coroutine, Optional
+from typing import Any, Callable, Coroutine, Optional, Sequence
 
 from src.job_sources.contact_book import ContactBook, contacts_from_text
 from src.job_sources.hr_replies import _looks_russian, generate_first_message
@@ -33,10 +33,12 @@ from src.job_sources.telegram_notify import (
     notify_from_secrets,
 )
 from src.logging import logger
+from src.utils.file_lock import state_file_lock
 
 _ACTIVE: Optional["TelegramWatcher"] = None
 RECONNECT_DELAY_SECONDS = 30
 _SEEN_LIMIT = 3000
+_BACKFILLED_CHANNELS_LOCK = threading.Lock()
 # Слова, по которым сама по себе должность ничего не говорит.
 _GENERIC_WORDS = {
     "developer",
@@ -81,17 +83,32 @@ def default_keywords(positions: list[str]) -> list[str]:
 # "python" (сузить keywords до целой фразы отсеет реальные вакансии с
 # другой формулировкой), а в том, что пост вообще не вакансия — эти
 # фразы такие посты выдают почти всегда, независимо от специализации.
+# Хэштеги — разметка резюме в каналах (@python_jobs, @jobs_it): на 48
+# реальных постах отсекли 16 резюме и ни одной вакансии. Голые «резюме»
+# и «cv» — нет: вакансии пишут «присылайте резюме/CV» (5 из 48 отсеклись
+# бы); «#cv» тоже нет — в ML-каналах это computer vision.
 CANDIDATE_SELF_POST_MARKERS = (
     "ищу работу",
     "ищу вакансию",
     "в поиске работы",
     "рассматриваю предложения",
     "рассматриваю офферы",
+    "рассмотрю предложения",
+    "открыт к предложениям",
+    "открыта к предложениям",
     "open to work",
+    "opentowork",
+    "looking for a job",
+    "looking for new opportunities",
+    "looking for opportunities",
     "резюме:",
     "моё резюме",
     "мое резюме",
     "мой резюме",
+    "обо мне",
+    "#резюме",
+    "#resume",
+    "#ищу",
     "хочу найти работу",
     "ищу проект",
 )
@@ -120,8 +137,15 @@ def _fingerprint(text: str) -> str:
 
 _VACANCY_CLASSIFIER_PROMPT = (
     "Пост из Telegram-канала о работе. Это объявление вакансии (ищут "
-    "сотрудника), а не резюме/реклама/вопрос? Ответь одним словом: "
-    "ДА или НЕТ.\n\nПост:\n{text}"
+    "сотрудника), а не резюме/реклама/вопрос? Ответь первой строкой "
+    "одним словом: ДА или НЕТ.{emails}\n\nПост:\n{text}"
+)
+# Адреса перечисляем со строкой, где они стоят: пост режется до 600
+# символов, а подпись «Размещение вакансий: ads@канал» обычно в конце.
+_EMAILS_QUESTION = (
+    "\nВторой строкой — email для отклика на эту вакансию из списка ниже "
+    "или НЕТ, если такого нет (реклама канала, размещение вакансий, "
+    "чужой адрес):\n{lines}"
 )
 
 
@@ -134,31 +158,66 @@ RATE_LIMIT_RETRY_DELAYS_SECONDS = (10, 30, 60)
 RATE_LIMIT_MARKERS = ("429", "rate limit", "rate_limit", "too many requests")
 
 
-def _llm_says_vacancy(text: str, llm_api_key: str) -> bool:
+def _llm_check_post(
+    text: str, llm_api_key: str, emails: Sequence[str] = ()
+) -> Optional[tuple[bool, str]]:
     """Короткий LLM-классификатор поверх стоп-слов (telegram.
     llm_vacancy_filter, выключен по умолчанию) — вызывается только для
-    постов, уже прошедших match_keywords, не на весь поток каналов;
-    промпт и ответ в одно слово держат токены к минимуму.
+    постов, уже прошедших match_keywords, не на весь поток каналов.
 
-    Rate limit — не сразу fail-open: 50+ каналов легко дают всплеск
-    запросов разом, а лимит провайдера обычно сбрасывается за минуты —
-    ждём и пробуем снова (см. RATE_LIMIT_RETRY_DELAYS_SECONDS), чтобы
-    не пропускать проверку молча именно в момент нагрузки, когда она
-    нужнее всего. Любая другая ошибка (плохой ключ, сеть, пустой
-    ответ) — fail-open сразу, как и раньше (_auto_message_text), нет
-    смысла ждать то, что само не пройдёт."""
+    Возвращает (вакансия?, email для отклика или ""). Адрес берётся
+    только из найденных в посте (emails) — ИИ его выбирает, а не
+    выдумывает; ответ в одну строку без адреса — адреса нет (для
+    автоматической рассылки лучше пропустить, чем взять чужой).
+
+    None — ИИ недоступен (нет ключа, ошибка, исчерпан rate limit): решает
+    _handle_post — пост в бот с пометкой, но без автоотправки и Базы.
+    Rate limit — не сразу None: 50+ каналов легко дают всплеск запросов
+    разом, а лимит провайдера обычно сбрасывается за минуты — ждём и
+    пробуем снова (см. RATE_LIMIT_RETRY_DELAYS_SECONDS)."""
     if not llm_api_key:
-        return True
+        logger.warning(
+            "Telegram-парсер: ИИ-проверка включена, но ключ не настроен"
+        )
+        return None
     from src.job_sources.llm_provider import get_chat_llm
 
-    prompt = _VACANCY_CLASSIFIER_PROMPT.format(text=text[:600])
+    lines = "\n".join(
+        f"- {email}: «"
+        + next(
+            (
+                line.strip()
+                for line in text.splitlines()
+                if email.lower() in line.lower()
+            ),
+            "",
+        )[:150]
+        + "»"
+        for email in emails
+    )
+    prompt = _VACANCY_CLASSIFIER_PROMPT.format(
+        text=text[:600],
+        emails=_EMAILS_QUESTION.format(lines=lines) if emails else "",
+    )
     attempts = len(RATE_LIMIT_RETRY_DELAYS_SECONDS) + 1
     for attempt in range(attempts):
         try:
             llm = get_chat_llm(llm_api_key, temperature=0)
             answer = llm.invoke(prompt)
             content = str(getattr(answer, "content", answer)).strip().lower()
-            return not content.startswith("нет")
+            verdict, _, tail = content.partition("\n")
+            if verdict.startswith("нет"):
+                return False, ""
+            tail = tail.strip()
+            apply_email = next(
+                (
+                    e
+                    for e in emails
+                    if not tail.startswith("нет") and e.lower() in tail
+                ),
+                "",
+            )
+            return True, apply_email
         except Exception as e:
             is_rate_limit = any(
                 m in str(e).lower() for m in RATE_LIMIT_MARKERS
@@ -168,14 +227,14 @@ def _llm_says_vacancy(text: str, llm_api_key: str) -> bool:
                     f"Telegram-парсер: LLM-классификатор недоступен "
                     f"(попытка {attempt + 1}/{attempts}): {e}"
                 )
-                return True
+                return None
             delay = RATE_LIMIT_RETRY_DELAYS_SECONDS[attempt]
             logger.info(
                 f"Telegram-парсер: LLM rate limit, повтор через {delay}с "
                 f"(попытка {attempt + 1}/{attempts})"
             )
             time.sleep(delay)
-    return True
+    return None
 
 
 # Структурные сигналы реальной вакансии — зарплата и формат работы
@@ -188,6 +247,9 @@ _SALARY_RE = re.compile(
 _WORK_FORMAT_RE = re.compile(
     r"удал[её]нн?о|remote|гибрид|офис|hybrid|on-?site", re.IGNORECASE
 )
+
+
+_UNVERIFIED_MARK = " · ⚠️ не проверено ИИ"
 
 
 def _has_vacancy_structure(text: str) -> bool:
@@ -275,6 +337,7 @@ class TelegramWatcher(threading.Thread):
         self._settings_task: Optional[asyncio.Task] = None
         self._stopping = threading.Event()
         self._seen: OrderedDict[str, None] = OrderedDict()
+        self._backfills_in_progress: set[str] = set()
 
     # --- запуск/остановка -------------------------------------------
 
@@ -318,6 +381,17 @@ class TelegramWatcher(threading.Thread):
                 lambda: asyncio.ensure_future(self.client.disconnect())
             )
 
+    def update_llm_vacancy_filter(self, enabled: bool) -> None:
+        """Применить LLM-фильтр к новым постам без перезапуска шлюза."""
+        telegram = self.parameters.get("telegram") or {}
+        self.parameters = {
+            **self.parameters,
+            "telegram": {
+                **telegram,
+                "llm_vacancy_filter": enabled,
+            },
+        }
+
     def _poll_bot_forever(self) -> None:
         """Постоянное чтение бота уведомлений (long polling): нажатия
         кнопок под вакансиями и команды обрабатываются за секунды, а не
@@ -360,6 +434,11 @@ class TelegramWatcher(threading.Thread):
             active_hours,
             send_file_fn=lambda contact, path: self.call(
                 lambda c: c.send_file(contact, path)
+            ),
+            on_sent=lambda entry: remember_telegram_post_contact(
+                self.output_folder,
+                [{"kind": "telegram", "value": entry["contact"]}],
+                entry.get("post") or {"link": entry.get("job_link", "")},
             ),
         )
 
@@ -426,7 +505,6 @@ class TelegramWatcher(threading.Thread):
         from telethon.tl.functions.channels import JoinChannelRequest
 
         backfilled = _load_backfilled_channels(self.output_folder)
-        newly_backfilled = []
         chats = []
         for channel in self.channels:
             try:
@@ -438,8 +516,11 @@ class TelegramWatcher(threading.Thread):
                         "получать посты"
                     )
                 chats.append(entity)
-                if channel not in backfilled:
-                    newly_backfilled.append(channel)
+                if (
+                    channel not in backfilled
+                    and channel not in self._backfills_in_progress
+                ):
+                    self._backfills_in_progress.add(channel)
                     asyncio.ensure_future(
                         self._backfill_channel(entity, channel)
                     )
@@ -447,13 +528,6 @@ class TelegramWatcher(threading.Thread):
                 logger.warning(
                     f"Telegram-шлюз: канал @{channel} недоступен: {e}"
                 )
-        if newly_backfilled:
-            # Помечаем сразу, до завершения самого досмотра — иначе
-            # повторный вызов _subscribe (смена ключевых слов и т.п.)
-            # раньше, чем досмотр закончится, запустил бы его ещё раз.
-            _save_backfilled_channels(
-                self.output_folder, backfilled | set(newly_backfilled)
-            )
         self.client.remove_event_handler(self._on_channel_post)
         self.client.add_event_handler(
             self._on_channel_post, events.NewMessage(chats=chats)
@@ -467,13 +541,13 @@ class TelegramWatcher(threading.Thread):
         days = (self.parameters.get("telegram") or {}).get(
             "channel_backfill_days", 14
         )
-        if not days:
-            return
-        from datetime import datetime, timedelta, timezone
-
-        since = datetime.now(timezone.utc) - timedelta(days=days)
-        found = 0
         try:
+            if not days:
+                return
+            from datetime import datetime, timedelta, timezone
+
+            since = datetime.now(timezone.utc) - timedelta(days=days)
+            found = 0
             async for message in self.client.iter_messages(entity, limit=300):
                 if message.date is not None and message.date < since:
                     break
@@ -485,6 +559,9 @@ class TelegramWatcher(threading.Thread):
                 f"за {days} дн.: {e}"
             )
             return
+        finally:
+            self._backfills_in_progress.discard(channel)
+        _mark_channel_backfilled(self.output_folder, channel)
         logger.info(
             f"Telegram-шлюз: досмотрел @{channel} за {days} дн. "
             f"({found} постов проверено)"
@@ -510,6 +587,10 @@ class TelegramWatcher(threading.Thread):
             except (OSError, KeyError, yaml.YAMLError):
                 continue
             telegram = prefs.get("telegram") or {}
+            if "llm_vacancy_filter" in telegram:
+                self.update_llm_vacancy_filter(
+                    bool(telegram["llm_vacancy_filter"])
+                )
             self.parameters = {
                 **self.parameters,
                 "resume_routing": dict(prefs.get("resume_routing") or {}),
@@ -547,24 +628,56 @@ class TelegramWatcher(threading.Thread):
         if len(self._seen) > _SEEN_LIMIT:
             self._seen.popitem(last=False)
 
-        tg_prefs = self.parameters.get("telegram") or {}
-        if tg_prefs.get("llm_vacancy_filter") and (
-            _channel_is_untrusted(self.output_folder, channel)
-            or not _has_vacancy_structure(text)
-        ):
-            is_vacancy = await asyncio.get_event_loop().run_in_executor(
-                None, _llm_says_vacancy, text, self.llm_api_key
-            )
-            _record_channel_verdict(self.output_folder, channel, is_vacancy)
-            if not is_vacancy:
-                return
-
         link = f"https://t.me/{channel}/{message.id}"
         contacts = contacts_from_text(text, exclude=(channel,))
+        title = text.splitlines()[0][:120]
+        post = {
+            "channel": channel,
+            "link": link,
+            "title": title,
+            "text": text[:4000],
+        }
+        tg_prefs = self.parameters.get("telegram") or {}
+        # ИИ-проверка (тумблер): «не вакансия» — пост отброшен. ИИ
+        # недоступен — пост всё равно в бот с пометкой, но без автоотправки
+        # и без Базы: бот вы читаете сами, потерянная вакансия дороже
+        # лишнего поста, а автоматическое действие — только по проверенному.
+        unverified = False
+        if tg_prefs.get("llm_vacancy_filter"):
+            verdict = await asyncio.get_event_loop().run_in_executor(
+                None,
+                _llm_check_post,
+                text,
+                self.llm_api_key,
+                [c["value"] for c in contacts if c["kind"] == "email"],
+            )
+            if verdict is None:
+                unverified = True
+            else:
+                is_vacancy, apply_email = verdict
+                _record_channel_verdict(
+                    self.output_folder, channel, is_vacancy
+                )
+                if not is_vacancy:
+                    return
+                if apply_email:
+                    # Email для отклика из проверенной вакансии — сразу в
+                    # Базу, как адреса с сайтов компаний. Остальные
+                    # контакты поста — только после отправки из бота.
+                    remember_telegram_post_contact(
+                        self.output_folder,
+                        [{"kind": "email", "value": apply_email}],
+                        post,
+                        sent=False,
+                    )
         self.matched_count += 1
 
         telegram_contacts = [c for c in contacts if c["kind"] == "telegram"]
-        if tg_prefs.get("auto_message") and len(telegram_contacts) == 1:
+        if (
+            tg_prefs.get("auto_message")
+            and not unverified
+            and len(telegram_contacts) == 1
+        ):
             from src.job_sources.apply_pacing import (
                 MAX_TELEGRAM_MESSAGE_DELAY_SECONDS,
                 MIN_TELEGRAM_MESSAGE_DELAY_SECONDS,
@@ -579,7 +692,6 @@ class TelegramWatcher(threading.Thread):
                 not conversations.already_contacted(contact_value)
                 and conversations.sent_today_count() < daily_limit
             ):
-                title = text.splitlines()[0][:120]
                 (
                     intro_text,
                     resume_path,
@@ -600,34 +712,37 @@ class TelegramWatcher(threading.Thread):
                         MAX_TELEGRAM_MESSAGE_DELAY_SECONDS,
                     ),
                     resume_path,
+                    post=post,
                 )
                 logger.info(
                     f"Telegram auto_message: в очередь для @{contact_value}"
                 )
-                self._remember_contacts(channel, link, text, contacts)
                 return
 
         if self.bot is not None:
             # Через бота — чтобы под вакансией были кнопки быстрого ответа.
-            post = {
-                "channel": channel,
-                "link": link,
-                "text": text[:4000],
-                "title": text.splitlines()[0][:120],
-                "contacts": [
-                    {"kind": c["kind"], "value": c["value"]} for c in contacts
-                ],
-            }
             await asyncio.get_event_loop().run_in_executor(
-                None, self._deliver_via_bot, post, matched
+                None,
+                self._deliver_via_bot,
+                {
+                    **post,
+                    "contacts": [
+                        {"kind": c["kind"], "value": c["value"]}
+                        for c in contacts
+                    ],
+                    "unverified": unverified,
+                },
+                matched,
             )
-            self._remember_contacts(channel, link, text, contacts)
             return
         try:
             forwarded = await self.client.forward_messages(
                 self.forward_to, message
             )
-            header = [f"🎯 {', '.join(matched)} · @{channel}"]
+            header = [
+                f"🎯 {', '.join(matched)} · @{channel}"
+                + (_UNVERIFIED_MARK if unverified else "")
+            ]
             if contacts:
                 header.append(
                     "Контакты: "
@@ -648,7 +763,6 @@ class TelegramWatcher(threading.Thread):
             )
         except Exception as e:
             logger.warning(f"Telegram-шлюз: не удалось переслать {link}: {e}")
-        self._remember_contacts(channel, link, text, contacts)
 
     def _deliver_via_bot(self, post: dict, matched: list[str]) -> None:
         assert self.bot is not None  # зовётся только при подключённом боте
@@ -671,13 +785,15 @@ class TelegramWatcher(threading.Thread):
         thread_id = get_or_create_topic(self.parameters, "Telegram-каналы")
         payload = {
             "chat_id": chat_id,
-            "text": f"🎯 {', '.join(matched)} · @{post['channel']}\n"
+            "text": f"🎯 {', '.join(matched)} · @{post['channel']}"
+            f"{_UNVERIFIED_MARK if post.get('unverified') else ''}\n"
             f"Контакты: {contacts_line}\n{post['link']}\n\n{body}",
             "disable_web_page_preview": True,
             "reply_markup": vacancy_keyboard(
                 post_id,
                 post["contacts"],
                 [routed_resume] if routed_resume is not None else [],
+                contact_notes(self.output_folder, post["contacts"]),
             ),
         }
         if thread_id is not None:
@@ -730,24 +846,6 @@ class TelegramWatcher(threading.Thread):
                 f"шаблон как есть: {e}"
             )
             return fallback, ""
-
-    def _remember_contacts(
-        self, channel: str, link: str, text: str, contacts: list[dict]
-    ) -> None:
-        if contacts:
-            ContactBook(self.output_folder).add(
-                "",
-                [
-                    {**c, "source": f"пост в @{channel}", "source_url": link}
-                    for c in contacts
-                ],
-                vacancy={
-                    "title": text.splitlines()[0][:120],
-                    "link": link,
-                    "source": "telegram",
-                    "text": text[:4000],
-                },
-            )
 
     async def _on_private_message(self, event) -> None:
         """Ответ HR в личке — мгновенно, вместо проверки раз в час."""
@@ -850,6 +948,15 @@ def _save_backfilled_channels(output_folder: Path, channels: set[str]) -> None:
     )
 
 
+def _mark_channel_backfilled(output_folder: Path, channel: str) -> None:
+    """Atomically add a channel only after its history scan has completed."""
+    with _BACKFILLED_CHANNELS_LOCK:
+        _save_backfilled_channels(
+            output_folder,
+            _load_backfilled_channels(output_folder) | {channel},
+        )
+
+
 def queue_telegram_send(
     output_folder: Path,
     contact: str,
@@ -858,6 +965,7 @@ def queue_telegram_send(
     delay_min_seconds: float,
     delay_max_seconds: float,
     resume_path: str = "",
+    post: Optional[dict] = None,
 ) -> None:
     import json
     import random
@@ -880,6 +988,7 @@ def queue_telegram_send(
         "job_link": job_link,
         "send_after": send_after.isoformat(),
         "resume_path": resume_path,
+        "post": post or {},
     }
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
@@ -901,6 +1010,7 @@ def flush_pending_telegram_sends(
     output_folder: Path,
     active_hours: tuple[int, int] | None,
     send_file_fn: Optional[Callable[[str, str], None]] = None,
+    on_sent: Optional[Callable[[dict], None]] = None,
 ) -> None:
     """Отправляет то, чему пришло время, и мы в рабочих часах; остальное
     остаётся в очереди до следующего тика. send_fn(contact, text) уже
@@ -944,6 +1054,8 @@ def flush_pending_telegram_sends(
             conversations.record_outbound(
                 entry["contact"], entry["text"], job_link=entry["job_link"]
             )
+            if on_sent is not None:
+                on_sent(entry)
             logger.info(f"Автоотправка Telegram: @{entry['contact']}")
             resume_path = entry.get("resume_path")
             if resume_path and send_file_fn is not None:
@@ -964,6 +1076,90 @@ def flush_pending_telegram_sends(
     )
 
 
+def remember_telegram_post_contact(
+    output_folder: Path, contacts: list[dict], post: dict, sent: bool = True
+) -> None:
+    """Контакты из поста канала — в Базу, одной карточкой.
+
+    Намеренно не на каждый прочитанный пост: @username или email в чужом
+    посте ещё не значит, что это HR. Поводы: мы написали (sent=True —
+    источник «отклик на пост»), ИИ выбрал email для отклика в проверенной
+    вакансии или вы нажали «Не писать компании» (sent=False — «пост в»).
+    """
+    contacts = [
+        {"kind": c["kind"], "value": str(c["value"]).strip()}
+        for c in contacts
+        if str(c.get("value") or "").strip()
+        and c.get("kind") in {"telegram", "email", "linkedin"}
+    ]
+    if not contacts:
+        return
+    channel = str(post.get("channel") or "").lstrip("@")
+    link = str(post.get("link") or "")
+    text = str(post.get("text") or "")
+    title = str(post.get("title") or (text.splitlines()[0] if text else ""))
+    source = ("отклик на пост в " if sent else "пост в ") + (
+        f"@{channel}" if channel else "Telegram"
+    )
+    ContactBook(output_folder).add(
+        "",
+        [{**c, "source": source, "source_url": link} for c in contacts],
+        vacancy=(
+            {
+                "title": title[:120],
+                "link": link,
+                "source": "telegram",
+                "text": text[:4000],
+            }
+            if link
+            else None
+        ),
+    )
+
+
+def contact_notes(output_folder: Path, contacts: list[dict]) -> dict[str, str]:
+    """Пометки для кнопок под вакансией: кому уже писали (и когда) или
+    кто ждёт в очереди рассылки — чтобы кнопка и рассылка не написали
+    одному HR дважды незаметно для вас. Ключ — value в нижнем регистре."""
+    from src.direct.campaign import CampaignStore
+
+    conversations = TelegramConversations(
+        output_folder / "telegram_conversations.json"
+    )
+    emailed = {
+        c["value"].lower(): c["sent_at"]
+        for card in ContactBook(output_folder).all().values()
+        for c in card["contacts"]
+        if c.get("sent_at")
+    }
+    queued = {
+        email: item
+        for campaign in CampaignStore(output_folder).all().values()
+        for email, item in campaign["items"].items()
+    }
+    notes = {}
+    for contact in contacts:
+        value = contact["value"].lower()
+        if contact["kind"] == "telegram":
+            conv = conversations.get(value) or {}
+            sent_at = next(
+                (
+                    m["at"]
+                    for m in reversed(conv.get("messages", []))
+                    if m["direction"] == "out"
+                ),
+                "",
+            )
+        else:
+            item = queued.get(value) or {}
+            sent_at = emailed.get(value) or item.get("sent_at", "")
+            if not sent_at and item.get("status") in ("pending", "draft"):
+                notes[value] = "в очереди рассылки"
+        if sent_at:
+            notes[value] = f"писали {sent_at[8:10]}.{sent_at[5:7]}"
+    return notes
+
+
 # --- Кнопки под вакансией: посты, резюме и письма для Telegram ----------
 
 WATCH_POSTS_FILE = ".watch_posts.json"
@@ -980,24 +1176,28 @@ def save_watch_post(output_folder: Path, post: dict) -> str:
 
     post_id = hashlib.sha1(post["link"].encode("utf-8")).hexdigest()[:10]
     path = output_folder / WATCH_POSTS_FILE
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        data = {}
-    data[post_id] = post
-    if len(data) > _WATCH_POSTS_LIMIT:
-        data = dict(list(data.items())[-_WATCH_POSTS_LIMIT:])
-    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    # Под замком: посты доставляются параллельно (run_in_executor, досмотр
+    # истории каналов) — два write_text разом склеивали файл, следующее
+    # чтение падало в {} и все старые кнопки отвечали «пост устарел».
+    with state_file_lock(path):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        data[post_id] = post
+        if len(data) > _WATCH_POSTS_LIMIT:
+            data = dict(list(data.items())[-_WATCH_POSTS_LIMIT:])
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     return post_id
 
 
 def get_watch_post(output_folder: Path, post_id: str) -> Optional[dict]:
     import json
 
+    path = output_folder / WATCH_POSTS_FILE
     try:
-        return json.loads(
-            (output_folder / WATCH_POSTS_FILE).read_text(encoding="utf-8")
-        ).get(post_id)
+        with state_file_lock(path):
+            return json.loads(path.read_text(encoding="utf-8")).get(post_id)
     except (OSError, ValueError):
         return None
 
@@ -1036,19 +1236,24 @@ def save_telegram_letter(data_folder: Path, post: dict, text: str) -> Path:
 
 
 def vacancy_keyboard(
-    post_id: str, contacts: list[dict], resumes: list[Path]
+    post_id: str,
+    contacts: list[dict],
+    resumes: list[Path],
+    notes: Optional[dict[str, str]] = None,
 ) -> dict:
     """Кнопки под вакансией: для Telegram-контакта — «Здравствуйте»,
     «Здравствуйте + резюме» (по кнопке на файл резюме) и письмо LLM; для
     email — черновик письма LLM; «Не писать компании» — в Базе статус
-    «не писать», в рассылки она не попадёт."""
+    «не писать», в рассылки она не попадёт. notes — см. contact_notes."""
     rows: list[list[dict]] = []
     for index, contact in enumerate(contacts[:2]):
+        note = (notes or {}).get(contact["value"].lower())
+        suffix = f" · {note}" if note else ""
         if contact["kind"] == "telegram":
             who = f"@{contact['value']}"
             row = [
                 {
-                    "text": f"👋 {who}",
+                    "text": f"👋 {who}{suffix}",
                     "callback_data": f"q:{post_id}:{index}:-1",
                 }
             ]
@@ -1072,7 +1277,8 @@ def vacancy_keyboard(
             rows.append(
                 [
                     {
-                        "text": f"✍️ Письмо на {contact['value']} (LLM)",
+                        "text": f"✍️ Письмо на {contact['value']} (LLM)"
+                        f"{suffix}",
                         "callback_data": f"l:{post_id}:{index}",
                     }
                 ]

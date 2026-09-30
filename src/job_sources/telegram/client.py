@@ -77,7 +77,18 @@ class TelegramSourceClient:
         if self._watcher is not None:
             return self
         _SESSION_LOCK.acquire()
-        self._client.start()
+        # Пока ждали замок, постоянный шлюз мог завершить подключение.
+        # В этом случае используем уже открытое соединение вместо
+        # второго клиента к тому же SQLite-файлу сессии.
+        self._watcher = active_watcher()
+        if self._watcher is not None:
+            _SESSION_LOCK.release()
+            return self
+        try:
+            self._client.start()
+        except Exception:
+            _SESSION_LOCK.release()
+            raise
         return self
 
     def __exit__(self, *exc_info) -> None:

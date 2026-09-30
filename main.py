@@ -209,6 +209,7 @@ from src.job_sources.telegram.watcher import (
     RATE_LIMIT_RETRY_DELAYS_SECONDS,
     active_watcher,
     get_watch_post,
+    remember_telegram_post_contact,
     save_telegram_letter,
     telegram_resumes,
 )
@@ -3517,6 +3518,20 @@ def prefill_direct_application(
     )
 
 
+_EMAILED = "уже писали вручную"
+
+
+def _emailed_directly(book: ContactBook, email: str) -> bool:
+    """Контакту уже написали не из рассылки — кнопкой под постом
+    Telegram-парсера или из «Входящих» (_mark_contact_mail ставит sent_at).
+    Второе письмо рассылка не шлёт: кто отправил первым, тот и отправил."""
+    return any(
+        c.get("sent_at") and c["value"].lower() == email.lower()
+        for card in book.all().values()
+        for c in card["contacts"]
+    )
+
+
 def start_campaign_job(
     parameters: dict,
     llm_api_key: str,
@@ -3586,6 +3601,11 @@ def start_campaign_job(
 
         def step(email: str) -> Optional[str]:
             item = campaign["items"][email]
+            if _emailed_directly(book, email):
+                store.update_item(
+                    campaign_id, email, status="skipped", reason=_EMAILED
+                )
+                return None
             card = book.get(item["key"]) or {"company": item["company"]}
             contact: dict = next(
                 (
@@ -3757,6 +3777,12 @@ def start_campaign_job(
                     email,
                     status="skipped",
                     reason="черновик удалён во «Входящих»",
+                )
+                return None
+            if _emailed_directly(book, email):
+                drafts.remove(code)
+                store.update_item(
+                    campaign_id, email, status="skipped", reason=_EMAILED
                 )
                 return None
             result = send_hr_draft(parameters, code, attachment=resume_path)
@@ -5574,7 +5600,7 @@ def _handle_vacancy_button(
         # раньше кнопка "👋" единственная из трёх способов написать
         # HR не использовала LLM вообще, хотя рядом "✍️ письмо" и
         # автоотправка уже персонализируют текст под вакансию. Rate
-        # limit — тот же retry, что у _llm_says_vacancy (watcher.py):
+        # limit — тот же retry, что у _llm_check_post (watcher.py):
         # бесплатные лимиты (например Gemini "раз в минуту") иначе
         # почти всегда fail-open в шаблон вместо настоящего письма.
         # Шаблон остаётся как последний рубеж только при исчерпанных
@@ -5628,6 +5654,7 @@ def _handle_vacancy_button(
         TelegramConversations(
             output_folder / "telegram_conversations.json"
         ).record_outbound(contact["value"], text, job_link=post["link"])
+        remember_telegram_post_contact(output_folder, [contact], post)
         done(
             f"✅ Отправлено @{contact['value']}"
             + (" + резюме" if resume_index >= 0 else "")
@@ -5679,6 +5706,7 @@ def _handle_vacancy_button(
             post["link"],
             russian=russian,
             resume=resume_relative_name(parameters, resume_pdf),
+            post_id=parts[1],  # после отправки — контакт в Базу
             **extra,
         )
         # Telegram: без резюме или + резюме файлом. Email: резюме уходит
@@ -5772,15 +5800,35 @@ def _handle_vacancy_button(
             if found is None:
                 raise ValueError("пост устарел — отметьте компанию в Базе")
             post = found
-            values = [c["value"] for c in post["contacts"]]
+            post_contacts = post["contacts"]
         else:
             draft = drafts.get(parts[1]) or {}
-            values = [draft["contact"]] if draft else []
+            post = (
+                get_watch_post(output_folder, draft.get("post_id", "")) or {}
+            )
+            post_contacts = (
+                [
+                    {
+                        "kind": draft.get("channel", "telegram"),
+                        "value": draft["contact"],
+                    }
+                ]
+                if draft
+                else []
+            )
             if draft.get("campaign"):
                 CampaignStore(output_folder).update_item(
                     draft["campaign"], draft["contact"], status="skipped"
                 )
             drafts.remove(parts[1])
+        values = [c["value"] for c in post_contacts]
+        if post:
+            # Контакты постов в Базу до отправки не попадают — «не писать»
+            # единственный повод завести карточку без письма, иначе
+            # отмечать нечего.
+            remember_telegram_post_contact(
+                output_folder, post_contacts, post, sent=False
+            )
         book = ContactBook(output_folder)
         keys = sorted({k for v in values for k in book.keys_with(v)})
         book.update(keys, do_not_contact=True)
@@ -6074,8 +6122,27 @@ def send_hr_draft(
     ).record_outbound(
         draft["contact"], message, job_link=draft.get("job_link", "")
     )
+    _remember_draft_post(output_folder, draft)
     drafts.remove(code)
     return f"Отправлено @{draft['contact']}."
+
+
+def _remember_draft_post(output_folder: Path, draft: dict) -> None:
+    """Отправлен черновик с кнопки под постом Telegram-парсера — контакт в
+    Базу (до отправки его там нет, см. remember_telegram_post_contact)."""
+    if not draft.get("post_id"):
+        return
+    remember_telegram_post_contact(
+        output_folder,
+        [
+            {
+                "kind": draft.get("channel", "telegram"),
+                "value": draft["contact"],
+            }
+        ],
+        get_watch_post(output_folder, draft["post_id"])
+        or {"link": draft.get("job_link", "")},
+    )
 
 
 def _send_email_draft(
@@ -6130,6 +6197,7 @@ def _send_email_draft(
         message_id = send_email(credentials, email_message)
     except Exception as e:
         return f"Не удалось отправить письмо {draft['contact']}: {e}"
+    _remember_draft_post(output_folder, draft)
     if draft.get("campaign"):
         # Для напоминания в той же ветке письма рассылки.
         now_iso = datetime.now().astimezone().isoformat()

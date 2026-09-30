@@ -62,7 +62,7 @@ Use one of them or all at once.
 |---|---|---|
 | **1. Job boards** | On a schedule, the bot searches 10 platforms, an LLM scores resume fit (1–10), writes a cover letter and applies by itself — or only shows what it found | Turn platforms on and pick a mode: "Applies by itself" or "Search only" |
 | **2. Telegram parser** | Listens to job channels non-stop. A post with your keywords reaches your CrossJob bot within seconds, with "Hello", "+ resume" and "Cover letter" buttons | Press a button — the message goes to HR from your personal account |
-| **3. Your own company base and outreach** | The base fills itself — from the Telegram parser and the "🏢 Company sites" channel — plus your own lists (Excel, CSV, PDF, open datasets such as [careerLauncher](https://github.com/byborh/careerLauncher)). Outreach writes a personal email to every company and sends it from your Gmail with your resume attached — one by one, during working hours, like a person would | Upload a list, review the emails, press "Start sending" |
+| **3. Your own company base and outreach** | The base fills itself — from the "🏢 Company sites" channel and the Telegram parser (only people you actually wrote to, plus the application email from LLM-verified vacancies) — plus your own lists (Excel, CSV, PDF, open datasets such as [careerLauncher](https://github.com/byborh/careerLauncher)). Outreach writes a personal email to every company and sends it from your Gmail with your resume attached — one by one, during working hours, like a person would | Upload a list, review the emails, press "Start sending" |
 
 The third way end to end: **companies land in the Base → "Outreach" writes the emails → the bot sends them in daily batches → replies show up in the Inbox**.
 
@@ -76,13 +76,15 @@ The third way end to end: **companies land in the Base → "Outreach" writes the
 - 🔝 Scheduled bump of your hh resume and your Djinni profile.
 
 **Telegram parser**
-- ⚡ A persistent connection to channels: a vacancy arrives within seconds, not once every N hours.
-- 📨 Buttons in the CrossJob bot: "Hello", "+ resume" (your own PDFs for different roles), "Cover letter for this vacancy".
-- 📇 HR contacts from posts go straight into the company base; new channels are picked up on the fly, and the parser joins channels your account isn't in yet.
+- ⚡ A persistent connection to channels: a vacancy arrives within seconds, not once every N hours; new channels are picked up on the fly, and the parser joins channels your account isn't in yet.
+- 📨 Buttons in the CrossJob bot: "Hello", "+ resume" (your own PDFs for different roles), "Cover letter for this vacancy". Whom you already wrote to is shown right on the button: "писали 30.09" (written on) or "в очереди рассылки" (queued for outreach).
+- 📇 Only real contacts from posts reach the company base: the person you wrote to from the bot (in Telegram or by email), and the application email the LLM picked in a verified vacancy (a channel footer like "Ads: ads@…" is ignored). Other @usernames and addresses stay in the bot and don't clutter the Base. "🚫 Don't contact this company" works even for a contact that isn't in the Base yet.
+- 🧹 Candidate posts are cut by built-in stop words: "ищу работу" (looking for a job), "рассмотрю предложения", "Обо мне" (about me), #резюме, #resume, #ищу, #opentowork. The word "резюме" or "CV" inside a vacancy ("send your CV") doesn't cut the post. Add your own stop words in Settings → Telegram parser.
+- 🤖 The "is this a vacancy?" LLM check (a toggle in the parser settings) looks at every matching post. If the LLM is unavailable (no key, rate limit), the post still arrives, marked "⚠️ не проверено ИИ" (not verified), but without auto-messaging and without being saved to the Base.
 
 **Companies and outreach**
 - 🗂 Company base: a sortable table with statuses (not contacted / draft / written / replied / bounced / do not contact), the source of each contact and its history. The base only grows — it never deletes anything by itself.
-- 🔄 Statuses update by themselves, wherever an email was sent from: outreach, the Telegram parser or the Inbox. A company you already wrote to won't get a second email from outreach; replies and bounces are picked up from Gmail.
+- 🔄 Statuses update by themselves, wherever an email was sent from: outreach, the Telegram parser or the Inbox. A company you already wrote to won't get a second email from outreach, even if you wrote from the bot while its draft was waiting to be sent; replies and bounces are picked up from Gmail.
 - 🏢 "Company sites" collects companies with matching vacancies (Greenhouse, Lever, Ashby, Workable, We Work Remotely, HN "Who is hiring") into the base and looks for an HR email: in the vacancy text, on the company website, via Hunter.
 - 📥 Import your own list: Excel, CSV, Markdown, PDF, Word, TXT. Tables are read by column headers, a table in a PDF — by cell positions, without an LLM; free text is split by an LLM, but an email is taken only if it's literally in the file. Domains are checked for MX, complaint and accessibility inboxes (accessibility@, fraud@…) are dropped, and everything is shown in a preview before saving. Where to get a list — [a prompt for AI](#building-a-company-base-with-ai).
 - 📚 Thousands of companies: pages of 50/100/200, "Select all matching the filter", filters by status, source, a specific file and whether there's an email, search.

@@ -1,6 +1,7 @@
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from src.scheduler import Scheduler
@@ -31,6 +32,58 @@ def test_due_sources_skips_disabled_sources():
             },
         )
         assert scheduler.due_sources() == ["headhunter"]
+
+
+def test_due_sources_skips_telegram_search_while_live_watcher_is_enabled():
+    """Постоянный watcher владеет Telethon-сессией; второй клиент из
+    планового поиска иначе открывает ту же SQLite-сессию параллельно."""
+    with tempfile.TemporaryDirectory() as tmp:
+        scheduler = _make_scheduler(
+            tmp,
+            parameters={
+                "telegram": {
+                    "watch_enabled": True,
+                    "schedule_enabled": True,
+                }
+            },
+            source_map={"telegram": lambda p, k: None},
+        )
+        scheduler._telegram_watcher = SimpleNamespace(is_alive=lambda: True)
+
+        assert scheduler.due_sources() == []
+
+
+def test_due_sources_allows_telegram_search_when_live_watcher_is_off():
+    with tempfile.TemporaryDirectory() as tmp:
+        scheduler = _make_scheduler(
+            tmp,
+            parameters={
+                "telegram": {
+                    "watch_enabled": False,
+                    "schedule_enabled": True,
+                }
+            },
+            source_map={"telegram": lambda p, k: None},
+        )
+
+        assert scheduler.due_sources() == ["telegram"]
+
+
+def test_due_sources_allows_telegram_search_after_watcher_stops():
+    with tempfile.TemporaryDirectory() as tmp:
+        scheduler = _make_scheduler(
+            tmp,
+            parameters={
+                "telegram": {
+                    "watch_enabled": True,
+                    "schedule_enabled": True,
+                }
+            },
+            source_map={"telegram": lambda p, k: None},
+        )
+        scheduler._telegram_watcher = SimpleNamespace(is_alive=lambda: False)
+
+        assert scheduler.due_sources() == ["telegram"]
 
 
 def test_due_sources_respects_next_run():

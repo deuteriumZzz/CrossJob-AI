@@ -2012,8 +2012,8 @@ async function saveTelegramWatch() {
         channel_backfill_days: Math.max(0, parseInt(document.getElementById("tgq-backfill-days").value, 10) || 0),
       }),
     });
+    await loadTelegramWatch();
     status.textContent = "✅ Сохранено — применяется сразу.";
-    loadTelegramWatch();
   } catch (err) {
     status.textContent = err.message;
   }

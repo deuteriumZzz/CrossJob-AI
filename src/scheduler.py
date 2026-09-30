@@ -66,6 +66,7 @@ class Scheduler:
         self.now_fn = now_fn
         self.stop_event = stop_event or threading.Event()
         self.paused = False
+        self._telegram_watcher: Optional[threading.Thread] = None
 
     def due_sources(self) -> list[str]:
         if self.paused:
@@ -73,6 +74,17 @@ class Scheduler:
         due = []
         for name in self.source_map:
             source_config = self.parameters.get(name) or {}
+            # Постоянный Telegram-шлюз сам получает каждый новый пост.
+            # Пока его поток жив, плановый search_telegram открыл бы
+            # второй Telethon-клиент к той же SQLite-сессии. Если шлюз
+            # не смог стартовать или уже остановился, поиск остаётся
+            # fallback-ом и не пропадает молча.
+            if (
+                name == "telegram"
+                and self._telegram_watcher is not None
+                and self._telegram_watcher.is_alive()
+            ):
+                continue
             # Проверки ответов (check_*) — не площадки, а часть своих каналов:
             # включены по умолчанию и сами ничего не делают, пока канал
             # (Gmail, Telegram, бот) не подключён. Выключить — явным false.
@@ -247,6 +259,7 @@ class Scheduler:
         except Exception as e:
             logger.warning(f"Telegram-шлюз не запустился: {e}")
             watcher = None
+        self._telegram_watcher = watcher
         try:
             while not self.stop_event.is_set():
                 self.run_once()
@@ -257,4 +270,5 @@ class Scheduler:
             for w in (watcher, active_watcher()):
                 if w is not None:
                     w.stop()
+            self._telegram_watcher = None
             logger.info("Scheduler stopped.")

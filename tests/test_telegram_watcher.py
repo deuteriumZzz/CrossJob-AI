@@ -25,21 +25,21 @@ def test_match_keywords_and_defaults():
     ]
 
 
-def test_llm_says_vacancy_fails_open_without_key():
-    assert w._llm_says_vacancy("любой текст", "") is True
+def test_llm_check_post_is_unavailable_without_key():
+    assert w._llm_check_post("любой текст", "") is None
 
 
-def test_llm_says_vacancy_fails_open_on_error(monkeypatch):
+def test_llm_check_post_is_unavailable_on_error(monkeypatch):
     def _boom(*args, **kwargs):
         raise RuntimeError("no llm configured")
 
     monkeypatch.setattr("src.job_sources.llm_provider.get_chat_llm", _boom)
-    assert w._llm_says_vacancy("любой текст", "key") is True
+    assert w._llm_check_post("любой текст", "key") is None
 
 
-def test_llm_says_vacancy_retries_on_rate_limit_then_succeeds(monkeypatch):
+def test_llm_check_post_retries_on_rate_limit_then_succeeds(monkeypatch):
     """Всплеск запросов (много каналов разом) не должен превращаться в
-    мгновенный fail-open — ждём сброса лимита и пробуем снова."""
+    мгновенный «ИИ недоступен» — ждём сброса лимита и пробуем снова."""
     monkeypatch.setattr(w, "RATE_LIMIT_RETRY_DELAYS_SECONDS", (0, 0))
     sleeps: list[float] = []
     monkeypatch.setattr(w.time, "sleep", sleeps.append)
@@ -57,12 +57,12 @@ def test_llm_says_vacancy_retries_on_rate_limit_then_succeeds(monkeypatch):
         "src.job_sources.llm_provider.get_chat_llm",
         lambda *a, **kw: _FakeLLM(),
     )
-    assert w._llm_says_vacancy("Ищем Python-разработчика", "key") is True
+    assert w._llm_check_post("Ищем Python-разработчика", "key") == (True, "")
     assert calls["n"] == 3
     assert sleeps == [0, 0]
 
 
-def test_llm_says_vacancy_fails_open_after_exhausting_retries(monkeypatch):
+def test_llm_check_post_is_unavailable_after_exhausting_retries(monkeypatch):
     monkeypatch.setattr(w, "RATE_LIMIT_RETRY_DELAYS_SECONDS", (0,))
     monkeypatch.setattr(w.time, "sleep", lambda *a: None)
 
@@ -72,7 +72,7 @@ def test_llm_says_vacancy_fails_open_after_exhausting_retries(monkeypatch):
     monkeypatch.setattr(
         "src.job_sources.llm_provider.get_chat_llm", _always_rate_limited
     )
-    assert w._llm_says_vacancy("текст", "key") is True
+    assert w._llm_check_post("текст", "key") is None
 
 
 def test_has_vacancy_structure_needs_salary_and_format():
@@ -98,7 +98,7 @@ def test_channel_trust_ignores_channel_below_min_samples(tmp_path):
     assert w._channel_is_untrusted(tmp_path, "new_channel") is False
 
 
-def test_llm_says_vacancy_parses_short_answer(monkeypatch):
+def test_llm_check_post_parses_short_answer(monkeypatch):
     class _FakeLLM:
         def invoke(self, prompt):
             assert "Пост:" in prompt
@@ -108,13 +108,13 @@ def test_llm_says_vacancy_parses_short_answer(monkeypatch):
         "src.job_sources.llm_provider.get_chat_llm",
         lambda *a, **kw: _FakeLLM(),
     )
-    assert w._llm_says_vacancy("Ищу работу", "key") is False
+    assert w._llm_check_post("Ищу работу", "key") == (False, "")
 
 
 def test_handle_post_skips_llm_call_when_flag_disabled(monkeypatch):
     called = []
     monkeypatch.setattr(
-        w, "_llm_says_vacancy", lambda *a, **kw: called.append(1) or True
+        w, "_llm_check_post", lambda *a, **kw: called.append(1) or (True, "")
     )
     with tempfile.TemporaryDirectory() as tmp:
         watcher = w.TelegramWatcher(
@@ -132,6 +132,39 @@ def test_handle_post_skips_llm_call_when_flag_disabled(monkeypatch):
             watcher._on_channel_post(_event("Ищем Python-разработчика"))
         )
     assert called == []
+
+
+def test_enabled_llm_checks_every_keyword_match_including_structured_post(
+    monkeypatch,
+):
+    """The safety switch must not bypass a post merely because it has
+    salary and remote-work markers."""
+    called = []
+    monkeypatch.setattr(
+        w, "_llm_check_post", lambda *a, **kw: called.append(1) or (True, "")
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        watcher = w.TelegramWatcher(
+            1,
+            "h",
+            Path(tmp) / "s",
+            ["geekjobs"],
+            ["python"],
+            [],
+            "me",
+            {
+                "outputFileDirectory": Path(tmp),
+                "dataFolder": Path(tmp),
+                "telegram": {"llm_vacancy_filter": True},
+            },
+        )
+        watcher.client = _FakeClient()
+        asyncio.run(
+            watcher._on_channel_post(
+                _event("Ищем Python-разработчика, 250000 ₽, удалённо")
+            )
+        )
+    assert called == [1]
 
 
 def test_match_keywords_rejects_candidate_self_posts():
@@ -156,6 +189,22 @@ def test_match_keywords_rejects_candidate_self_posts():
     assert w.match_keywords(
         "Ищем Python backend-разработчика в команду", ["python"], []
     ) == ["python"]
+
+
+def test_match_keywords_rejects_resume_hashtags_but_keeps_vacancies():
+    """Резюме в каналах помечают хэштегами; слово «резюме»/CV в самой
+    вакансии («присылайте резюме») пост не отсекает."""
+    for resume in (
+        "#резюме #python #backend Обо мне: 4 года",
+        "#cv #ищуработу Python Developer",
+        "#Python #FastAPI #OpenToWork Junior Python",
+    ):
+        assert w.match_keywords(resume, ["python"], []) == []
+    for vacancy in (
+        "#вакансия Python-разработчик. Присылайте резюме на hr@acme.io",
+        "#vacancy Python Developer, send your CV to jobs@acme.io",
+    ):
+        assert w.match_keywords(vacancy, ["python"], []) == ["python"]
 
 
 class _FakeClient:
@@ -268,11 +317,9 @@ def test_channel_post_forwarded_with_header_once():
         assert header.startswith("🎯 python · @geekjobs")
         assert "@anna_hr" in header and "jobs@acme.io" in header
         assert watcher.matched_count == 1
-        [card] = ContactBook(Path(tmp)).all().values()
-        assert {c["value"] for c in card["contacts"]} == {
-            "anna_hr",
-            "jobs@acme.io",
-        }
+        # Найденный в посте контакт — ещё не история обращения. В базу
+        # он попадёт лишь после успешной отправки через кнопку/авторежим.
+        assert ContactBook(Path(tmp)).all() == {}
 
 
 def test_backfilled_channels_persist_roundtrip():
@@ -319,6 +366,117 @@ def test_backfill_channel_only_forwards_recent_matches():
         watcher.client = _FakeClient(history=history)
         asyncio.run(watcher._backfill_channel(object(), "geekjobs"))
         assert watcher.client.forwarded == [("me", 10)]
+        assert w._load_backfilled_channels(Path(tmp)) == {"geekjobs"}
+
+
+def test_backfill_channel_is_not_marked_when_history_scan_fails():
+    """Interrupted history scans must retry on the next watcher start."""
+    from datetime import datetime, timezone
+
+    history = [
+        SimpleNamespace(
+            message="Ищем Python-разработчика",
+            id=10,
+            date=datetime.now(timezone.utc),
+        )
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        watcher = w.TelegramWatcher(
+            1,
+            "h",
+            Path(tmp) / "s",
+            ["geekjobs"],
+            ["python"],
+            [],
+            "me",
+            {
+                "outputFileDirectory": Path(tmp),
+                "dataFolder": Path(tmp),
+                "telegram": {"channel_backfill_days": 14},
+            },
+        )
+        watcher.client = _FakeClient(history=history)
+
+        async def interrupted(*args):
+            raise ConnectionError("connection lost")
+
+        watcher._handle_post = interrupted
+        asyncio.run(watcher._backfill_channel(object(), "geekjobs"))
+
+        assert w._load_backfilled_channels(Path(tmp)) == set()
+
+
+def test_disabled_backfill_clears_in_progress_channel():
+    """Setting the history window to zero must not block a later retry."""
+    with tempfile.TemporaryDirectory() as tmp:
+        watcher = w.TelegramWatcher(
+            1,
+            "h",
+            Path(tmp) / "s",
+            ["geekjobs"],
+            ["python"],
+            [],
+            "me",
+            {
+                "outputFileDirectory": Path(tmp),
+                "dataFolder": Path(tmp),
+                "telegram": {"channel_backfill_days": 0},
+            },
+        )
+        watcher._backfills_in_progress.add("geekjobs")
+
+        asyncio.run(watcher._backfill_channel(object(), "geekjobs"))
+
+        assert watcher._backfills_in_progress == set()
+
+
+def test_subscribe_does_not_start_duplicate_backfill_while_one_is_running():
+    class SubscribeClient:
+        async def get_entity(self, channel):
+            return SimpleNamespace(left=False)
+
+        def remove_event_handler(self, *args):
+            pass
+
+        def add_event_handler(self, *args):
+            pass
+
+    with tempfile.TemporaryDirectory() as tmp:
+        watcher = w.TelegramWatcher(
+            1,
+            "h",
+            Path(tmp) / "s",
+            ["geekjobs"],
+            ["python"],
+            [],
+            "me",
+            {
+                "outputFileDirectory": Path(tmp),
+                "dataFolder": Path(tmp),
+                "telegram": {"channel_backfill_days": 7},
+            },
+        )
+        watcher.client = SubscribeClient()
+        calls = []
+        release = [None]
+
+        async def slow_backfill(entity, channel):
+            calls.append(channel)
+            await release[0].wait()
+            watcher._backfills_in_progress.discard(channel)
+
+        watcher._backfill_channel = slow_backfill
+
+        async def subscribe_twice():
+            release[0] = asyncio.Event()
+            await watcher._subscribe()
+            await watcher._subscribe()
+            await asyncio.sleep(0)
+            assert calls == ["geekjobs"]
+            release[0].set()
+            await asyncio.sleep(0)
+
+        asyncio.run(subscribe_twice())
 
 
 def test_source_client_routes_through_active_watcher(monkeypatch):
@@ -336,6 +494,25 @@ def test_source_client_routes_through_active_watcher(monkeypatch):
         with TelegramSourceClient(1, "h", Path(tmp) / "session") as tg:
             assert tg.send_message("hr_anna", "Привет") == "sent"
     assert len(calls) == 1
+
+
+def test_source_client_rechecks_watcher_after_waiting_for_session_lock(
+    monkeypatch,
+):
+    """Пока клиент ждал сессионный замок, watcher мог подключиться.
+    Тогда нельзя открывать второй Telethon-клиент."""
+    watcher = SimpleNamespace(connected=True)
+    checks = iter([None, watcher])
+    starts = []
+    source_client = object.__new__(TelegramSourceClient)
+    source_client._watcher = None
+    source_client._client = SimpleNamespace(start=lambda: starts.append(True))
+    monkeypatch.setattr(w, "active_watcher", lambda: next(checks))
+
+    assert source_client.__enter__() is source_client
+    assert source_client._watcher is watcher
+    assert starts == []
+    assert not _SESSION_LOCK.locked()
 
 
 def test_watch_settings_api(client):  # noqa: F811
@@ -356,6 +533,30 @@ def test_watch_settings_api(client):  # noqa: F811
     assert snap["forward_to"] == "my_jobs"
     tg = api.get_ctx().config["telegram"]
     assert tg["watch_enabled"] is True
+
+
+def test_watch_settings_api_updates_active_llm_filter(
+    client, monkeypatch  # noqa: F811
+):
+    updates = []
+
+    class _Watcher:
+        connected = True
+        matched_count = 0
+
+        def update_llm_vacancy_filter(self, enabled):
+            updates.append(enabled)
+
+    monkeypatch.setattr(w, "_ACTIVE", _Watcher())
+
+    response = client.post(
+        "/api/settings/telegram-watch",
+        json={"llm_vacancy_filter": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["llm_vacancy_filter"] is True
+    assert updates == [True]
 
 
 def test_telegram_resumes_folder_and_keyboard():
@@ -484,6 +685,9 @@ def test_quick_hello_with_resume(monkeypatch):
             conv.get("anna_hr")["messages"][0]["job_link"]
             == "https://t.me/geekjobs/5"
         )
+        [card] = ContactBook(params["outputFileDirectory"]).all().values()
+        assert card["contacts"][0]["value"] == "anna_hr"
+        assert card["contacts"][0]["source"] == "отклик на пост в @geekjobs"
 
 
 def test_quick_hello_uses_configured_resume_for_post_language(monkeypatch):
@@ -563,6 +767,8 @@ def test_llm_letter_saved_to_telegram_folder_then_sent(monkeypatch):
             "Под вашу вакансию: 3 примера.",
         )
         assert calls["files"] == [("anna_hr", "cv_ru.pdf")]
+        [card] = ContactBook(params["outputFileDirectory"]).all().values()
+        assert card["contacts"][0]["source"] == "отклик на пост в @geekjobs"
         skip = next(b for b in buttons if b.startswith("x:"))
         main._handle_vacancy_button(
             params, "key", "T", cb(skip)
@@ -731,6 +937,74 @@ def test_new_channels_picked_up_without_restart(tmp_path, monkeypatch):
     }
 
 
+def test_watch_settings_refreshes_llm_vacancy_filter_without_restart(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "work_preferences.yaml").write_text(
+        "telegram:\n  llm_vacancy_filter: true\n",
+        encoding="utf-8",
+    )
+    watcher = w.TelegramWatcher(
+        1,
+        "h",
+        tmp_path / "s",
+        [],
+        [],
+        [],
+        "me",
+        {
+            "outputFileDirectory": tmp_path,
+            "dataFolder": tmp_path,
+            "secretsFile": tmp_path / "x",
+            "telegram": {"llm_vacancy_filter": False},
+        },
+    )
+    connected = iter([True, False])
+    watcher.client = SimpleNamespace(is_connected=lambda: next(connected))
+
+    async def no_sleep(_):
+        pass
+
+    monkeypatch.setattr(w.asyncio, "sleep", no_sleep)
+    asyncio.run(watcher._watch_settings())
+
+    assert watcher.parameters["telegram"]["llm_vacancy_filter"] is True
+
+
+def test_watch_settings_keeps_llm_filter_when_preference_is_missing(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "work_preferences.yaml").write_text(
+        "telegram: {}\n",
+        encoding="utf-8",
+    )
+    watcher = w.TelegramWatcher(
+        1,
+        "h",
+        tmp_path / "s",
+        [],
+        [],
+        [],
+        "me",
+        {
+            "outputFileDirectory": tmp_path,
+            "dataFolder": tmp_path,
+            "secretsFile": tmp_path / "x",
+            "telegram": {"llm_vacancy_filter": True},
+        },
+    )
+    connected = iter([True, False])
+    watcher.client = SimpleNamespace(is_connected=lambda: next(connected))
+
+    async def no_sleep(_):
+        pass
+
+    monkeypatch.setattr(w.asyncio, "sleep", no_sleep)
+    asyncio.run(watcher._watch_settings())
+
+    assert watcher.parameters["telegram"]["llm_vacancy_filter"] is True
+
+
 def test_email_from_post_marks_base_and_do_not_write(monkeypatch):
     """Письмо HR из поста парсера: в Базе «написали» (рассылка второй раз не
     напишет), ответ ловится; «Не писать компании» — статус «не писать»."""
@@ -801,6 +1075,134 @@ def test_email_from_post_marks_base_and_do_not_write(monkeypatch):
         assert ContactBook(out).get("acme")["do_not_contact"] is True
 
 
+def test_llm_check_post_picks_apply_email_only_from_post(monkeypatch):
+    """Подпись канала «Размещение вакансий: ads@…» — не адрес для отклика;
+    адрес, которого нет в посте, ИИ не выдумает."""
+    prompts, answers = [], iter(
+        [
+            "ДА\nhr@acme.io",
+            "ДА\nНЕТ (ads@geekjobs.ru — реклама канала)",
+            "ДА\nboss@other.io",
+        ]
+    )
+
+    class _FakeLLM:
+        def invoke(self, prompt):
+            prompts.append(prompt)
+            return SimpleNamespace(content=next(answers))
+
+    monkeypatch.setattr(
+        "src.job_sources.llm_provider.get_chat_llm",
+        lambda *a, **kw: _FakeLLM(),
+    )
+    text = (
+        "Python Dev. Резюме: hr@acme.io\nРазмещение вакансий: ads@geekjobs.ru"
+    )
+    emails = ["hr@acme.io", "ads@geekjobs.ru"]
+    assert w._llm_check_post(text, "key", emails) == (True, "hr@acme.io")
+    assert "«Размещение вакансий: ads@geekjobs.ru»" in prompts[0]
+    assert w._llm_check_post(text, "key", emails) == (True, "")
+    assert w._llm_check_post(text, "key", emails) == (True, "")
+
+
+def _llm_watcher(tmp, telegram):
+    watcher = w.TelegramWatcher(
+        1,
+        "h",
+        Path(tmp) / "s",
+        ["geekjobs"],
+        ["python"],
+        [],
+        "me",
+        {
+            "outputFileDirectory": Path(tmp),
+            "dataFolder": Path(tmp),
+            "telegram": {"llm_vacancy_filter": True, **telegram},
+        },
+    )
+    watcher.bot = ("T", "42")
+    watcher.client = _FakeClient()
+    return watcher
+
+
+def test_verified_post_saves_only_apply_email_to_base(monkeypatch):
+    """Проверенная вакансия: email для отклика — сразу в Базу (как адреса
+    с сайтов компаний), @username — только после отправки из бота."""
+    monkeypatch.setattr(
+        w, "_llm_check_post", lambda text, key, emails: (True, "hr@acme.io")
+    )
+    monkeypatch.setattr(w, "bot_request", lambda *a: {})
+    with tempfile.TemporaryDirectory() as tmp:
+        watcher = _llm_watcher(tmp, {})
+        asyncio.run(
+            watcher._on_channel_post(
+                _event("Python Dev в Acme: hr@acme.io, вопросы @anna_hr")
+            )
+        )
+        [card] = ContactBook(Path(tmp)).all().values()
+    assert [(c["value"], c["source"]) for c in card["contacts"]] == [
+        ("hr@acme.io", "пост в @geekjobs")
+    ]
+
+
+def test_unverified_post_reaches_bot_without_auto_send_or_base(monkeypatch):
+    """ИИ недоступен: пост не теряется (в бот с пометкой), но ничего
+    автоматического — ни автоотправки, ни Базы, ни вердикта каналу."""
+    monkeypatch.setattr(w, "_llm_check_post", lambda *a: None)
+    sent = []
+    monkeypatch.setattr(
+        w, "bot_request", lambda token, method, payload: sent.append(payload)
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        watcher = _llm_watcher(tmp, {"auto_message": True})
+        asyncio.run(
+            watcher._on_channel_post(
+                _event("Python Dev в Acme: hr@acme.io, пишите @anna_hr")
+            )
+        )
+        assert w.pending_telegram_sends_count(Path(tmp)) == 0
+        assert ContactBook(Path(tmp)).all() == {}
+        assert not (Path(tmp) / ".channel_trust.json").exists()
+    [payload] = sent
+    assert "⚠️ не проверено ИИ" in payload["text"]
+
+
+def test_buttons_mark_contacts_already_written_or_queued():
+    from datetime import datetime
+
+    from src.direct.campaign import CampaignStore
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp)
+        TelegramConversations(
+            out / "telegram_conversations.json"
+        ).record_outbound("anna_hr", "Здравствуйте")
+        CampaignStore(out).create(
+            "all", [{"key": "acme", "email": "hr@acme.io", "company": "Acme"}]
+        )
+        contacts = [
+            {"kind": "telegram", "value": "Anna_HR"},
+            {"kind": "email", "value": "HR@acme.io"},
+        ]
+        notes = w.contact_notes(out, contacts)
+    written = f"писали {datetime.now().astimezone():%d.%m}"
+    assert notes == {"anna_hr": written, "hr@acme.io": "в очереди рассылки"}
+    rows = w.vacancy_keyboard("abc", contacts, [], notes)["inline_keyboard"]
+    assert rows[0][0]["text"] == f"👋 @Anna_HR · {written}"
+    assert rows[2][0]["text"].endswith("(LLM) · в очереди рассылки")
+
+
+def test_do_not_write_creates_card_for_post_contact(monkeypatch):
+    """Контакт поста ещё не в Базе (ему не писали) — «Не писать компании»
+    всё равно срабатывает: заводит карточку сразу со статусом."""
+    with tempfile.TemporaryDirectory() as tmp:
+        main, params, post_id, calls, cb = _button_env(tmp, monkeypatch)
+        main._handle_vacancy_button(params, "key", "T", cb(f"n:{post_id}"))
+        [card] = ContactBook(params["outputFileDirectory"]).all().values()
+    assert card["do_not_contact"] is True
+    assert card["contacts"][0]["source"] == "пост в @geekjobs"
+
+
 def test_pending_telegram_sends_queue_and_flush():
     """queue_telegram_send не блокирует (никакого sleep) — просто пишет
     запись с send_after; flush отправляет только то, чему пришло время
@@ -827,10 +1229,15 @@ def test_pending_telegram_sends_queue_and_flush():
 
         # Без ограничения часов и с нулевой задержкой — отправляется и
         # удаляется из очереди.
+        remembered = []
         w.flush_pending_telegram_sends(
-            lambda contact, text: sent.append((contact, text)), out, None
+            lambda contact, text: sent.append((contact, text)),
+            out,
+            None,
+            on_sent=lambda entry: remembered.append(entry["contact"]),
         )
         assert sent == [("hr_user", "текст письма")]
+        assert remembered == ["hr_user"]
 
 
 def test_pending_telegram_send_attaches_resume_file_after_text():

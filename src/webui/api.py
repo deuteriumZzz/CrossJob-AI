@@ -2338,7 +2338,10 @@ def _source_group(source: str) -> str:
         return "Сайты компаний"
     if source.startswith("файл "):
         return source.split(",")[0]
-    if source.startswith("пост в @"):
+    # «пост в @канал» — найден в посте (email для отклика, «не писать»),
+    # «отклик на пост в @канал» — мы ему написали
+    # (remember_telegram_post_contact).
+    if source.startswith(("пост в ", "отклик на пост в ")):
         return "Telegram-каналы"
     if source.startswith("сайт") or source.startswith("Hunter"):
         return "Досье компаний"
@@ -3891,6 +3894,12 @@ def post_telegram_watch(
         if value is not None:
             set_source_field(prefs, "telegram", field, value)
     ctx.reload_config()
+    if body.llm_vacancy_filter is not None:
+        from src.job_sources.telegram.watcher import active_watcher
+
+        watcher = active_watcher()
+        if watcher is not None:
+            watcher.update_llm_vacancy_filter(body.llm_vacancy_filter)
     daemon_running = (
         ctx.scheduler_thread is not None and ctx.scheduler_thread.is_alive()
     )
