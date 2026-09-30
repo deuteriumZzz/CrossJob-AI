@@ -23,10 +23,10 @@
 
 ## Скачать
 
-Актуальная alpha-версия: **[v0.3.1-alpha](https://github.com/deuteriumZzz/CrossJob-AI/releases/tag/v0.3.1-alpha)**.
+Актуальная alpha-версия: **[v0.3.2-alpha](https://github.com/deuteriumZzz/CrossJob-AI/releases/tag/v0.3.2-alpha)**.
 
-- [Скачать для macOS](https://github.com/deuteriumZzz/CrossJob-AI/releases/download/v0.3.1-alpha/CrossJob-AI-macOS.zip)
-- [Скачать для Windows](https://github.com/deuteriumZzz/CrossJob-AI/releases/download/v0.3.1-alpha/CrossJob-AI-Windows.zip)
+- [Скачать для macOS](https://github.com/deuteriumZzz/CrossJob-AI/releases/download/v0.3.2-alpha/CrossJob-AI-macOS.zip)
+- [Скачать для Windows](https://github.com/deuteriumZzz/CrossJob-AI/releases/download/v0.3.2-alpha/CrossJob-AI-Windows.zip)
 - [Все релизы и примечания к версиям](https://github.com/deuteriumZzz/CrossJob-AI/releases)
 
 Это экспериментальная alpha-версия. Перед использованием прочитайте предупреждения на странице релиза.
