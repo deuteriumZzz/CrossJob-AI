@@ -45,7 +45,9 @@ def test_question_gets_draft_and_stage(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp:
         params, log, conversations = _setup(tmp)
         sent: list[str] = []
-        monkeypatch.setattr(main, "notify", lambda p, text: sent.append(text))
+        monkeypatch.setattr(
+            main, "notify", lambda p, text, *a, **k: sent.append(text)
+        )
         monkeypatch.setattr(main, "classify_reply", lambda t, k: "question")
         monkeypatch.setattr(
             main, "generate_reply", lambda *a, **k: "От 250 000 ₽."
@@ -73,7 +75,9 @@ def test_interest_marks_interview_without_draft(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp:
         params, log, conversations = _setup(tmp)
         sent: list[str] = []
-        monkeypatch.setattr(main, "notify", lambda p, text: sent.append(text))
+        monkeypatch.setattr(
+            main, "notify", lambda p, text, *a, **k: sent.append(text)
+        )
         monkeypatch.setattr(main, "classify_reply", lambda t, k: "interest")
 
         main._react_to_hr_reply(
@@ -176,7 +180,9 @@ def test_daily_digest_sent_once_per_day(monkeypatch):
         out = Path(tmp)
         sent: list[str] = []
         monkeypatch.setattr(
-            main, "send_notification", lambda t, c, text: sent.append(text)
+            main,
+            "send_notification",
+            lambda t, c, text, *a, **k: sent.append(text),
         )
         params = {"outputFileDirectory": out, "digest": {"hour": 0}}
         main._maybe_send_daily_digest(params, "t", "c")

@@ -119,7 +119,9 @@ def test_sync_hh_states_writes_log_and_notifies_only_real_replies(
             },
         )
         sent: list[str] = []
-        monkeypatch.setattr(main, "notify", lambda p, text: sent.append(text))
+        monkeypatch.setattr(
+            main, "notify", lambda p, text, *a, **k: sent.append(text)
+        )
 
         # Первая сверка — тихая загрузка истории одной сводкой.
         log.update_reply_state("headhunter", "2", "Не просмотрен")

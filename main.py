@@ -70,10 +70,7 @@ from src.job_sources.cover_letter import (
     generate_cover_letter_for_job,
     set_cover_letter_style,
 )
-from src.job_sources.djinni.apply import (
-    DjinniProfileRequired,
-    DjinniSession,
-)
+from src.job_sources.djinni.apply import DjinniProfileRequired, DjinniSession
 from src.job_sources.djinni.apply import apply_to_job as apply_to_djinni_job
 from src.job_sources.djinni.apply import bump_profile as bump_djinni_profile
 from src.job_sources.djinni.apply import (
@@ -219,6 +216,7 @@ from src.job_sources.telegram_conversations import TelegramConversations
 from src.job_sources.telegram_notify import (
     bot_credentials,
     bot_request,
+    get_or_create_topic,
     notify_from_secrets,
     send_document_from_secrets,
     send_notification,
@@ -1226,6 +1224,7 @@ def _total_daily_limit_reached(
             parameters,
             f"Общий дневной лимит откликов ({total_limit}) на все "
             "площадки вместе достигнут.",
+            category="Лимиты",
         )
         return True
     token_limit = (parameters.get("limits") or {}).get("llm_daily_token_limit")
@@ -1241,6 +1240,7 @@ def _total_daily_limit_reached(
             f"Дневной лимит токенов ИИ ({token_limit}) достигнут — "
             "сегодня бот больше не откликается и не пишет, "
             "продолжит завтра.",
+            category="Лимиты",
         )
         return True
     return False
@@ -1386,6 +1386,7 @@ def search_and_apply_headhunter(
                 "поставлена на паузу на 24ч. Решите капчу вручную в "
                 "открытом Chrome-профиле и пришлите /resume headhunter "
                 "— попробуем снова раньше.",
+                category="headhunter",
             )
             return
         logger.info(f"Found {len(jobs)} matching HeadHunter vacancies.")
@@ -1437,6 +1438,7 @@ def search_and_apply_headhunter(
                     parameters,
                     f"Дневной лимит откликов ({daily_limit}) достигнут "
                     f"для {job.source}.",
+                    category=job.source,
                 )
                 break
 
@@ -1508,6 +1510,7 @@ def search_and_apply_headhunter(
                         "поставлена на паузу на 24ч. Решите капчу "
                         "вручную в открытом Chrome-профиле и пришлите "
                         "/resume headhunter — попробуем снова раньше.",
+                        category="headhunter",
                     )
                     break
                 except Exception as e:
@@ -1521,6 +1524,12 @@ def search_and_apply_headhunter(
                     status: Literal["applied", "dry_run"] = "applied"
                     logger.info(
                         f"Applied to {job.role} at {job.company} ({job.link})"
+                    )
+                    notify_routine(
+                        parameters,
+                        f"✅ Applied to {job.role} at {job.company} "
+                        f"({job.link})",
+                        category=job.source,
                     )
                     if not cover_letter and hh_preferences.get(
                         "chat_cover_letter_followup"
@@ -1629,6 +1638,7 @@ def search_geekjob(
             "поставлена на паузу на 24ч. Решите капчу вручную в "
             "открытом Chrome-профиле и пришлите /resume geekjob — "
             "попробуем снова раньше.",
+            category="geekjob",
         )
         return
     logger.info(f"Found {len(jobs)} matching geekjob.ru vacancies.")
@@ -1703,6 +1713,12 @@ def search_geekjob(
                 status: Literal["applied", "dry_run"] = "applied"
                 logger.info(
                     f"Applied to {job.role} at {job.company} ({job.link})"
+                )
+                notify_routine(
+                    parameters,
+                    f"✅ Applied to {job.role} at {job.company} "
+                    f"({job.link})",
+                    category=job.source,
                 )
             else:
                 status = "dry_run"
@@ -2026,6 +2042,7 @@ def search_getmatch(
                 "поставлена на паузу на 24ч. Решите капчу вручную в "
                 "открытом Chrome-профиле и пришлите /resume getmatch — "
                 "попробуем снова раньше.",
+                category="getmatch",
             )
             return
         logger.info(f"Found {len(jobs)} matching GetMatch vacancies.")
@@ -2104,6 +2121,12 @@ def search_getmatch(
                     status: Literal["applied", "dry_run"] = "applied"
                     logger.info(
                         f"Applied to {job.role} at {job.company} ({job.link})"
+                    )
+                    notify_routine(
+                        parameters,
+                        f"✅ Applied to {job.role} at {job.company} "
+                        f"({job.link})",
+                        category=job.source,
                     )
                 else:
                     status = "dry_run"
@@ -2250,6 +2273,7 @@ def search_and_apply_linkedin(
                     parameters,
                     f"Дневной лимит откликов ({daily_limit}) достигнут "
                     "для LinkedIn.",
+                    category="linkedin",
                 )
                 break
 
@@ -2451,6 +2475,7 @@ def search_and_apply_habr_career(
             "поставлена на паузу на 24ч. Решите капчу вручную в "
             "открытом Chrome-профиле и пришлите /resume habr_career — "
             "попробуем снова раньше.",
+            category="habr_career",
         )
         return
     logger.info(f"Found {len(jobs)} matching career.habr.com vacancies.")
@@ -2548,6 +2573,12 @@ def search_and_apply_habr_career(
                     logger.info(
                         f"Applied to {job.role} at {job.company} "
                         f"({job.link})"
+                    )
+                    notify_routine(
+                        parameters,
+                        f"✅ Applied to {job.role} at {job.company} "
+                        f"({job.link})",
+                        category=job.source,
                     )
                 else:
                     status = "dry_run"
@@ -2653,6 +2684,7 @@ def search_and_apply_wellfound(
             parameters,
             f"wellfound.com: похоже на блокировку ({e}). "
             "Площадка поставлена на паузу на 24ч.",
+            category="wellfound",
         )
         return
     logger.info(f"Found {len(jobs)} matching wellfound.com vacancies.")
@@ -2750,6 +2782,12 @@ def search_and_apply_wellfound(
                 status: Literal["applied", "dry_run"] = "applied"
                 logger.info(
                     f"Applied to {job.role} at {job.company} ({job.link})"
+                )
+                notify_routine(
+                    parameters,
+                    f"✅ Applied to {job.role} at {job.company} "
+                    f"({job.link})",
+                    category=job.source,
                 )
             else:
                 status = "dry_run"
@@ -2861,6 +2899,7 @@ def search_and_apply_himalayas(
                 parameters,
                 f"himalayas.app: похоже на блокировку ({e}). "
                 "Площадка поставлена на паузу на 24ч.",
+                category="himalayas",
             )
             return
         logger.info(f"Found {len(jobs)} matching himalayas.app vacancies.")
@@ -2960,6 +2999,12 @@ def search_and_apply_himalayas(
                         f"Applied to {job.role} at {job.company} "
                         f"({job.link})"
                     )
+                    notify_routine(
+                        parameters,
+                        f"✅ Applied to {job.role} at {job.company} "
+                        f"({job.link})",
+                        category=job.source,
+                    )
                 else:
                     status = "dry_run"
                     logger.warning(
@@ -3058,6 +3103,7 @@ def search_and_apply_avito(
                 parameters,
                 f"avito.ru: похоже на блокировку ({e}). Площадка "
                 "поставлена на паузу на 24ч.",
+                category="avito",
             )
             return
         logger.info(f"Found {len(jobs)} matching avito.ru vacancies.")
@@ -3147,6 +3193,12 @@ def search_and_apply_avito(
                     logger.info(
                         f"Applied to {job.role} at {job.company} "
                         f"({job.link})"
+                    )
+                    notify_routine(
+                        parameters,
+                        f"✅ Applied to {job.role} at {job.company} "
+                        f"({job.link})",
+                        category=job.source,
                     )
                 else:
                     status = "dry_run"
@@ -3287,6 +3339,7 @@ def search_direct(
             parameters,
             f"🏢 Сайты компаний: +{added} в Базе, с email — {with_email}. "
             "Разослать письма — «Компании» → «Рассылки».",
+            category="Прямые письма",
         )
 
 
@@ -3611,9 +3664,9 @@ def start_campaign_job(
             )
             if stopped and current.get("alerted") != stopped:
                 store.update(campaign_id, alerted=stopped)
-                notify(parameters, f"⛔ {text}")
+                notify(parameters, f"⛔ {text}", category="Рассылка")
             elif not stopped:
-                notify_routine(parameters, text)
+                notify_routine(parameters, text, category="Рассылка")
 
         job = CampaignJob(
             campaign_id,
@@ -3662,6 +3715,7 @@ def _check_campaign_mail(parameters: dict, credentials: dict) -> None:
             parameters,
             f"✉️ Ответ на письмо из рассылки «{name}»: {company} ({email}). "
             "Проверьте почту.",
+            category="Рассылка",
         )
     _draft_campaign_follow_ups(parameters, store, set(replied))
 
@@ -3741,12 +3795,14 @@ def _check_contact_book_mail(
                 parameters,
                 f"🚫 {sent[email][0]} ({email}) попросили больше не писать "
                 "— компания помечена «не писать» в Базе.",
+                category="Прямые письма",
             )
         else:
             notify(
                 parameters,
                 f"✉️ Ответ на письмо: {sent[email][0]} ({email}). Проверьте "
                 "почту.",
+                category="Прямые письма",
             )
     days = int((parameters.get("direct") or {}).get("follow_up_days", 7))
     if days <= 0:
@@ -3777,6 +3833,7 @@ def _check_contact_book_mail(
             parameters,
             f"⏳ {company} не ответили на письмо {days}+ дн. "
             f"Напоминание: «отправить {code}» / «пропустить {code}».",
+            category="Прямые письма",
         )
 
 
@@ -3964,6 +4021,7 @@ def check_email_replies(parameters: dict, llm_api_key: str) -> None:
                 parameters,
                 f"✉️ Ответ на письмо: {entry['company']} — {entry['title']} "
                 f"({entry['outreach_email']}). Проверьте почту.",
+                category=entry["source"],
             )
         elif (
             days > 0
@@ -3987,6 +4045,7 @@ def check_email_replies(parameters: dict, llm_api_key: str) -> None:
                 parameters,
                 f"⏳ {entry['company']} не ответили на письмо {days}+ дн. "
                 f"Напоминание: «отправить {code}» / «пропустить {code}».",
+                category=entry["source"],
             )
 
 
@@ -4056,6 +4115,7 @@ def search_and_apply_djinni(
             parameters,
             f"djinni.co: похоже на блокировку ({e}). Площадка поставлена на "
             "паузу на 24ч.",
+            category="djinni",
         )
         return
     logger.info(f"Found {len(jobs)} matching djinni.co vacancies.")
@@ -4083,6 +4143,7 @@ def search_and_apply_djinni(
                     notify_routine(
                         parameters,
                         "Djinni: профиль поднят в поиске рекрутеров.",
+                        category="djinni",
                     )
             except Exception as e:
                 logger.warning(f"Не удалось поднять профиль на Djinni: {e}")
@@ -4126,7 +4187,7 @@ def search_and_apply_djinni(
                     unmet = djinni_unmet_requirements(session.driver, job.link)
                 except DjinniProfileRequired as e:
                     logger.error(str(e))
-                    notify(parameters, f"Djinni: {e}")
+                    notify(parameters, f"Djinni: {e}", category="djinni")
                     break
                 if unmet:
                     logger.info(
@@ -4177,7 +4238,7 @@ def search_and_apply_djinni(
                     )
                 except DjinniProfileRequired as e:
                     logger.error(str(e))
-                    notify(parameters, f"Djinni: {e}")
+                    notify(parameters, f"Djinni: {e}", category="djinni")
                     break
                 except PlatformBlockedError as e:
                     logger.error(f"djinni.co appears to have blocked us: {e}")
@@ -4186,12 +4247,19 @@ def search_and_apply_djinni(
                         parameters,
                         f"djinni.co: похоже на блокировку ({e}). Площадка "
                         "поставлена на паузу на 24ч.",
+                        category="djinni",
                     )
                     break
                 if applied:
                     status = "applied"
                     logger.info(
                         f"Applied to {job.role} at {job.company} ({job.link})"
+                    )
+                    notify_routine(
+                        parameters,
+                        f"✅ Applied to {job.role} at {job.company} "
+                        f"({job.link})",
+                        category=job.source,
                     )
                 else:
                     logger.warning(
@@ -4295,7 +4363,9 @@ def run_selected_sources(
             search_fn(parameters, llm_api_key, stop_event=stop_event)
         except Exception as e:
             logger.exception(f"{name} failed, continuing with the rest: {e}")
-            notify(parameters, f"CrossJob-AI: {name} упал — {e}")
+            notify(
+                parameters, f"CrossJob-AI: {name} упал — {e}", category=name
+            )
             if output_folder:
                 record_run_result(
                     output_folder,
@@ -4326,6 +4396,7 @@ def run_selected_sources(
             parameters,
             f"Прогон завершён: отправлено {after - before} откликов "
             f"({', '.join(name for name, _ in selected)}).",
+            category="Система",
         )
 
     threshold = (parameters.get("limits") or {}).get(
@@ -4337,6 +4408,7 @@ def run_selected_sources(
                 parameters,
                 f"CrossJob-AI: расходы на LLM сегодня превысили "
                 f"${threshold}.",
+                category="Система",
             )
 
     if output_folder and check_and_mark_llm_exhausted_alert(output_folder):
@@ -4346,6 +4418,7 @@ def run_selected_sources(
             "недоступны (несколько ошибок подряд, ни одного успешного "
             "вызова) — вероятно, исчерпаны бесплатные лимиты. Вакансии "
             "пока оцениваются с fallback (без реальной LLM-проверки).",
+            category="Система",
         )
 
 
@@ -4355,24 +4428,32 @@ def run_all_sources(parameters: dict, llm_api_key: str) -> None:
     )
 
 
-def notify(parameters: dict, text: str) -> None:
+def notify(
+    parameters: dict, text: str, category: Optional[str] = None
+) -> None:
     """Best-effort уведомление в Telegram — отсутствие настроенного
     бота или сетевая ошибка не должны ронять прогон, только
     залогироваться. Реализация в telegram_notify.notify_from_secrets
     (общая с src.scheduler.Scheduler, чтобы не тянуть main.py туда
-    циклическим импортом)."""
-    notify_from_secrets(parameters, text)
+    циклическим импортом). category — название площадки/раздела
+    ("avito", "headhunter", "Ошибки", "Ответы HR", ...): если чат
+    назначения — супергруппа с включёнными темами, сообщение уходит в
+    отдельную тему с этим именем (см. telegram_notify.get_or_create_
+    topic); для обычного личного чата с ботом ничего не меняется."""
+    notify_from_secrets(parameters, text, category)
 
 
 QUIET_QUEUE_FILE = ".quiet_queue.json"
 
 
-def notify_routine(parameters: dict, text: str) -> None:
+def notify_routine(
+    parameters: dict, text: str, category: Optional[str] = None
+) -> None:
     """Несрочное (итоги прогонов, лимиты, «анкета отправлена»). В тихом
     режиме (digest.quiet) не приходит сразу, а копится до утренней сводки —
     сразу приходит только важное: ответы HR, интервью, капча, черновики."""
     if not (parameters.get("digest") or {}).get("quiet"):
-        notify(parameters, text)
+        notify(parameters, text, category)
         return
     path = Path(parameters["outputFileDirectory"]) / QUIET_QUEUE_FILE
     with state_file_lock(path):
@@ -4381,7 +4462,11 @@ def notify_routine(parameters: dict, text: str) -> None:
         except (OSError, ValueError):
             queue = []
         queue.append(
-            {"at": datetime.now().astimezone().isoformat(), "text": text}
+            {
+                "at": datetime.now().astimezone().isoformat(),
+                "text": text,
+                "category": category,
+            }
         )
         path.write_text(
             json.dumps(queue[-200:], ensure_ascii=False), encoding="utf-8"
@@ -4422,6 +4507,7 @@ def _prepare_external_form(
                 "Работодатель просит заполнить анкету — не смог "
                 f"прочитать вопросы автоматически: {entry['company']} — "
                 f"{entry['title']}\n{form_url}",
+                category="Анкеты",
             )
             return
         resume_text = extract_pdf_text(str(resume_pdf_path))
@@ -4436,6 +4522,7 @@ def _prepare_external_form(
             "Работодатель просит заполнить анкету — не смог обработать "
             f"её автоматически: {entry['company']} — {entry['title']}\n"
             f"{form_url}",
+            category="Анкеты",
         )
         return
     finally:
@@ -4541,6 +4628,7 @@ def _submit_approved_form(
                 parameters,
                 f"Анкета отправлена: {record['company']} — "
                 f"{record['title']}",
+                category="Анкеты",
             )
         else:
             logger.warning(
@@ -4774,6 +4862,7 @@ def _answer_headhunter_messages(
         notify_routine(
             parameters,
             f"Автоответ отправлен: {entry['company']} — {entry['title']}",
+            category="headhunter",
         )
 
 
@@ -4878,6 +4967,7 @@ def _send_due_hh_reminders(
                 parameters,
                 f"🔔 Напоминание отправлено: {entry['company']} — "
                 f"{entry['title']}",
+                category="headhunter",
             )
 
 
@@ -4944,6 +5034,7 @@ def _sync_headhunter_negotiation_states(
                 parameters,
                 f"hh: {entry['company']} — {entry['title']}: {state}\n"
                 f"{entry['link']}",
+                category="headhunter",
             )
             if stage == "interview":
                 prepare_interview(parameters, llm_api_key, entry)
@@ -4953,6 +5044,7 @@ def _sync_headhunter_negotiation_states(
             parameters,
             f"hh: подтянул статусы прошлых откликов ({summary}). "
             "Дальше буду присылать только новые ответы.",
+            category="headhunter",
         )
     logger.info(
         f"Статусы откликов hh: {len(states)} на площадке, "
@@ -5164,6 +5256,7 @@ def cleanup_headhunter_negotiations(parameters: dict) -> None:
     notify_routine(
         parameters,
         f"HeadHunter: отменено {withdrawn} зависших отклик(ов).",
+        category="headhunter",
     )
 
 
@@ -5197,7 +5290,9 @@ def block_headhunter_employer(parameters: dict, company: str) -> bool:
 
     if ok:
         notify(
-            parameters, f"HeadHunter: работодатель '{company}' заблокирован."
+            parameters,
+            f"HeadHunter: работодатель '{company}' заблокирован.",
+            category="headhunter",
         )
     return ok
 
@@ -5668,6 +5763,7 @@ def _react_to_hr_reply(
                 format_draft_notification(
                     contact, company_title, text, code, draft
                 ),
+                category="Ответы HR",
             )
             return
         except Exception as e:
@@ -5677,6 +5773,7 @@ def _react_to_hr_reply(
     notify(
         parameters,
         f"{CATEGORY_LABELS[category]} — @{contact}{where}: {text}",
+        category="Ответы HR",
     )
 
 
@@ -5764,6 +5861,7 @@ def _draft_follow_ups(
             parameters,
             f"⏳ @{contact} не отвечает {days}+ дн. Напоминание:\n"
             f"{FOLLOW_UP_TEXT}\n\n«отправить {code}» / «пропустить {code}»",
+            category="Ответы HR",
         )
 
 
@@ -5935,11 +6033,24 @@ def _maybe_send_daily_digest(
     except (OSError, ValueError):
         queued = []
     if queued:
-        lines = [f"• {q['text'].splitlines()[0][:200]}" for q in queued[-30:]]
+        # Группируем по category (площадка/раздел), а не одним
+        # списком — иначе 30 строк вперемешку с разных площадок читать
+        # так же неудобно, как поток отдельных сообщений, который эта
+        # сводка и должна была заменить.
+        by_category: dict = {}
+        for q in queued[-30:]:
+            by_category.setdefault(q.get("category") or "Разное", []).append(
+                q["text"].splitlines()[0][:200]
+            )
+        sections = [
+            f"{cat}:\n" + "\n".join(f"• {line}" for line in lines)
+            for cat, lines in by_category.items()
+        ]
         more = f"\n…и ещё {len(queued) - 30}" if len(queued) > 30 else ""
-        text += "\n\n🔕 Несрочное за сутки:\n" + "\n".join(lines) + more
+        text += "\n\n🔕 Несрочное за сутки:\n\n" + "\n\n".join(sections) + more
     try:
-        send_notification(bot_token, chat_id, text[:4000])
+        thread_id = get_or_create_topic(parameters, "Сводка")
+        send_notification(bot_token, chat_id, text[:4000], thread_id)
     except Exception as e:
         logger.warning(f"Не удалось отправить утреннюю сводку: {e}")
         return

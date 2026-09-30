@@ -705,7 +705,7 @@ def test_email_from_post_marks_base_and_do_not_write(monkeypatch):
         monkeypatch.setattr(
             main, "senders_replied", lambda creds, addrs: {"hr@acme.io"}
         )
-        monkeypatch.setattr(main, "notify", lambda *a: None)
+        monkeypatch.setattr(main, "notify", lambda *a, **k: None)
         main._check_contact_book_mail(params, {})
         assert status() == "replied"
 

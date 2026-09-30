@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -5,8 +6,10 @@ import httpx
 import yaml
 
 from src.logging import logger
+from src.utils.file_lock import state_file_lock
 
 TELEGRAM_API_BASE = "https://api.telegram.org"
+TOPICS_CACHE_FILE = ".telegram_topics.json"
 
 
 class TelegramAPIError(RuntimeError):
@@ -43,14 +46,65 @@ def notify_manual_login_required(
         f"CrossJob-AI: {source_name} требует ручного входа — "
         f"откройте Chrome в течение {timeout_seconds}с, "
         "иначе прогон сорвётся.",
+        category=source_name,
     )
 
 
-def notify_from_secrets(parameters: dict, text: str) -> None:
+def _load_topics_cache(parameters: dict) -> "tuple[Path, dict]":
+    path = Path(parameters["outputFileDirectory"]) / TOPICS_CACHE_FILE
+    try:
+        cache = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        cache = {}
+    return path, cache
+
+
+def get_or_create_topic(parameters: dict, category: str) -> Optional[int]:
+    """message_thread_id темы для category в группе-получателе
+    уведомлений (см. TOPICS_CACHE_FILE) — по одной теме на площадку/
+    категорию, чтобы не мешать всё в один чат "стеной текста". Если
+    chat_id — не супергруппа с включёнными темами (обычный личный чат
+    с ботом, как раньше) или бот не админ с правом "Управление
+    темами" — createForumTopic вернёт ошибку, ловим её и отдаём None:
+    вызывающий код тогда шлёт обычным сообщением без темы, ничего не
+    ломая для тех, кто "папки" не настраивал."""
+    creds = bot_credentials(parameters)
+    if not creds:
+        return None
+    bot_token, chat_id = creds
+    path, cache = _load_topics_cache(parameters)
+    if category in cache:
+        return cache[category]
+    try:
+        result = bot_request(
+            bot_token,
+            "createForumTopic",
+            {"chat_id": chat_id, "name": category[:128]},
+        )
+        thread_id = result.get("message_thread_id")
+    except Exception as e:
+        logger.info(
+            f"Telegram: не удалось создать тему '{category}' (обычный "
+            f"чат без тем, или бот не админ) — шлю без темы: {e}"
+        )
+        return None
+    if thread_id is None:
+        return None
+    with state_file_lock(path):
+        _, cache = _load_topics_cache(parameters)
+        cache[category] = thread_id
+        path.write_text(json.dumps(cache, ensure_ascii=False), "utf-8")
+    return thread_id
+
+
+def notify_from_secrets(
+    parameters: dict, text: str, category: Optional[str] = None
+) -> None:
     """Best-effort уведомление в Telegram из parameters["secretsFile"]
     — общая реализация main.notify()/Scheduler, живёт здесь (а не в
     main.py), чтобы scheduler.py могла её импортировать без
-    циклического импорта main.py <-> src.scheduler."""
+    циклического импорта main.py <-> src.scheduler. category — имя
+    темы (Avito, HeadHunter, Ошибки, ...), см. get_or_create_topic."""
     try:
         secrets_path: Path = parameters["secretsFile"]
         with open(secrets_path, "r") as stream:
@@ -60,13 +114,20 @@ def notify_from_secrets(parameters: dict, text: str) -> None:
         chat_id = notifications.get("telegram_chat_id")
         if not bot_token or not chat_id:
             return
-        send_notification(bot_token, chat_id, text)
+        thread_id = (
+            get_or_create_topic(parameters, category) if category else None
+        )
+        send_notification(bot_token, chat_id, text, thread_id)
     except Exception as e:
         logger.warning(f"Failed to send Telegram notification: {e}")
 
 
 def send_document_from_secrets(
-    parameters: dict, filename: str, content: bytes, caption: str
+    parameters: dict,
+    filename: str,
+    content: bytes,
+    caption: str,
+    category: Optional[str] = None,
 ) -> None:
     """Файл в тот же Telegram-бот (например .ics приглашения на
     интервью — одно нажатие добавляет событие в календарь). Best-effort,
@@ -79,9 +140,15 @@ def send_document_from_secrets(
         chat_id = notifications.get("telegram_chat_id")
         if not bot_token or not chat_id:
             return
+        thread_id = (
+            get_or_create_topic(parameters, category) if category else None
+        )
+        data = {"chat_id": chat_id, "caption": caption}
+        if thread_id is not None:
+            data["message_thread_id"] = thread_id
         response = httpx.post(
             f"{TELEGRAM_API_BASE}/bot{bot_token}/sendDocument",
-            data={"chat_id": chat_id, "caption": caption},
+            data=data,
             files={"document": (filename, content)},
             timeout=20,
         )
@@ -90,14 +157,22 @@ def send_document_from_secrets(
         logger.warning(f"Failed to send Telegram document: {e}")
 
 
-def send_notification(bot_token: str, chat_id: str, text: str) -> None:
+def send_notification(
+    bot_token: str,
+    chat_id: str,
+    text: str,
+    message_thread_id: Optional[int] = None,
+) -> None:
     """Прямой httpx.post вместо Telethon (юзер-сессия, нужна для
     чтения каналов в TelegramSourceClient) — для простого "уведомить
     себя" достаточно обычного бота через @BotFather, без входа под
     личным аккаунтом."""
+    payload = {"chat_id": chat_id, "text": text}
+    if message_thread_id is not None:
+        payload["message_thread_id"] = message_thread_id
     response = httpx.post(
         f"{TELEGRAM_API_BASE}/bot{bot_token}/sendMessage",
-        json={"chat_id": chat_id, "text": text},
+        json=payload,
         timeout=10,
     )
     raise_for_telegram_status(response, "sendMessage")

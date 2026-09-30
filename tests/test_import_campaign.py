@@ -263,7 +263,9 @@ def test_import_api_and_full_campaign(client, monkeypatch):  # noqa: F811
         main, "senders_replied", lambda creds, emails: {"hr@acme.io"}
     )
     notified = []
-    monkeypatch.setattr(main, "notify", lambda p, t: notified.append(t))
+    monkeypatch.setattr(
+        main, "notify", lambda p, t, *a, **k: notified.append(t)
+    )
     main._check_campaign_mail(
         ctx.config, {"address": "me@gmail.com", "app_password": "p"}
     )
@@ -438,7 +440,7 @@ def test_campaign_follow_up_in_same_thread(client, monkeypatch):  # noqa: F811
         status="sent",
         sent_at=datetime.now().astimezone().isoformat(),
     )
-    monkeypatch.setattr(main, "notify", lambda p, t: None)
+    monkeypatch.setattr(main, "notify", lambda p, t, *a, **k: None)
     main._draft_campaign_follow_ups(ctx.config, store, replied=set())
     main._draft_campaign_follow_ups(
         ctx.config, store, replied=set()
@@ -746,7 +748,7 @@ def test_activity_shows_running_work(client):  # noqa: F811
 def test_quiet_mode_moves_routine_to_digest(tmp_path, monkeypatch):
     sent = []
     monkeypatch.setattr(
-        main, "notify_from_secrets", lambda p, t: sent.append(t)
+        main, "notify_from_secrets", lambda p, t, *a, **k: sent.append(t)
     )
     params = {
         "outputFileDirectory": tmp_path,
@@ -760,7 +762,7 @@ def test_quiet_mode_moves_routine_to_digest(tmp_path, monkeypatch):
     monkeypatch.setattr(
         main,
         "send_notification",
-        lambda token, chat, text: digests.append(text),
+        lambda token, chat, text, *a, **k: digests.append(text),
     )
     monkeypatch.setattr(main, "build_digest", lambda *a: "☀️ Сводка")
     main._maybe_send_daily_digest(params, "tok", "1")

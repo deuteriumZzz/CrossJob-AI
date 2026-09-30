@@ -1,7 +1,11 @@
+import json
+import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from src.job_sources.telegram_notify import (
     TelegramAPIError,
+    get_or_create_topic,
     notify_manual_login_required,
     raise_for_telegram_status,
     send_notification,
@@ -50,6 +54,57 @@ def test_telegram_http_error_never_exposes_bot_token():
         assert "409" in str(error) and "Conflict" in str(error)
     else:
         raise AssertionError("TelegramAPIError was not raised")
+
+
+def _params_with_secrets(tmp_path: Path) -> dict:
+    secrets_file = tmp_path / "secrets.yaml"
+    secrets_file.write_text(
+        "notifications:\n"
+        "  telegram_bot_token: BOT_TOKEN\n"
+        "  telegram_chat_id: -100123\n"
+    )
+    return {"secretsFile": secrets_file, "outputFileDirectory": tmp_path}
+
+
+def test_get_or_create_topic_creates_and_caches():
+    with tempfile.TemporaryDirectory() as tmp:
+        parameters = _params_with_secrets(Path(tmp))
+        with patch(
+            "src.job_sources.telegram_notify.bot_request",
+            return_value={"message_thread_id": 42},
+        ) as mock_request:
+            thread_id = get_or_create_topic(parameters, "avito")
+            assert thread_id == 42
+            # Второй вызов — из кэша, без повторного createForumTopic.
+            thread_id_again = get_or_create_topic(parameters, "avito")
+            assert thread_id_again == 42
+            mock_request.assert_called_once()
+
+        cache = json.loads((Path(tmp) / ".telegram_topics.json").read_text())
+        assert cache == {"avito": 42}
+
+
+def test_get_or_create_topic_falls_back_to_none_on_plain_chat():
+    """Обычный личный чат с ботом (не супергруппа с темами) —
+    createForumTopic вернёт ошибку, get_or_create_topic не должен
+    падать, просто отдаёт None (вызывающий код шлёт без темы)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        parameters = _params_with_secrets(Path(tmp))
+        with patch(
+            "src.job_sources.telegram_notify.bot_request",
+            side_effect=TelegramAPIError("Bad Request: chat is not a forum"),
+        ):
+            thread_id = get_or_create_topic(parameters, "avito")
+        assert thread_id is None
+
+
+def test_get_or_create_topic_without_credentials_returns_none():
+    with tempfile.TemporaryDirectory() as tmp:
+        parameters = {
+            "secretsFile": Path(tmp) / "missing.yaml",
+            "outputFileDirectory": Path(tmp),
+        }
+        assert get_or_create_topic(parameters, "avito") is None
 
 
 if __name__ == "__main__":
