@@ -24,7 +24,7 @@ from typing import Any, Callable, Coroutine, Optional
 from src.job_sources.contact_book import ContactBook, contacts_from_text
 from src.job_sources.hr_replies import _looks_russian, generate_first_message
 from src.job_sources.resume_routing import resolve_resume
-from src.job_sources.telegram.client import normalize_channel
+from src.job_sources.telegram.client import _SESSION_LOCK, normalize_channel
 from src.job_sources.telegram_conversations import TelegramConversations
 from src.job_sources.telegram_notify import (
     bot_credentials,
@@ -380,24 +380,37 @@ class TelegramWatcher(threading.Thread):
     async def _serve(self) -> None:
         from telethon import events
 
-        await self.client.connect()
-        # _serve повторяется при переподключении — без снятия старых
-        # обработчиков каждый пост приходил бы по несколько раз.
-        self.client.remove_event_handler(self._on_channel_post)
-        self.client.remove_event_handler(self._on_private_message)
-        if not await self.client.is_user_authorized():
-            logger.error(
-                "Telegram-шлюз: сессия не авторизована — войдите во вкладке "
-                "«Общение → Telegram»."
+        # active_watcher() отдаёт вызовы через шлюз, только когда
+        # self.connected уже True — а до этого момента (connect() +
+        # подписка на десятки каналов, реально видено вживую до минуты)
+        # сам шлюз пишет в тот же файл сессии SQLite, ничем не
+        # защищённый. TelegramSourceClient.__enter__() в этом окне не
+        # знает про шлюз и открывает вторую конкурентную сессию —
+        # "database is locked". Держим тот же _SESSION_LOCK, что уже
+        # сериализует остальные обращения к Telegram, на всё время
+        # подключения — конкурирующий вызов подождёт вместо падения.
+        _SESSION_LOCK.acquire()
+        try:
+            await self.client.connect()
+            # _serve повторяется при переподключении — без снятия старых
+            # обработчиков каждый пост приходил бы по несколько раз.
+            self.client.remove_event_handler(self._on_channel_post)
+            self.client.remove_event_handler(self._on_private_message)
+            if not await self.client.is_user_authorized():
+                logger.error(
+                    "Telegram-шлюз: сессия не авторизована — войдите во "
+                    "вкладке «Общение → Telegram»."
+                )
+                self._stopping.set()
+                return
+            await self._subscribe()
+            self.client.add_event_handler(
+                self._on_private_message,
+                events.NewMessage(incoming=True, func=lambda e: e.is_private),
             )
-            self._stopping.set()
-            return
-        await self._subscribe()
-        self.client.add_event_handler(
-            self._on_private_message,
-            events.NewMessage(incoming=True, func=lambda e: e.is_private),
-        )
-        self.connected = True
+            self.connected = True
+        finally:
+            _SESSION_LOCK.release()
         if self._settings_task is not None:
             self._settings_task.cancel()
         self._settings_task = asyncio.ensure_future(self._watch_settings())

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from src.job_sources.contact_book import ContactBook
 from src.job_sources.telegram import watcher as w
-from src.job_sources.telegram.client import TelegramSourceClient
+from src.job_sources.telegram.client import _SESSION_LOCK, TelegramSourceClient
 from src.job_sources.telegram_conversations import TelegramConversations
 from src.webui import api
 from tests.test_webui_api import client  # noqa: F401  (fixture)
@@ -185,6 +185,59 @@ def _event(text, msg_id=5, channel="geekjobs"):
         chat_id=1,
         get_chat=get_chat,
     )
+
+
+class _FakeConnectingClient:
+    """Клиент, который проверяет, что _SESSION_LOCK реально держится
+    на всём connect()+_subscribe() — воспроизводит гонку из бага
+    "database is locked" (search_telegram открывал вторую сессию,
+    пока шлюз ещё подключался, потому что active_watcher() отдавал
+    его только после self.connected=True)."""
+
+    def __init__(self, lock_states: list):
+        self.lock_states = lock_states
+
+    async def connect(self):
+        self.lock_states.append(("connect", _SESSION_LOCK.locked()))
+
+    def remove_event_handler(self, *a, **k):
+        pass
+
+    async def is_user_authorized(self):
+        return True
+
+    def add_event_handler(self, *a, **k):
+        pass
+
+    async def run_until_disconnected(self):
+        pass
+
+
+def test_serve_holds_session_lock_through_connect_and_subscribe():
+    with tempfile.TemporaryDirectory() as tmp:
+        watcher = w.TelegramWatcher(
+            1,
+            "h",
+            Path(tmp) / "s",
+            ["geekjobs"],
+            ["python"],
+            [],
+            "me",
+            {"outputFileDirectory": Path(tmp), "dataFolder": Path(tmp)},
+        )
+        lock_states = []
+        watcher.client = _FakeConnectingClient(lock_states)
+
+        async def fake_subscribe():
+            lock_states.append(("subscribe", _SESSION_LOCK.locked()))
+
+        watcher._subscribe = fake_subscribe
+
+        assert not _SESSION_LOCK.locked()
+        asyncio.run(watcher._serve())
+        assert not _SESSION_LOCK.locked()  # освобождён после подключения
+        assert lock_states == [("connect", True), ("subscribe", True)]
+        assert watcher.connected is True
 
 
 def test_channel_post_forwarded_with_header_once():
