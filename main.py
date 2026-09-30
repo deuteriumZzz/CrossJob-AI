@@ -3666,6 +3666,7 @@ def start_campaign_job(
                             },
                         ]
                     ],
+                    category="Рассылка",
                 )
             elif stats["draft"]:
                 _notify_with_buttons(
@@ -3697,6 +3698,7 @@ def start_campaign_job(
                             },
                         ]
                     ],
+                    category="Рассылка",
                 )
 
         job = CampaignJob(
@@ -4088,28 +4090,34 @@ def _draft_campaign_follow_ups(
                         },
                     ]
                 ],
+                category="Рассылка",
             )
 
 
-def _notify_with_buttons(parameters: dict, text: str, keyboard: list) -> None:
+def _notify_with_buttons(
+    parameters: dict,
+    text: str,
+    keyboard: list,
+    category: Optional[str] = None,
+) -> None:
     """Уведомление в CrossJob-бот с кнопками; без бота — обычное."""
     creds = bot_credentials(parameters)
     if creds is None:
-        notify(parameters, text)
+        notify(parameters, text, category)
         return
+    thread_id = get_or_create_topic(parameters, category) if category else None
+    payload = {
+        "chat_id": creds[1],
+        "text": text,
+        "reply_markup": {"inline_keyboard": keyboard},
+    }
+    if thread_id is not None:
+        payload["message_thread_id"] = thread_id
     try:
-        bot_request(
-            creds[0],
-            "sendMessage",
-            {
-                "chat_id": creds[1],
-                "text": text,
-                "reply_markup": {"inline_keyboard": keyboard},
-            },
-        )
+        bot_request(creds[0], "sendMessage", payload)
     except Exception as e:
         logger.warning(f"Не удалось отправить в бот: {e}")
-        notify(parameters, text)
+        notify(parameters, text, category)
 
 
 def check_email_replies(parameters: dict, llm_api_key: str) -> None:
@@ -5994,6 +6002,7 @@ def prepare_interview(parameters: dict, llm_api_key: str, entry: dict) -> str:
             if len(prep) > 1500
             else ""
         ),
+        category="Ответы HR",
     )
     return prep
 

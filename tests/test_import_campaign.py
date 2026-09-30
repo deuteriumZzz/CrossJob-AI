@@ -890,7 +890,7 @@ def test_campaign_prepares_in_daily_batches(monkeypatch):
             "generate_company_email",
             lambda *a: {"subject": "s", "text": "t"},
         )
-        monkeypatch.setattr(main, "_notify_with_buttons", lambda *a: None)
+        monkeypatch.setattr(main, "_notify_with_buttons", lambda *a, **k: None)
         store = camp.CampaignStore(out)
         cid = store.create(
             "t",
@@ -974,7 +974,7 @@ def test_campaign_uses_language_specific_resume_for_each_company(monkeypatch):
         used = {}
         monkeypatch.setattr(camp.CampaignJob, "start", lambda self: self.run())
         monkeypatch.setattr(main, "candidate_name", lambda *a: "Ann")
-        monkeypatch.setattr(main, "_notify_with_buttons", lambda *a: None)
+        monkeypatch.setattr(main, "_notify_with_buttons", lambda *a, **k: None)
 
         def fake_generate(
             resume, name, position, card, contact, key, parameters
@@ -1323,7 +1323,7 @@ def test_new_companies_join_queue_first_and_auto_send(
         "generate_company_email",
         lambda *a: {"subject": "s", "text": "t"},
     )
-    monkeypatch.setattr(main, "_notify_with_buttons", lambda *a: None)
+    monkeypatch.setattr(main, "_notify_with_buttons", lambda *a, **k: None)
     (ctx.config["dataFolder"] / "resume.pdf").write_bytes(b"%PDF")
     params = {
         **ctx.config,

@@ -35,7 +35,9 @@ def test_prepare_interview_generates_once_and_stores(monkeypatch):
             "generate_interview_prep",
             lambda *a: calls.append(a) or "1. Вопрос",
         )
-        monkeypatch.setattr(main, "notify", lambda p, t: sent.append(t))
+        monkeypatch.setattr(
+            main, "notify", lambda p, t, *a, **k: sent.append(t)
+        )
         params = {"dataFolder": data, "outputFileDirectory": out}
         entry = log.find_by_source_and_external_id("headhunter", "1")
 
