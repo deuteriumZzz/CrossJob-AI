@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 import yaml
@@ -167,7 +167,7 @@ def send_notification(
     чтения каналов в TelegramSourceClient) — для простого "уведомить
     себя" достаточно обычного бота через @BotFather, без входа под
     личным аккаунтом."""
-    payload = {"chat_id": chat_id, "text": text}
+    payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
     if message_thread_id is not None:
         payload["message_thread_id"] = message_thread_id
     response = httpx.post(

@@ -4109,7 +4109,7 @@ def _notify_with_buttons(
         notify(parameters, text, category)
         return
     thread_id = get_or_create_topic(parameters, category) if category else None
-    payload = {
+    payload: dict[str, Any] = {
         "chat_id": creds[1],
         "text": text,
         "reply_markup": {"inline_keyboard": keyboard},
