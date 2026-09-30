@@ -29,6 +29,7 @@ from src.job_sources.telegram_conversations import TelegramConversations
 from src.job_sources.telegram_notify import (
     bot_credentials,
     bot_request,
+    get_or_create_topic,
     notify_from_secrets,
 )
 from src.logging import logger
@@ -654,22 +655,22 @@ class TelegramWatcher(threading.Thread):
         )
         russian = _looks_russian(post.get("text") or post.get("title", ""))
         routed_resume = resolve_resume(self.parameters, "telegram", russian)
+        thread_id = get_or_create_topic(self.parameters, "Telegram-каналы")
+        payload = {
+            "chat_id": chat_id,
+            "text": f"🎯 {', '.join(matched)} · @{post['channel']}\n"
+            f"Контакты: {contacts_line}\n{post['link']}\n\n{body}",
+            "disable_web_page_preview": True,
+            "reply_markup": vacancy_keyboard(
+                post_id,
+                post["contacts"],
+                [routed_resume] if routed_resume is not None else [],
+            ),
+        }
+        if thread_id is not None:
+            payload["message_thread_id"] = thread_id
         try:
-            bot_request(
-                token,
-                "sendMessage",
-                {
-                    "chat_id": chat_id,
-                    "text": f"🎯 {', '.join(matched)} · @{post['channel']}\n"
-                    f"Контакты: {contacts_line}\n{post['link']}\n\n{body}",
-                    "disable_web_page_preview": True,
-                    "reply_markup": vacancy_keyboard(
-                        post_id,
-                        post["contacts"],
-                        [routed_resume] if routed_resume is not None else [],
-                    ),
-                },
-            )
+            bot_request(token, "sendMessage", payload)
         except Exception as e:
             logger.warning(
                 f"Telegram-шлюз: бот не отправил вакансию {post['link']}: {e}"
@@ -753,7 +754,9 @@ class TelegramWatcher(threading.Thread):
             username, text, event.message.id, event.message.date
         )
         notify_from_secrets(
-            self.parameters, f"✈️ Ответ HR @{username}: " f"{text}"
+            self.parameters,
+            f"✈️ Ответ HR @{username}: " f"{text}",
+            category="Ответы HR",
         )
 
 

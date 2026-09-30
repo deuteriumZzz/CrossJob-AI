@@ -555,6 +555,41 @@ def test_bot_delivery_sends_buttons(monkeypatch):
         )  # с ботом — без пересылки в «Избранное»
 
 
+def test_bot_delivery_routes_into_topic_when_available(monkeypatch):
+    """Найденные вакансии от Telegram-парсера — самый шумный источник
+    уведомлений (до 50 каналов) — должны уходить в свою тему
+    "Telegram-каналы", если чат назначения это поддерживает."""
+    with tempfile.TemporaryDirectory() as tmp:
+        sent = []
+        monkeypatch.setattr(
+            w,
+            "bot_request",
+            lambda token, method, payload: sent.append(payload) or {},
+        )
+        monkeypatch.setattr(
+            w, "get_or_create_topic", lambda parameters, category: 99
+        )
+        watcher = w.TelegramWatcher(
+            1,
+            "h",
+            Path(tmp) / "s",
+            [],
+            ["python"],
+            [],
+            "me",
+            {"outputFileDirectory": Path(tmp), "dataFolder": Path(tmp)},
+        )
+        watcher.bot = ("T", "42")
+        watcher.client = _FakeClient()
+        asyncio.run(
+            watcher._on_channel_post(
+                _event("Python Dev в Acme, пишите @anna_hr")
+            )
+        )
+        [payload] = sent
+        assert payload["message_thread_id"] == 99
+
+
 def test_email_letter_sent_via_gmail_with_chosen_resume(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp:
         main, params, _, calls, cb = _button_env(tmp, monkeypatch)
