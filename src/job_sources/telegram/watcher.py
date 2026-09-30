@@ -130,8 +130,8 @@ _VACANCY_CLASSIFIER_PROMPT = (
 # держит один пост в очереди не больше ~100с, пока идёт reset окна
 # лимита у провайдера. Другие посты (свои executor-потоки) это не
 # блокирует — см. run_in_executor в _handle_post.
-_RATE_LIMIT_RETRY_DELAYS_SECONDS = (10, 30, 60)
-_RATE_LIMIT_MARKERS = ("429", "rate limit", "rate_limit", "too many requests")
+RATE_LIMIT_RETRY_DELAYS_SECONDS = (10, 30, 60)
+RATE_LIMIT_MARKERS = ("429", "rate limit", "rate_limit", "too many requests")
 
 
 def _llm_says_vacancy(text: str, llm_api_key: str) -> bool:
@@ -142,7 +142,7 @@ def _llm_says_vacancy(text: str, llm_api_key: str) -> bool:
 
     Rate limit — не сразу fail-open: 50+ каналов легко дают всплеск
     запросов разом, а лимит провайдера обычно сбрасывается за минуты —
-    ждём и пробуем снова (см. _RATE_LIMIT_RETRY_DELAYS_SECONDS), чтобы
+    ждём и пробуем снова (см. RATE_LIMIT_RETRY_DELAYS_SECONDS), чтобы
     не пропускать проверку молча именно в момент нагрузки, когда она
     нужнее всего. Любая другая ошибка (плохой ключ, сеть, пустой
     ответ) — fail-open сразу, как и раньше (_auto_message_text), нет
@@ -152,7 +152,7 @@ def _llm_says_vacancy(text: str, llm_api_key: str) -> bool:
     from src.job_sources.llm_provider import get_chat_llm
 
     prompt = _VACANCY_CLASSIFIER_PROMPT.format(text=text[:600])
-    attempts = len(_RATE_LIMIT_RETRY_DELAYS_SECONDS) + 1
+    attempts = len(RATE_LIMIT_RETRY_DELAYS_SECONDS) + 1
     for attempt in range(attempts):
         try:
             llm = get_chat_llm(llm_api_key, temperature=0)
@@ -161,7 +161,7 @@ def _llm_says_vacancy(text: str, llm_api_key: str) -> bool:
             return not content.startswith("нет")
         except Exception as e:
             is_rate_limit = any(
-                m in str(e).lower() for m in _RATE_LIMIT_MARKERS
+                m in str(e).lower() for m in RATE_LIMIT_MARKERS
             )
             if not is_rate_limit or attempt == attempts - 1:
                 logger.warning(
@@ -169,7 +169,7 @@ def _llm_says_vacancy(text: str, llm_api_key: str) -> bool:
                     f"(попытка {attempt + 1}/{attempts}): {e}"
                 )
                 return True
-            delay = _RATE_LIMIT_RETRY_DELAYS_SECONDS[attempt]
+            delay = RATE_LIMIT_RETRY_DELAYS_SECONDS[attempt]
             logger.info(
                 f"Telegram-парсер: LLM rate limit, повтор через {delay}с "
                 f"(попытка {attempt + 1}/{attempts})"

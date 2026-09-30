@@ -40,7 +40,7 @@ def test_llm_says_vacancy_fails_open_on_error(monkeypatch):
 def test_llm_says_vacancy_retries_on_rate_limit_then_succeeds(monkeypatch):
     """Всплеск запросов (много каналов разом) не должен превращаться в
     мгновенный fail-open — ждём сброса лимита и пробуем снова."""
-    monkeypatch.setattr(w, "_RATE_LIMIT_RETRY_DELAYS_SECONDS", (0, 0))
+    monkeypatch.setattr(w, "RATE_LIMIT_RETRY_DELAYS_SECONDS", (0, 0))
     sleeps: list[float] = []
     monkeypatch.setattr(w.time, "sleep", sleeps.append)
 
@@ -63,7 +63,7 @@ def test_llm_says_vacancy_retries_on_rate_limit_then_succeeds(monkeypatch):
 
 
 def test_llm_says_vacancy_fails_open_after_exhausting_retries(monkeypatch):
-    monkeypatch.setattr(w, "_RATE_LIMIT_RETRY_DELAYS_SECONDS", (0,))
+    monkeypatch.setattr(w, "RATE_LIMIT_RETRY_DELAYS_SECONDS", (0,))
     monkeypatch.setattr(w.time, "sleep", lambda *a: None)
 
     def _always_rate_limited(*args, **kwargs):

@@ -202,6 +202,8 @@ from src.job_sources.telegram.contact import extract_contact
 from src.job_sources.telegram.post_parser import parse_post
 from src.job_sources.telegram.source import TelegramSource
 from src.job_sources.telegram.watcher import (
+    RATE_LIMIT_MARKERS,
+    RATE_LIMIT_RETRY_DELAYS_SECONDS,
     active_watcher,
     get_watch_post,
     save_telegram_letter,
@@ -5558,34 +5560,54 @@ def _handle_vacancy_button(
         # Тумблер "Настройки → Telegram-парсер" — по умолчанию включён:
         # раньше кнопка "👋" единственная из трёх способов написать
         # HR не использовала LLM вообще, хотя рядом "✍️ письмо" и
-        # автоотправка уже персонализируют текст под вакансию. Шаблон
-        # остаётся как есть при сбое LLM (нет ключа/сеть/пустой ответ) —
-        # тот же fail-open, что уже в _auto_message_text (watcher.py).
+        # автоотправка уже персонализируют текст под вакансию. Rate
+        # limit — тот же retry, что у _llm_says_vacancy (watcher.py):
+        # бесплатные лимиты (например Gemini "раз в минуту") иначе
+        # почти всегда fail-open в шаблон вместо настоящего письма.
+        # Шаблон остаётся как последний рубеж только при исчерпанных
+        # попытках или другой ошибке (нет ключа, пустой ответ) — не
+        # ждём то, что само не пройдёт.
         if (parameters.get("telegram") or {}).get(
             "smart_greeting", True
         ) and llm_api_key:
-            try:
-                resume_for_llm = (
-                    resumes[resume_index]
-                    if 0 <= resume_index < len(resumes)
-                    else (resumes[0] if resumes else data_folder / RESUME_PDF)
-                )
-                smart = generate_first_message(
-                    resume_for_llm,
-                    candidate_name(parameters, resume_for_llm),
-                    "",
-                    post["title"],
-                    post["text"],
-                    "telegram",
-                    llm_api_key,
-                )
-                if smart["text"]:
-                    text = smart["text"]
-                    used_llm = True
-            except Exception as e:
-                logger.warning(
-                    f"Кнопка 👋: LLM недоступна, отправляю шаблон как есть: {e}"
-                )
+            resume_for_llm = (
+                resumes[resume_index]
+                if 0 <= resume_index < len(resumes)
+                else (resumes[0] if resumes else data_folder / RESUME_PDF)
+            )
+            attempts = len(RATE_LIMIT_RETRY_DELAYS_SECONDS) + 1
+            for attempt in range(attempts):
+                try:
+                    smart = generate_first_message(
+                        resume_for_llm,
+                        candidate_name(parameters, resume_for_llm),
+                        "",
+                        post["title"],
+                        post["text"],
+                        "telegram",
+                        llm_api_key,
+                    )
+                    if smart["text"]:
+                        text = smart["text"]
+                        used_llm = True
+                    break
+                except Exception as e:
+                    is_rate_limit = any(
+                        m in str(e).lower() for m in RATE_LIMIT_MARKERS
+                    )
+                    if not is_rate_limit or attempt == attempts - 1:
+                        logger.warning(
+                            "Кнопка 👋: LLM недоступна, отправляю шаблон "
+                            f"как есть (попытка {attempt + 1}/{attempts}): "
+                            f"{e}"
+                        )
+                        break
+                    delay = RATE_LIMIT_RETRY_DELAYS_SECONDS[attempt]
+                    logger.info(
+                        f"Кнопка 👋: LLM rate limit, повтор через {delay}с "
+                        f"(попытка {attempt + 1}/{attempts})"
+                    )
+                    time.sleep(delay)
         with _telegram_client(parameters) as client:
             client.send_message(contact["value"], text)
             if resume_index >= 0:
