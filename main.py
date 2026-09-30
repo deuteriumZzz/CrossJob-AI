@@ -1275,19 +1275,106 @@ def _job_max_applications(
     )
 
 
+FUNNEL_HEALTH_FILE = ".funnel_health.json"
+# ponytail: пороги подобраны на глаз (не A/B-тестировались) — 5 подряд
+# пустых поисков и 3 подряд прогона, где отклики шли (dry_run>0), но
+# ни один не подтвердился (applied=0), пока auto_apply включён. Второе
+# — сильнее сигнализирует о реальной поломке (не "вакансий сегодня
+# нет", а "сайт поменялся, клик перестал находить кнопку"), поэтому
+# порог ниже.
+FUNNEL_ZERO_FOUND_THRESHOLD = 5
+FUNNEL_STUCK_THRESHOLD = 3
+
+
+def _update_funnel_health(
+    parameters: dict, source: str, found: int, applied: int, dry_run: int
+) -> None:
+    """Самоконтроль: если площадка много прогонов подряд либо вообще
+    ничего не находит (сломался поиск/вёрстка), либо пытается
+    откликаться и каждый раз проваливается (сломалась кнопка отклика),
+    шлём один алерт вместо того, чтобы это тихо копилось в логах,
+    которые никто не читает каждый день."""
+    output_folder = parameters.get("outputFileDirectory")
+    if not output_folder:
+        return
+    path = Path(output_folder) / FUNNEL_HEALTH_FILE
+    with state_file_lock(path):
+        try:
+            health = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            health = {}
+        state = health.get(source) or {
+            "zero_found_streak": 0,
+            "stuck_streak": 0,
+            "found_alerted": False,
+            "stuck_alerted": False,
+        }
+
+        if found == 0:
+            state["zero_found_streak"] += 1
+        else:
+            state["zero_found_streak"] = 0
+            state["found_alerted"] = False
+
+        auto_apply = bool((parameters.get(source) or {}).get("auto_apply"))
+        if auto_apply and found > 0 and dry_run > 0 and applied == 0:
+            state["stuck_streak"] += 1
+        else:
+            state["stuck_streak"] = 0
+            state["stuck_alerted"] = False
+
+        should_alert_found = (
+            state["zero_found_streak"] >= FUNNEL_ZERO_FOUND_THRESHOLD
+            and not state["found_alerted"]
+        )
+        should_alert_stuck = (
+            state["stuck_streak"] >= FUNNEL_STUCK_THRESHOLD
+            and not state["stuck_alerted"]
+        )
+        if should_alert_found:
+            state["found_alerted"] = True
+        if should_alert_stuck:
+            state["stuck_alerted"] = True
+
+        health[source] = state
+        path.write_text(json.dumps(health, ensure_ascii=False), "utf-8")
+
+    if should_alert_found:
+        notify(
+            parameters,
+            f"⚠️ {source}: 0 вакансий найдено {state['zero_found_streak']} "
+            "прогонов подряд — возможно, площадка поменяла вёрстку или "
+            "заблокировала поиск. Проверьте вручную.",
+            category=source,
+        )
+    if should_alert_stuck:
+        notify(
+            parameters,
+            f"⚠️ {source}: {state['stuck_streak']} прогонов подряд вакансии "
+            "находятся, но ни один отклик не подтвердился (все — "
+            "dry-run) — похоже, кнопка отклика перестала находиться. "
+            "Проверьте вручную.",
+            category=source,
+        )
+
+
 def _log_funnel_summary(
     source: str,
     applied_log: AppliedLog,
     found: int,
     already_seen: int,
     run_start: datetime,
+    parameters: Optional[dict] = None,
 ) -> None:
     """Сводка воронки отбора за прогон: сколько вакансий вообще нашли,
     сколько из них уже видели раньше (в LLM не пошли), сколько отсеял
     fit score, и сколько дошло до отклика/dry-run — чтобы по логам
     было видно настоящее узкое место (нехватка новых вакансий,
     слишком строгий порог score и т.д.), а не гадать по глубине
-    пагинации."""
+    пагинации. parameters — опционален только для обратной
+    совместимости старых вызовов без самоконтроля (см.
+    _update_funnel_health); без него алерты по этой площадке просто не
+    считаются."""
     new_entries = applied_log.entries_since(source, run_start)
     low_fit = sum(1 for e in new_entries if e["status"] == "skipped_low_fit")
     easy_apply_failed = sum(
@@ -1303,6 +1390,8 @@ def _log_funnel_summary(
         f"low_fit={low_fit} applied={applied} dry_run={dry_run}"
         f"{easy_apply_failed_part}"
     )
+    if parameters is not None:
+        _update_funnel_health(parameters, source, found, applied, dry_run)
 
 
 def search_and_apply_headhunter(
@@ -1578,7 +1667,12 @@ def search_and_apply_headhunter(
             sent_count += 1
 
         _log_funnel_summary(
-            "headhunter", applied_log, len(jobs), already_seen, run_start
+            "headhunter",
+            applied_log,
+            len(jobs),
+            already_seen,
+            run_start,
+            parameters,
         )
 
 
@@ -1744,7 +1838,7 @@ def search_geekjob(
         sent_count += 1
 
     _log_funnel_summary(
-        "geekjob", applied_log, len(jobs), already_seen, run_start
+        "geekjob", applied_log, len(jobs), already_seen, run_start, parameters
     )
 
 
@@ -1944,7 +2038,12 @@ def search_telegram(
             sent_count += 1
 
         _log_funnel_summary(
-            "telegram", applied_log, len(jobs), already_seen, run_start
+            "telegram",
+            applied_log,
+            len(jobs),
+            already_seen,
+            run_start,
+            parameters,
         )
 
 
@@ -2154,7 +2253,12 @@ def search_getmatch(
             sent_count += 1
 
         _log_funnel_summary(
-            "getmatch", applied_log, len(jobs), already_seen, run_start
+            "getmatch",
+            applied_log,
+            len(jobs),
+            already_seen,
+            run_start,
+            parameters,
         )
 
 
@@ -2406,7 +2510,12 @@ def search_and_apply_linkedin(
             sent_count += 1
 
         _log_funnel_summary(
-            "linkedin", applied_log, len(jobs), already_seen, run_start
+            "linkedin",
+            applied_log,
+            len(jobs),
+            already_seen,
+            run_start,
+            parameters,
         )
     finally:
         session.quit()
@@ -2604,7 +2713,12 @@ def search_and_apply_habr_career(
             sent_count += 1
 
     _log_funnel_summary(
-        "habr_career", applied_log, len(jobs), already_seen, run_start
+        "habr_career",
+        applied_log,
+        len(jobs),
+        already_seen,
+        run_start,
+        parameters,
     )
 
 
@@ -2813,7 +2927,12 @@ def search_and_apply_wellfound(
         sent_count += 1
 
     _log_funnel_summary(
-        "wellfound", applied_log, len(jobs), already_seen, run_start
+        "wellfound",
+        applied_log,
+        len(jobs),
+        already_seen,
+        run_start,
+        parameters,
     )
 
 
@@ -3029,7 +3148,12 @@ def search_and_apply_himalayas(
             sent_count += 1
 
         _log_funnel_summary(
-            "himalayas", applied_log, len(jobs), already_seen, run_start
+            "himalayas",
+            applied_log,
+            len(jobs),
+            already_seen,
+            run_start,
+            parameters,
         )
     finally:
         session.quit()
@@ -3224,7 +3348,12 @@ def search_and_apply_avito(
             sent_count += 1
 
         _log_funnel_summary(
-            "avito", applied_log, len(jobs), already_seen, run_start
+            "avito",
+            applied_log,
+            len(jobs),
+            already_seen,
+            run_start,
+            parameters,
         )
     finally:
         session.quit()
@@ -4283,7 +4412,12 @@ def search_and_apply_djinni(
             sent_count += 1
 
         _log_funnel_summary(
-            "djinni", applied_log, len(jobs), already_seen, run_start
+            "djinni",
+            applied_log,
+            len(jobs),
+            already_seen,
+            run_start,
+            parameters,
         )
     finally:
         if session is not None:
