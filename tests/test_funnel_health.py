@@ -3,10 +3,9 @@
 подтверждается (кнопка отклика сломалась), — один алерт вместо тихого
 молчания в логах."""
 
-import json
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import main
 
