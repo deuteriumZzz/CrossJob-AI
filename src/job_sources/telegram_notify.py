@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -104,7 +105,12 @@ def notify_from_secrets(
     — общая реализация main.notify()/Scheduler, живёт здесь (а не в
     main.py), чтобы scheduler.py могла её импортировать без
     циклического импорта main.py <-> src.scheduler. category — имя
-    темы (Avito, HeadHunter, Ошибки, ...), см. get_or_create_topic."""
+    темы (Avito, HeadHunter, Ошибки, ...), см. get_or_create_topic.
+
+    Не ушло (Telegram недоступен) — не теряется: ложится в
+    .pending_notifications.json и досылается перед следующим
+    уведомлением, когда связь вернётся. Живой случай: час таймаутов до
+    api.telegram.org, и сообщение «HH: капча» пропало молча."""
     try:
         secrets_path: Path = parameters["secretsFile"]
         with open(secrets_path, "r") as stream:
@@ -112,14 +118,74 @@ def notify_from_secrets(
         notifications = secrets.get("notifications") or {}
         bot_token = notifications.get("telegram_bot_token")
         chat_id = notifications.get("telegram_chat_id")
-        if not bot_token or not chat_id:
-            return
-        thread_id = (
-            get_or_create_topic(parameters, category) if category else None
-        )
-        send_notification(bot_token, chat_id, text, thread_id)
     except Exception as e:
         logger.warning(f"Failed to send Telegram notification: {e}")
+        return
+    if not bot_token or not chat_id:
+        return
+    output = parameters.get("outputFileDirectory")
+    pending = Path(output) / _PENDING_FILE if output else None
+    queue = _take_pending(pending) + [
+        {"text": text, "category": category, "at": ""}
+    ]
+    sent = 0
+    for item in queue:
+        body = (
+            f"⏳ {item['at']}, доставлено с опозданием:\n{item['text']}"
+            if item["at"]
+            else item["text"]
+        )
+        try:
+            thread_id = (
+                get_or_create_topic(parameters, item["category"])
+                if item["category"]
+                else None
+            )
+            send_notification(bot_token, chat_id, body, thread_id)
+        except Exception as e:
+            logger.warning(f"Failed to send Telegram notification: {e}")
+            break
+        sent += 1
+    if pending is not None and sent < len(queue):
+        now = datetime.now().strftime("%d.%m %H:%M")
+        _put_pending(
+            pending,
+            [{**item, "at": item["at"] or now} for item in queue[sent:]],
+        )
+
+
+_PENDING_FILE = ".pending_notifications.json"
+# ponytail: хвост последних 20 — после долгого обрыва не досылать сотню
+# рутинных сообщений пачкой; поднять, если начнут теряться важные.
+_PENDING_LIMIT = 20
+
+
+def _take_pending(path: Optional[Path]) -> list[dict]:
+    """Забирает отложенные уведомления (файл очищается под блокировкой,
+    сама отправка — уже без неё, чтобы не держать блокировку на сети)."""
+    if path is None or not path.exists():
+        return []
+    with state_file_lock(path):
+        try:
+            items = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            items = []
+        path.write_text("[]", encoding="utf-8")
+    return items if isinstance(items, list) else []
+
+
+def _put_pending(path: Path, items: list[dict]) -> None:
+    with state_file_lock(path):
+        try:
+            current = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            current = []
+        path.write_text(
+            json.dumps(
+                (current + items)[-_PENDING_LIMIT:], ensure_ascii=False
+            ),
+            encoding="utf-8",
+        )
 
 
 def send_document_from_secrets(

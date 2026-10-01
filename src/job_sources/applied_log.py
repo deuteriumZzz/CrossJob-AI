@@ -10,7 +10,7 @@ from typing import Callable, Literal
 from src.job import Job
 from src.job_sources.html_report import render_applications_html
 from src.job_sources.market_stats import extract_skills, remote_region
-from src.utils.file_lock import state_file_lock
+from src.utils.file_lock import atomic_write_text, state_file_lock
 
 Status = Literal[
     "applied",
@@ -105,10 +105,8 @@ class AppliedLog:
                 else {"applications": []}
             )
             mutate(fresh)
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(
-                json.dumps(fresh, indent=2, ensure_ascii=False),
-                encoding="utf-8",
+            atomic_write_text(
+                self.path, json.dumps(fresh, indent=2, ensure_ascii=False)
             )
 
     def already_applied(self, job: Job) -> bool:

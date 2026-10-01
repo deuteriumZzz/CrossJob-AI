@@ -85,7 +85,10 @@ def test_send_missing_cover_letters_skips_already_sent_and_empty():
             "cover_letter_in_form": True,
         },
     ]
-    with patch("main.send_chat_cover_letter", return_value=True) as send_mock:
+    with patch(
+        "main.send_chat_cover_letter_result",
+        return_value=ChatSendResult(sent=True),
+    ) as send_mock:
         main._send_missing_cover_letters(MagicMock(), applied_log)
     # 4-й аргумент — ссылка на вакансию: чат открывается и с её страницы.
     send_mock.assert_called_once_with(ANY, "1", "Hello Acme", ANY)
@@ -105,7 +108,10 @@ def test_send_missing_cover_letters_does_not_mark_on_failed_send():
             "cover_letter_sent_via_chat": False,
         }
     ]
-    with patch("main.send_chat_cover_letter", return_value=False):
+    with patch(
+        "main.send_chat_cover_letter_result",
+        return_value=ChatSendResult(sent=False),
+    ):
         main._send_missing_cover_letters(MagicMock(), applied_log)
     applied_log.mark_cover_letter_sent_via_chat.assert_not_called()
 
@@ -140,7 +146,8 @@ def test_send_due_hh_reminders_sends_and_marks():
     ]
     parameters = {"headhunter": {"reminder_follow_up_days": 7}}
     with patch(
-        "main.send_chat_cover_letter", return_value=True
+        "main.send_chat_cover_letter_result",
+        return_value=ChatSendResult(sent=True),
     ) as send_mock, patch("main.notify_routine") as notify_mock:
         main._send_due_hh_reminders(parameters, MagicMock(), applied_log)
     send_mock.assert_called_once_with(ANY, "1", ANY, ANY)
@@ -164,7 +171,10 @@ def test_send_due_hh_reminders_does_not_mark_on_failed_send():
         }
     ]
     parameters = {"headhunter": {"reminder_follow_up_days": 7}}
-    with patch("main.send_chat_cover_letter", return_value=False):
+    with patch(
+        "main.send_chat_cover_letter_result",
+        return_value=ChatSendResult(sent=False),
+    ):
         main._send_due_hh_reminders(parameters, MagicMock(), applied_log)
     applied_log.mark_reminder_sent.assert_not_called()
 
@@ -532,10 +542,54 @@ def test_send_due_hh_reminders_caps_per_run_with_pauses():
         for i in range(main.HH_REMINDERS_PER_RUN + 3)
     ]
     with patch(
-        "main.send_chat_cover_letter", return_value=True
+        "main.send_chat_cover_letter_result",
+        return_value=ChatSendResult(sent=True),
     ) as send_mock, patch("main.wait_before_apply") as pause, patch(
         "main.notify_routine"
     ):
         main._send_due_hh_reminders({}, MagicMock(), applied_log)
     assert send_mock.call_count == main.HH_REMINDERS_PER_RUN
     assert pause.call_count == main.HH_REMINDERS_PER_RUN - 1
+
+
+def test_hh_chat_failures_back_off_instead_of_retrying_every_visit():
+    """Живой лог: одни и те же 5 напоминаний «чат не открылся» на каждом
+    заходе на HH. Архив/недоступна — больше не пытаемся; чат не открылся
+    — пауза на сутки; пауза между напоминаниями — только после реально
+    отправленного."""
+    from datetime import datetime, timedelta
+
+    old = (datetime.now().astimezone() - timedelta(days=10)).isoformat()
+    entries = [
+        {
+            "external_id": str(i),
+            "company": f"Co{i}",
+            "title": "Python разработчик",
+            "applied_at": old,
+            "last_known_state": None,
+            "reminder_sent_at": None,
+        }
+        for i in range(3)
+    ]
+    entries[2]["chat_retry_after"] = (
+        datetime.now().astimezone() + timedelta(hours=5)
+    ).isoformat()  # недавно не открылся — сейчас не трогаем
+    applied_log = MagicMock()
+    applied_log.entries_by_source_and_status.return_value = entries
+    results = iter(
+        [ChatSendResult(sent=False, archived=True), ChatSendResult(sent=False)]
+    )
+    with patch(
+        "main.send_chat_cover_letter_result",
+        side_effect=lambda *a: next(results),
+    ) as send_mock, patch("main.wait_before_apply") as pause:
+        main._send_due_hh_reminders({}, MagicMock(), applied_log)
+    assert send_mock.call_count == 2  # Co2 в суточной паузе
+    pause.assert_not_called()  # между неудачами не ждём
+    updates = {
+        c.args[1]: c.kwargs for c in applied_log.update_fields.call_args_list
+    }
+    assert updates["0"] == {"chat_closed": "вакансия в архиве"}
+    assert "chat_retry_after" in updates["1"]
+    applied_log.mark_reminder_sent.assert_not_called()
+    assert not main._hh_chat_allowed({**entries[0], **updates["0"]})

@@ -110,3 +110,34 @@ def test_get_or_create_topic_without_credentials_returns_none():
 if __name__ == "__main__":
     test_send_notification_posts_to_telegram_api()
     print("All tests passed.")
+
+
+def test_notify_keeps_unsent_message_and_delivers_it_later(
+    tmp_path, monkeypatch
+):
+    """Telegram недоступен — уведомление (например «HH: капча») не
+    теряется: откладывается и уходит первым, когда связь вернётся."""
+    from src.job_sources import telegram_notify as tn
+
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text(
+        "notifications:\n  telegram_bot_token: T\n  telegram_chat_id: '1'\n"
+    )
+    params = {"secretsFile": secrets, "outputFileDirectory": tmp_path}
+    sent, online = [], [False]
+
+    def _send(token, chat_id, text, thread_id=None):
+        if not online[0]:
+            raise TimeoutError("The read operation timed out")
+        sent.append(text)
+
+    monkeypatch.setattr(tn, "send_notification", _send)
+    tn.notify_from_secrets(params, "HH: капча")
+    assert sent == []
+    online[0] = True
+    tn.notify_from_secrets(params, "geekjob: 0 новых")
+    assert len(sent) == 2
+    assert "доставлено с опозданием" in sent[0] and "HH: капча" in sent[0]
+    assert sent[1] == "geekjob: 0 новых"
+    tn.notify_from_secrets(params, "ещё")  # отложенное не уходит дважды
+    assert sent[2:] == ["ещё"]

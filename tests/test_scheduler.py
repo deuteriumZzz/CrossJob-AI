@@ -235,28 +235,78 @@ def test_continuous_cycle_runs_one_source_per_tick_round_robin():
         )
 
 
-def test_continuous_cycle_piggybacks_hh_replies_on_headhunter_turn():
-    """Постоянный цикл: check_hh_replies не идёт по своему таймеру —
-    срабатывает сразу после хода headhunter в том же тике, одним заходом."""
+def test_continuous_cycle_hh_chat_check_is_its_own_turn_in_the_round():
+    """Постоянный цикл: чат HH (автоответ, досылка письма, напоминания) —
+    отдельный ход в общем круге после площадок, а не прицеп к каждому
+    ходу HH. Следует галочке самого HH, даже если у check_hh_replies свой
+    флаг выключен (живой конфиг: check_hh_replies.schedule_enabled=false)."""
     with tempfile.TemporaryDirectory() as tmp:
         calls = []
-        now = datetime(2026, 8, 20, 10, 0, 0)
-        parameters = {
-            "headhunter": {"schedule_enabled": True},
-            "limits": {
-                "continuous_cycle_enabled": True,
-                "continuous_cycle_gap_minutes": 3,
+        clock = [datetime(2026, 8, 20, 10, 0, 0)]
+        names = ["headhunter", "geekjob", "check_hh_replies"]
+        scheduler = Scheduler(
+            source_map={
+                n: (lambda n: lambda p, k: calls.append(n))(n) for n in names
             },
+            parameters={
+                "headhunter": {"schedule_enabled": True},
+                "geekjob": {"schedule_enabled": True},
+                "check_hh_replies": {"schedule_enabled": False},
+                "limits": {
+                    "continuous_cycle_enabled": True,
+                    "continuous_cycle_gap_minutes": 3,
+                },
+            },
+            llm_api_key="key",
+            output_folder=Path(tmp),
+            now_fn=lambda: clock[0],
+        )
+        for _ in range(3):
+            scheduler.run_once()
+            clock[0] += timedelta(seconds=30)
+        assert sorted(calls) == sorted(names)  # каждый по разу за круг
+        clock[0] += timedelta(minutes=5)
+        for _ in range(3):
+            scheduler.run_once()
+            clock[0] += timedelta(seconds=30)
+        assert calls[3:] == calls[:3]  # второй круг в том же порядке
+
+
+def test_continuous_cycle_gives_turn_to_longest_waiting_source():
+    """Живой инцидент: прогон HH длиннее gap — к его концу HH снова due и
+    первый по порядку, и getmatch/linkedin/… не запускались 4 дня. Ход —
+    тому, кто ждёт дольше всех, а не первому в списке."""
+    from src.scheduler_state import record_run_result
+
+    with tempfile.TemporaryDirectory() as tmp:
+        calls = []
+        now = datetime(2026, 10, 1, 23, 0, 0)
+        names = ["headhunter", "geekjob", "getmatch", "linkedin"]
+        parameters = {n: {"schedule_enabled": True} for n in names}
+        parameters["limits"] = {
+            "continuous_cycle_enabled": True,
+            "continuous_cycle_gap_minutes": 3,
         }
         source_map = {
-            "headhunter": lambda p, k: calls.append("headhunter"),
-            "check_hh_replies": lambda p, k: calls.append("check_hh_replies"),
+            n: (lambda n: lambda p, k: calls.append(n))(n) for n in names
         }
-        scheduler = _make_scheduler(tmp, parameters, source_map, now=now)
-        scheduler.run_once()
-        assert calls == ["headhunter", "check_hh_replies"]
-
-        # На следующем тике до истечения gap — headhunter не due, и
-        # check_hh_replies за ним следом тоже не запускается сам по себе.
-        scheduler.run_once()
-        assert calls == ["headhunter", "check_hh_replies"]
+        out = Path(tmp)
+        for name, waited in (
+            ("headhunter", timedelta(minutes=1)),
+            ("geekjob", timedelta(minutes=2)),
+            ("getmatch", timedelta(days=4)),
+            ("linkedin", timedelta(days=3)),
+        ):
+            record_run_result(out, name, "ok", now - waited, now - waited)
+        clock = [now]
+        scheduler = Scheduler(
+            source_map=source_map,
+            parameters=parameters,
+            llm_api_key="key",
+            output_folder=out,
+            now_fn=lambda: clock[0],
+        )
+        for _ in range(4):
+            scheduler.run_once()
+            clock[0] += timedelta(seconds=30)
+        assert calls == ["getmatch", "linkedin", "geekjob", "headhunter"]

@@ -29,6 +29,10 @@ CONTINUOUS_CYCLE_SOURCES = {
     "himalayas",
     "djinni",
     "avito",
+    # Чат HH (автоответ, досылка письма, напоминания) — свой ход в том
+    # же круге, после площадок, а не прицеп к каждому ходу HH и не
+    # отдельный часовой таймер.
+    "check_hh_replies",
 }
 
 
@@ -97,19 +101,32 @@ class Scheduler:
                     )
                 )
             )
-            if not source_config.get("schedule_enabled", enabled_by_default):
+            enabled = source_config.get("schedule_enabled", enabled_by_default)
+            # В постоянном цикле чат HH — часть хода HH по кругу и следует
+            # галочке самого HH (как раньше прицеп к его ходу), а не своей.
+            if name == "check_hh_replies" and self._continuous():
+                enabled = bool(
+                    (self.parameters.get("headhunter") or {}).get(
+                        "schedule_enabled"
+                    )
+                )
+            if not enabled:
                 continue
             next_run = get_next_run(self.output_folder, name)
             if next_run is None or next_run <= self.now_fn():
                 due.append(name)
         return due
 
+    def _continuous(self) -> bool:
+        limits = self.parameters.get("limits") or {}
+        return bool(limits.get("continuous_cycle_enabled"))
+
     def run_once(self) -> None:
         from src.utils.backup import daily_backup
 
         daily_backup(self.output_folder)
         limits = self.parameters.get("limits") or {}
-        continuous = bool(limits.get("continuous_cycle_enabled"))
+        continuous = self._continuous()
         gap_hours = (
             max(1, int(limits.get("continuous_cycle_gap_minutes", 3))) / 60
         )
@@ -117,18 +134,18 @@ class Scheduler:
         due = self.due_sources()
         if continuous:
             # Раунд-робин через уже существующий next_run каждой площадки:
-            # запускаем только САМУЮ первую по порядку due-площадку из
-            # ротации за один тик — её next_run сдвинется на gap_hours
-            # вперёд, и на следующем тике (30с) уже другая due-площадка
-            # окажется первой. check_*-задачи (ответы HR и т.п.) в
-            # ротацию не входят — идут своим чередом, как обычно.
+            # за один тик запускается одна due-площадка из круга — её
+            # next_run сдвинется на gap_hours вперёд, и на следующем тике
+            # (30с) ход у следующей. Остальные check_*-задачи (ответы HR в
+            # почте/Telegram и т.п.) в круг не входят — идут своим чередом.
             due_cycle = [n for n in due if n in CONTINUOUS_CYCLE_SOURCES]
             due_rest = [n for n in due if n not in CONTINUOUS_CYCLE_SOURCES]
-            # check_hh_replies не идёт отдельным таймером, пока постоянный
-            # цикл включён — раз уж на HH и так заходим каждый gap_hours,
-            # логичнее проверить сообщения/дослать письмо тем же заходом,
-            # чем открывать браузер на HH ещё раз отдельно по своему таймеру.
-            due_rest = [n for n in due_rest if n != "check_hh_replies"]
+            # Ход — тому, кто ждёт дольше всех (самый старый next_run), а
+            # не первому по порядку: прогон HH длится дольше gap, к его
+            # концу HH снова due и снова первый — живой инцидент, getmatch/
+            # linkedin/habr и др. не запускались 4 дня подряд.
+            waits = {n: get_next_run(self.output_folder, n) for n in due_cycle}
+            due_cycle.sort(key=lambda n: (waits[n] is not None, waits[n] or 0))
             due = due_rest + (due_cycle[:1] if due_cycle else [])
 
         for name in due:
@@ -161,45 +178,10 @@ class Scheduler:
                 )
                 continue
             record_run_result(self.output_folder, name, "ok", next_run, run_at)
-            if (
-                continuous
-                and name == "headhunter"
-                and "check_hh_replies" in self.source_map
-            ):
-                self._run_piggybacked_hh_replies()
 
         self._check_llm_cost_alert()
         self._purge_old_cover_letters()
         self._purge_old_applications()
-
-    def _run_piggybacked_hh_replies(self) -> None:
-        """Постоянный цикл: раз уж только что заходили на HH (поиск+
-        отклик), проверяем сообщения/дошлём письмо в чат тем же
-        заходом — вместо отдельного таймера check_hh_replies (см.
-        due_sources исключение выше)."""
-        run_at = self.now_fn()
-        interval_hours = (self.parameters.get("check_hh_replies") or {}).get(
-            "interval_hours", CHECK_INTERVAL_HOURS.get("check_hh_replies", 1)
-        )
-        next_run = run_at + timedelta(hours=interval_hours)
-        try:
-            self.source_map["check_hh_replies"](
-                self.parameters, self.llm_api_key
-            )
-        except Exception as e:
-            logger.exception(f"[scheduler] check_hh_replies failed: {e}")
-            record_run_result(
-                self.output_folder,
-                "check_hh_replies",
-                "error",
-                next_run,
-                run_at,
-                error=str(e),
-            )
-            return
-        record_run_result(
-            self.output_folder, "check_hh_replies", "ok", next_run, run_at
-        )
 
     def _purge_old_cover_letters(self) -> None:
         retention_days = int(

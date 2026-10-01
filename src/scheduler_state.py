@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, Optional
 
-from src.utils.file_lock import state_file_lock
+from src.utils.file_lock import atomic_write_text, state_file_lock
 
 RunStatus = Literal["ok", "error", "blocked"]
 
@@ -28,9 +28,9 @@ def load_state(output_folder: Path) -> dict:
 
 
 def _save_state(output_folder: Path, state: dict) -> None:
-    path = _state_path(output_folder)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    # Атомарно: «порванное» чтение раньше давало {} — и планировщик
+    # считал, что пора запускать все площадки разом.
+    atomic_write_text(_state_path(output_folder), json.dumps(state, indent=2))
 
 
 def record_run_result(
