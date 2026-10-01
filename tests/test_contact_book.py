@@ -89,21 +89,40 @@ def test_collect_telegram_post_fills_job_and_book(monkeypatch):
             description="Acme ищет Python Backend. Пишите @anna_hr или "
             "jobs@acme.ru. #geekjobs @geekjobs",
         )
-        main._collect_telegram_post(
-            {"outputFileDirectory": Path(tmp)}, "key", job, "geekjobs"
-        )
+        params = {"outputFileDirectory": Path(tmp)}
+        # ИИ-проверка выключена — пост разобран, но в Базу ничего: контакты
+        # из постов попадают туда только после проверки или отправки.
+        assert main._collect_telegram_post(params, "key", job, "geekjobs")
         assert (job.company, job.role, job.salary) == (
             "Acme",
             "Python Backend Developer",
             "от 250 000 ₽",
         )
-        card = ContactBook(Path(tmp)).get("acme")
-        assert {c["value"] for c in card["contacts"]} == {
-            "anna_hr",
-            "jobs@acme.ru",
-        }
+        assert ContactBook(Path(tmp)).all() == {}
+
+        # Проверка включена: в Базу — только email, выбранный ИИ; @anna_hr
+        # остаётся в посте до отправки сообщения.
+        params["telegram"] = {"llm_vacancy_filter": True}
+        checked = []
+        monkeypatch.setattr(
+            main,
+            "_llm_check_post",
+            lambda text, key, emails: checked.append(emails)
+            or (True, "jobs@acme.ru"),
+        )
+        assert main._collect_telegram_post(params, "key", job, "geekjobs")
+        assert checked == [["jobs@acme.ru"]]
+        (card,) = ContactBook(Path(tmp)).all().values()
+        assert [c["value"] for c in card["contacts"]] == ["jobs@acme.ru"]
         assert card["contacts"][0]["source"] == "пост в @geekjobs"
         assert card["vacancies"][0]["text"].startswith("Acme ищет")
+
+        # «Не вакансия» (резюме, реклама) — пост пропускается, База не растёт.
+        monkeypatch.setattr(
+            main, "_llm_check_post", lambda text, key, emails: (False, "")
+        )
+        assert not main._collect_telegram_post(params, "key", job, "geekjobs")
+        assert len(ContactBook(Path(tmp)).all()) == 1
 
 
 def test_contacts_api_status_backfill_and_draft(

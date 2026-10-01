@@ -2358,14 +2358,9 @@ def _campaign_targets(
     ctx: AppContext,
     source: str = "",
     keys: list[str] | None = None,
-    exclude_source: str = "",
 ) -> list[dict]:
     """Кому можно написать: по одному новому email на компанию, которой ещё
-    нет ни в одной рассылке и которую не отметили «не писать».
-    exclude_source — обратный фильтр к source (см. _absorb_new_companies:
-    свежие компании из Telegram по умолчанию не подмешиваются в идущую
-    рассылку «всем» автоматически, вручную выбранный источник это не
-    затрагивает)."""
+    нет ни в одной рассылке и которую не отметили «не писать»."""
     store = CampaignStore(ctx.output_folder)
     in_campaigns = (
         set().union(*[set(c["items"]) for c in store.all().values()])
@@ -2386,10 +2381,6 @@ def _campaign_targets(
                 and (
                     not source or _source_group(c.get("source", "")) == source
                 )
-                and (
-                    not exclude_source
-                    or _source_group(c.get("source", "")) != exclude_source
-                )
             ),
             None,
         )
@@ -2409,13 +2400,12 @@ def _absorb_new_companies(ctx: AppContext) -> int:
     выбранных вручную и не по одному источнику). Письма им пишутся первыми
     — см. сортировку по свежести в start_campaign_job.
 
-    Telegram — исключение: подтверждённый вживую инцидент — пост
-    кандидата "Ищу работу" совпал по ключевому слову, его контакт ушёл
-    в Базу и автоматическая рассылка «всем» отправила туда письмо как
-    работодателю. По умолчанию такие компании сюда не подмешиваются —
-    только через direct.include_telegram_leads: true (или вручную
-    выбрав источник "Telegram-каналы" при создании рассылки — это
-    осознанное решение пользователя, не затрагивается)."""
+    Telegram — наравне с остальными: из постов в Базу попадает только
+    email для отклика, который ИИ подтвердил в проверенной вакансии
+    (remember_telegram_post_contact). Раньше туда шли все контакты поста,
+    и рассылка «всем» однажды написала кандидату из поста «Ищу работу» —
+    поэтому Telegram держали за отдельной галочкой; теперь мусор
+    отсекается до Базы, и галочка не нужна."""
     store = CampaignStore(ctx.output_folder)
     started = [
         c
@@ -2425,12 +2415,7 @@ def _absorb_new_companies(ctx: AppContext) -> int:
     if not started:
         return 0
     latest = max(started, key=lambda c: c["created_at"])
-    include_telegram = bool(
-        (ctx.config.get("direct") or {}).get("include_telegram_leads")
-    )
-    targets = _campaign_targets(
-        ctx, exclude_source="" if include_telegram else "Telegram-каналы"
-    )
+    targets = _campaign_targets(ctx)
     return store.add_items(latest["id"], targets) if targets else 0
 
 
@@ -2818,7 +2803,6 @@ def get_direct_summary(ctx: AppContext = Depends(get_ctx)) -> dict:
         "companies": len(all_companies(ctx.config)),
         "wwr": direct.get("wwr", True) is not False,
         "hn": direct.get("hn", True) is not False,
-        "include_telegram_leads": bool(direct.get("include_telegram_leads")),
         "in_base": len(cards),
         "added_week": sum(
             1 for c in cards if c.get("created_at", "") >= week_ago
@@ -2838,11 +2822,6 @@ def get_direct_summary(ctx: AppContext = Depends(get_ctx)) -> dict:
 class DirectSettings(BaseModel):
     wwr: Optional[bool] = None
     hn: Optional[bool] = None
-    # По умолчанию выключено — см. _absorb_new_companies: подтверждённый
-    # вживую инцидент, когда пост кандидата "Ищу работу" ушёл в Базу и
-    # автоматическая рассылка «всем» отправила туда письмо как
-    # работодателю.
-    include_telegram_leads: Optional[bool] = None
 
 
 @app.post("/api/direct/settings")
@@ -2851,7 +2830,7 @@ def post_direct_settings(
 ) -> dict:
     """Доски удалёнки «Сайтов компаний»: We Work Remotely,
     HN «Who is hiring»."""
-    for field in ("wwr", "hn", "include_telegram_leads"):
+    for field in ("wwr", "hn"):
         value = getattr(body, field)
         if value is not None:
             set_source_field(ctx.config_file, "direct", field, value)
@@ -3733,6 +3712,7 @@ class TelegramWatchUpdate(BaseModel):
 
 def _telegram_watch_snapshot(ctx: AppContext) -> dict:
     from src.job_sources.telegram.watcher import (
+        CANDIDATE_SELF_POST_MARKERS,
         active_watcher,
         default_keywords,
     )
@@ -3746,6 +3726,7 @@ def _telegram_watch_snapshot(ctx: AppContext) -> dict:
             telegram.get("positions") or ctx.config.get("positions") or []
         ),
         "stop_words": telegram.get("watch_stop_words") or [],
+        "builtin_stop_words": list(CANDIDATE_SELF_POST_MARKERS),
         "forward_to": telegram.get("watch_forward_to") or "me",
         "running": watcher is not None,
         "channels": len(telegram.get("channels") or []),

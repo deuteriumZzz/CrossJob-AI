@@ -518,6 +518,8 @@ def test_source_client_rechecks_watcher_after_waiting_for_session_lock(
 def test_watch_settings_api(client):  # noqa: F811
     snap = client.get("/api/settings/telegram-watch").json()
     assert snap["enabled"] is False and snap["running"] is False
+    # Встроенные стоп-слова видны в UI полным списком, не «и похожие».
+    assert "ищу работу" in snap["builtin_stop_words"]
     snap = client.post(
         "/api/settings/telegram-watch",
         json={

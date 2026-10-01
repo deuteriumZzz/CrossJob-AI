@@ -207,6 +207,7 @@ from src.job_sources.telegram.source import TelegramSource
 from src.job_sources.telegram.watcher import (
     RATE_LIMIT_MARKERS,
     RATE_LIMIT_RETRY_DELAYS_SECONDS,
+    _llm_check_post,
     active_watcher,
     get_watch_post,
     remember_telegram_post_contact,
@@ -1959,6 +1960,17 @@ def search_telegram(
             if applied_log.already_applied(job):
                 continue
 
+            # https://t.me/{channel}/{message_id} — см. mapping.py.
+            channel = job.link.rsplit("/", 2)[-2]
+            if not _collect_telegram_post(
+                parameters, llm_api_key, job, channel
+            ):
+                logger.info(f"Skipping {job.link}: ИИ — не вакансия.")
+                applied_log.record(
+                    job, "", "", "skipped_low_fit", 0, ["не вакансия (ИИ)"]
+                )
+                continue
+
             fit = score_job_fit(
                 resume_pdf_path,
                 job,
@@ -1996,9 +2008,6 @@ def search_telegram(
                 )
                 continue
 
-            # https://t.me/{channel}/{message_id} — см. mapping.py.
-            channel = job.link.rsplit("/", 2)[-2]
-            _collect_telegram_post(parameters, llm_api_key, job, channel)
             contact = extract_contact(job.description, channel)
             status: Literal["dry_run", "applied"] = "dry_run"
             if (
@@ -2027,6 +2036,13 @@ def search_telegram(
                 else:
                     conversations.record_outbound(
                         contact, intro_message, job_link=job.link
+                    )
+                    # Написали — контакт в Базу с пометкой «писали»,
+                    # как у кнопок шлюза (remember_telegram_post_contact).
+                    remember_telegram_post_contact(
+                        output_folder,
+                        [{"kind": "telegram", "value": contact}],
+                        {"channel": channel, "link": job.link},
                     )
                     status = "applied"
                     logger.info(
@@ -2057,12 +2073,18 @@ def search_telegram(
 
 def _collect_telegram_post(
     parameters: dict, llm_api_key: str, job: Job, channel: str
-) -> None:
-    """Полный разбор подходящего поста: компания/должность/зарплата
-    (LLM — в постах нет структуры) и все контакты из текста (@username,
-    email, t.me, LinkedIn) — во вкладку «Контакты». Job дополняется
-    компанией и нормальной должностью: так пост виден в «Истории» по-
-    человечески и сверяется с той же вакансией на других площадках."""
+) -> bool:
+    """Разбор подходящего поста: компания/должность/зарплата (LLM — в
+    постах нет структуры). Job дополняется компанией и нормальной
+    должностью: так пост виден в «Истории» по-человечески и сверяется с
+    той же вакансией на других площадках.
+
+    Контакты — как у постоянного шлюза (_handle_post): в Базу только email
+    для отклика, который ИИ выбрал в проверенной вакансии (telegram.
+    llm_vacancy_filter). @username и прочее из поста — только после
+    отправки сообщения, остальное в Базу не идёт.
+
+    False — ИИ сказал «не вакансия» (резюме, реклама): пост пропускаем."""
     try:
         parsed = parse_post(job.description, llm_api_key)
     except Exception as e:
@@ -2071,22 +2093,30 @@ def _collect_telegram_post(
     job.company = parsed["company"] or job.company
     job.role = parsed["role"] or job.role
     job.salary = parsed["salary"] or job.salary
-    contacts = contacts_from_text(job.description, exclude=(channel,))
-    if not contacts:
-        return
-    ContactBook(parameters["outputFileDirectory"]).add(
-        job.company,
-        [
-            {**c, "source": f"пост в @{channel}", "source_url": job.link}
-            for c in contacts
-        ],
-        vacancy={
-            "title": job.role,
-            "link": job.link,
-            "source": "telegram",
-            "text": job.description[:4000],
-        },
-    )
+    if not (parameters.get("telegram") or {}).get("llm_vacancy_filter"):
+        return True
+    emails = [
+        c["value"]
+        for c in contacts_from_text(job.description, exclude=(channel,))
+        if c["kind"] == "email"
+    ]
+    verdict = _llm_check_post(job.description, llm_api_key, emails)
+    if verdict is None:
+        return True  # ИИ недоступен — пост не теряем, но и в Базу не пишем
+    is_vacancy, apply_email = verdict
+    if is_vacancy and apply_email:
+        remember_telegram_post_contact(
+            parameters["outputFileDirectory"],
+            [{"kind": "email", "value": apply_email}],
+            {
+                "channel": channel,
+                "link": job.link,
+                "title": job.role,
+                "text": job.description[:4000],
+            },
+            sent=False,
+        )
+    return is_vacancy
 
 
 def search_getmatch(

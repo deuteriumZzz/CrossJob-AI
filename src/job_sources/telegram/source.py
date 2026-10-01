@@ -7,6 +7,7 @@ from src.job_sources.telegram.client import (
     normalize_channel,
 )
 from src.job_sources.telegram.mapping import telegram_message_to_job
+from src.job_sources.telegram.watcher import CANDIDATE_SELF_POST_MARKERS
 
 # ponytail: фиксированное число сообщений на канал вместо обхода всей
 # истории, увеличить, если это перестанет давать достаточно постов.
@@ -28,9 +29,19 @@ def _passes_telegram_filters(text: str, preferences: dict) -> bool:
     """У постов нет структурированных полей company/title/location,
     поэтому чёрные списки и разрешённые локации сверяются со всем
     текстом сообщения целиком, а не по отдельным полям (в отличие от
-    passes_blacklists)."""
+    passes_blacklists).
+
+    Стоп-слова — те же, что у постоянного шлюза (свои watch_stop_words +
+    встроенные CANDIDATE_SELF_POST_MARKERS): иначе посты «ищу работу»,
+    отсеянные шлюзом, проходили бы через поиск по расписанию."""
     text_lower = text.lower()
 
+    stop_words = [
+        *((preferences.get("telegram") or {}).get("watch_stop_words") or []),
+        *CANDIDATE_SELF_POST_MARKERS,
+    ]
+    if _matches_any(text_lower, [s for s in stop_words if s.strip()]):
+        return False
     if _matches_any(text_lower, preferences.get("company_blacklist", [])):
         return False
     if _matches_any(text_lower, preferences.get("title_blacklist", [])):

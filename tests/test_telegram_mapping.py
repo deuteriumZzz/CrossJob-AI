@@ -61,3 +61,13 @@ if __name__ == "__main__":
     test_passes_telegram_filters_rejects_blacklisted_company_in_text()
     test_passes_telegram_filters_locations_allowlist_checks_full_text()
     print("All tests passed.")
+
+
+def test_passes_telegram_filters_applies_stop_words_like_gateway():
+    # Поиск по расписанию отсекает то же, что и постоянный шлюз: встроенные
+    # маркеры резюме и свои watch_stop_words.
+    prefs = {"telegram": {"watch_stop_words": ["офис"]}}
+    assert not _passes_telegram_filters("#резюме Python developer", prefs)
+    assert not _passes_telegram_filters("Ищу работу Python-разработчиком", {})
+    assert not _passes_telegram_filters("Python, офис в Москве", prefs)
+    assert _passes_telegram_filters("Ищем Python-разработчика, remote", prefs)

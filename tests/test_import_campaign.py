@@ -834,14 +834,12 @@ def test_company_sites_collect_into_base_for_campaign(client):  # noqa: F811
     assert len(created["items"]) == 1
 
 
-def test_telegram_leads_excluded_from_auto_absorb_by_default(
+def test_verified_telegram_email_joins_running_all_campaign(
     client,  # noqa: F811
 ):
-    """Инцидент: пост кандидата "Ищу работу" в Telegram-канале совпал по
-    ключевому слову, его email ушёл в Базу, и уже идущая рассылка «всем»
-    подхватила его сама — письмо ушло кандидату как работодателю. Теперь
-    Telegram-контакты не подмешиваются в _absorb_new_companies, пока
-    direct.include_telegram_leads не включён явно."""
+    """Из постов в Базу теперь попадает только email, который ИИ
+    подтвердил в вакансии (мусор отсекается до Базы) — такой адрес идёт в
+    уже идущую рассылку «всем» сам, без отдельной галочки."""
     ctx = api.get_ctx()
     book = ContactBook(ctx.output_folder)
     book.add(
@@ -849,7 +847,7 @@ def test_telegram_leads_excluded_from_auto_absorb_by_default(
         [
             {
                 "kind": "email",
-                "value": "candidate@example.com",
+                "value": "hr@example.com",
                 "source": "пост в @somechannel",
             }
         ],
@@ -863,11 +861,8 @@ def test_telegram_leads_excluded_from_auto_absorb_by_default(
     campaign_id = store.create("Все источники", [])
     store.update(campaign_id, scope="all", batch_day="2026-01-01")
 
-    assert api._absorb_new_companies(ctx) == 0
-
-    client.post("/api/direct/settings", json={"include_telegram_leads": True})
-    ctx.reload_config()
     assert api._absorb_new_companies(ctx) == 1
+    assert "hr@example.com" in store.get(campaign_id)["items"]
 
 
 def test_campaign_prepares_in_daily_batches(monkeypatch):

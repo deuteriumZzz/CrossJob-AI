@@ -111,28 +111,24 @@ def _format_yaml_scalar(value: object) -> str:
 def _field_end(lines: list[str], field_start: int, block_end: int) -> int:
     """Возвращает конец значения YAML-поля внутри уже найденного блока.
 
-    Обычное значение занимает одну строку. У folded/literal scalar-а
-    (`>-`, `|`, `>+` и т.п.) тело находится в следующих строках с более
-    глубоким отступом. При замене заголовка такого значения надо заменить
-    и тело: иначе после сохранения из UI в файле остаются «осиротевшие»
-    строки и YAML перестаёт парситься.
+    Тело значения — все следующие строки с более глубоким отступом: у
+    folded/literal scalar-а (`>-`, `|`), но и у обычной строки, перенесённой
+    на следующую строку (`key: Здравствуйте!` + `    Если позиция…` — так
+    пишут руками). При замене заголовка надо заменить и тело: иначе в файле
+    остаются «осиротевшие» строки, YAML перестаёт парситься и сохранение
+    из UI падает целиком — вместе со всеми остальными полями раздела.
+    Пустые строки после значения не трогаем — они разделители, не тело.
     """
     line = lines[field_start]
-    value = line.split(":", 1)[1].lstrip()
-    if not value.startswith(("|", ">")):
-        return field_start + 1
-
     field_indent = len(line) - len(line.lstrip())
     field_end = field_start + 1
-    while field_end < block_end:
-        candidate = lines[field_end]
+    for index in range(field_start + 1, block_end):
+        candidate = lines[index]
         if not candidate.strip():
-            field_end += 1
             continue
-        candidate_indent = len(candidate) - len(candidate.lstrip())
-        if candidate_indent <= field_indent:
+        if len(candidate) - len(candidate.lstrip()) <= field_indent:
             break
-        field_end += 1
+        field_end = index + 1
     return field_end
 
 

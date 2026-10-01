@@ -995,8 +995,6 @@
         <h4>Где искать</h4>
         <label class="checkbox-row"><input id="direct-wwr" type="checkbox" /> We Work Remotely — доска удалённых вакансий</label>
         <label class="checkbox-row"><input id="direct-hn" type="checkbox" /> Hacker News «Who is hiring» — ежемесячная ветка с вакансиями</label>
-        <label class="checkbox-row"><input id="direct-include-telegram-leads" type="checkbox" /> Автоматически включать контакты из Telegram-постов в рассылку «всем»</label>
-        <p class="muted small">Выключено по умолчанию — контакт из поста в Telegram-канале (например, из чужого объявления «Ищу работу») не всегда компания. Без этой галочки такие контакты не попадают в уже идущую рассылку сами — только если вы явно выберете источник «Telegram-каналы» при создании новой рассылки.</p>
 
         <h4>Отслеживаемые компании</h4>
         <p class="muted small">Введите адрес сайта — бот сам найдёт, где компания публикует вакансии (Greenhouse, Lever, Ashby, Workable).</p>
@@ -1081,7 +1079,8 @@
               <span>Стоп-слова — такие посты не присылать</span>
               <textarea id="tgq-stop" rows="2"></textarea>
             </label>
-            <p class="muted small">Плюс всегда включены встроенные: «ищу работу», «ищу вакансию», «резюме:», «open to work» и похожие — отсеивают посты кандидатов, а не вакансий, их нельзя выключить. Здесь — только ваши дополнительные.</p>
+            <p class="muted small">Здесь — только ваши дополнительные. Плюс всегда включены встроенные — отсеивают посты кандидатов (резюме), а не вакансий, их нельзя выключить:</p>
+            <p class="muted small" id="tgq-builtin-stop"></p>
             <label class="limit-field">
               <span>Досмотреть историю нового канала за последние дни (вакансия могла появиться до того, как вы его добавили, и всё ещё быть открыта) — 0 отключает</span>
               <input id="tgq-backfill-days" class="num-input" type="number" min="0" max="60" style="width:80px" />

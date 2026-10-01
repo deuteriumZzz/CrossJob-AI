@@ -1842,6 +1842,9 @@ async function loadTelegramWatch() {
   const stop = document.getElementById("tgq-stop");
   stop.value = w.stop_words.join("\n");
   initTagInput(stop);
+  document.getElementById("tgq-builtin-stop").textContent = (w.builtin_stop_words || [])
+    .map((s) => `«${s}»`)
+    .join(", ");
   const greeting = document.getElementById("tgq-greeting");
   greeting.value = w.greeting;
   updateGreetingPreview();
@@ -3960,8 +3963,6 @@ async function loadDirectSettings() {
   const d = await api("/api/direct/summary");
   document.getElementById("direct-wwr").checked = d.wwr;
   document.getElementById("direct-hn").checked = d.hn;
-  document.getElementById("direct-include-telegram-leads").checked =
-    d.include_telegram_leads;
   loadDirectCompanies();
 }
 
@@ -3969,7 +3970,6 @@ async function saveDirectSetting(e) {
   const field = {
     "direct-wwr": "wwr",
     "direct-hn": "hn",
-    "direct-include-telegram-leads": "include_telegram_leads",
   }[e.target.id];
   if (!field) return;
   try {

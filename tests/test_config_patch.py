@@ -308,6 +308,38 @@ def test_set_source_field_replaces_folded_scalar_without_orphaning_body():
         }
 
 
+def test_set_source_field_replaces_wrapped_plain_scalar():
+    """Живой случай: приветствие записано обычной строкой с переносом на
+    следующую строку. Старый редактор оставлял продолжение «сиротой» —
+    YAML ломался, и падало сохранение всего раздела (в том числе тумблер
+    ИИ-проверки «это вакансия?»)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        config_file = Path(tmp) / "work_preferences.yaml"
+        config_file.write_text(
+            "telegram:\n"
+            "  intro_message_template: Здравствуйте! Увидел вашу\n"
+            "    вакансию «{role}».\n"
+            "\n"
+            "  llm_vacancy_filter: false\n",
+            encoding="utf-8",
+        )
+
+        set_source_field(
+            config_file,
+            "telegram",
+            "intro_message_template",
+            "Новое сообщение для {role}",
+            quote=True,
+        )
+        set_source_field(config_file, "telegram", "llm_vacancy_filter", True)
+
+        parsed = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+        assert parsed["telegram"] == {
+            "intro_message_template": "Новое сообщение для {role}",
+            "llm_vacancy_filter": True,
+        }
+
+
 def test_settings_write_creates_backup_and_keeps_yaml_valid():
     with tempfile.TemporaryDirectory() as tmp:
         config_file = Path(tmp) / "work_preferences.yaml"
