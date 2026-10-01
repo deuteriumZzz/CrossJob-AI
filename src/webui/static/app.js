@@ -503,6 +503,7 @@ let repliesLoaded = false;
 let lastRepliesSnapshot = null;
 let lastRepliesCount = 0;
 let lastRepliesEntries = [];
+let hhReminderBatchSummary = "";
 let logsLoaded = false;
 let lastLogsSnapshot = null;
 let lastLogsLines = [];
@@ -4761,7 +4762,10 @@ async function renderHhRemindersQueue() {
     return;
   }
   if (!reminders.length) {
-    el.style.display = "none";
+    el.style.display = hhReminderBatchSummary ? "" : "none";
+    document.getElementById("hh-reminders-list").innerHTML = hhReminderBatchSummary
+      ? `<p class="muted small" role="status">${escapeHtml(hhReminderBatchSummary)}</p>`
+      : "";
     return;
   }
   el.style.display = "";
@@ -4787,15 +4791,53 @@ async function renderHhRemindersQueue() {
       <span></span>
       <button type="button" class="btn btn-secondary btn-small" id="hh-reminders-send-all">Отправить все как есть</button>
     </div>
-    <p class="muted small" id="hh-reminders-send-all-status" role="status"></p>
+    <p class="muted small" id="hh-reminders-send-all-status" role="status">${escapeHtml(hhReminderBatchSummary)}</p>
     ${items.map(decisionCardHtml).join("")}`;
   el.querySelectorAll("[data-draft-code]").forEach((box, i) =>
     wireDecisionCard(box, items[i], renderHhRemindersQueue)
   );
   el.querySelector("#hh-reminders-send-all").addEventListener("click", (ev) => {
     ev.target.disabled = true;
-    sendAllAsIs(items, document.getElementById("hh-reminders-send-all-status"), renderHhRemindersQueue);
+    sendAllHhRemindersAsIs(
+      items,
+      document.getElementById("hh-reminders-send-all-status"),
+      renderHhRemindersQueue
+    ).finally(() => {
+      if (ev.target.isConnected) ev.target.disabled = false;
+    });
   });
+}
+
+async function sendAllHhRemindersAsIs(items, statusEl, refresh) {
+  statusEl.textContent = `Открываю HH и отправляю ${items.length}…`;
+  try {
+    const response = await api("/api/headhunter/reminders/send-all", {
+      method: "POST",
+      body: JSON.stringify({
+        reminders: items.map((item) => ({
+          external_id: item.code,
+          text: item.text,
+        })),
+      }),
+    });
+    const sent = response.results.filter((result) => result.sent).length;
+    const failed = response.results.length - sent;
+    hhReminderBatchSummary = failed
+      ? `Отправлено ${sent} из ${response.results.length}; не удалось ${failed}. Неотправленные остались в очереди.`
+      : `Отправлено ${sent} из ${response.results.length}.`;
+    showToast(hhReminderBatchSummary, failed ? "error" : "success", 7000);
+  } catch (error) {
+    const message = error.message.replace(/^\d+: /, "");
+    hhReminderBatchSummary = `Напоминания не отправлены: ${message}`;
+    statusEl.textContent = hhReminderBatchSummary;
+    showToast(hhReminderBatchSummary, "error", 7000);
+    return;
+  }
+  try {
+    await refresh();
+  } catch (error) {
+    showToast("Напоминания отправлены, но список не обновился. Обновите вкладку позже.", "info", 7000);
+  }
 }
 
 // «Сегодня: 12 из 25 · разогрев, день 3 · отправка будни 9–19».

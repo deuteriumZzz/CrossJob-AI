@@ -454,6 +454,12 @@ def test_due_hh_reminders_skips_viewed_and_already_reminded():
             "last_known_state": None,
             "reminder_sent_at": old,
         },
+        {  # вакансию HH пометил архивной — напоминать бессмысленно
+            "external_id": "5",
+            "title": "Dev",
+            "applied_at": old,
+            "last_known_state": "Вакансия в архиве",
+        },
     ]
     due = due_hh_reminders(entries, days=7, now=now)
     assert [e["external_id"] for e in due] == ["1"]

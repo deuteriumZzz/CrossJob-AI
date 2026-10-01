@@ -103,6 +103,7 @@ from src.job_sources.headhunter.browser_replies import (
     fetch_new_employer_messages,
     find_external_link,
     send_chat_cover_letter,
+    send_chat_cover_letter_result,
     send_reply,
 )
 from src.job_sources.headhunter.browser_session import HeadHunterSession
@@ -250,6 +251,11 @@ from src.utils.constants import (
     WORK_PREFERENCES_YAML,
 )
 from src.utils.file_lock import state_file_lock
+
+# Профиль HH нельзя открывать двумя WebDriver одновременно: Chrome оставляет
+# блокировку профиля, а второй ручной клик тогда выглядит для пользователя как
+# «упавшая» отправка. Один lock общий для плановой и ручной операций.
+_HEADHUNTER_BROWSER_SESSION_LOCK = threading.Lock()
 
 
 class ConfigError(Exception):
@@ -1401,7 +1407,7 @@ def _log_funnel_summary(
         _update_funnel_health(parameters, source, found, applied, dry_run)
 
 
-def search_and_apply_headhunter(
+def _search_and_apply_headhunter_with_session(
     parameters: dict,
     llm_api_key: str,
     stop_event: Optional[threading.Event] = None,
@@ -1681,6 +1687,23 @@ def search_and_apply_headhunter(
             run_start,
             parameters,
         )
+
+
+def search_and_apply_headhunter(
+    parameters: dict,
+    llm_api_key: str,
+    stop_event: Optional[threading.Event] = None,
+):
+    """Запускает поиск HH, только когда его Chrome-профиль свободен."""
+    if not _HEADHUNTER_BROWSER_SESSION_LOCK.acquire(blocking=False):
+        logger.info("Пропускаю поиск HH: профиль занят другой операцией")
+        return
+    try:
+        return _search_and_apply_headhunter_with_session(
+            parameters, llm_api_key, stop_event
+        )
+    finally:
+        _HEADHUNTER_BROWSER_SESSION_LOCK.release()
 
 
 def search_geekjob(
@@ -5071,7 +5094,7 @@ def _answer_headhunter_messages(
         )
 
 
-def check_headhunter_replies(parameters: dict, llm_api_key: str):
+def _check_headhunter_replies_with_session(parameters: dict, llm_api_key: str):
     """
     Если headhunter.auto_reply: true — автоматически отвечает на новые
     сообщения работодателя в чате hh.ru через браузерную сессию (см.
@@ -5118,6 +5141,19 @@ def check_headhunter_replies(parameters: dict, llm_api_key: str):
         _process_pending_form_approvals(parameters, llm_api_key)
 
 
+def check_headhunter_replies(parameters: dict, llm_api_key: str):
+    """Запускает плановую HH-проверку, только когда профиль свободен."""
+    if not _HEADHUNTER_BROWSER_SESSION_LOCK.acquire(blocking=False):
+        logger.info(
+            "Пропускаю плановую проверку HH: профиль занят ручной отправкой"
+        )
+        return
+    try:
+        _check_headhunter_replies_with_session(parameters, llm_api_key)
+    finally:
+        _HEADHUNTER_BROWSER_SESSION_LOCK.release()
+
+
 def send_headhunter_reminder(
     parameters: dict, external_id: str, text: str
 ) -> bool:
@@ -5126,16 +5162,135 @@ def send_headhunter_reminder(
     свою браузерную сессию, как и остальные ручные HH-действия
     (prefill_direct_application и т.п.), а не переиспользует сессию
     демона, чтобы не мешать плановому прогону, если он идёт параллельно."""
-    output_folder: Path = parameters["outputFileDirectory"]
-    applied_log = AppliedLog(output_folder / "applied_log.json")
-    driver = init_browser(output_folder / ".chrome_profile_headhunter")
+    results = send_headhunter_reminders(
+        parameters, [{"external_id": external_id, "text": text}]
+    )
+    return bool(results and results[0]["sent"])
+
+
+def _stored_hh_vacancy_url(
+    applied_log: AppliedLog, external_id: str
+) -> Optional[str]:
+    """Возвращает проверенную ссылку вакансии из локального журнала HH."""
+    entry = applied_log.find_by_source_and_external_id(
+        "headhunter", external_id
+    )
+    vacancy_url = entry.get("link") if entry else None
+    if isinstance(vacancy_url, str) and re.match(
+        r"^https://(?:[a-z0-9-]+\.)?hh\.ru/vacancy/\d+", vacancy_url
+    ):
+        return vacancy_url
+    return None
+
+
+def send_headhunter_reminders(
+    parameters: dict, reminders: list[dict[str, str]]
+) -> list[dict[str, Any]]:
+    """Отправляет пачку ручных HH-напоминаний в одной сессии Chrome.
+
+    Каждый результат возвращается отдельно: ошибка одного чата не
+    останавливает остальные, а успешное напоминание сразу помечается в
+    журнале, чтобы не попасть в следующую очередь.
+    """
+    if not reminders:
+        return []
+
+    if not _HEADHUNTER_BROWSER_SESSION_LOCK.acquire(blocking=False):
+        return [
+            {
+                "external_id": reminder["external_id"],
+                "sent": False,
+                "error": "Сессия HH уже выполняет другую операцию",
+            }
+            for reminder in reminders
+        ]
+
     try:
-        sent = send_chat_cover_letter(driver, external_id, text)
+        output_folder: Path = parameters["outputFileDirectory"]
+        applied_log = AppliedLog(output_folder / "applied_log.json")
+        results: list[dict[str, Any]] = []
+        try:
+            driver = init_browser(output_folder / ".chrome_profile_headhunter")
+        except Exception:
+            logger.exception(
+                "Не удалось запустить браузер для ручных HH-напоминаний"
+            )
+            return [
+                {
+                    "external_id": reminder["external_id"],
+                    "sent": False,
+                    "error": "Не удалось запустить браузер HH",
+                }
+                for reminder in reminders
+            ]
+
+        try:
+            for reminder in reminders:
+                external_id = reminder["external_id"]
+                vacancy_url = _stored_hh_vacancy_url(applied_log, external_id)
+                try:
+                    chat_result = send_chat_cover_letter_result(
+                        driver, external_id, reminder["text"], vacancy_url
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Не удалось отправить напоминание в чат HH %s: %s",
+                        external_id,
+                        e,
+                    )
+                    results.append(
+                        {
+                            "external_id": external_id,
+                            "sent": False,
+                            "error": "Не удалось открыть чат на HH",
+                        }
+                    )
+                    continue
+
+                if chat_result.archived:
+                    applied_log.update_reply_state(
+                        "headhunter", external_id, "Вакансия в архиве"
+                    )
+                    results.append(
+                        {
+                            "external_id": external_id,
+                            "sent": False,
+                            "error": "Вакансия в архиве",
+                        }
+                    )
+                    continue
+
+                if chat_result.unavailable:
+                    applied_log.update_reply_state(
+                        "headhunter",
+                        external_id,
+                        "Вакансия недоступна для текущего аккаунта",
+                    )
+                    results.append(
+                        {
+                            "external_id": external_id,
+                            "sent": False,
+                            "error": (
+                                "Вакансия недоступна для текущего " "аккаунта"
+                            ),
+                        }
+                    )
+                    continue
+
+                sent = chat_result.sent
+                if sent:
+                    applied_log.mark_reminder_sent("headhunter", external_id)
+                results.append({"external_id": external_id, "sent": sent})
+        finally:
+            try:
+                driver.quit()
+            except Exception:
+                logger.warning(
+                    "Не удалось корректно закрыть браузер HH", exc_info=True
+                )
+        return results
     finally:
-        driver.quit()
-    if sent:
-        applied_log.mark_reminder_sent("headhunter", external_id)
-    return sent
+        _HEADHUNTER_BROWSER_SESSION_LOCK.release()
 
 
 def _send_due_hh_reminders(
@@ -5441,28 +5596,34 @@ def cleanup_headhunter_negotiations(parameters: dict) -> None:
     output_folder: Path = parameters["outputFileDirectory"]
     profile_dir = output_folder / ".chrome_profile_headhunter"
 
-    driver = init_browser(profile_dir)
-    withdrawn = 0
+    if not _HEADHUNTER_BROWSER_SESSION_LOCK.acquire(blocking=False):
+        logger.info("Не запускаю очистку HH: профиль занят другой операцией")
+        return
     try:
-        entries = list_withdrawable_negotiations(driver, older_than_days)
-        logger.info(f"Найдено {len(entries)} отклик(ов) для отмены.")
-        for entry in entries:
-            ok = withdraw_negotiation(driver, entry)
-            logger.info(
-                f"{'Отменён' if ok else 'Не удалось отменить'} отклик "
-                f"{entry['vacancy_url']} (отказ={entry['is_discard']}, "
-                f"дней без обновления={entry['days_old']})"
-            )
-            if ok:
-                withdrawn += 1
-    finally:
-        driver.quit()
+        driver = init_browser(profile_dir)
+        withdrawn = 0
+        try:
+            entries = list_withdrawable_negotiations(driver, older_than_days)
+            logger.info(f"Найдено {len(entries)} отклик(ов) для отмены.")
+            for entry in entries:
+                ok = withdraw_negotiation(driver, entry)
+                logger.info(
+                    f"{'Отменён' if ok else 'Не удалось отменить'} отклик "
+                    f"{entry['vacancy_url']} (отказ={entry['is_discard']}, "
+                    f"дней без обновления={entry['days_old']})"
+                )
+                if ok:
+                    withdrawn += 1
+        finally:
+            driver.quit()
 
-    notify_routine(
-        parameters,
-        f"HeadHunter: отменено {withdrawn} зависших отклик(ов).",
-        category="headhunter",
-    )
+        notify_routine(
+            parameters,
+            f"HeadHunter: отменено {withdrawn} зависших отклик(ов).",
+            category="headhunter",
+        )
+    finally:
+        _HEADHUNTER_BROWSER_SESSION_LOCK.release()
 
 
 def block_headhunter_employer(parameters: dict, company: str) -> bool:
@@ -5487,19 +5648,27 @@ def block_headhunter_employer(parameters: dict, company: str) -> bool:
         return False
 
     profile_dir = output_folder / ".chrome_profile_headhunter"
-    driver = init_browser(profile_dir)
-    try:
-        ok = block_employer(driver, matches[0]["link"])
-    finally:
-        driver.quit()
-
-    if ok:
-        notify(
-            parameters,
-            f"HeadHunter: работодатель '{company}' заблокирован.",
-            category="headhunter",
+    if not _HEADHUNTER_BROWSER_SESSION_LOCK.acquire(blocking=False):
+        logger.info(
+            "Не блокирую работодателя на HH: профиль занят другой операцией"
         )
-    return ok
+        return False
+    try:
+        driver = init_browser(profile_dir)
+        try:
+            ok = block_employer(driver, matches[0]["link"])
+        finally:
+            driver.quit()
+
+        if ok:
+            notify(
+                parameters,
+                f"HeadHunter: работодатель '{company}' заблокирован.",
+                category="headhunter",
+            )
+        return ok
+    finally:
+        _HEADHUNTER_BROWSER_SESSION_LOCK.release()
 
 
 def check_telegram_replies(parameters: dict, llm_api_key: str) -> None:

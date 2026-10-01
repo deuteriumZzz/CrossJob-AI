@@ -78,6 +78,116 @@ def test_status_lists_all_sources_never_run(client):
     assert hh["schedule_enabled"] is False
 
 
+def test_headhunter_reminders_send_all_uses_one_batch_operation(client):
+    reminders = [
+        {
+            "external_id": "101",
+            "text": "Здравствуйте, подскажите, пожалуйста…",
+        },
+        {"external_id": "102", "text": "Добрый день, хотел уточнить статус…"},
+    ]
+    with patch(
+        "src.webui.api._send_headhunter_reminders",
+        return_value=[
+            {"external_id": "101", "sent": True},
+            {"external_id": "102", "sent": False},
+        ],
+    ) as send_batch:
+        response = client.post(
+            "/api/headhunter/reminders/send-all", json={"reminders": reminders}
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "results": [
+            {"external_id": "101", "sent": True},
+            {"external_id": "102", "sent": False},
+        ]
+    }
+    assert send_batch.call_count == 1
+    assert send_batch.call_args.args[1] == reminders
+
+
+def test_headhunter_reminders_send_all_rejects_duplicate_or_empty_messages(
+    client,
+):
+    duplicate = client.post(
+        "/api/headhunter/reminders/send-all",
+        json={
+            "reminders": [
+                {"external_id": "101", "text": "Первое"},
+                {"external_id": "101", "text": "Второе"},
+            ]
+        },
+    )
+    empty = client.post(
+        "/api/headhunter/reminders/send-all", json={"reminders": []}
+    )
+
+    assert duplicate.status_code == 422
+    assert empty.status_code == 422
+
+
+def test_single_hh_reminder_reports_archived_vacancy(client):
+    with patch(
+        "src.webui.api._send_headhunter_reminders",
+        return_value=[
+            {
+                "external_id": "101",
+                "sent": False,
+                "error": "Вакансия в архиве",
+            }
+        ],
+    ):
+        response = client.post(
+            "/api/headhunter/reminders/send",
+            json={"external_id": "101", "text": "Напоминание"},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Вакансия в архиве"
+
+
+def test_single_hh_reminder_reports_authorization_unavailable_vacancy(client):
+    with patch(
+        "src.webui.api._send_headhunter_reminders",
+        return_value=[
+            {
+                "external_id": "101",
+                "sent": False,
+                "error": "Вакансия недоступна для текущего аккаунта",
+            }
+        ],
+    ):
+        response = client.post(
+            "/api/headhunter/reminders/send",
+            json={"external_id": "101", "text": "Напоминание"},
+        )
+
+    assert response.status_code == 409
+    assert (
+        response.json()["detail"]
+        == "Вакансия недоступна для текущего аккаунта"
+    )
+
+
+def test_headhunter_reminders_send_all_accepts_every_ready_reminder(client):
+    reminders = [
+        {"external_id": str(index), "text": f"Напоминание {index}"}
+        for index in range(51)
+    ]
+    with patch(
+        "src.webui.api._send_headhunter_reminders",
+        return_value=[],
+    ) as send_batch:
+        response = client.post(
+            "/api/headhunter/reminders/send-all", json={"reminders": reminders}
+        )
+
+    assert response.status_code == 200
+    assert send_batch.call_args.args[1] == reminders
+
+
 def test_status_reports_readiness_per_source(client):
     response = client.get("/api/status")
     sources = {s["name"]: s for s in response.json()["sources"]}

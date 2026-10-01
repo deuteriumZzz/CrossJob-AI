@@ -59,7 +59,7 @@ from main import prepare_interview as _prepare_interview
 from main import (
     run_selected_sources,
 )
-from main import send_headhunter_reminder as _send_headhunter_reminder
+from main import send_headhunter_reminders as _send_headhunter_reminders
 from main import send_hr_draft as _send_hr_draft
 from main import start_campaign_job as _start_campaign_job
 from src.config_patch import (
@@ -2679,18 +2679,66 @@ class HeadhunterReminderSend(BaseModel):
     text: str
 
 
+class HeadhunterRemindersSend(BaseModel):
+    reminders: list[HeadhunterReminderSend]
+
+
 @app.post("/api/headhunter/reminders/send")
 def post_headhunter_reminder_send(
     body: HeadhunterReminderSend, ctx: AppContext = Depends(get_ctx)
 ) -> dict:
-    sent = _send_headhunter_reminder(
-        ctx.config, body.external_id, body.text.strip()
+    results = _send_headhunter_reminders(
+        ctx.config,
+        [{"external_id": body.external_id, "text": body.text.strip()}],
     )
-    if not sent:
+    result = results[0] if results else {"sent": False}
+    if not result["sent"]:
+        detail = result.get(
+            "error",
+            "Не нашли чат этого отклика — разметка HH могла измениться",
+        )
         raise HTTPException(
-            502, "Не нашли чат этого отклика — разметка HH могла измениться"
+            (
+                409
+                if detail
+                in (
+                    "Вакансия в архиве",
+                    "Вакансия недоступна для текущего аккаунта",
+                )
+                else 502
+            ),
+            detail,
         )
     return {"ok": True}
+
+
+@app.post("/api/headhunter/reminders/send-all")
+def post_headhunter_reminders_send_all(
+    body: HeadhunterRemindersSend, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Отправляет выбранные HH-напоминания в единственной сессии Chrome."""
+    if not body.reminders:
+        raise HTTPException(422, "Нужно выбрать хотя бы одно напоминание")
+
+    reminders: list[dict[str, str]] = []
+    external_ids: set[str] = set()
+    for reminder in body.reminders:
+        external_id = reminder.external_id.strip()
+        text = reminder.text.strip()
+        if not external_id or not text:
+            raise HTTPException(
+                422, "У каждого напоминания нужны отклик и текст"
+            )
+        if len(text) > 4_000:
+            raise HTTPException(
+                422, "Текст напоминания не должен превышать 4000 символов"
+            )
+        if external_id in external_ids:
+            raise HTTPException(422, "Один отклик нельзя отправить дважды")
+        external_ids.add(external_id)
+        reminders.append({"external_id": external_id, "text": text})
+
+    return {"results": _send_headhunter_reminders(ctx.config, reminders)}
 
 
 class CompanyAdd(BaseModel):

@@ -23,6 +23,13 @@ def test_effective_stage_from_hh_state_and_manual_override():
     assert effective_stage({}) is None
     assert effective_stage({"last_known_state": "Не просмотрен"}) is None
     assert effective_stage({"last_known_state": "Просмотрен"}) is None
+    assert effective_stage({"last_known_state": "Вакансия в архиве"}) is None
+    assert (
+        effective_stage(
+            {"last_known_state": "Вакансия недоступна для текущего аккаунта"}
+        )
+        is None
+    )
     assert effective_stage({"last_known_state": "Отказ"}) == "rejected"
     assert effective_stage({"last_known_state": "Приглашение"}) == "interview"
     assert effective_stage({"last_known_state": "Есть ответ"}) == "replied"
