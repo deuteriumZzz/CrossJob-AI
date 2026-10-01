@@ -259,6 +259,26 @@ class HeadHunterBrowserClient:
             if owns_it:
                 driver.quit()
 
+    def send_letter_in_chat(
+        self, vacancy_url: str, vacancy_id: str, text: str
+    ) -> bool:
+        """Сразу после отклика без поля для письма (быстрый отклик,
+        анкета) — письмо первым сообщением в чат этой вакансии, в том же
+        Chrome, что и отклик. False — чат не открылся: письмо дошлёт
+        плановая проверка чата (_send_missing_cover_letters)."""
+        from src.job_sources.headhunter.browser_replies import (
+            send_chat_cover_letter_result,
+        )
+
+        driver, owns_it = self._acquire_driver()
+        try:
+            return send_chat_cover_letter_result(
+                driver, vacancy_id, text, vacancy_url
+            ).sent
+        finally:
+            if owns_it:
+                driver.quit()
+
     def bump_resume(self, resume_id: str) -> bool:
         """ponytail: аналог operations/update_resumes.py из
         s3rgeym/hh-applicant-tool (бесплатный аналог платного "Поднять

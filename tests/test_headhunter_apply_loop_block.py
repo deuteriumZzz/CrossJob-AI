@@ -130,3 +130,83 @@ def test_auto_bump_without_resume_id_bumps_every_account_resume(monkeypatch):
         )
 
         assert bumped == ["aaa111", "bbb222"]
+
+
+def test_letter_goes_to_chat_right_after_apply_without_letter_field(
+    monkeypatch,
+):
+    """Отклик без поля для письма (быстрый отклик, анкета) — письмо сразу,
+    тем же Chrome, первым сообщением в чат. Не вышло — остаётся для
+    досылки проверкой чата. Письмо, ушедшее в форме, помечается, чтобы
+    проверка чата его не продублировала."""
+    with tempfile.TemporaryDirectory() as tmp:
+        data_folder = Path(tmp) / "data"
+        output_folder = Path(tmp) / "output"
+        data_folder.mkdir()
+        output_folder.mkdir()
+        (data_folder / main.RESUME_PDF).write_bytes(b"%PDF-1.4 fake")
+        chat_sent = []
+
+        class _LetterClient(_FakeClient):
+            def apply(self, link, cover_letter_fn, ai_answer_fn):
+                # vacancy/1 — поле письма было; 2 и 3 — быстрый отклик.
+                return True, ("В форме" if link.endswith("/1") else "")
+
+            def send_letter_in_chat(self, url, vacancy_id, text):
+                chat_sent.append((vacancy_id, text))
+                return vacancy_id == "2"  # у вакансии 3 чат не открылся
+
+        jobs = [
+            Job(
+                role=f"Dev {i}",
+                company=f"Co {i}",
+                link=f"https://hh.ru/vacancy/{i}",
+                source="headhunter",
+                external_id=str(i),
+            )
+            for i in (1, 2, 3)
+        ]
+        monkeypatch.setattr(
+            main,
+            "HeadHunterSession",
+            lambda profile_dir: type(
+                "S", (), {"ensure_logged_in": lambda self, parameters: None}
+            )(),
+        )
+        monkeypatch.setattr(
+            main, "HeadHunterBrowserClient", lambda d: _LetterClient()
+        )
+        monkeypatch.setattr(
+            main.HeadHunterBrowserSource, "search", lambda self, prefs: jobs
+        )
+        monkeypatch.setattr(main, "score_job_fit", lambda *a, **k: _FakeFit())
+        monkeypatch.setattr(main, "classify_fit", lambda *a, **k: "strong")
+        monkeypatch.setattr(main, "wait_before_apply", lambda: None)
+        monkeypatch.setattr(main, "notify", lambda *a, **k: None)
+        monkeypatch.setattr(main, "notify_routine", lambda *a, **k: None)
+        monkeypatch.setattr(
+            main, "generate_cover_letter_for_job", lambda *a: "Письмо"
+        )
+
+        main.search_and_apply_headhunter(
+            {
+                "dataFolder": data_folder,
+                "outputFileDirectory": output_folder,
+                "headhunter": {
+                    "auto_apply": True,
+                    "chat_cover_letter_followup": True,
+                },
+            },
+            "fake-llm-key",
+        )
+
+        log = main.AppliedLog(output_folder / "applied_log.json")
+
+        def entry(i):
+            return log.find_by_source_and_external_id("headhunter", str(i))
+
+        assert chat_sent == [("2", "Письмо"), ("3", "Письмо")]
+        assert entry(1)["cover_letter_in_form"] is True
+        assert entry(2).get("cover_letter_sent_via_chat")
+        assert entry(3)["cover_letter"] == "Письмо"
+        assert not entry(3).get("cover_letter_sent_via_chat")

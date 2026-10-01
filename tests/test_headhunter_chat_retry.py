@@ -76,10 +76,19 @@ def test_send_missing_cover_letters_skips_already_sent_and_empty():
             "cover_letter": "Hi",
             "cover_letter_sent_via_chat": True,
         },
+        {
+            # Письмо ушло в форме отклика — в чат не дублируем.
+            "external_id": "4",
+            "company": "InForm",
+            "title": "Dev",
+            "cover_letter": "Hi",
+            "cover_letter_in_form": True,
+        },
     ]
     with patch("main.send_chat_cover_letter", return_value=True) as send_mock:
         main._send_missing_cover_letters(MagicMock(), applied_log)
-    send_mock.assert_called_once_with(ANY, "1", "Hello Acme")
+    # 4-й аргумент — ссылка на вакансию: чат открывается и с её страницы.
+    send_mock.assert_called_once_with(ANY, "1", "Hello Acme", ANY)
     applied_log.mark_cover_letter_sent_via_chat.assert_called_once_with(
         "headhunter", "1"
     )
@@ -134,7 +143,7 @@ def test_send_due_hh_reminders_sends_and_marks():
         "main.send_chat_cover_letter", return_value=True
     ) as send_mock, patch("main.notify_routine") as notify_mock:
         main._send_due_hh_reminders(parameters, MagicMock(), applied_log)
-    send_mock.assert_called_once_with(ANY, "1", ANY)
+    send_mock.assert_called_once_with(ANY, "1", ANY, ANY)
     applied_log.mark_reminder_sent.assert_called_once_with("headhunter", "1")
     notify_mock.assert_called_once()
 
@@ -501,3 +510,32 @@ if __name__ == "__main__":
     test_answer_headhunter_messages_retries_once_then_succeeds()
     test_answer_headhunter_messages_gives_up_after_second_failure()
     print("All tests passed.")
+
+
+def test_send_due_hh_reminders_caps_per_run_with_pauses():
+    """Накопившиеся напоминания не уходят пачкой: не больше
+    HH_REMINDERS_PER_RUN за заход и пауза между ними; остальные — в
+    следующие заходы (у них ещё нет reminder_sent_at)."""
+    from datetime import datetime, timedelta
+
+    old = (datetime.now().astimezone() - timedelta(days=10)).isoformat()
+    applied_log = MagicMock()
+    applied_log.entries_by_source_and_status.return_value = [
+        {
+            "external_id": str(i),
+            "company": f"Co{i}",
+            "title": "Python разработчик",
+            "applied_at": old,
+            "last_known_state": None,
+            "reminder_sent_at": None,
+        }
+        for i in range(main.HH_REMINDERS_PER_RUN + 3)
+    ]
+    with patch(
+        "main.send_chat_cover_letter", return_value=True
+    ) as send_mock, patch("main.wait_before_apply") as pause, patch(
+        "main.notify_routine"
+    ):
+        main._send_due_hh_reminders({}, MagicMock(), applied_log)
+    assert send_mock.call_count == main.HH_REMINDERS_PER_RUN
+    assert pause.call_count == main.HH_REMINDERS_PER_RUN - 1

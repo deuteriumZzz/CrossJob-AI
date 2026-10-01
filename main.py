@@ -1570,6 +1570,7 @@ def _search_and_apply_headhunter_with_session(
                     f"({fit.score}/10, gaps: {', '.join(fit.gaps)})."
                 )
 
+            letter_in_form = letter_in_chat = False
             if auto_apply:
                 wait_before_apply()
 
@@ -1633,23 +1634,27 @@ def _search_and_apply_headhunter_with_session(
                         f"({job.link})",
                         category=job.source,
                     )
+                    letter_in_form = bool(cover_letter)
                     if not cover_letter and hh_preferences.get(
                         "chat_cover_letter_followup"
                     ):
-                        # Форма отклика не приняла письмо (сухой отклик) —
-                        # генерируем его сейчас, пока job ещё в памяти, и
-                        # сохраняем в applied_log; отправит в чат
-                        # check_headhunter_replies (см.
-                        # _send_missing_cover_letters), не блокируя сам
-                        # отклик паузой на LLM+чат прямо здесь.
+                        # Форма отклика не приняла письмо (быстрый отклик,
+                        # анкета) — сразу, в этом же Chrome, письмо первым
+                        # сообщением в чат вакансии. Не вышло — оно
+                        # остаётся в applied_log, и его дошлёт проверка
+                        # чата (check_headhunter_replies →
+                        # _send_missing_cover_letters).
                         try:
                             cover_letter = generate_cover_letter_for_job(
                                 resume_pdf_path, job, llm_api_key
                             )
+                            letter_in_chat = client.send_letter_in_chat(
+                                job.link, job.external_id, cover_letter
+                            )
                         except Exception as e:
                             logger.warning(
-                                "Не удалось сгенерировать письмо для "
-                                f"досылки в чат {job.company}: {e}"
+                                f"Письмо в чат {job.company} сразу не "
+                                f"ушло, дошлёт проверка чата: {e}"
                             )
                 else:
                     status = "dry_run"
@@ -1677,6 +1682,16 @@ def _search_and_apply_headhunter_with_session(
             applied_log.record(
                 job, cover_letter, "", status, fit.score, fit.gaps
             )
+            if letter_in_form:
+                # Письмо ушло в форме — проверка чата его не дублирует.
+                applied_log.update_fields(
+                    job.source, job.external_id, cover_letter_in_form=True
+                )
+            elif letter_in_chat:
+                logger.info(f"Письмо отправлено в чат: {job.company}")
+                applied_log.mark_cover_letter_sent_via_chat(
+                    job.source, job.external_id
+                )
             sent_count += 1
 
         _log_funnel_summary(
@@ -5303,6 +5318,9 @@ def send_headhunter_reminders(
         _HEADHUNTER_BROWSER_SESSION_LOCK.release()
 
 
+HH_REMINDERS_PER_RUN = 5
+
+
 def _send_due_hh_reminders(
     parameters: dict, driver, applied_log: AppliedLog
 ) -> None:
@@ -5316,10 +5334,20 @@ def _send_due_hh_reminders(
         (parameters.get("headhunter") or {}).get("reminder_follow_up_days", 7)
     )
     entries = applied_log.entries_by_source_and_status("headhunter", "applied")
-    for entry in due_hh_reminders(entries, days):
+    # Не больше HH_REMINDERS_PER_RUN за заход и с паузой между ними: 20
+    # накопившихся напоминаний подряд за минуту выглядят для HH как бот.
+    # Остальные уйдут следующими заходами.
+    for index, entry in enumerate(
+        due_hh_reminders(entries, days)[:HH_REMINDERS_PER_RUN]
+    ):
+        if index:
+            wait_before_apply()
         try:
             sent = send_chat_cover_letter(
-                driver, entry["external_id"], hh_reminder_text(entry)
+                driver,
+                entry["external_id"],
+                hh_reminder_text(entry),
+                _stored_hh_vacancy_url(applied_log, entry["external_id"]),
             )
         except Exception as e:
             logger.warning(
@@ -5327,6 +5355,11 @@ def _send_due_hh_reminders(
                 f"{entry['company']}: {e}"
             )
             continue
+        if not sent:
+            logger.info(
+                f"Напоминание {entry['company']} пока не ушло: чат не "
+                "открылся, повторю при следующей проверке"
+            )
         if sent:
             applied_log.mark_reminder_sent("headhunter", entry["external_id"])
             logger.info(
@@ -5349,19 +5382,31 @@ def _send_missing_cover_letters(driver, applied_log: AppliedLog) -> None:
     for entry in applied_log.entries_by_source_and_status(
         "headhunter", "applied"
     ):
-        if not entry.get("cover_letter") or entry.get(
-            "cover_letter_sent_via_chat"
+        if (
+            not entry.get("cover_letter")
+            or entry.get("cover_letter_sent_via_chat")
+            or entry.get("cover_letter_in_form")  # уже ушло в форме отклика
         ):
             continue
         try:
             sent = send_chat_cover_letter(
-                driver, entry["external_id"], entry["cover_letter"]
+                driver,
+                entry["external_id"],
+                entry["cover_letter"],
+                _stored_hh_vacancy_url(applied_log, entry["external_id"]),
             )
         except Exception as e:
             logger.warning(
                 f"Не удалось отправить письмо в чат {entry['company']}: {e}"
             )
             continue
+        if not sent:
+            # Раньше неудача была немой: письмо молча ждало досылки, пока
+            # его не стирала недельная чистка писем.
+            logger.info(
+                f"Письмо в чат {entry['company']} пока не ушло: чат не "
+                "открылся, повторю при следующей проверке"
+            )
         if sent:
             applied_log.mark_cover_letter_sent_via_chat(
                 "headhunter", entry["external_id"]
