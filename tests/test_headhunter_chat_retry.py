@@ -593,3 +593,25 @@ def test_hh_chat_failures_back_off_instead_of_retrying_every_visit():
     assert "chat_retry_after" in updates["1"]
     applied_log.mark_reminder_sent.assert_not_called()
     assert not main._hh_chat_allowed({**entries[0], **updates["0"]})
+
+
+def test_captcha_during_hh_chat_check_is_reported_to_telegram(monkeypatch):
+    """Проверка чата HH — свой ход в круге и может первой наткнуться на
+    капчу: раньше это было только в логе, без сообщения в Telegram."""
+    from src.job_sources.block_detection import PlatformBlockedError
+
+    sent = []
+    driver = MagicMock()
+    monkeypatch.setattr(main, "init_browser", lambda profile_dir: driver)
+    monkeypatch.setattr(
+        main,
+        "_sync_headhunter_negotiation_states",
+        MagicMock(side_effect=PlatformBlockedError("captcha")),
+    )
+    monkeypatch.setattr(main, "notify", lambda p, text, **k: sent.append(text))
+    with tempfile.TemporaryDirectory() as tmp:
+        main._check_headhunter_replies_with_session(
+            {"outputFileDirectory": Path(tmp), "headhunter": {}}, "key"
+        )
+    assert len(sent) == 1 and "капчу" in sent[0]
+    driver.quit.assert_called_once()

@@ -1407,6 +1407,19 @@ def _log_funnel_summary(
         _update_funnel_health(parameters, source, found, applied, dry_run)
 
 
+def _notify_hh_blocked(parameters: dict, error: Exception) -> None:
+    """Капча/блокировка HH — в Telegram, откуда бы её ни поймали (поиск,
+    отклик, проверка чата). Не дошло — notify_from_secrets отложит и
+    дошлёт, когда Telegram снова доступен."""
+    notify(
+        parameters,
+        f"hh.ru: похоже на блокировку ({error}). Площадка поставлена на "
+        "паузу на 24ч. Решите капчу вручную в открытом Chrome-профиле и "
+        "пришлите /resume headhunter — попробуем снова раньше.",
+        category="headhunter",
+    )
+
+
 def _search_and_apply_headhunter_with_session(
     parameters: dict,
     llm_api_key: str,
@@ -1482,14 +1495,7 @@ def _search_and_apply_headhunter_with_session(
         except PlatformBlockedError as e:
             logger.error(f"hh.ru appears to have blocked us: {e}")
             mark_blocked(output_folder, "headhunter")
-            notify(
-                parameters,
-                f"hh.ru: похоже на блокировку ({e}). Площадка "
-                "поставлена на паузу на 24ч. Решите капчу вручную в "
-                "открытом Chrome-профиле и пришлите /resume headhunter "
-                "— попробуем снова раньше.",
-                category="headhunter",
-            )
+            _notify_hh_blocked(parameters, e)
             return
         logger.info(f"Found {len(jobs)} matching HeadHunter vacancies.")
         already_seen = sum(
@@ -1607,14 +1613,7 @@ def _search_and_apply_headhunter_with_session(
                     # mark_blocked и стоп для этого прогона.
                     logger.error(f"hh.ru appears to have blocked us: {e}")
                     mark_blocked(output_folder, "headhunter")
-                    notify(
-                        parameters,
-                        f"hh.ru: похоже на блокировку ({e}). Площадка "
-                        "поставлена на паузу на 24ч. Решите капчу "
-                        "вручную в открытом Chrome-профиле и пришлите "
-                        "/resume headhunter — попробуем снова раньше.",
-                        category="headhunter",
-                    )
+                    _notify_hh_blocked(parameters, e)
                     break
                 except Exception as e:
                     logger.exception(
@@ -5148,6 +5147,10 @@ def _check_headhunter_replies_with_session(parameters: dict, llm_api_key: str):
         except PlatformBlockedError as e:
             logger.error(f"hh.ru appears to have blocked us: {e}")
             mark_blocked(output_folder, "headhunter")
+            # Раньше здесь не уведомляли: капчу почти всегда первым ловил
+            # ход поиска HH. Теперь проверка чата — свой ход в круге и
+            # может наткнуться на капчу первой.
+            _notify_hh_blocked(parameters, e)
             return
         except Exception as e:
             logger.warning(f"Не удалось сверить статусы откликов hh: {e}")
