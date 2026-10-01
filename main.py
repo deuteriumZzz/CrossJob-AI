@@ -99,6 +99,7 @@ from src.job_sources.headhunter.browser_negotiations import (
     withdraw_negotiation,
 )
 from src.job_sources.headhunter.browser_replies import (
+    ChatSendResult,
     block_employer,
     fetch_new_employer_messages,
     find_external_link,
@@ -5339,12 +5340,16 @@ def _hh_chat_send(driver, applied_log: AppliedLog, entry: dict, text: str):
     страниц и риск капчи. Архив/недоступна — больше не пытаемся; чат не
     открылся — следующая попытка не раньше чем через сутки."""
     external_id = entry["external_id"]
-    result = send_chat_cover_letter_result(
-        driver,
-        external_id,
-        text,
-        _stored_hh_vacancy_url(applied_log, external_id),
-    )
+    try:
+        result = send_chat_cover_letter_result(
+            driver,
+            external_id,
+            text,
+            _stored_hh_vacancy_url(applied_log, external_id),
+        )
+    except Exception as e:  # сбой страницы — та же суточная пауза
+        logger.warning(f"{entry['company']}: ошибка при отправке в чат: {e}")
+        result = ChatSendResult(sent=False)
     if result.sent:
         return True
     if result.archived or result.unavailable:

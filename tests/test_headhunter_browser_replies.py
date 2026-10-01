@@ -308,3 +308,50 @@ def test_send_chat_cover_letter_finds_vacancy_on_later_negotiations_page():
     assert sent is True
     second_page_button.click.assert_called_once()
     open_chat.click.assert_called_once()
+
+
+def test_send_reply_waits_for_late_input_and_send_button(monkeypatch):
+    """Живой HH: поле ввода появляется не сразу после открытия чата, а
+    кнопка отправки — только после ввода текста. Раньше send_reply искал
+    их один раз и случайно возвращал False."""
+    from src.job_sources.headhunter import browser_replies as br
+
+    monkeypatch.setattr(br.time, "sleep", lambda s: None)
+    box, button = MagicMock(), MagicMock()
+    polls = {"input": 0, "send": 0}
+
+    def find_elements(by, selector):
+        kind = "send" if "send" in selector else "input"
+        polls[kind] += 1
+        return [box if kind == "input" else button] if polls[kind] >= 3 else []
+
+    driver = MagicMock()
+    driver.find_elements.side_effect = find_elements
+    assert br.send_reply(driver, "Здравствуйте") is True
+    box.send_keys.assert_called_once_with("Здравствуйте")
+    button.click.assert_called_once()
+
+
+def test_find_negotiation_item_survives_stale_list_after_page_switch(
+    monkeypatch,
+):
+    from selenium.common.exceptions import StaleElementReferenceException
+
+    from src.job_sources.headhunter import browser_replies as br
+
+    monkeypatch.setattr(br.time, "sleep", lambda s: None)
+    link = MagicMock()
+    link.get_attribute.return_value = "https://hh.ru/vacancy/123"
+    stale_item, good_item = MagicMock(), MagicMock()
+    stale_item.find_elements.side_effect = StaleElementReferenceException()
+    good_item.find_elements.return_value = [link]
+    item_lists = iter([[stale_item], [good_item]])
+
+    def find_elements(by, selector):
+        if selector == br._NEGOTIATION_ITEM_SELECTOR:
+            return next(item_lists)
+        return []  # одна страница, без кнопок пагинации
+
+    driver = MagicMock()
+    driver.find_elements.side_effect = find_elements
+    assert br._find_negotiation_item(driver, "123") is good_item

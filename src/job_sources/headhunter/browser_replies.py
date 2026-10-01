@@ -4,6 +4,7 @@ import re
 import time
 from dataclasses import dataclass
 
+from selenium.common.exceptions import StaleElementReferenceException
 from selenium.webdriver.common.by import By
 
 from src.logging import logger
@@ -143,16 +144,26 @@ def _find_negotiation_item(driver, vacancy_id: str):
             buttons[0].click()
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
 
-        for item in driver.find_elements(
-            By.CSS_SELECTOR, _NEGOTIATION_ITEM_SELECTOR
-        ):
-            links = item.find_elements(By.CSS_SELECTOR, 'a[href*="/vacancy/"]')
-            if not links:
-                continue
-            href = links[0].get_attribute("href") or ""
-            match = re.search(r"/vacancy/(\d+)", href)
-            if match and match.group(1) == str(vacancy_id):
-                return item
+        # После клика по номеру страницы HH перерисовывает список — уже
+        # найденные карточки устаревают (StaleElementReferenceException,
+        # живой случай 01.10). Тогда перечитываем страницу ещё раз.
+        for attempt in range(2):
+            try:
+                for item in driver.find_elements(
+                    By.CSS_SELECTOR, _NEGOTIATION_ITEM_SELECTOR
+                ):
+                    links = item.find_elements(
+                        By.CSS_SELECTOR, 'a[href*="/vacancy/"]'
+                    )
+                    if not links:
+                        continue
+                    href = links[0].get_attribute("href") or ""
+                    match = re.search(r"/vacancy/(\d+)", href)
+                    if match and match.group(1) == str(vacancy_id):
+                        return item
+                break
+            except StaleElementReferenceException:
+                time.sleep(PAGE_LOAD_WAIT_SECONDS)
     return None
 
 
@@ -254,25 +265,40 @@ def send_chat_cover_letter(
     ).sent
 
 
+def _wait_for(driver, selector: str, seconds: float) -> list:
+    """Элементы по селектору — ждёт их появления до seconds."""
+    deadline = time.monotonic() + seconds
+    while True:
+        found = driver.find_elements(By.CSS_SELECTOR, selector)
+        if found or time.monotonic() >= deadline:
+            return found
+        time.sleep(0.5)
+
+
 def send_reply(driver, text: str) -> bool:
     """Отправляет ответ в уже открытом чате (после
     fetch_new_employer_messages). ponytail: см. её докстринг про
     неподтверждённую разметку — то же самое касается поля ввода и
     кнопки отправки здесь."""
-    inputs = driver.find_elements(
-        By.CSS_SELECTOR,
+    # Проверено на живом HH (01.10): поле textarea[data-qa="text-input"]
+    # появляется не сразу после открытия чата (0,8 с — а бывает и >3 с),
+    # кнопка chatik-do-send-message — только когда в поле уже есть текст
+    # (~0,5 с). Одиночный поиск без ожидания и давал случайное «не ушло».
+    inputs = _wait_for(
+        driver,
         'textarea[data-qa="text-input"], '
         '[data-qa*="chat-message-input"], textarea',
+        seconds=10,
     )
     if not inputs:
         return False
     inputs[0].send_keys(text)
-    time.sleep(0.5)
 
-    send_buttons = driver.find_elements(
-        By.CSS_SELECTOR,
+    send_buttons = _wait_for(
+        driver,
         'button[data-qa="chatik-do-send-message"], '
         '[data-qa*="chat-message-send"]',
+        seconds=5,
     )
     if not send_buttons:
         return False
