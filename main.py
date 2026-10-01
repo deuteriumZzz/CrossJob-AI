@@ -1985,9 +1985,10 @@ def search_telegram(
 
             # https://t.me/{channel}/{message_id} — см. mapping.py.
             channel = job.link.rsplit("/", 2)[-2]
-            if not _collect_telegram_post(
+            verified = _collect_telegram_post(
                 parameters, llm_api_key, job, channel
-            ):
+            )
+            if verified is False:
                 logger.info(f"Skipping {job.link}: ИИ — не вакансия.")
                 applied_log.record(
                     job, "", "", "skipped_low_fit", 0, ["не вакансия (ИИ)"]
@@ -2033,9 +2034,12 @@ def search_telegram(
 
             contact = extract_contact(job.description, channel)
             status: Literal["dry_run", "applied"] = "dry_run"
+            # Как у шлюза: пост, который ИИ не смог проверить (verified is
+            # None), — только для ручного ответа, без автоотправки.
             if (
                 contact
                 and auto_message
+                and verified is not None
                 and not conversations.already_contacted(contact)
                 and conversations.sent_today_count() < daily_message_limit
                 and (
@@ -2065,7 +2069,11 @@ def search_telegram(
                     remember_telegram_post_contact(
                         output_folder,
                         [{"kind": "telegram", "value": contact}],
-                        {"channel": channel, "link": job.link},
+                        {
+                            "channel": channel,
+                            "link": job.link,
+                            "company": job.company,
+                        },
                     )
                     status = "applied"
                     logger.info(
@@ -2096,7 +2104,7 @@ def search_telegram(
 
 def _collect_telegram_post(
     parameters: dict, llm_api_key: str, job: Job, channel: str
-) -> bool:
+) -> Optional[bool]:
     """Разбор подходящего поста: компания/должность/зарплата (LLM — в
     постах нет структуры). Job дополняется компанией и нормальной
     должностью: так пост виден в «Истории» по-человечески и сверяется с
@@ -2107,7 +2115,8 @@ def _collect_telegram_post(
     llm_vacancy_filter). @username и прочее из поста — только после
     отправки сообщения, остальное в Базу не идёт.
 
-    False — ИИ сказал «не вакансия» (резюме, реклама): пост пропускаем."""
+    False — ИИ сказал «не вакансия» (резюме, реклама): пост пропускаем.
+    None — ИИ недоступен: пост не теряем, но без Базы и автоотправки."""
     try:
         parsed = parse_post(job.description, llm_api_key)
     except Exception as e:
@@ -2125,7 +2134,7 @@ def _collect_telegram_post(
     ]
     verdict = _llm_check_post(job.description, llm_api_key, emails)
     if verdict is None:
-        return True  # ИИ недоступен — пост не теряем, но и в Базу не пишем
+        return None
     is_vacancy, apply_email = verdict
     if is_vacancy and apply_email:
         remember_telegram_post_contact(
@@ -2136,6 +2145,7 @@ def _collect_telegram_post(
                 "link": job.link,
                 "title": job.role,
                 "text": job.description[:4000],
+                "company": job.company,
             },
             sent=False,
         )

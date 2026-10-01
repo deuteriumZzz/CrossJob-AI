@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import re
 import threading
 import time
@@ -136,17 +135,31 @@ def _fingerprint(text: str) -> str:
 
 
 _VACANCY_CLASSIFIER_PROMPT = (
-    "Пост из Telegram-канала о работе. Это объявление вакансии (ищут "
-    "сотрудника), а не резюме/реклама/вопрос? Ответь первой строкой "
-    "одним словом: ДА или НЕТ.{emails}\n\nПост:\n{text}"
+    "Пост из Telegram-канала о работе. Это объявление вакансии (компания "
+    "ищет сотрудника), а не резюме/поиск работы кандидатом, реклама, "
+    "курсы или вопрос? Ответь одним словом: ДА или НЕТ.\n\nПост:\n{text}"
 )
-# Адреса перечисляем со строкой, где они стоят: пост режется до 600
-# символов, а подпись «Размещение вакансий: ads@канал» обычно в конце.
-_EMAILS_QUESTION = (
-    "\nВторой строкой — email для отклика на эту вакансию из списка ниже "
-    "или НЕТ, если такого нет (реклама канала, размещение вакансий, "
-    "чужой адрес):\n{lines}"
-)
+# Строка с адресом про рекламу/размещение в самом канале — не адрес для
+# отклика («Размещение вакансий: ads@канал» в подписи поста).
+_NOT_APPLY_LINE_MARKERS = ("размещ", "реклам", "сотруднич", "advertis")
+
+
+def _apply_email(text: str, emails: Sequence[str]) -> str:
+    """Email для отклика — правилом, не ИИ: первый адрес из поста, строка
+    которого не про рекламу канала. Раньше адрес выбирал gpt-4o-mini и на
+    живых постах случайно отбрасывал настоящие «Контакты: hr@компания»
+    (МТС, Альфа-Банк — от прогона к прогону по-разному); правило на тех
+    же 17 вакансиях стабильно даёт верный адрес. Резюме с email кандидата
+    сюда не доходят — их отсекают стоп-слова и ответ ИИ «не вакансия»."""
+    for email in emails:
+        line = next(
+            (ln for ln in text.splitlines() if email.lower() in ln.lower()),
+            "",
+        )
+        rest = line.lower().replace(email.lower(), "")
+        if not any(m in rest for m in _NOT_APPLY_LINE_MARKERS):
+            return email
+    return ""
 
 
 # Секунды ожидания перед каждым повтором при rate limit — не растёт
@@ -165,10 +178,9 @@ def _llm_check_post(
     llm_vacancy_filter, выключен по умолчанию) — вызывается только для
     постов, уже прошедших match_keywords, не на весь поток каналов.
 
-    Возвращает (вакансия?, email для отклика или ""). Адрес берётся
-    только из найденных в посте (emails) — ИИ его выбирает, а не
-    выдумывает; ответ в одну строку без адреса — адреса нет (для
-    автоматической рассылки лучше пропустить, чем взять чужой).
+    Возвращает (вакансия?, email для отклика или ""). ИИ отвечает только
+    «вакансия или нет»; адрес — из найденных в посте (emails) правилом
+    _apply_email, ИИ его не выбирает и не выдумывает.
 
     None — ИИ недоступен (нет ключа, ошибка, исчерпан rate limit): решает
     _handle_post — пост в бот с пометкой, но без автоотправки и Базы.
@@ -182,42 +194,16 @@ def _llm_check_post(
         return None
     from src.job_sources.llm_provider import get_chat_llm
 
-    lines = "\n".join(
-        f"- {email}: «"
-        + next(
-            (
-                line.strip()
-                for line in text.splitlines()
-                if email.lower() in line.lower()
-            ),
-            "",
-        )[:150]
-        + "»"
-        for email in emails
-    )
-    prompt = _VACANCY_CLASSIFIER_PROMPT.format(
-        text=text[:600],
-        emails=_EMAILS_QUESTION.format(lines=lines) if emails else "",
-    )
+    prompt = _VACANCY_CLASSIFIER_PROMPT.format(text=text[:600])
     attempts = len(RATE_LIMIT_RETRY_DELAYS_SECONDS) + 1
     for attempt in range(attempts):
         try:
             llm = get_chat_llm(llm_api_key, temperature=0)
             answer = llm.invoke(prompt)
-            content = str(getattr(answer, "content", answer)).strip().lower()
-            verdict, _, tail = content.partition("\n")
-            if verdict.startswith("нет"):
+            content = str(getattr(answer, "content", answer)).lower()
+            if content.replace("*", "").strip().startswith("нет"):
                 return False, ""
-            tail = tail.strip()
-            apply_email = next(
-                (
-                    e
-                    for e in emails
-                    if not tail.startswith("нет") and e.lower() in tail
-                ),
-                "",
-            )
-            return True, apply_email
+            return True, _apply_email(text, emails)
         except Exception as e:
             is_rate_limit = any(
                 m in str(e).lower() for m in RATE_LIMIT_MARKERS
@@ -237,74 +223,7 @@ def _llm_check_post(
     return None
 
 
-# Структурные сигналы реальной вакансии — зарплата и формат работы
-# почти всегда есть в тексте вакансии, у постов "ищу работу"/рекламы
-# реже. Не замена LLM-классификатору, а способ не тратить на него
-# токены, когда пост и так явно похож на вакансию.
-_SALARY_RE = re.compile(
-    r"\d[\d\s]{2,}\s?(?:₽|руб|\$|usd|eur|€|k\b)|\bот\s+\d{2,}", re.IGNORECASE
-)
-_WORK_FORMAT_RE = re.compile(
-    r"удал[её]нн?о|remote|гибрид|офис|hybrid|on-?site", re.IGNORECASE
-)
-
-
 _UNVERIFIED_MARK = " · ⚠️ не проверено ИИ"
-
-
-def _has_vacancy_structure(text: str) -> bool:
-    return bool(_SALARY_RE.search(text)) and bool(_WORK_FORMAT_RE.search(text))
-
-
-_CHANNEL_TRUST_FILE = ".channel_trust.json"
-# Меньше — можно наказать канал по паре случайных совпадений; больше —
-# долго терпим откровенно мусорный канал, пока не наберётся данных.
-_TRUST_MIN_SAMPLES = 5
-_TRUST_REJECT_THRESHOLD = 0.5
-
-
-def _record_channel_verdict(
-    output_folder: Path, channel: str, is_vacancy: bool
-) -> None:
-    """Копит долю отклонённых LLM-классификатором постов на канал —
-    основа для _channel_is_untrusted. Пишется только когда
-    llm_vacancy_filter реально вызвал LLM (см. _handle_post), не на
-    каждый матч по ключевым словам."""
-    path = output_folder / _CHANNEL_TRUST_FILE
-    try:
-        data = (
-            json.loads(path.read_text(encoding="utf-8"))
-            if path.exists()
-            else {}
-        )
-    except (OSError, json.JSONDecodeError):
-        data = {}
-    entry = data.setdefault(channel, {"checked": 0, "rejected": 0})
-    entry["checked"] += 1
-    if not is_vacancy:
-        entry["rejected"] += 1
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-
-
-def _channel_is_untrusted(output_folder: Path, channel: str) -> bool:
-    """Канал с высокой долей отклонённых постов (не менее
-    _TRUST_MIN_SAMPLES проверок) теряет право на "скидку" по
-    _has_vacancy_structure — для него LLM-проверка идёт всегда, даже
-    если структурные сигналы выглядят убедительно."""
-    path = output_folder / _CHANNEL_TRUST_FILE
-    if not path.exists():
-        return False
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
-    entry = data.get(channel)
-    if not entry or entry["checked"] < _TRUST_MIN_SAMPLES:
-        return False
-    return entry["rejected"] / entry["checked"] >= _TRUST_REJECT_THRESHOLD
 
 
 class TelegramWatcher(threading.Thread):
@@ -655,9 +574,6 @@ class TelegramWatcher(threading.Thread):
                 unverified = True
             else:
                 is_vacancy, apply_email = verdict
-                _record_channel_verdict(
-                    self.output_folder, channel, is_vacancy
-                )
                 if not is_vacancy:
                     return
                 if apply_email:
@@ -1085,6 +1001,8 @@ def remember_telegram_post_contact(
     посте ещё не значит, что это HR. Поводы: мы написали (sent=True —
     источник «отклик на пост»), ИИ выбрал email для отклика в проверенной
     вакансии или вы нажали «Не писать компании» (sent=False — «пост в»).
+    post["company"] — если компания известна (поиск по расписанию разбирает
+    пост ИИ): карточка называется по компании, а не по первому контакту.
     """
     contacts = [
         {"kind": c["kind"], "value": str(c["value"]).strip()}
@@ -1102,7 +1020,7 @@ def remember_telegram_post_contact(
         f"@{channel}" if channel else "Telegram"
     )
     ContactBook(output_folder).add(
-        "",
+        str(post.get("company") or ""),
         [{**c, "source": source, "source_url": link} for c in contacts],
         vacancy=(
             {

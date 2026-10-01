@@ -7,7 +7,10 @@ from src.job_sources.telegram.client import (
     normalize_channel,
 )
 from src.job_sources.telegram.mapping import telegram_message_to_job
-from src.job_sources.telegram.watcher import CANDIDATE_SELF_POST_MARKERS
+from src.job_sources.telegram.watcher import (
+    CANDIDATE_SELF_POST_MARKERS,
+    default_keywords,
+)
 
 # ponytail: фиксированное число сообщений на канал вместо обхода всей
 # истории, увеличить, если это перестанет давать достаточно постов.
@@ -61,8 +64,14 @@ class TelegramSource:
         self.client = client
 
     def search(self, preferences: dict) -> list[Job]:
-        keywords = effective_list(preferences, "telegram", "positions")
         telegram_preferences = preferences.get("telegram") or {}
+        # Те же слова, что у постоянного шлюза (start_telegram_watcher):
+        # поле «Ключевые слова», иначе значимые слова из должностей.
+        keywords = telegram_preferences.get("watch_keywords") or (
+            default_keywords(
+                effective_list(preferences, "telegram", "positions")
+            )
+        )
         channels = [
             normalize_channel(c)
             for c in telegram_preferences.get("channels", [])

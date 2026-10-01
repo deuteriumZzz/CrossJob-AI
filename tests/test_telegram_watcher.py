@@ -75,29 +75,6 @@ def test_llm_check_post_is_unavailable_after_exhausting_retries(monkeypatch):
     assert w._llm_check_post("текст", "key") is None
 
 
-def test_has_vacancy_structure_needs_salary_and_format():
-    assert w._has_vacancy_structure(
-        "Ищем Python-разработчика, зарплата от 250000 руб, удалённо"
-    )
-    assert not w._has_vacancy_structure("Ищем Python-разработчика")
-    assert not w._has_vacancy_structure("Зарплата от 250000 руб")
-
-
-def test_channel_trust_flags_channel_after_enough_rejections(tmp_path):
-    for _ in range(2):
-        w._record_channel_verdict(tmp_path, "spammy", True)
-    for _ in range(3):
-        w._record_channel_verdict(tmp_path, "spammy", False)
-    assert w._channel_is_untrusted(tmp_path, "spammy") is True
-    assert w._channel_is_untrusted(tmp_path, "unknown_channel") is False
-
-
-def test_channel_trust_ignores_channel_below_min_samples(tmp_path):
-    for _ in range(3):
-        w._record_channel_verdict(tmp_path, "new_channel", False)
-    assert w._channel_is_untrusted(tmp_path, "new_channel") is False
-
-
 def test_llm_check_post_parses_short_answer(monkeypatch):
     class _FakeLLM:
         def invoke(self, prompt):
@@ -1077,16 +1054,11 @@ def test_email_from_post_marks_base_and_do_not_write(monkeypatch):
         assert ContactBook(out).get("acme")["do_not_contact"] is True
 
 
-def test_llm_check_post_picks_apply_email_only_from_post(monkeypatch):
-    """Подпись канала «Размещение вакансий: ads@…» — не адрес для отклика;
-    адрес, которого нет в посте, ИИ не выдумает."""
-    prompts, answers = [], iter(
-        [
-            "ДА\nhr@acme.io",
-            "ДА\nНЕТ (ads@geekjobs.ru — реклама канала)",
-            "ДА\nboss@other.io",
-        ]
-    )
+def test_llm_check_post_picks_apply_email_by_rule(monkeypatch):
+    """ИИ отвечает только «вакансия?»; адрес — правилом из поста: подпись
+    канала «Размещение вакансий: ads@…» не адрес для отклика, даже если
+    стоит первой; адреса, которого нет в посте, не бывает."""
+    prompts, answers = [], iter(["ДА", "**ДА**", "НЕТ"])
 
     class _FakeLLM:
         def invoke(self, prompt):
@@ -1097,14 +1069,13 @@ def test_llm_check_post_picks_apply_email_only_from_post(monkeypatch):
         "src.job_sources.llm_provider.get_chat_llm",
         lambda *a, **kw: _FakeLLM(),
     )
-    text = (
-        "Python Dev. Резюме: hr@acme.io\nРазмещение вакансий: ads@geekjobs.ru"
-    )
-    emails = ["hr@acme.io", "ads@geekjobs.ru"]
+    text = "Python Dev. Контакты: hr@acme.io\nРазмещение вакансий: ads@ch.ru"
+    emails = ["ads@ch.ru", "hr@acme.io"]
     assert w._llm_check_post(text, "key", emails) == (True, "hr@acme.io")
-    assert "«Размещение вакансий: ads@geekjobs.ru»" in prompts[0]
-    assert w._llm_check_post(text, "key", emails) == (True, "")
-    assert w._llm_check_post(text, "key", emails) == (True, "")
+    footer_only = "Python Dev\nРазмещение вакансий: ads@ch.ru"
+    assert w._llm_check_post(footer_only, "key", ["ads@ch.ru"]) == (True, "")
+    assert w._llm_check_post(text, "key", emails) == (False, "")
+    assert "ДА или НЕТ" in prompts[0]
 
 
 def _llm_watcher(tmp, telegram):
@@ -1164,7 +1135,6 @@ def test_unverified_post_reaches_bot_without_auto_send_or_base(monkeypatch):
         )
         assert w.pending_telegram_sends_count(Path(tmp)) == 0
         assert ContactBook(Path(tmp)).all() == {}
-        assert not (Path(tmp) / ".channel_trust.json").exists()
     [payload] = sent
     assert "⚠️ не проверено ИИ" in payload["text"]
 

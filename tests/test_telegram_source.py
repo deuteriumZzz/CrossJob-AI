@@ -51,3 +51,25 @@ def test_telegram_source_respects_custom_age_window():
     )
 
     assert jobs == []
+
+
+def test_telegram_source_uses_same_keywords_as_gateway():
+    """Поле «Ключевые слова» (watch_keywords) действует и на поиск по
+    расписанию, как на шлюз; пустое — значимые слова из должностей
+    («Python разработчик» → «python»), а не вся фраза целиком."""
+    now = datetime.now(timezone.utc)
+    source = TelegramSource(
+        _Client(
+            [
+                _Message(1, "Ищем Python-developer, удалённо", now),
+                _Message(2, "Нужен Django инженер", now),
+            ]
+        )
+    )
+    prefs = {
+        "positions": ["Python разработчик"],
+        "telegram": {"channels": ["jobs"]},
+    }
+    assert [j.external_id for j in source.search(prefs)] == ["jobs_1"]
+    prefs["telegram"]["watch_keywords"] = ["django"]
+    assert [j.external_id for j in source.search(prefs)] == ["jobs_2"]

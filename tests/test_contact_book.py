@@ -113,6 +113,7 @@ def test_collect_telegram_post_fills_job_and_book(monkeypatch):
         assert main._collect_telegram_post(params, "key", job, "geekjobs")
         assert checked == [["jobs@acme.ru"]]
         (card,) = ContactBook(Path(tmp)).all().values()
+        assert card["company"] == "Acme"  # не по email, а по компании
         assert [c["value"] for c in card["contacts"]] == ["jobs@acme.ru"]
         assert card["contacts"][0]["source"] == "пост в @geekjobs"
         assert card["vacancies"][0]["text"].startswith("Acme ищет")
@@ -121,8 +122,16 @@ def test_collect_telegram_post_fills_job_and_book(monkeypatch):
         monkeypatch.setattr(
             main, "_llm_check_post", lambda text, key, emails: (False, "")
         )
-        assert not main._collect_telegram_post(params, "key", job, "geekjobs")
+        verdict = main._collect_telegram_post(params, "key", job, "geekjobs")
+        assert verdict is False
         assert len(ContactBook(Path(tmp)).all()) == 1
+
+        # ИИ недоступен — None: пост не теряем, но search_telegram не шлёт
+        # по нему автосообщение (как шлюз с пометкой «не проверено ИИ»).
+        monkeypatch.setattr(
+            main, "_llm_check_post", lambda text, key, emails: None
+        )
+        assert main._collect_telegram_post(params, "key", job, "x") is None
 
 
 def test_contacts_api_status_backfill_and_draft(
