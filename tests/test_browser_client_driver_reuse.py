@@ -389,3 +389,67 @@ if __name__ == "__main__":
     test_wait_for_any_returns_true_when_selector_appears()
     test_wait_for_any_returns_false_on_timeout_without_hanging()
     print("All tests passed.")
+
+
+def _getmatch_apply_with(textareas, typed_value):
+    """Прогон GetMatchClient.apply() на моках: «Откликнуться» → модалка
+    с данными textarea → «Закрыть»/«Отправить отклик»."""
+    respond, close, submit = MagicMock(), MagicMock(), MagicMock()
+    for t in textareas:
+        t.get_attribute.return_value = typed_value
+
+    def find_elements(by, value):
+        if "Откликнуться" in value:
+            return [respond]
+        if value == "textarea":
+            return textareas
+        if "Закрыть" in value:
+            return [close]
+        if "Отправить отклик" in value:
+            return [submit]
+        return []
+
+    with patch(
+        "src.job_sources.getmatch.client.init_browser"
+    ) as mock_init, patch(
+        "src.job_sources.getmatch.client.raise_if_blocked"
+    ), patch(
+        "src.job_sources.getmatch.client.visible_text",
+        return_value="Откликнуться",
+    ), patch(
+        "src.job_sources.getmatch.client.time.sleep"
+    ), patch(
+        "src.job_sources.getmatch.client._wait_until", lambda pred: pred()
+    ):
+        mock_init.return_value.find_elements.side_effect = find_elements
+        with GetMatchClient("profile") as client:
+            try:
+                result = client.apply(
+                    "https://getmatch.ru/vacancies/1", "Письмо"
+                )
+            except RuntimeError as e:
+                result = e
+    return result, close, submit
+
+
+def test_getmatch_apply_types_letter_into_visible_box_then_submits():
+    """Живой случай 02.10: отклик ушёл без письма. Письмо — в видимое
+    поле модалки (скрытый textarea виджета на странице пропускаем), и
+    только потом «Отправить отклик»."""
+    hidden, visible = MagicMock(), MagicMock()
+    hidden.is_displayed.return_value = False
+    visible.is_displayed.return_value = True
+    result, close, submit = _getmatch_apply_with([hidden, visible], "Письмо")
+    assert result is True
+    visible.send_keys.assert_called_once_with("Письмо")
+    hidden.send_keys.assert_not_called()
+    submit.click.assert_called_once()
+
+
+def test_getmatch_apply_does_not_submit_when_letter_did_not_land():
+    box = MagicMock()
+    box.is_displayed.return_value = True
+    result, close, submit = _getmatch_apply_with([box], "")
+    assert isinstance(result, RuntimeError)  # вакансия повторится позже
+    submit.click.assert_not_called()
+    close.click.assert_called_once()

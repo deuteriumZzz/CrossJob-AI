@@ -54,6 +54,14 @@ def _wait_for_vacancies_page(driver) -> None:
         time.sleep(VACANCIES_PAGE_POLL_INTERVAL_SECONDS)
 
 
+def _close_modal(driver) -> None:
+    close_buttons = driver.find_elements(
+        By.XPATH, '//button[@aria-label="Закрыть"]'
+    )
+    if close_buttons:
+        close_buttons[0].click()
+
+
 def _wait_until(predicate, timeout=10.0, interval=0.5) -> bool:
     """Общий bounded-poll — тот же приём, что у _wait_for_vacancies_page
     и HeadHunterBrowserClient._wait_for_any, но без завязки на конкретный
@@ -203,41 +211,52 @@ class GetMatchClient:
 
             modal_text = ""
 
+            # Готовность — видимое поле письма (или мастер анкеты), а не
+            # кнопка «Закрыть»: она появляется раньше, чем форма догрузит
+            # зарплату/город из профиля и отрисует поле письма. Живой
+            # случай 02.10: отклик ушёл без письма. Видимое — потому что
+            # первым textarea на странице бывает скрытое поле виджета.
+            letter_boxes: list = []
+
             def _modal_ready() -> bool:
-                nonlocal modal_text
+                nonlocal modal_text, letter_boxes
                 modal_text = visible_text(driver)
-                return (
-                    bool(_WIZARD_STEP_RE.search(modal_text))
-                    or bool(driver.find_elements(By.TAG_NAME, "textarea"))
-                    or bool(
-                        driver.find_elements(
-                            By.XPATH,
-                            '//button[normalize-space()="Отправить отклик"]',
-                        )
-                    )
-                    or bool(
-                        driver.find_elements(
-                            By.XPATH, '//button[@aria-label="Закрыть"]'
-                        )
-                    )
-                )
+                if _WIZARD_STEP_RE.search(modal_text):
+                    return True
+                letter_boxes = [
+                    t
+                    for t in driver.find_elements(By.TAG_NAME, "textarea")
+                    if t.is_displayed()
+                ]
+                return bool(letter_boxes)
 
             _wait_until(_modal_ready)
 
             if _WIZARD_STEP_RE.search(modal_text):
-                close_buttons = driver.find_elements(
-                    By.XPATH, '//button[@aria-label="Закрыть"]'
-                )
-                if close_buttons:
-                    close_buttons[0].click()
+                _close_modal(driver)
                 return False
 
-            if cover_letter:
-                textareas = driver.find_elements(By.TAG_NAME, "textarea")
-                if textareas:
-                    textareas[0].send_keys(
-                        html_letter_to_plain_text(cover_letter)
-                    )
+            # Без письма отклик не отправляем: письмо — весь смысл формы
+            # (+30% к шансам, по словам самого GetMatch). Исключение, а не
+            # False, — вызывающий код тогда пропускает вакансию без записи
+            # в журнал, и следующий прогон попробует её снова.
+            letter = (
+                html_letter_to_plain_text(cover_letter) if cover_letter else ""
+            )
+            if not letter_boxes or not letter:
+                _close_modal(driver)
+                raise RuntimeError(
+                    "GetMatch: поле сопроводительного письма не найдено "
+                    "или письмо пустое — отклик не отправлен"
+                )
+            letter_boxes[0].click()
+            letter_boxes[0].send_keys(letter)
+            if not (letter_boxes[0].get_attribute("value") or "").strip():
+                _close_modal(driver)
+                raise RuntimeError(
+                    "GetMatch: письмо не вставилось в поле — отклик не "
+                    "отправлен"
+                )
 
             submit_buttons = driver.find_elements(
                 By.XPATH, '//button[normalize-space()="Отправить отклик"]'
