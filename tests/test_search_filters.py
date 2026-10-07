@@ -196,3 +196,12 @@ def test_himalayas_query():
         "&type=full-time,intern&experience=entry-level,senior"
         "&salary-required=true"
     )
+
+
+def test_djinni_parttime_only_when_format_free():
+    from src.job_sources.filters import djinni_employment
+
+    part = {"employment_types": ["part"]}
+    assert djinni_employment(part) == "parttime"
+    assert djinni_employment({**part, "remote": True}) == "remote"
+    assert djinni_employment({}) is None

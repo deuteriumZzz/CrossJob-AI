@@ -56,7 +56,12 @@ FILTER_SUPPORT: dict[str, dict] = {
     # фильтр ставим, только если выбран ровно один формат.
     # Стаж у Djinni — exp_level (повторяемый, проверено вживую); «только с
     # зарплатой» у сайта нет, поэтому её отсеиваем по самой вакансии.
-    "djinni": {"formats": "single", "salary": True, "levels": True},
+    "djinni": {
+        "formats": "single",
+        "salary": True,
+        "levels": True,
+        "employment": "single",
+    },
     # GeekJob: rm=1 — удалённо, ih=1 — офис (inhouse), s=1&money — только с
     # зарплатой; своего «гибрида» и уровней нет.
     "geekjob": {
@@ -385,6 +390,9 @@ def djinni_employment(preferences: dict) -> Optional[str]:
         return "remote"
     if formats in (["onsite"], ["hybrid"]):
         return "office"
+    # Формат не выбран — параметр свободен для «частичной занятости».
+    if not formats and single_employment(preferences) == "part_time":
+        return "parttime"
     return None
 
 
