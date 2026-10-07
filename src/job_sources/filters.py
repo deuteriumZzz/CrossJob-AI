@@ -9,17 +9,44 @@ from __future__ import annotations
 from typing import Optional
 
 FORMATS = ("remote", "hybrid", "onsite")
+EMPLOYMENT = ("full", "part", "project", "internship")
+PERIOD_DAYS = (1, 3, 7, 30)
 LEVELS = ("intern", "junior", "middle", "senior", "lead")
 
+# employment — тип занятости, period — «опубликовано за N дней».
 # Что умеет каждая площадка. formats — формат работы, salary — «только с
 # зарплатой», levels — уровень (junior/middle/...) на стороне сайта.
 # Подтверждено по коду поиска каждой площадки; нет в списке — не разобрано.
 FILTER_SUPPORT: dict[str, dict] = {
-    "headhunter": {"formats": True, "salary": True, "levels": True},
-    "linkedin": {"formats": True, "salary": False, "levels": True},
+    "headhunter": {
+        "formats": True,
+        "salary": True,
+        "levels": True,
+        "employment": True,
+        "period": True,
+    },
+    "linkedin": {
+        "formats": True,
+        "salary": False,
+        "levels": True,
+        "employment": True,
+        "period": True,
+    },
     "getmatch": {"formats": "remote", "salary": False, "levels": True},
-    "habr_career": {"formats": "remote", "salary": True, "levels": True},
-    "avito": {"formats": "remote", "salary": False, "levels": True},
+    "habr_career": {
+        "formats": "remote",
+        "salary": True,
+        "levels": True,
+        "employment": "single",
+        "period": False,
+    },
+    "avito": {
+        "formats": "remote",
+        "salary": False,
+        "levels": True,
+        "employment": "single",
+        "period": False,
+    },
     # Djinni принимает один employment (при двух сразу берёт remote) —
     # фильтр ставим, только если выбран ровно один формат.
     # Стаж у Djinni — exp_level (повторяемый, проверено вживую); «только с
@@ -27,7 +54,13 @@ FILTER_SUPPORT: dict[str, dict] = {
     "djinni": {"formats": "single", "salary": True, "levels": True},
     # GeekJob: rm=1 — удалённо, ih=1 — офис (inhouse), s=1&money — только с
     # зарплатой; своего «гибрида» и уровней нет.
-    "geekjob": {"formats": "single", "salary": True, "levels": False},
+    "geekjob": {
+        "formats": "single",
+        "salary": True,
+        "levels": False,
+        "employment": "single",
+        "period": False,
+    },
     # Wellfound ищет по /role/r/<роль> — это страница удалённых вакансий
     # (/role/l/... — по городам), Himalayas целиком удалённая: формат
     # «удалённо» у них уже есть сам по себе, остальных фильтров нет.
@@ -43,6 +76,56 @@ _LINKEDIN_WORK_TYPE = {"onsite": "1", "remote": "2", "hybrid": "3"}
 def work_formats(preferences: dict) -> list[str]:
     """Включённые общие форматы работы ("Что ищу" → «Формат работы»)."""
     return [f for f in FORMATS if preferences.get(f)]
+
+
+def employment_types(preferences: dict) -> list[str]:
+    """Выбранные типы занятости («Что ищу»): пусто — любой."""
+    chosen = preferences.get("employment_types") or []
+    return [e for e in EMPLOYMENT if e in chosen]
+
+
+def posted_within_days(preferences: dict) -> int:
+    """«Опубликовано за N дней» (1, 3, 7 или 30); 0 — без ограничения."""
+    try:
+        days = int(preferences.get("posted_within_days") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return days if days in PERIOD_DAYS else 0
+
+
+def single_employment(preferences: dict) -> Optional[str]:
+    """full_time или part_time для площадок с одним значением занятости
+    (Habr, Avito, GeekJob): ставится, только если выбрана ровно одна из
+    «полная» / «частичная»."""
+    chosen = [
+        e for e in employment_types(preferences) if e in ("full", "part")
+    ]
+    if len(chosen) != 1:
+        return None
+    return "full_time" if chosen[0] == "full" else "part_time"
+
+
+_HH_EMPLOYMENT = {"full": "FULL", "part": "PART", "project": "PROJECT"}
+
+
+def hh_employment(preferences: dict) -> tuple[list[str], bool]:
+    """(employment_form повторяемый, internship) для HH."""
+    chosen = employment_types(preferences)
+    return (
+        [_HH_EMPLOYMENT[e] for e in chosen if e in _HH_EMPLOYMENT],
+        "internship" in chosen,
+    )
+
+
+# LinkedIn f_JT: F полная, P частичная, C контракт, T временная, I стажировка.
+_LINKEDIN_JOB_TYPE = {
+    "full": "F",
+    "part": "P",
+    "project": "C",
+    "internship": "I",
+}
+# f_TPR: секунды; «3 дня» округляем до недели (у LinkedIn нет 3 дней).
+_LINKEDIN_PERIOD = {1: "r86400", 3: "r604800", 7: "r604800", 30: "r2592000"}
 
 
 def levels(preferences: dict) -> list[str]:
@@ -158,6 +241,12 @@ def linkedin_search_params(preferences: dict) -> dict:
     experience = _mapped(_LINKEDIN_EXPERIENCE, levels(preferences))
     if experience:
         params["f_E"] = ",".join(sorted(experience))
+    job_types = [_LINKEDIN_JOB_TYPE[e] for e in employment_types(preferences)]
+    if job_types:
+        params["f_JT"] = ",".join(sorted(job_types))
+    days = posted_within_days(preferences)
+    if days:
+        params["f_TPR"] = _LINKEDIN_PERIOD[days]
     return params
 
 
@@ -194,6 +283,8 @@ def geekjob_search_params(preferences: dict) -> dict:
     страница её из адреса не читает — поэтому её здесь нет. Формат ставится
     при одном выбранном (удалённо или офис), «гибрида» на сайте нет."""
     params: dict = {}
+    if single_employment(preferences) == "part_time":
+        params["pt"] = "1"
     formats = work_formats(preferences)
     if formats == ["remote"]:
         params["rm"] = "1"

@@ -122,3 +122,25 @@ def test_remote_only_platforms_skipped_for_office_seekers():
     assert skip_remote_only_platform({"onsite": True, "hybrid": True})
     assert not skip_remote_only_platform({"remote": True, "onsite": True})
     assert not skip_remote_only_platform({})
+
+
+def test_employment_and_period_adapters():
+    from src.job_sources.filters import (
+        hh_employment,
+        posted_within_days,
+        single_employment,
+    )
+
+    prefs = {
+        "employment_types": ["part", "internship"],
+        "posted_within_days": 7,
+    }
+    assert hh_employment(prefs) == (["PART"], True)
+    assert single_employment(prefs) == "part_time"
+    assert single_employment({"employment_types": ["full", "part"]}) is None
+    assert posted_within_days({"posted_within_days": 5}) == 0
+    params = linkedin_search_params(
+        {"employment_types": ["full", "project"], "posted_within_days": 1}
+    )
+    assert params["f_JT"] == "C,F" and params["f_TPR"] == "r86400"
+    assert "f_JT" not in linkedin_search_params({})

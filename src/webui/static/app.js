@@ -2955,6 +2955,10 @@ const render = {
       document.querySelectorAll(".search-level").forEach((el) => {
         el.checked = (search.levels || []).includes(el.value);
       });
+      document.querySelectorAll(".search-employment").forEach((el) => {
+        el.checked = (search.employment_types || []).includes(el.value);
+      });
+      document.getElementById("search-posted-within").value = String(search.posted_within_days || 0);
     });
 
     api("/api/settings/llm").then((llm) => {
@@ -6510,6 +6514,10 @@ function initDashboard() {
             levels: [...document.querySelectorAll(".search-level")]
               .filter((el) => el.checked)
               .map((el) => el.value),
+            employment_types: [...document.querySelectorAll(".search-employment")]
+              .filter((el) => el.checked)
+              .map((el) => el.value),
+            posted_within_days: Number(document.getElementById("search-posted-within").value),
           }),
         });
         status.textContent = "Сохранено.";

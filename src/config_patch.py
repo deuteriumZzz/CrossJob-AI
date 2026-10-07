@@ -154,7 +154,9 @@ def set_top_level_field(config_file: Path, key: str, value: str) -> None:
     _write_valid_yaml(config_file, "\n".join(lines) + "\n")
 
 
-def set_top_level_bool_field(config_file: Path, key: str, value: bool) -> None:
+def set_top_level_bool_field(
+    config_file: Path, key: str, value: bool | int
+) -> None:
     """Как set_top_level_field, но для булевых top-level ключей
     (remote/hybrid/onsite в work_preferences.yaml) — без кавычек,
     той же текстовой техникой."""

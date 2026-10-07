@@ -3,6 +3,7 @@ from src.job_sources.avito.search import search_jobs
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import PlatformBlockedError
 from src.job_sources.filters import remote_only as remote_only_filter
+from src.job_sources.filters import single_employment
 from src.job_sources.preferences import effective_list
 from src.logging import logger
 
@@ -21,7 +22,11 @@ class AvitoSource:
         # у Avito "Опыт работы" тоже одиночный выбор, не список, в
         # отличие от experience_level у GetMatch).
         experience_level = av_prefs.get("qualification") or ""
-        employment_type = av_prefs.get("employment_type") or ""
+        employment_type = (
+            single_employment(preferences)
+            or av_prefs.get("employment_type")
+            or ""
+        )
 
         for position in effective_list(preferences, "avito", "positions"):
             try:

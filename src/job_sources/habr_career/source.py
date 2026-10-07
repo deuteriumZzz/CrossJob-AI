@@ -7,6 +7,7 @@ from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import PlatformBlockedError
 from src.job_sources.filters import habr_qualifications
 from src.job_sources.filters import remote_only as remote_only_filter
+from src.job_sources.filters import single_employment
 from src.job_sources.habr_career.client import HabrCareerClient
 from src.job_sources.habr_career.mapping import (
     habr_vacancy_to_job,
@@ -28,7 +29,11 @@ class HabrCareerSource:
         hc_preferences = preferences.get("habr_career") or {}
         remote_only = remote_only_filter(preferences, "habr_career")
         qualification = hc_preferences.get("qualification") or None
-        employment_type = hc_preferences.get("employment_type") or None
+        employment_type = (
+            single_employment(preferences)
+            or hc_preferences.get("employment_type")
+            or None
+        )
 
         seen_ids: set = set()
         already_seen = seen_ids_for(preferences, "habr_career")

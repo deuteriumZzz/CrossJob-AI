@@ -649,6 +649,25 @@
           <label class="checkbox-row"><input type="checkbox" class="switch search-level" value="senior" /> Senior</label>
           <label class="checkbox-row"><input type="checkbox" class="switch search-level" value="lead" /> Lead</label>
         </div>
+        <h4 style="margin-top:14px">Тип занятости</h4>
+        <p class="muted small">Ничего не выбрано — любой. Умеют HH, LinkedIn, а «полная» или «частичная» (одна из двух) — ещё Habr, Avito и GeekJob.</p>
+        <div class="filters" id="search-employment">
+          <label class="checkbox-row"><input type="checkbox" class="switch search-employment" value="full" /> Полная</label>
+          <label class="checkbox-row"><input type="checkbox" class="switch search-employment" value="part" /> Частичная</label>
+          <label class="checkbox-row"><input type="checkbox" class="switch search-employment" value="project" /> Проект / контракт</label>
+          <label class="checkbox-row"><input type="checkbox" class="switch search-employment" value="internship" /> Стажировка</label>
+        </div>
+        <h4 style="margin-top:14px">Опубликовано</h4>
+        <div class="filters">
+          <select id="search-posted-within" aria-label="Опубликовано за">
+            <option value="0">Когда угодно</option>
+            <option value="1">За сутки</option>
+            <option value="3">За 3 дня</option>
+            <option value="7">За неделю</option>
+            <option value="30">За месяц</option>
+          </select>
+          <span class="muted small">Умеют HH и LinkedIn.</span>
+        </div>
         <div class="filters">
           <label class="checkbox-row"><input id="outreach-skip-us" type="checkbox" class="switch" /> Пропускать удалёнку «только из США»</label>
           <label class="checkbox-row"><input id="outreach-skip-eu" type="checkbox" class="switch" /> Пропускать удалёнку «только из Европы»</label>

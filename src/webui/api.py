@@ -101,8 +101,11 @@ from src.job_sources.apply_pacing import (
 from src.job_sources.block_detection import is_still_blocked
 from src.job_sources.contact_book import ContactBook, company_key
 from src.job_sources.filters import (
+    EMPLOYMENT,
     FILTER_SUPPORT,
     LEVELS,
+    PERIOD_DAYS,
+    posted_within_days,
 )
 from src.job_sources.filters import remote_only as remote_only_filter
 from src.job_sources.filters import (
@@ -3697,6 +3700,7 @@ _SEARCH_LIST_FIELDS = (
     "title_blacklist",
     "location_blacklist",
     "levels",
+    "employment_types",
 )
 # "Формат работы" hh.ru (см. HeadHunterSource/HeadHunterBrowserSource) —
 # top-level булевы флаги, а не список, поэтому отдельный кортеж со своей
@@ -3715,6 +3719,8 @@ class SearchSettingsUpdate(BaseModel):
     onsite: Optional[bool] = None
     only_with_salary: Optional[bool] = None
     levels: Optional[list[str]] = None
+    employment_types: Optional[list[str]] = None
+    posted_within_days: Optional[int] = None
 
 
 def _search_snapshot(ctx: AppContext) -> dict:
@@ -3724,6 +3730,7 @@ def _search_snapshot(ctx: AppContext) -> dict:
     snapshot.update(
         {field: bool(ctx.config.get(field)) for field in _SEARCH_BOOL_FIELDS}
     )
+    snapshot["posted_within_days"] = posted_within_days(ctx.config)
     return snapshot
 
 
@@ -3743,10 +3750,21 @@ def post_search_settings(
     терять комментарии пользователя."""
     if body.levels is not None:
         body.levels = [lvl for lvl in LEVELS if lvl in body.levels]
+    if body.employment_types is not None:
+        body.employment_types = [
+            e for e in EMPLOYMENT if e in body.employment_types
+        ]
     for field in _SEARCH_LIST_FIELDS:
         value = getattr(body, field)
         if value is not None:
             set_list_field(ctx.config_file, field, value)
+    if body.posted_within_days is not None:
+        days = body.posted_within_days
+        set_top_level_bool_field(
+            ctx.config_file,
+            "posted_within_days",
+            days if days in PERIOD_DAYS else 0,
+        )
     for field in _SEARCH_BOOL_FIELDS:
         value = getattr(body, field)
         if value is not None:

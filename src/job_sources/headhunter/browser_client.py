@@ -138,6 +138,9 @@ class HeadHunterBrowserClient:
         work_formats: tuple[str, ...] = (),
         only_with_salary: bool = False,
         experience: tuple[str, ...] = (),
+        employment: tuple[str, ...] = (),
+        internship: bool = False,
+        period_days: int = 0,
     ) -> str:
         """work_formats — значения "Формат работы" hh.ru (REMOTE/
         HYBRID/ON_SITE, подтверждено вживую 2026-09-29), каждое —
@@ -164,6 +167,13 @@ class HeadHunterBrowserClient:
                 params += "&only_with_salary=true"
             for value in experience:
                 params += f"&experience={value}"
+            for value in employment:
+                params += f"&employment_form={value}"
+            if internship:
+                # Проверено вживую 2026-10-08: 75 вакансий (internship=… не фильтрует).
+                params += "&label=internship"
+            if period_days:
+                params += f"&search_period={period_days}"
             driver.get(f"{HH_BASE}/search/vacancy?{params}")
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
             raise_if_blocked(visible_text(driver))
