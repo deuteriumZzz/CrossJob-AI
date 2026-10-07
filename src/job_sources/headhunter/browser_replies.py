@@ -50,6 +50,59 @@ class ChatSendResult:
     unavailable: bool = False
 
 
+_ATTACH_LETTER_BUTTON = '[data-qa="responded-success-attach-cover-letter"]'
+_ATTACH_LETTER_INPUT = (
+    'textarea[data-qa="vacancy-response-popup-form-letter-input"]'
+)
+_ATTACH_LETTER_SUBMIT = 'button[data-qa="vacancy-response-letter-submit"]'
+
+
+def attach_letter_on_vacancy_page(driver, text: str) -> str:
+    """Письмо к уже отправленному отклику через кнопку «Приложить
+    сопроводительное письмо» на странице вакансии (подтверждено вживую
+    2026-10-07: после быстрого отклика страница показывает «You applied»
+    и эту кнопку, клик открывает textarea и «Send»). Драйвер уже на
+    странице вакансии. Возвращает "sent", "no_button" (письмо уже
+    приложено, отклик отозван/закрыт — кнопки нет) или "failed"."""
+    buttons = [
+        b
+        for b in driver.find_elements(By.CSS_SELECTOR, _ATTACH_LETTER_BUTTON)
+        if b.is_displayed()
+    ]
+    if not buttons:
+        return "no_button"
+    try:
+        driver.execute_script(
+            "arguments[0].scrollIntoView({block: 'center'});", buttons[0]
+        )
+        driver.execute_script("arguments[0].click();", buttons[0])
+        fields = _wait_for(driver, _ATTACH_LETTER_INPUT, seconds=10)
+        if not fields:
+            logger.warning("HH: после «Приложить письмо» нет поля ввода.")
+            return "failed"
+        fields[0].send_keys(text)
+        submits = _wait_for(driver, _ATTACH_LETTER_SUBMIT, seconds=5)
+        if not submits:
+            return "failed"
+        submits[0].click()
+        # Отправлено, когда форма письма исчезла со страницы.
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if not any(
+                f.is_displayed()
+                for f in driver.find_elements(
+                    By.CSS_SELECTOR, _ATTACH_LETTER_INPUT
+                )
+            ):
+                return "sent"
+            time.sleep(0.5)
+        logger.warning("HH: форма письма не закрылась после «Send».")
+        return "failed"
+    except Exception as e:
+        logger.warning(f"HH: не удалось приложить письмо к отклику: {e}")
+        return "failed"
+
+
 def find_external_link(message_text: str) -> str | None:
     """Внешняя ссылка (например форма ATS) в сообщении работодателя —
     её не заполняем автоматически (см. docstring
@@ -241,6 +294,8 @@ def send_chat_cover_letter_result(
             return ChatSendResult(sent=False, archived=True)
         if _vacancy_page_is_unavailable_for_current_account(driver):
             return ChatSendResult(sent=False, unavailable=True)
+        if attach_letter_on_vacancy_page(driver, text) == "sent":
+            return ChatSendResult(sent=True)
         if _open_chat_from_vacancy_page(driver):
             try:
                 return ChatSendResult(sent=send_reply(driver, text))

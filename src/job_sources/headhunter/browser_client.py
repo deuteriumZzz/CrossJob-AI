@@ -147,7 +147,13 @@ class HeadHunterBrowserClient:
         задваиваем параметр)."""
         driver, owns_it = self._acquire_driver()
         try:
-            params = f"text={query}&area={HH_AREA_RUSSIA}&page={page}"
+            # order_by=publication_time — сначала самые новые: по умолчанию
+            # "по релевантности" выдача каждый круг одна и та же, а
+            # свежие вакансии теряются за пределами первых страниц.
+            params = (
+                f"text={query}&area={HH_AREA_RUSSIA}&page={page}"
+                "&order_by=publication_time"
+            )
             formats = set(work_formats)
             if remote_only and not formats:
                 formats.add("REMOTE")
@@ -255,6 +261,26 @@ class HeadHunterBrowserClient:
                     "порядке) либо разметка изменилась, проверьте вручную."
                 )
             return True, cover_letter
+        finally:
+            if owns_it:
+                driver.quit()
+
+    def attach_cover_letter(self, vacancy_url: str, text: str) -> str:
+        """Сразу после отклика без поля письма — письмо кнопкой
+        «Приложить сопроводительное письмо» на странице вакансии (так оно
+        прикладывается к самому отклику, а не пишется обычным сообщением).
+        "sent" / "no_button" / "failed" — см. attach_letter_on_vacancy_page.
+        no_button — вызывающий код пробует чат."""
+        from src.job_sources.headhunter.browser_replies import (
+            attach_letter_on_vacancy_page,
+        )
+
+        driver, owns_it = self._acquire_driver()
+        try:
+            if vacancy_url.rstrip("/") not in driver.current_url:
+                driver.get(vacancy_url)
+                time.sleep(PAGE_LOAD_WAIT_SECONDS)
+            return attach_letter_on_vacancy_page(driver, text)
         finally:
             if owns_it:
                 driver.quit()

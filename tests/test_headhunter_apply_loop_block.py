@@ -152,6 +152,10 @@ def test_letter_goes_to_chat_right_after_apply_without_letter_field(
                 # vacancy/1 — поле письма было; 2 и 3 — быстрый отклик.
                 return True, ("В форме" if link.endswith("/1") else "")
 
+            def attach_cover_letter(self, url, text):
+                # вакансия 4 — родная кнопка «Приложить письмо» сработала
+                return "sent" if url.endswith("/4") else "no_button"
+
             def send_letter_in_chat(self, url, vacancy_id, text):
                 chat_sent.append((vacancy_id, text))
                 return vacancy_id == "2"  # у вакансии 3 чат не открылся
@@ -164,7 +168,7 @@ def test_letter_goes_to_chat_right_after_apply_without_letter_field(
                 source="headhunter",
                 external_id=str(i),
             )
-            for i in (1, 2, 3)
+            for i in (1, 2, 3, 4)
         ]
         monkeypatch.setattr(
             main,
@@ -210,3 +214,6 @@ def test_letter_goes_to_chat_right_after_apply_without_letter_field(
         assert entry(2).get("cover_letter_sent_via_chat")
         assert entry(3)["cover_letter"] == "Письмо"
         assert not entry(3).get("cover_letter_sent_via_chat")
+        # 4 — письмо приложено кнопкой, в чат не пишем и не дублируем
+        assert entry(4)["cover_letter_in_form"] is True
+        assert ("4", "Письмо") not in chat_sent

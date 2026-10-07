@@ -1,3 +1,4 @@
+import re
 import sys
 from pathlib import Path
 from typing import Literal
@@ -45,6 +46,31 @@ _LIB_DIR = (
     / "libs"
     / "resume_and_cover_builder"
 )
+
+
+_SIGN_OFF_RE = re.compile(
+    r"^\s*(с уважением|искренне ваш|всего доброго|best regards|kind regards|"
+    r"warm regards|sincerely|regards|thanks|thank you)\b",
+    re.IGNORECASE,
+)
+
+
+def strip_signature(letter: str) -> str:
+    """Текстовое письмо на площадку не должно содержать подпись — имя
+    кандидата уже показывает сам отклик. Промты это запрещают, но модель
+    иногда всё равно дописывает «С уважением, <выдуманное имя>» (живой
+    случай 2026-10-07: «Иван Иванов» вместо Дмитрия Вологдина), поэтому
+    обрезаем хвост по последней строке-прощанию в конце письма."""
+    lines = letter.rstrip().splitlines()
+    for index in range(len(lines) - 1, max(len(lines) - 5, -1), -1):
+        # Прощание — короткая строка и не начало письма.
+        if (
+            index > 0
+            and len(lines[index]) <= 60
+            and _SIGN_OFF_RE.match(lines[index])
+        ):
+            return "\n".join(lines[:index]).rstrip()
+    return letter
 
 
 def generate_cover_letter_for_job(
@@ -144,6 +170,14 @@ def generate_cover_letter_for_job(
     # площадки — добавляем их как минимальный сигнал.
     job_description_text = f"{job.role} — {job.company}\n\n{job.description}"
     answerer.set_job_description_from_text(job_description_text)
-    letter = answerer.generate_cover_letter()
-    # Текстовые письма (не HTML-бланк) — вторая проверка «как человек».
-    return letter if template == "html" else humanize(letter, llm_api_key)
+    # Живой случай 2026-10-07: LLM иногда молча возвращает пустое письмо, и
+    # площадка (GeekJob) отправляла отклик с шаблоном вместо письма. Пустое —
+    # один повтор, дальше ошибка (все вызывающие пропускают вакансию).
+    letter = ""
+    for _ in range(2):
+        letter = answerer.generate_cover_letter()
+        if template != "html":
+            letter = strip_signature(humanize(letter, llm_api_key))
+        if (letter or "").strip():
+            return letter
+    raise RuntimeError("LLM вернул пустое сопроводительное письмо")

@@ -589,7 +589,10 @@ def test_hh_chat_failures_back_off_instead_of_retrying_every_visit():
     updates = {
         c.args[1]: c.kwargs for c in applied_log.update_fields.call_args_list
     }
-    assert updates["0"] == {"chat_closed": "вакансия в архиве"}
+    assert updates["0"] == {
+        "chat_closed": "вакансия в архиве",
+        "cover_letter_undeliverable": "вакансия в архиве",
+    }
     assert "chat_retry_after" in updates["1"]
     applied_log.mark_reminder_sent.assert_not_called()
     assert not main._hh_chat_allowed({**entries[0], **updates["0"]})
