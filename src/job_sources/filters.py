@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Optional
 
 FORMATS = ("remote", "hybrid", "onsite")
@@ -43,7 +44,7 @@ FILTER_SUPPORT: dict[str, dict] = {
         "salary": True,
         "levels": True,
         "employment": "single",
-        "period": False,
+        "period": True,
     },
     "avito": {
         "formats": "remote",
@@ -61,6 +62,7 @@ FILTER_SUPPORT: dict[str, dict] = {
         "salary": True,
         "levels": True,
         "employment": "single",
+        "period": True,
     },
     # GeekJob: rm=1 — удалённо, ih=1 — офис (inhouse), s=1&money — только с
     # зарплатой; своего «гибрида» и уровней нет.
@@ -113,6 +115,55 @@ def posted_within_days(preferences: dict) -> int:
     except (TypeError, ValueError):
         return 0
     return days if days in PERIOD_DAYS else 0
+
+
+_RU_MONTHS = {
+    "января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5,
+    "июня": 6, "июля": 7, "августа": 8, "сентября": 9, "октября": 10,
+    "ноября": 11, "декабря": 12,
+}  # fmt: skip
+
+
+def parse_ru_date(text: str, today: Optional["date"] = None) -> str:
+    """«24 сентября» / «сегодня» / «вчера» → ISO-дата ('' если не
+    разобрали). Года на карточке нет: берём текущий, а если дата вышла бы в
+    будущем — прошлый."""
+    from datetime import date as _date
+    from datetime import timedelta
+
+    today = today or _date.today()
+    word = (text or "").strip().lower()
+    if word == "сегодня":
+        return today.isoformat()
+    if word == "вчера":
+        return (today - timedelta(days=1)).isoformat()
+    parts = word.split()
+    if len(parts) >= 2 and parts[0].isdigit() and parts[1] in _RU_MONTHS:
+        try:
+            day = _date(today.year, _RU_MONTHS[parts[1]], int(parts[0]))
+        except ValueError:
+            return ""
+        if day > today:
+            day = day.replace(year=today.year - 1)
+        return day.isoformat()
+    return ""
+
+
+def posted_too_old(posted_at: str, preferences: dict) -> bool:
+    """True, если вакансия опубликована раньше выбранного периода.
+    Площадкам без своего фильтра по дате (Djinni, Habr) период применяем по
+    дате самой вакансии; неизвестная дата — не отсекаем."""
+    days = posted_within_days(preferences)
+    if not days or not posted_at:
+        return False
+    from datetime import datetime, timedelta
+
+    try:
+        posted = datetime.fromisoformat(posted_at)
+    except ValueError:
+        return False
+    now = datetime.now(posted.tzinfo) if posted.tzinfo else datetime.now()
+    return now - posted > timedelta(days=days)
 
 
 def single_employment(preferences: dict) -> Optional[str]:

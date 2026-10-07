@@ -205,3 +205,65 @@ def test_djinni_parttime_only_when_format_free():
     assert djinni_employment(part) == "parttime"
     assert djinni_employment({**part, "remote": True}) == "remote"
     assert djinni_employment({}) is None
+
+
+def test_period_filter_by_vacancy_date_for_djinni_and_habr():
+    import json
+    from datetime import datetime, timedelta
+
+    from src.job_sources.djinni.search import parse_jobs
+    from src.job_sources.filters import posted_too_old
+    from src.job_sources.habr_career.mapping import parse_search_dates
+
+    prefs = {"posted_within_days": 3}
+    fresh = (datetime.now() - timedelta(days=1)).isoformat()
+    old = (datetime.now() - timedelta(days=9)).isoformat()
+    assert not posted_too_old(fresh, prefs)
+    assert posted_too_old(old, prefs)
+    assert not posted_too_old("", prefs)  # дата неизвестна — не отсекаем
+    assert not posted_too_old(old, {})  # период не выбран
+
+    def ld(i, date):
+        item = {
+            "@type": "JobPosting",
+            "url": f"https://djinni.co/jobs/{i}-x/",
+            "title": "Dev",
+            "identifier": i,
+            "datePosted": date,
+        }
+        return (
+            '<script type="application/ld+json">'
+            f"{json.dumps(item)}</script>"
+        )
+
+    html = ld(1, fresh) + ld(2, old)
+    jobs = parse_jobs(html, preferences=prefs)
+    assert [j.external_id for j in jobs] == ["1"]
+    assert len(parse_jobs(html)) == 2
+
+    card = (
+        '<div class="vacancy-card"><a class="vacancy-card__backdrop-link" '
+        'href="/vacancies/42"></a>'
+        '<time datetime="2026-10-07T17:43:25+03:00">7 октября</time></div>'
+    )
+    assert parse_search_dates(card) == {"42": "2026-10-07T17:43:25+03:00"}
+
+
+def test_ru_date_and_geekjob_card_date():
+    from datetime import date
+
+    from src.job_sources.filters import parse_ru_date
+    from src.job_sources.geekjob.mapping import parse_search_results
+
+    today = date(2026, 10, 7)
+    assert parse_ru_date("5 октября", today) == "2026-10-05"
+    assert parse_ru_date("24 декабря", today) == "2025-12-24"
+    assert parse_ru_date("вчера", today) == "2026-10-06"
+    assert parse_ru_date("что-то", today) == ""
+    html = (
+        '<li class="collection-item"><p class="vacancy-name">'
+        '<a class="title" href="/vacancy/abc">Dev</a></p>'
+        '<p class="datetime-info">24 сентября</p></li>'
+    )
+    item = parse_search_results(html)[0]
+    assert item["id"] == "abc" and item["posted_at"].endswith("-09-24")

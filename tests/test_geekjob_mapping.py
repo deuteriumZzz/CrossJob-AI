@@ -37,9 +37,9 @@ VACANCY_HTML = """
 
 def test_parse_search_results_extracts_id_and_title():
     results = parse_search_results(SEARCH_HTML)
-    assert results == [
-        {"id": "abc123", "title": "Python разработчик"},
-        {"id": "def456", "title": "Backend Engineer"},
+    assert [(r["id"], r["title"]) for r in results] == [
+        ("abc123", "Python разработчик"),
+        ("def456", "Backend Engineer"),
     ]
 
 

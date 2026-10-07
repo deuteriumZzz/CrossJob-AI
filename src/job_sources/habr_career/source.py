@@ -5,12 +5,13 @@ from src.job import Job
 from src.job_sources.applied_log import max_new_per_run, seen_ids_for
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import PlatformBlockedError
-from src.job_sources.filters import habr_qualifications
+from src.job_sources.filters import habr_qualifications, posted_too_old
 from src.job_sources.filters import remote_only as remote_only_filter
 from src.job_sources.filters import single_employment
 from src.job_sources.habr_career.client import HabrCareerClient
 from src.job_sources.habr_career.mapping import (
     habr_vacancy_to_job,
+    parse_search_dates,
     parse_search_results,
 )
 from src.job_sources.preferences import effective_list
@@ -73,9 +74,12 @@ class HabrCareerSource:
                 )
                 continue
 
+            posted = parse_search_dates(html)
             for vacancy_id in parse_search_results(html):
                 if vacancy_id in seen_ids:
                     continue
+                if posted_too_old(posted.get(vacancy_id, ""), preferences):
+                    continue  # старше выбранного периода
                 seen_ids.add(vacancy_id)
                 if vacancy_id in already_seen:
                     continue  # уже в журнале — страницу не открываем

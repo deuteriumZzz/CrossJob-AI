@@ -2,7 +2,7 @@ from src.job import Job
 from src.job_sources.applied_log import max_new_per_run, seen_ids_for
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import PlatformBlockedError
-from src.job_sources.filters import geekjob_search_params
+from src.job_sources.filters import geekjob_search_params, posted_too_old
 from src.job_sources.geekjob.client import GeekjobClient
 from src.job_sources.geekjob.mapping import (
     geekjob_vacancy_to_job,
@@ -72,6 +72,8 @@ class GeekjobSource:
                     seen_ids.add(vacancy_id)
                     if vacancy_id in already_seen:
                         continue  # уже в журнале — страницу не открываем
+                    if posted_too_old(item.get("posted_at", ""), preferences):
+                        continue  # старше выбранного периода
                     if opened >= max_new:
                         return jobs
                     opened += 1

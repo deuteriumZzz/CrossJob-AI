@@ -23,7 +23,11 @@ import httpx
 from src.job import Job
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import raise_if_blocked
-from src.job_sources.filters import djinni_employment, djinni_experience
+from src.job_sources.filters import (
+    djinni_employment,
+    djinni_experience,
+    posted_too_old,
+)
 from src.job_sources.preferences import effective_list
 
 BASE = "https://djinni.co"
@@ -130,6 +134,7 @@ def parse_jobs(
     country: str = "",
     max_months: Optional[float] = None,
     only_with_salary: bool = False,
+    preferences: Optional[dict] = None,
 ) -> list[Job]:
     """JobPosting из JSON-LD страницы выдачи → Job. country/max_months —
     сразу отсеять то, куда Djinni всё равно не даст откликнуться: вакансия
@@ -158,6 +163,8 @@ def parse_jobs(
                 continue
             if max_months is not None and months and months > max_months:
                 continue
+            if posted_too_old(item.get("datePosted", ""), preferences or {}):
+                continue  # старше выбранного периода (выдача — по дате)
             salary = _salary_text(item.get("baseSalary"))
             if only_with_salary and not salary:
                 continue
@@ -216,6 +223,7 @@ def search(
                     country,
                     max_months,
                     bool(preferences.get("only_with_salary")),
+                    preferences,
                 )
                 # В обычной странице Djinni есть скрипт reCAPTCHA формы входа —
                 # слово «captcha» само по себе не блокировка. Блок — это

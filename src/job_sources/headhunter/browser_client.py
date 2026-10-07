@@ -170,7 +170,7 @@ class HeadHunterBrowserClient:
             for value in employment:
                 params += f"&employment_form={value}"
             if internship:
-                # Проверено вживую 2026-10-08: 75 вакансий (internship=… не фильтрует).
+                # Вживую 2026-10-08: 75 вакансий (internship=… не фильтрует).
                 params += "&label=internship"
             if period_days:
                 params += f"&search_period={period_days}"

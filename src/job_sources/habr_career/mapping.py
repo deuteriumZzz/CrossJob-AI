@@ -56,6 +56,25 @@ def parse_search_results(html: str) -> list[str]:
     return results
 
 
+def parse_search_dates(html: str) -> dict[str, str]:
+    """id вакансии → дата публикации (ISO) из <time datetime> карточки
+    выдачи: по ней период «Опубликовано» применяется без открытия
+    страницы вакансии."""
+    soup = BeautifulSoup(html, "html.parser")
+    dates: dict[str, str] = {}
+    for card in soup.select(".vacancy-card"):
+        link = card.select_one("a.vacancy-card__backdrop-link[href]")
+        stamp = card.select_one("time[datetime]")
+        if link is None or stamp is None:
+            continue
+        href = str(link.get("href", ""))
+        if href.startswith("/vacancies/"):
+            dates[href.removeprefix("/vacancies/")] = str(
+                stamp.get("datetime", "")
+            )
+    return dates
+
+
 def habr_vacancy_to_job(html: str, vacancy_id: str) -> Job:
     """Подтверждено прямым запросом (2026-08-28): .vacancy-header__title/
     .vacancy-company__title/.vacancy-header__salary/.vacancy-description__text

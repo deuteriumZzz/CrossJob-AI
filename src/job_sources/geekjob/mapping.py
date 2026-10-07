@@ -1,6 +1,7 @@
 from bs4 import BeautifulSoup
 
 from src.job import Job
+from src.job_sources.filters import parse_ru_date
 
 GJ_BASE_URL = "https://geekjob.ru"
 
@@ -17,7 +18,17 @@ def parse_search_results(html: str) -> list[dict]:
         if not vacancy_id or vacancy_id in seen_ids:
             continue
         seen_ids.add(vacancy_id)
-        results.append({"id": vacancy_id, "title": link.get_text(strip=True)})
+        card = link.find_parent("li")
+        stamp = card.select_one("p.datetime-info") if card else None
+        results.append(
+            {
+                "id": vacancy_id,
+                "title": link.get_text(strip=True),
+                "posted_at": (
+                    parse_ru_date(stamp.get_text(strip=True)) if stamp else ""
+                ),
+            }
+        )
     return results
 
 
