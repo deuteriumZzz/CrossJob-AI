@@ -102,7 +102,9 @@ class HabrCareerClient:
         full_time|part_time`. Неизвестный qualification/employment_type
         молча игнорируется — HabrCareerSource уже фильтрует по
         известным значениям до вызова этого метода."""
-        params = {"q": position}
+        # sort=date — сначала самые новые (проверено вживую 2026-10-08:
+        # без него выдача идёт по релевантности, свежие теряются).
+        params = {"q": position, "sort": "date"}
         if page > 1:
             params["page"] = str(page)
         if remote_only:

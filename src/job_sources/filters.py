@@ -70,7 +70,13 @@ FILTER_SUPPORT: dict[str, dict] = {
     # (/role/l/... — по городам), Himalayas целиком удалённая: формат
     # «удалённо» у них уже есть сам по себе, остальных фильтров нет.
     "wellfound": {"formats": "remote", "salary": False, "levels": False},
-    "himalayas": {"formats": "remote", "salary": False, "levels": False},
+    "himalayas": {
+        "formats": "remote",
+        "salary": True,
+        "levels": True,
+        "employment": True,
+        "period": False,
+    },
     "talanto": {
         "formats": True,
         "salary": True,
@@ -334,6 +340,38 @@ def talanto_extra_query(preferences: dict) -> str:
     days = posted_within_days(preferences)
     if days:
         query += f"&period={_TALANTO_PERIOD[days]}"
+    return query
+
+
+# Himalayas (проверено вживую 2026-10-08 в вашем окне бота): type= и
+# experience= — списки через запятую; salary-required=true — «только с
+# зарплатой». Сайт целиком удалённый, формат и период не нужны.
+_HIMALAYAS_TYPE = {
+    "full": "full-time",
+    "part": "part-time",
+    "project": "contractor",
+    "internship": "intern",
+}
+_HIMALAYAS_EXPERIENCE = {
+    "intern": ["entry-level"],
+    "junior": ["entry-level"],
+    "middle": ["mid-level"],
+    "senior": ["senior"],
+    "lead": ["manager"],
+}
+
+
+def himalayas_query(preferences: dict) -> str:
+    """Хвост адреса Himalayas: тип работы, уровень, «только с зарплатой»."""
+    query = ""
+    types = [_HIMALAYAS_TYPE[e] for e in employment_types(preferences)]
+    if types:
+        query += "&type=" + ",".join(types)
+    experience = _mapped(_HIMALAYAS_EXPERIENCE, levels(preferences))
+    if experience:
+        query += "&experience=" + ",".join(experience)
+    if preferences.get("only_with_salary"):
+        query += "&salary-required=true"
     return query
 
 

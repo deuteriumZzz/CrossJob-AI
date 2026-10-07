@@ -179,3 +179,20 @@ def test_talanto_extra_query_has_types_period_salary():
     )
     assert "&work_types=full" in query and "&work_types=intern" in query
     assert "&period=three_days" in query and "salary_min=1" in query
+
+
+def test_himalayas_query():
+    from src.job_sources.filters import himalayas_query
+
+    assert himalayas_query({}) == ""
+    query = himalayas_query(
+        {
+            "employment_types": ["full", "internship"],
+            "levels": ["junior", "senior"],
+            "only_with_salary": True,
+        }
+    )
+    assert query == (
+        "&type=full-time,intern&experience=entry-level,senior"
+        "&salary-required=true"
+    )

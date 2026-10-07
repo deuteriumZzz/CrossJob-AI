@@ -18,7 +18,7 @@ def _slugify(position: str) -> str:
     return _SLUG_RE.sub("-", position.strip().lower()).strip("-")
 
 
-def search_jobs(driver, position: str) -> list[Job]:
+def search_jobs(driver, position: str, query: str = "") -> list[Job]:
     """НЕ подтверждено на живой сессии: /jobs и /companies/... на
     himalayas.app отдают анти-бот интерстишл для запроса без реального
     браузерного отпечатка (подтверждено вживую 2026-09-02, см. docstring
@@ -31,7 +31,10 @@ def search_jobs(driver, position: str) -> list[Job]:
     лог "Found N matching himalayas.app vacancies" и при 0 результатах
     смотрите разметку вручную и правьте эту функцию."""
     slug = _slugify(position)
-    driver.get(f"{SEARCH_URL}/{slug}" if slug else SEARCH_URL)
+    url = f"{SEARCH_URL}/{slug}" if slug else SEARCH_URL
+    if query:
+        url += "?" + query.lstrip("&")
+    driver.get(url)
     time.sleep(PAGE_LOAD_WAIT_SECONDS)
     raise_if_blocked_after_wait(driver)
 
