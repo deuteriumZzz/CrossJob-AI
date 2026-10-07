@@ -3004,6 +3004,7 @@ const render = {
       api("/api/settings/limits"),
     ]);
     renderAutoAll(status);
+    renderAutoChat(status);
 
     api("/api/settings/search").then((search) => {
       const fields = [
@@ -3328,20 +3329,14 @@ const render = {
             ${
               s.name === "headhunter"
                 ? `<label class="limit-field" style="justify-content:flex-end">
-                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto-reply switch" ${s.auto_reply ? "checked" : ""} />Автоответ в чате HH</span>
+                <span style="display:flex;align-items:center;gap:8px" title="Одним переключателем: отвечает на рутинные вопросы в чате, досылает письмо, если отклик ушёл без него, и напоминает о себе молчащим работодателям"><input type="checkbox" class="d-auto-reply switch" ${s.auto_reply ? "checked" : ""} />Вести переписку в чате HH</span>
               </label>
               <label class="limit-field" style="justify-content:flex-end">
                 <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto-bump switch" ${s.auto_bump_resume ? "checked" : ""} />Бамп резюме на HH</span>
               </label>
-              <label class="limit-field" style="justify-content:flex-end">
-                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-chat-cover-letter-followup switch" ${s.chat_cover_letter_followup ? "checked" : ""} />💬 Если отклик ушёл без письма — досылать его в чат</span>
-              </label>
               <label class="limit-field">
                 <span title="0 — выключить напоминания. Список готовых напоминаний — во «Входящих»">Напомнить о себе, если не просмотрели, через (дней)</span>
                 <input type="number" class="d-reminder-days" min="0" value="${s.reminder_follow_up_days ?? 7}" style="width:80px" />
-              </label>
-              <label class="limit-field" style="justify-content:flex-end">
-                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto-reminder switch" ${s.auto_reminder ? "checked" : ""} />Отправлять напоминания самому, без подтверждения</span>
               </label>
               <label class="limit-field">
                 <span>Зарплата для автоответа в чате HH</span>
@@ -3468,11 +3463,15 @@ const render = {
               clear_daily_application_limit: !dailyOverride,
               positions: linesOfEl(drawerBody.querySelector(".d-positions")),
               locations: linesOfEl(drawerBody.querySelector(".d-locations")),
-              ...(autoReplyEl ? { auto_reply: autoReplyEl.checked } : {}),
-              ...(autoBumpEl ? { auto_bump_resume: autoBumpEl.checked } : {}),
-              ...(chatFollowupEl
-                ? { chat_cover_letter_followup: chatFollowupEl.checked }
+              // «Вести переписку» — один переключатель на три настройки HH.
+              ...(autoReplyEl
+                ? {
+                    auto_reply: autoReplyEl.checked,
+                    chat_cover_letter_followup: autoReplyEl.checked,
+                    auto_reminder: autoReplyEl.checked,
+                  }
                 : {}),
+              ...(autoBumpEl ? { auto_bump_resume: autoBumpEl.checked } : {}),
               ...(reminderDaysEl
                 ? {
                     reminder_follow_up_days: Math.max(
@@ -5124,6 +5123,43 @@ function renderAutoAll(status) {
     } finally {
       box.disabled = false;
       renderAutoAll(await api("/api/status"));
+      lastOverviewSnapshot = "";
+    }
+  };
+}
+
+// «Вести переписку» — один тумблер на три настройки HH: автоответ в чате,
+// досылка письма в чат и напоминание молчащим работодателям.
+function renderAutoChat(status) {
+  const hh = status.sources.find((s) => s.name === "headhunter");
+  const box = document.getElementById("search-auto-chat");
+  const note = document.getElementById("search-auto-chat-note");
+  if (!box || !hh) return;
+  const flags = [hh.auto_reply, hh.chat_cover_letter_followup, hh.auto_reminder];
+  const active = flags.filter(Boolean).length;
+  box.checked = active === flags.length;
+  box.indeterminate = active > 0 && active < flags.length;
+  note.textContent = hh.schedule_enabled
+    ? "отвечает на рутинные вопросы, досылает письмо, напоминает о себе (HH)"
+    : "HeadHunter сейчас выключен";
+  box.onchange = async () => {
+    const enable = box.checked;
+    if (enable && !confirm("Бот начнёт сам отвечать работодателям в чатах HH, досылать письма и напоминать о себе. Приглашения и вопросы про время и деньги по-прежнему приходят вам. Включить?")) {
+      renderAutoChat(status);
+      return;
+    }
+    box.disabled = true;
+    try {
+      await api("/api/settings", {
+        method: "POST",
+        body: JSON.stringify({ source: "headhunter", auto_reply: enable, chat_cover_letter_followup: enable, auto_reminder: enable }),
+      });
+      showToast(enable ? "Переписка включена" : "Переписку веду я сам", "success");
+    } catch (err) {
+      showToast(err.message.replace(/^\d+: /, ""), "error");
+    } finally {
+      box.disabled = false;
+      renderAutoChat(await api("/api/status"));
       lastOverviewSnapshot = "";
     }
   };
