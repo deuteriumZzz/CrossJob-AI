@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -61,6 +62,25 @@ def raise_if_blocked(response_or_html) -> None:
             raise PlatformBlockedError(
                 f"Blocked (detected {keyword!r} in response body)"
             )
+
+
+def raise_if_blocked_after_wait(
+    driver, seconds: float = 45, interval: float = 3
+) -> None:
+    """raise_if_blocked с ожиданием: Cloudflare-интерстишл (Himalayas)
+    обычно проходит сам за несколько секунд, а раньше площадка сразу
+    объявлялась заблокированной и в Telegram уходила ложная тревога,
+    хотя следом страница спокойно открывалась. Блокировка засчитывается,
+    только если страница остаётся такой же через `seconds`."""
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            raise_if_blocked(visible_text(driver))
+            return
+        except PlatformBlockedError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(interval)
 
 
 def visible_text(driver) -> str:

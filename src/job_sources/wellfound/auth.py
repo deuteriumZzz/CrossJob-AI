@@ -1,5 +1,7 @@
+import re
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 from src.job_sources.telegram_notify import notify_manual_login_required
 from src.logging import logger
@@ -7,6 +9,24 @@ from src.utils.chrome_utils import get_with_retry, init_browser
 
 WF_BASE = "https://wellfound.com"
 LOGIN_TIMEOUT_SECONDS = 300
+
+
+# Страница, где вход ещё не завершён: форма входа/регистрации, капча или
+# проверка браузера. Раньше достаточно было уйти с /login — и редирект на
+# проверку (живьём 2026-10-07) засчитывался как «вошли», окно сворачивалось
+# через секунды, человек не успевал ничего ввести.
+_NOT_DONE_RE = re.compile(
+    r"/login|/signup|/sign_up|/register|captcha|challenge|verify|"
+    r"cloudflare|checkpoint",
+    re.IGNORECASE,
+)
+_STABLE_SECONDS = 8
+
+
+def _login_finished(url: str) -> bool:
+    return "wellfound.com" in urlparse(url).netloc and not _NOT_DONE_RE.search(
+        url
+    )
 
 
 class WellfoundSession:
@@ -43,11 +63,18 @@ class WellfoundSession:
                 parameters, "Wellfound", LOGIN_TIMEOUT_SECONDS
             )
             deadline = time.monotonic() + LOGIN_TIMEOUT_SECONDS
-            while "/login" in driver.current_url:
+            stable_since = None
+            while True:
                 if time.monotonic() > deadline:
                     raise RuntimeError(
                         "Timed out waiting for wellfound.com login."
                     )
+                if _login_finished(driver.current_url):
+                    stable_since = stable_since or time.monotonic()
+                    if time.monotonic() - stable_since >= _STABLE_SECONDS:
+                        return
+                else:
+                    stable_since = None
                 time.sleep(2)
         finally:
             driver.quit()

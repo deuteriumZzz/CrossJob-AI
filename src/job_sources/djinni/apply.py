@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 import time
+from datetime import datetime
 from pathlib import Path
 
 from selenium.webdriver.common.by import By
@@ -171,13 +172,35 @@ def bump_profile(driver) -> str:
         "arguments[0].click();",
         button,
     )
+    time.sleep(2)
+    # Подтверждено вживую 2026-10-07: первый клик только открывает окно
+    # «Are you sure? … You can improve your search rank once a week» —
+    # поднятие происходит по второй кнопке "Bump My Profile" в этом окне
+    # (js-improve-search-rank). Раньше бот кликал один раз, ничего не
+    # поднималось и возвращалось "not_found".
+    # Кнопка в окне для Selenium "невидима" (is_displayed=False — окно
+    # анимируется), но клик по ней срабатывает: фильтр по видимости
+    # раньше и не давал её нажать.
+    confirm = driver.find_elements(
+        By.CSS_SELECTOR, "button.js-improve-search-rank"
+    )
+    if confirm:
+        driver.execute_script("arguments[0].click();", confirm[0])
+    time.sleep(PAGE_LOAD_WAIT_SECONDS)
+    if "back at the top of the search results" in visible_text(driver):
+        return "bumped"
     time.sleep(PAGE_LOAD_WAIT_SECONDS)
     # После поднятия Djinni снова пишет «можно через 7 дней».
     driver.get(f"{BASE}/my/profile/")
     time.sleep(PAGE_LOAD_WAIT_SECONDS)
+    text = visible_text(driver)
+    today = datetime.now()
+    bumped_today = (
+        f"last bumped {today.day} {today:%B}".lower() in text.lower()
+    )
     return (
         "bumped"
-        if _BUMP_AGAIN_RE.search(visible_text(driver))
+        if _BUMP_AGAIN_RE.search(text) or bumped_today
         else "not_found"
     )
 

@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
 
-from src.job_sources.block_detection import raise_if_blocked, visible_text
+from src.job_sources.block_detection import raise_if_blocked_after_wait
 
 PAGE_LOAD_WAIT_SECONDS = 3
 _SUBMIT_TEXT_MARKERS = (
@@ -39,7 +39,7 @@ def apply_to_job(
     его форму никогда не заполняем и не отправляем сами."""
     driver.get(job_link)
     time.sleep(PAGE_LOAD_WAIT_SECONDS)
-    raise_if_blocked(visible_text(driver))
+    raise_if_blocked_after_wait(driver)
 
     apply_button = _find_button_by_visible_text(driver, _APPLY_TEXT_MARKERS)
     if apply_button is None:
