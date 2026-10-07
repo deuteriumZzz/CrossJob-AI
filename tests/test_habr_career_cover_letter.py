@@ -96,3 +96,24 @@ def test_apply_still_reports_success_when_cover_letter_form_missing():
 
     assert applied is True
     textarea.send_keys.assert_not_called()
+
+
+def test_apply_still_reports_applied_when_cover_letter_step_crashes():
+    """Отклик уже ушёл — сбой на дописывании письма (перекрытый клик и
+    т.п.) не должен превращать результат в исключение: живьём 2026-10-08
+    так отклики остались без записи в журнале."""
+    driver, _, _ = _make_driver(with_cover_letter_form=True)
+    with patch(
+        "src.job_sources.habr_career.client.init_browser",
+        return_value=driver,
+    ), patch("src.job_sources.habr_career.client.raise_if_blocked"), patch(
+        "src.job_sources.habr_career.client.visible_text", return_value=""
+    ), patch(
+        "src.job_sources.habr_career.client.time.sleep"
+    ), patch.object(
+        HabrCareerClient,
+        "_attach_cover_letter",
+        side_effect=RuntimeError("element click intercepted"),
+    ):
+        client = HabrCareerClient("profile")
+        assert client.apply("https://career.habr.com/vacancies/1", "x") is True

@@ -11,6 +11,7 @@ from selenium.webdriver.common.by import By
 from src.job_sources.block_detection import raise_if_blocked, visible_text
 from src.job_sources.html_text import html_letter_to_plain_text
 from src.job_sources.user_agents import random_user_agent
+from src.logging import logger
 from src.utils.chrome_utils import init_browser, is_driver_dead
 
 HC_BASE = "https://career.habr.com"
@@ -102,9 +103,11 @@ class HabrCareerClient:
         full_time|part_time`. Неизвестный qualification/employment_type
         молча игнорируется — HabrCareerSource уже фильтрует по
         известным значениям до вызова этого метода."""
-        # sort=date — сначала самые новые (проверено вживую 2026-10-08:
-        # без него выдача идёт по релевантности, свежие теряются).
-        params = {"q": position, "sort": "date"}
+        # Без sort=date: сортировка по дате подмешивает свежие, но
+        # нерелевантные вакансии (вживую 2026-10-08: по «Python …» шли
+        # аналитики и .NET), а лимит открытий уходит на них. Релевантность
+        # ставит нужные вакансии первыми.
+        params = {"q": position}
         if page > 1:
             params["page"] = str(page)
         if remote_only:
@@ -172,7 +175,16 @@ class HabrCareerClient:
                 for marker in _ALREADY_APPLIED_MARKERS
             )
             if applied and cover_letter:
-                self._attach_cover_letter(driver, cover_letter)
+                # Отклик уже ушёл: сбой при дописывании письма не должен
+                # терять отметку «откликнулся» (иначе вакансию возьмут
+                # повторно, а в журнале её нет).
+                try:
+                    self._attach_cover_letter(driver, cover_letter)
+                except Exception as e:
+                    logger.warning(
+                        f"Отклик на {vacancy_url} отправлен, письмо не "
+                        f"дописалось: {e}"
+                    )
             return applied
         finally:
             if owns_it:
@@ -191,7 +203,7 @@ class HabrCareerClient:
         ]
         if not view_buttons:
             return
-        view_buttons[0].click()
+        driver.execute_script("arguments[0].click();", view_buttons[0])
         time.sleep(1.5)
 
         edit_buttons = [
@@ -204,7 +216,7 @@ class HabrCareerClient:
         ]
         if not edit_buttons:
             return
-        edit_buttons[0].click()
+        driver.execute_script("arguments[0].click();", edit_buttons[0])
         time.sleep(1)
 
         textareas = [
