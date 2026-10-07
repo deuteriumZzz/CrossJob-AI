@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import shutil
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -18,6 +19,7 @@ from src.scheduler_state import (
 )
 
 DEFAULT_INTERVAL_HOURS = 3
+MIN_FREE_DISK_BYTES = 2 * 1024**3
 
 # Площадки, участвующие в "постоянном цикле" (limits.continuous_cycle_enabled)
 # — реальный поиск+отклик на job-бордах. telegram — свой живой шлюз
@@ -95,6 +97,11 @@ class Scheduler:
         self.stop_event = stop_event or threading.Event()
         self.paused = False
         self._telegram_watcher: Optional[threading.Thread] = None
+        self._gateway_failures = 0
+        self._gateway_last_try = 0.0
+        self._gateway_alerted = 0.0
+        self._disk_checked = 0.0
+        self._disk_alerted = 0.0
 
     def due_sources(self) -> list[str]:
         if self.paused:
@@ -164,6 +171,64 @@ class Scheduler:
             fn(self.parameters, self.llm_api_key, stop_event=stop)
         finally:
             timer.cancel()
+
+    def _supervise_gateway(self) -> None:
+        """Шлюз Telegram сам поднимается, если поток умер (раньше он жил и
+        гас только вместе с планировщиком). Не чаще раза в 30 секунд; после
+        3 неудач подряд — одно сообщение в Telegram (не чаще раза в час)."""
+        from src.job_sources.telegram.watcher import (
+            active_watcher,
+            start_telegram_watcher,
+        )
+
+        if not (self.parameters.get("telegram") or {}).get("watch_enabled"):
+            return
+        w = self._telegram_watcher
+        if (w is not None and w.is_alive()) or active_watcher() is not None:
+            self._gateway_failures = 0
+            return
+        now = self.now_fn().timestamp()
+        if now - self._gateway_last_try < 30:
+            return
+        self._gateway_last_try = now
+        try:
+            self._telegram_watcher = start_telegram_watcher(
+                self.parameters, self.llm_api_key
+            )
+            logger.info("Telegram-шлюз перезапущен надзором.")
+        except Exception as e:
+            self._gateway_failures += 1
+            logger.warning(f"Telegram-шлюз не поднялся: {e}")
+            if (
+                self._gateway_failures >= 3
+                and now - self._gateway_alerted > 3600
+            ):
+                self._gateway_alerted = now
+                notify_from_secrets(
+                    self.parameters,
+                    "CrossJob-AI: Telegram-шлюз не поднимается "
+                    f"({self._gateway_failures} попытки подряд): {e}",
+                )
+
+    def _check_disk_space(self) -> None:
+        """Раз в час проверяет свободное место: при <2 ГБ — одно сообщение
+        в сутки (на 2.10 нехватка места молча роняла Telegram-шлюз)."""
+        now = self.now_fn().timestamp()
+        if now - self._disk_checked < 3600:
+            return
+        self._disk_checked = now
+        try:
+            free = shutil.disk_usage(self.output_folder).free
+        except OSError:
+            return
+        if free < MIN_FREE_DISK_BYTES and now - self._disk_alerted > 86400:
+            self._disk_alerted = now
+            notify_from_secrets(
+                self.parameters,
+                "CrossJob-AI: на диске осталось "
+                f"{free / 1024**3:.1f} ГБ — при нехватке места падают шлюз "
+                "Telegram и браузеры. Освободите место.",
+            )
 
     def _continuous(self) -> bool:
         limits = self.parameters.get("limits") or {}
@@ -314,7 +379,15 @@ class Scheduler:
         self._telegram_watcher = watcher
         try:
             while not self.stop_event.is_set():
-                self.run_once()
+                # Неожиданная ошибка одного тика не должна останавливать
+                # демон: вместе с ним гасло и постоянное соединение с
+                # Telegram (живьём 3–7 октября шлюз «обрывался» именно так).
+                try:
+                    self.run_once()
+                except Exception as e:
+                    logger.exception(f"[scheduler] тик упал, продолжаю: {e}")
+                self._supervise_gateway()
+                self._check_disk_space()
                 self.stop_event.wait(tick_seconds)
         finally:
             # Парсер могли включить/выключить из дашборда на ходу — гасим

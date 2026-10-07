@@ -167,6 +167,7 @@ from src.job_sources.telegram.client import (
 )
 from src.job_sources.telegram.watcher import (
     TELEGRAM_FOLDER,
+    gateway_state,
     pending_telegram_sends_count,
 )
 from src.job_sources.telegram_connect import (
@@ -735,6 +736,7 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
             and ctx.scheduler.paused
         ),
         "sources": sources,
+        "telegram_gateway": gateway_state(),
         "chat_checks": chat_checks,
         "total_applied_today": ctx.applied_log.applied_today_count_all(),
         "total_daily_limit": _effective_total_daily_limit(ctx.config),
@@ -1844,6 +1846,7 @@ def get_todo(ctx: AppContext = Depends(get_ctx)) -> dict:
             }
         )
     items += _broken_later(ctx)
+    items += _health_items(ctx)
     return {
         "items": items,
         "setup": _setup_checklist(ctx),
@@ -1977,6 +1980,72 @@ def _setup_checklist(ctx: AppContext) -> list[dict]:
 
 
 _REQUIRED_SETUP = ("resume", "llm", "schedule")
+
+
+def _health_items(ctx: AppContext) -> list[dict]:
+    """Шлюз молчит, мало места на диске, формы LinkedIn не пройдены."""
+    import shutil
+    import time
+
+    from src.job_sources.applied_log import EASY_APPLY_MAX_ATTEMPTS
+    from src.scheduler import MIN_FREE_DISK_BYTES
+
+    items: list[dict] = []
+    state = gateway_state()
+    last_post = state["last_post_at"]
+    if (
+        (ctx.config.get("telegram") or {}).get("watch_enabled")
+        and state["alive"]
+        and last_post
+        and time.time() - last_post > 6 * 3600
+    ):
+        items.append(
+            {
+                "id": "gateway_silent",
+                "count": "!",
+                "view": "telegram",
+                "text": "Telegram-шлюз не получал постов больше 6 часов "
+                "— проверьте каналы",
+            }
+        )
+    try:
+        free = shutil.disk_usage(ctx.output_folder).free
+    except OSError:
+        free = MIN_FREE_DISK_BYTES
+    if free < MIN_FREE_DISK_BYTES:
+        items.append(
+            {
+                "id": "low_disk",
+                "count": "!",
+                "view": "overview",
+                "text": f"На диске осталось {free / 1024**3:.1f} ГБ — "
+                "освободите место, иначе шлюз и браузеры падают",
+            }
+        )
+    stuck = [
+        e
+        for e in ctx.applied_log.entries_by_source_and_status(
+            "linkedin", "skipped_easy_apply_failed"
+        )
+        if e.get("retry_count", 1) >= EASY_APPLY_MAX_ATTEMPTS
+    ]
+    if stuck:
+        items.append(
+            {
+                "id": "linkedin_forms",
+                "count": len(stuck),
+                "view": "history",
+                "text": _plural(
+                    len(stuck),
+                    "форма LinkedIn не пройдена",
+                    "формы LinkedIn не пройдены",
+                    "форм LinkedIn не пройдено",
+                )
+                + f" за {EASY_APPLY_MAX_ATTEMPTS} попытки — откликнитесь "
+                "вручную",
+            }
+        )
+    return items
 
 
 def _broken_later(ctx: AppContext) -> list[dict]:

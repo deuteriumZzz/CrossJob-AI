@@ -1,6 +1,7 @@
 import logging
 import logging.handlers
 import os
+import re
 import sys
 
 from loguru import logger
@@ -9,6 +10,16 @@ from selenium.webdriver.remote.remote_connection import (
 )
 
 from config import LOG_LEVEL, LOG_SELENIUM_LEVEL, LOG_TO_CONSOLE, LOG_TO_FILE
+
+# Токен Telegram-бота лежит в адресе запросов (…/bot<id>:<токен>/…) и раньше
+# попадал в журнал открытым текстом через INFO-логи httpx.
+_TOKEN_RE = re.compile(r"\b(bot)?\d{6,12}:[A-Za-z0-9_-]{30,}")
+
+
+def _mask_tokens(record) -> None:
+    record["message"] = _TOKEN_RE.sub(
+        lambda m: (m.group(1) or "") + "<скрыт>", record["message"]
+    )
 
 
 def remove_default_loggers():
@@ -34,6 +45,9 @@ def init_loguru_logger():
     os.makedirs(os.path.dirname(log_file), exist_ok=True)
 
     logger.remove()
+    logger.configure(patcher=_mask_tokens)
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
     # Файловый логгер добавляем, только если включён LOG_TO_FILE
     if LOG_TO_FILE:

@@ -54,6 +54,17 @@ _GENERIC_WORDS = {
 }
 
 
+def gateway_state() -> dict:
+    """Состояние постоянного шлюза для дашборда: жив ли поток, есть ли
+    соединение, когда пришёл последний пост канала (unix-время)."""
+    w = _ACTIVE
+    return {
+        "alive": w is not None,
+        "connected": bool(w is not None and w.connected),
+        "last_post_at": getattr(w, "last_post_at", None) if w else None,
+    }
+
+
 def active_watcher() -> Optional["TelegramWatcher"]:
     return _ACTIVE if _ACTIVE is not None and _ACTIVE.connected else None
 
@@ -252,6 +263,7 @@ class TelegramWatcher(threading.Thread):
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.client: Any = None
         self.connected = False
+        self.last_post_at: Optional[float] = None
         self.matched_count = 0
         self._settings_task: Optional[asyncio.Task] = None
         self._stopping = threading.Event()
@@ -526,6 +538,7 @@ class TelegramWatcher(threading.Thread):
                 await self._subscribe()
 
     async def _on_channel_post(self, event) -> None:
+        self.last_post_at = time.time()
         chat = await event.get_chat()
         channel = getattr(chat, "username", None) or str(event.chat_id)
         await self._handle_post(channel, event.message)
