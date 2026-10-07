@@ -5,8 +5,8 @@ from src.job_sources.applied_log import seen_ids_for
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import PlatformBlockedError
 from src.job_sources.filters import (
+    talanto_extra_query,
     talanto_levels,
-    talanto_salary_params,
     talanto_work_formats,
 )
 from src.job_sources.preferences import effective_list
@@ -67,7 +67,7 @@ class TalantoSource:
                         page,
                         talanto_work_formats(preferences),
                         talanto_levels(preferences),
-                        talanto_salary_params(preferences),
+                        talanto_extra_query(preferences),
                     )
                 except PlatformBlockedError:
                     raise

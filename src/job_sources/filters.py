@@ -71,7 +71,13 @@ FILTER_SUPPORT: dict[str, dict] = {
     # «удалённо» у них уже есть сам по себе, остальных фильтров нет.
     "wellfound": {"formats": "remote", "salary": False, "levels": False},
     "himalayas": {"formats": "remote", "salary": False, "levels": False},
-    "talanto": {"formats": True, "salary": True, "levels": True},
+    "talanto": {
+        "formats": True,
+        "salary": True,
+        "levels": True,
+        "employment": True,
+        "period": True,
+    },
 }
 
 # LinkedIn f_WT: 1 — на месте, 2 — удалённо, 3 — гибрид.
@@ -306,6 +312,29 @@ def talanto_salary_params(preferences: dict) -> str:
     if preferences.get("only_with_salary"):
         return "&salary_min=1&salary_input_currency=USD"
     return ""
+
+
+# Talanto work_types (повторяемый) и period (проверено вживую 2026-10-08:
+# «python»: full 465, part 10, оба вместе 475; период — сутки 14, три дня
+# 59, неделя 161, месяц 671). part_time и internship сайт не знает.
+_TALANTO_WORK_TYPES = {
+    "full": "full",
+    "part": "part",
+    "project": "contract",
+    "internship": "intern",
+}
+_TALANTO_PERIOD = {1: "day", 3: "three_days", 7: "week", 30: "month"}
+
+
+def talanto_extra_query(preferences: dict) -> str:
+    """Хвост адреса Talanto: зарплата, тип занятости и период."""
+    query = talanto_salary_params(preferences)
+    for kind in employment_types(preferences):
+        query += f"&work_types={_TALANTO_WORK_TYPES[kind]}"
+    days = posted_within_days(preferences)
+    if days:
+        query += f"&period={_TALANTO_PERIOD[days]}"
+    return query
 
 
 def djinni_employment(preferences: dict) -> Optional[str]:

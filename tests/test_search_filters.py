@@ -164,3 +164,18 @@ def test_getmatch_and_avito_office_hybrid_adapters():
     assert avito_click_format({"onsite": True}) == "office"
     assert avito_click_format({"hybrid": True}) == "hybrid"
     assert avito_click_format({"onsite": True, "hybrid": True}) == ""
+
+
+def test_talanto_extra_query_has_types_period_salary():
+    from src.job_sources.filters import talanto_extra_query
+
+    assert talanto_extra_query({}) == ""
+    query = talanto_extra_query(
+        {
+            "employment_types": ["full", "internship"],
+            "posted_within_days": 3,
+            "only_with_salary": True,
+        }
+    )
+    assert "&work_types=full" in query and "&work_types=intern" in query
+    assert "&period=three_days" in query and "salary_min=1" in query
