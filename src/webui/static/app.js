@@ -2137,6 +2137,27 @@ function stepHead(n, title, state) {
   return `<div class="step-head"><span class="step-num ${state}">${state === "done" ? "✓" : n}</span><h3>${title}</h3></div>`;
 }
 
+// «Что бот делает сейчас»: последние значимые строки журнала без служебных.
+async function renderLiveFeed() {
+  const box = document.getElementById("live-feed");
+  if (!box?.open) return;
+  try {
+    const { lines } = await api("/api/logs?lines=120");
+    const rows = lines
+      .filter((l) => / (INFO|WARNING|ERROR) +\|/.test(l) && !l.includes("api.telegram.org"))
+      .slice(-10)
+      .reverse()
+      .map((l) => {
+        const [, time = "", level = "", , msg = l] = l.match(/^\S+ (\S+) \| (\w+) *\| ([^-]*) - (.*)$/) || [];
+        return `<div>${escapeHtml(time.slice(0, 8))} ${level === "INFO" ? "" : "⚠ "}${escapeHtml(msg.slice(0, 160))}</div>`;
+      });
+    document.getElementById("live-feed-body").innerHTML = rows.join("") || "Пока тихо.";
+  } catch (e) {
+    /* лента необязательна */
+  }
+}
+document.getElementById("live-feed")?.addEventListener("toggle", renderLiveFeed);
+
 const SENT_LABELS = { sent: "отправлено", replied: "ответили", bounced: "возврат", failed: "не ушло" };
 let sentRows = [];
 function renderSentLog() {
@@ -2439,6 +2460,7 @@ const render = {
 
   async overview() {
     const todoPromise = renderTodo();
+    renderLiveFeed();
     renderOwnChannels();
     if (!overviewLoaded) {
       document.getElementById("stats-row").innerHTML = skeletonStats();
@@ -2470,9 +2492,11 @@ const render = {
     const runningLabel = status.daemon_started_at
       ? `бот работает · ${formatElapsed(status.daemon_started_at)}`
       : "бот работает";
+    const gw = status.telegram_gateway;
+    badge.title = gw?.alive ? (gw.connected ? "Telegram-шлюз на связи" : "Telegram-шлюз переподключается") : "";
     badge.innerHTML = `<span class="badge-dot"></span><span class="btn-label">${
       status.daemon_running ? runningLabel : "бот остановлен"
-    }</span>`;
+    }${gw?.alive ? (gw.connected ? " · Telegram ✓" : " · Telegram …") : ""}</span>`;
     badge.classList.toggle("on", status.daemon_running);
     badge.classList.toggle("off", !status.daemon_running);
     // Одна кнопка вместо двух (Старт/Пауза): демон не запущен — это
