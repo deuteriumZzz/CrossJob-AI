@@ -101,14 +101,22 @@ def test_run_easy_apply_scrapes_and_applies_answers_per_step():
     driver.find_element.return_value = MagicMock()  # MODAL_SELECTOR match
     driver.find_elements.return_value = []  # no <p> tags -> no fields
 
-    click_sequence = [True, True]  # Easy Apply button, then Submit
+    click_sequence = [True]  # только Easy Apply: Submit в dry-run НЕ жмём
+    clicked_xpaths = []
 
     def fake_click(driver_arg, xpath):
+        clicked_xpaths.append(xpath)
         return click_sequence.pop(0) if click_sequence else False
 
     with patch(
         "src.job_sources.linkedin.easy_apply._click", side_effect=fake_click
     ), patch("src.job_sources.linkedin.easy_apply.time.sleep"), patch(
+        "src.job_sources.linkedin.easy_apply._wait_for_modal",
+        return_value=True,
+    ), patch(
+        "src.job_sources.linkedin.easy_apply._is_displayed",
+        return_value=True,  # кнопка Submit видна
+    ), patch(
         "src.job_sources.linkedin.easy_apply.draft_answers"
     ) as fake_draft:
         submitted, reason = run_easy_apply(
@@ -125,6 +133,10 @@ def test_run_easy_apply_scrapes_and_applies_answers_per_step():
     assert submitted is True
     assert reason == ""
     fake_draft.assert_not_called()  # no fields scraped -> no LLM call
+    # dry-run не должен кликать Submit (раньше кликал и отправлял отклик)
+    from src.job_sources.linkedin.easy_apply import SUBMIT_XPATH
+
+    assert SUBMIT_XPATH not in clicked_xpaths
 
 
 def test_run_easy_apply_reports_stuck_reason_when_no_next_or_submit():
@@ -148,7 +160,10 @@ def test_run_easy_apply_reports_stuck_reason_when_no_next_or_submit():
 
     with patch(
         "src.job_sources.linkedin.easy_apply._click", side_effect=fake_click
-    ), patch("src.job_sources.linkedin.easy_apply.time.sleep"):
+    ), patch("src.job_sources.linkedin.easy_apply.time.sleep"), patch(
+        "src.job_sources.linkedin.easy_apply._wait_for_modal",
+        return_value=True,
+    ):
         submitted, reason = run_easy_apply(
             driver,
             job,
@@ -162,6 +177,32 @@ def test_run_easy_apply_reports_stuck_reason_when_no_next_or_submit():
 
     assert submitted is False
     assert reason == "stuck"
+
+
+def test_run_easy_apply_reclicks_when_modal_does_not_open():
+    """Клик по Easy Apply на недогруженной странице ничего не открывает —
+    жмём ещё раз, и только после трёх неудач сдаёмся с no_modal."""
+    job = MagicMock()
+    job.link = "https://www.linkedin.com/jobs/view/123/"
+    driver = MagicMock()
+    clicks = []
+
+    def fake_click(driver_arg, xpath):
+        clicks.append(xpath)
+        return True
+
+    with patch(
+        "src.job_sources.linkedin.easy_apply._click", side_effect=fake_click
+    ), patch("src.job_sources.linkedin.easy_apply.time.sleep"), patch(
+        "src.job_sources.linkedin.easy_apply._wait_for_modal",
+        return_value=False,
+    ):
+        submitted, reason = run_easy_apply(
+            driver, job, "r.pdf", "r", "p", "c", "key", dry_run=True
+        )
+
+    assert (submitted, reason) == (False, "no_modal")
+    assert len(clicks) == 1 + 3  # первый клик + повтор после каждой попытки
 
 
 if __name__ == "__main__":

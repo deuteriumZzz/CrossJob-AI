@@ -1,4 +1,8 @@
+import json
 import time
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
 
 from selenium.common.exceptions import (
     ElementClickInterceptedException,
@@ -12,6 +16,7 @@ from src.job_sources.linkedin.dynamic_form import (
     check_required_consent_checkboxes,
     draft_answers,
     scrape_visible_fields,
+    validation_errors,
 )
 from src.logging import logger
 
@@ -54,6 +59,7 @@ def run_easy_apply(
     cover_letter: str,
     llm_api_key: str,
     dry_run: bool,
+    failure_log: Optional[Path] = None,
 ) -> tuple[bool, str]:
     """Проводит кандидата через многошаговую форму Easy Apply. Возвращает
     (True, "") если отклик отправлен (или был бы отправлен, в dry-run
@@ -104,11 +110,38 @@ def run_easy_apply(
             )
             return False, "closed"
         logger.warning(f"No Easy Apply button on {job.link}, skipping.")
+        log_failure(driver, job, "no_button", 0, [], failure_log)
         return False, "no_button"
-    time.sleep(2)
+    # Подтверждено живьём 2026-10-07: кнопка есть уже на недогруженной
+    # странице (серые заглушки), клик по ней тогда ничего не открывает, а
+    # окно формы на загруженной странице появляется не за 2с, а за
+    # несколько секунд — раньше бот смотрел на пустую страницу и писал
+    # "stuck (no Next/Submit)" на ВСЕХ вакансиях. Ждём окно и, если его
+    # нет, жмём кнопку ещё раз.
+    for attempt in range(3):
+        if _wait_for_modal(driver, 10):
+            break
+        logger.info(
+            f"Окно Easy Apply не открылось (попытка {attempt + 1}/3) на "
+            f"{job.link} — жму кнопку ещё раз."
+        )
+        if attempt == 1:
+            # Страница могла так и не догрузиться (серые заглушки на
+            # месте описания) — тогда клик не доходит до обработчика.
+            # Перезагрузка и пауза, потом снова клик.
+            driver.refresh()
+            time.sleep(8)
+        _click(driver, EASY_APPLY_BUTTON_XPATH)
+    else:
+        logger.warning(f"Easy Apply modal never opened on {job.link}.")
+        log_failure(driver, job, "no_modal", 0, [], failure_log)
+        return False, "no_modal"
+    time.sleep(1)
 
     fields: list = []
-    for _ in range(MAX_STEPS):
+    previous_errors: list[str] = []
+    repeated_errors = 0
+    for step in range(1, MAX_STEPS + 1):
         # ponytail: подтверждено вживую — те же функции на той же
         # зависавшей вакансии прошли все шаги чисто, когда между ними
         # естественно появлялась пара сотен мс на чтение/парсинг DOM
@@ -124,9 +157,16 @@ def run_easy_apply(
         except Exception:
             form = None
         fields = []
+        errors: list[str] = []
         if form is not None:
             check_required_consent_checkboxes(driver, form)
-            fields = scrape_visible_fields(driver, form)
+            # Ошибки, оставшиеся после прошлого "Next": исправляем именно
+            # их (в том числе уже заполненные поля), а не повторяем тот
+            # же ответ до лимита шагов.
+            errors = validation_errors(driver, form)
+            fields = scrape_visible_fields(
+                driver, form, include_filled=bool(errors)
+            )
             if fields:
                 answers = draft_answers(
                     fields,
@@ -135,18 +175,50 @@ def run_easy_apply(
                     profile_text,
                     cover_letter,
                     llm_api_key,
+                    errors=errors or None,
                 )
-                apply_answers(driver, fields, answers)
+                logger.info(
+                    f"Easy Apply шаг {step}"
+                    + (f" (ошибки формы: {errors})" if errors else "")
+                    + ": "
+                    + "; ".join(
+                        f"[{f.kind}] {f.text[:70]!r} -> "
+                        f"{_answer_text(answers[f.index])[:60]!r}"
+                        for f in fields
+                        if f.index in answers
+                    )
+                )
+                apply_answers(
+                    driver, fields, answers, clear_first=bool(errors)
+                )
+        repeated_errors = (
+            repeated_errors + 1 if errors and errors == previous_errors else 0
+        )
+        previous_errors = errors
+        if repeated_errors >= 2:
+            logger.warning(
+                f"Easy Apply: форма трижды отклонила ответы на {job.link}: "
+                f"{errors}"
+            )
+            log_failure(driver, job, "validation", step, fields, failure_log)
+            _dismiss(driver)
+            return False, "validation"
 
-        if _click(driver, SUBMIT_XPATH):
-            if dry_run:
+        # dry-run: до кнопки Submit дошли — это и есть «отправили бы», но
+        # НЕ нажимаем её. Раньше здесь стоял _click(SUBMIT_XPATH) и в
+        # dry-run: он настоящим кликом отправлял отклик, а затем только
+        # писал "Would submit" (найдено 2026-10-07 — тестовый проход ушёл
+        # реальными откликами).
+        if dry_run:
+            if _is_displayed(driver, SUBMIT_XPATH):
                 logger.info(
                     f"[dry run] Would submit Easy Apply: {job.role} "
                     f"at {job.company}"
                 )
                 _dismiss(driver)
-            else:
-                time.sleep(1)
+                return True, ""
+        elif _click(driver, SUBMIT_XPATH):
+            time.sleep(1)
             return True, ""
 
         if not _click(driver, NEXT_OR_REVIEW_XPATH):
@@ -155,6 +227,7 @@ def run_easy_apply(
                 f"skipping. Fields on this step: "
                 f"{[(f.kind, f.text) for f in fields]}"
             )
+            log_failure(driver, job, "stuck", step, fields, failure_log)
             _dismiss(driver)
             return False, "stuck"
         # ponytail: 1.5с изначально — недостаточно, живой прогон
@@ -168,8 +241,91 @@ def run_easy_apply(
         f"Easy Apply exceeded {MAX_STEPS} steps on {job.link} — skipping. "
         f"Fields on last step: {[(f.kind, f.text) for f in fields]}"
     )
+    log_failure(driver, job, "exceeded_steps", MAX_STEPS, fields, failure_log)
     _dismiss(driver)
     return False, "exceeded_steps"
+
+
+def _answer_text(answer) -> str:
+    return answer.selected_option or answer.text_answer or ""
+
+
+def _is_displayed(driver, xpath: str) -> bool:
+    for el in driver.find_elements(By.XPATH, xpath):
+        try:
+            if el.is_displayed():
+                return True
+        except StaleElementReferenceException:
+            continue
+    return False
+
+
+def _wait_for_modal(driver, seconds: float) -> bool:
+    deadline = time.monotonic() + seconds
+    while True:
+        if driver.find_elements(By.CSS_SELECTOR, MODAL_SELECTOR):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.5)
+
+
+_ERROR_SELECTOR = (
+    "[role='alert'], .artdeco-inline-feedback--error, "
+    "[data-test-form-element-error-messages]"
+)
+
+
+def log_failure(
+    driver,
+    job,
+    reason: str,
+    step: int,
+    fields: list,
+    failure_log: Optional[Path],
+    error: str = "",
+) -> None:
+    """Одна строка JSON на каждый сбой Easy Apply + скриншот рядом — в
+    applied_log причина пропуска не сохраняется (всё пишется как
+    skipped_easy_apply_failed), и без неё не понять, на каком шаге/поле
+    форма ломается. Диагностика не должна сама ронять отклик."""
+    if failure_log is None:
+        return
+    try:
+        try:
+            errors = [
+                e.text.strip()
+                for e in driver.find_elements(By.CSS_SELECTOR, _ERROR_SELECTOR)
+                if e.text.strip()
+            ]
+        except Exception:
+            errors = []
+        shot = ""
+        try:
+            shots = failure_log.parent / "easy_apply_failures"
+            shots.mkdir(parents=True, exist_ok=True)
+            job_id = str(job.link).rstrip("/").split("/")[-1] or "job"
+            shot_path = shots / f"{datetime.now():%Y%m%d_%H%M%S}_{job_id}.png"
+            if driver.save_screenshot(str(shot_path)):
+                shot = shot_path.name
+        except Exception:
+            pass
+        record = {
+            "at": datetime.now().astimezone().isoformat(),
+            "link": job.link,
+            "company": job.company,
+            "role": job.role,
+            "reason": reason,
+            "step": step,
+            "fields": [[f.kind, f.text] for f in fields],
+            "errors": errors[:5],
+            "error": error[:300],
+            "screenshot": shot,
+        }
+        with failure_log.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as e:
+        logger.debug(f"Could not record Easy Apply failure: {e}")
 
 
 def _click(driver, xpath: str) -> bool:

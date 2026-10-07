@@ -51,6 +51,53 @@ NON_QUESTION_LABELS = {
     "invalid input",
 }
 PAGE_COUNTER_RE = re.compile(r"^\d+/\d+ pages$")
+# Пустой пункт <select> ("Select an option") — не ответ: если LLM или
+# фолбэк _closest_option выберет его, LinkedIn отвечает "Please enter a
+# valid answer" и шаг не проходит.
+PLACEHOLDER_OPTION_RE = re.compile(
+    r"^(select|choose|please select|выберите|seleccione)\b", re.IGNORECASE
+)
+ERROR_SELECTOR = (
+    "[role='alert'], .artdeco-inline-feedback--error, "
+    "[data-test-form-element-error-messages], [id*='error'], "
+    "[class*='error']"
+)
+# Не ошибки: role=alert у LinkedIn заодно показывает зелёные тосты
+# ("Resume uploaded successfully") — раньше они принимались за ошибку
+# валидации и форма ложно закрывалась как "validation".
+_SUCCESS_TEXT_RE = re.compile(
+    r"success|uploaded|saved|успешно|erfolgreich|correctamente", re.IGNORECASE
+)
+
+
+def _real_options(select_el) -> list[str]:
+    return [
+        o.text.strip()
+        for o in Select(select_el).options
+        if o.text.strip() and not PLACEHOLDER_OPTION_RE.match(o.text.strip())
+    ]
+
+
+def validation_errors(driver, form) -> list[str]:
+    """Видимые сообщения об ошибках формы текущего шага ("This field is
+    required", "Invalid input", "Enter a whole number"...). Нужны, чтобы
+    после неудачного "Next" не повторять тот же ответ, а исправлять
+    именно то, что отклонил LinkedIn."""
+    found: list[str] = []
+    try:
+        for el in form.find_elements(By.CSS_SELECTOR, ERROR_SELECTOR):
+            text = (el.text or "").strip()
+            if (
+                text
+                and len(text) < 200
+                and not _SUCCESS_TEXT_RE.search(text)
+                and el.is_displayed()
+                and text not in found
+            ):
+                found.append(text)
+    except Exception as e:
+        logger.debug(f"validation_errors failed: {e}")
+    return found
 
 
 class ScrapedField:
@@ -275,7 +322,9 @@ def _text_like_inputs(container) -> list:
     return results
 
 
-def scrape_visible_fields(driver, form) -> list[ScrapedField]:
+def scrape_visible_fields(
+    driver, form, include_filled: bool = False
+) -> list[ScrapedField]:
     """Собирает все видимые незаполненные вопросы ТЕКУЩЕЙ страницы
     формы — не по конкретным атрибутам, а по факту разметки (есть ли
     рядом с текстом вопроса select/radio/checkbox/text-поле). Что
@@ -287,7 +336,11 @@ def scrape_visible_fields(driver, form) -> list[ScrapedField]:
     поля БЕЗ своего <p> (например "Location (city)" на шаге Contact
     Info — там текст вопроса лежит в обычном <label>/placeholder, не
     в <p>). claimed_elements не даёт полю из (1) попасть туда же
-    повторно через (2)."""
+    повторно через (2).
+
+    include_filled=True — после ошибки валидации берём и уже заполненные
+    текстовые поля, иначе неверно вписанное значение (например "1.5" в
+    целочисленном поле) уже не попадает в список и не исправляется."""
     fields: list[ScrapedField] = []
     seen_parents: set = set()
     claimed_elements: set = set()
@@ -313,21 +366,24 @@ def scrape_visible_fields(driver, form) -> list[ScrapedField]:
 
         selects = parent.find_elements(By.TAG_NAME, "select")
         if selects:
-            options = [
-                o.text.strip()
-                for o in Select(selects[0]).options
-                if o.text.strip()
-            ]
-            if options:
-                select_question = _group_label(driver, selects[0], question)
-                seen_parents.add(parent.id)
-                claimed_elements.add(selects[0].id)
+            # Несколько select-вопросов могут лежать в ОДНОМ контейнере
+            # (живьём 2026-10-07: "Wie gut beherrschen Sie Deutsch?" и
+            # "...Englisch?" рядом) — раньше бралась только первая, а
+            # остальные оставались "Select an option" и форма не шла
+            # дальше. Берём все ещё не занятые.
+            for select_el in selects:
+                if select_el.id in claimed_elements:
+                    continue
+                options = _real_options(select_el)
+                if not options:
+                    continue
+                label = _group_label(driver, select_el, question)
+                claimed_elements.add(select_el.id)
                 fields.append(
-                    ScrapedField(
-                        index, select_question, "select", options, selects[0]
-                    )
+                    ScrapedField(index, label, "select", options, select_el)
                 )
                 index += 1
+            seen_parents.add(parent.id)
             continue
 
         radios = parent.find_elements(By.CSS_SELECTOR, "[role='radio']")
@@ -359,7 +415,9 @@ def scrape_visible_fields(driver, form) -> list[ScrapedField]:
         text_inputs = _text_like_inputs(parent)
         if text_inputs:
             field = text_inputs[0]
-            if field.is_displayed() and not field.get_attribute("value"):
+            if field.is_displayed() and (
+                include_filled or not field.get_attribute("value")
+            ):
                 seen_parents.add(parent.id)
                 claimed_elements.add(field.id)
                 fields.append(
@@ -378,7 +436,9 @@ def scrape_visible_fields(driver, form) -> list[ScrapedField]:
     for field in _text_like_inputs(form):
         if field.id in claimed_elements:
             continue
-        if not field.is_displayed() or field.get_attribute("value"):
+        if not field.is_displayed() or (
+            field.get_attribute("value") and not include_filled
+        ):
             continue
         is_required = (
             field.get_attribute("required") is not None
@@ -400,6 +460,31 @@ def scrape_visible_fields(driver, form) -> list[ScrapedField]:
             )
         )
         index += 1
+
+    # Страховка: любой видимый select, который так и остался на "Select an
+    # option" и не попал в поля выше (вопрос без <p>, нестандартная
+    # вёрстка), — иначе LinkedIn не пустит дальше ("This field is required").
+    for select_el in form.find_elements(By.TAG_NAME, "select"):
+        if select_el.id in claimed_elements:
+            continue
+        try:
+            if not select_el.is_displayed():
+                continue
+            chosen = (
+                Select(select_el).first_selected_option.text or ""
+            ).strip()
+        except Exception:
+            continue
+        if chosen and not PLACEHOLDER_OPTION_RE.match(chosen):
+            continue
+        options = _real_options(select_el)
+        label = _group_label(driver, select_el, "")
+        if options and label:
+            claimed_elements.add(select_el.id)
+            fields.append(
+                ScrapedField(index, label, "select", options, select_el)
+            )
+            index += 1
 
     return fields
 
@@ -432,6 +517,7 @@ def draft_answers(
     profile_text: str,
     cover_letter: str,
     llm_api_key: str,
+    errors: Optional[list[str]] = None,
 ) -> dict[int, _FieldAnswer]:
     """Один батч-вызов LLM на все поля текущей страницы формы —
     выбирает варианты только из уже предложенного списка options
@@ -440,6 +526,14 @@ def draft_answers(
     if not fields:
         return {}
 
+    errors_block = (
+        "\n\n## The form rejected the previous answers with these "
+        "validation errors — fix exactly these fields (right format, a "
+        "whole number where a number is required, within the character "
+        "limit, a real option from the list):\n- " + "\n- ".join(errors)
+        if errors
+        else ""
+    )
     fields_block = "\n".join(
         f"{f.index}. [{f.kind}] {f.text}"
         + (f" Options: {f.options}" if f.options else "")
@@ -471,7 +565,7 @@ def draft_answers(
             f"## Candidate resume:\n{resume_text}\n\n"
             f"## Candidate profile:\n{profile_text}\n\n"
             f"## Pre-written cover letter for this job:\n{cover_letter}\n\n"
-            f"## Form fields:\n{fields_block}"
+            f"## Form fields:\n{fields_block}{errors_block}"
         ),
     )
     return {a.index: a for a in result.answers}
@@ -509,7 +603,10 @@ def check_required_consent_checkboxes(driver, form) -> None:
 
 
 def apply_answers(
-    driver, fields: list[ScrapedField], answers: dict[int, _FieldAnswer]
+    driver,
+    fields: list[ScrapedField],
+    answers: dict[int, _FieldAnswer],
+    clear_first: bool = False,
 ) -> None:
     """Заполняет форму по уже сгенерированным ответам — не решает, что
     писать (это уже сделано в draft_answers), только применяет."""
@@ -525,6 +622,7 @@ def apply_answers(
                 o.text.strip()
                 for o in Select(f.element).options
                 if o.text.strip()
+                and not PLACEHOLDER_OPTION_RE.match(o.text.strip())
             ]
             if options:
                 Select(f.element).select_by_visible_text(
@@ -559,6 +657,8 @@ def apply_answers(
             if not answer.text_answer:
                 continue
             try:
+                if clear_first:
+                    f.element.clear()
                 _fill_text_field(
                     driver,
                     f.element,
