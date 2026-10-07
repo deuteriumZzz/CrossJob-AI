@@ -2,6 +2,7 @@ from src.job import Job
 from src.job_sources.avito.search import search_jobs
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import PlatformBlockedError
+from src.job_sources.filters import remote_only as remote_only_filter
 from src.job_sources.preferences import effective_list
 from src.logging import logger
 
@@ -14,7 +15,7 @@ class AvitoSource:
         seen_ids: set = set()
         jobs: list[Job] = []
         av_prefs = preferences.get("avito") or {}
-        remote_only = bool(av_prefs.get("remote_only"))
+        remote_only = remote_only_filter(preferences, "avito")
         # Переиспользует общие поля qualification/employment_type
         # (те же имена и тип — строка, — что уже завёл Habr Career;
         # у Avito "Опыт работы" тоже одиночный выбор, не список, в

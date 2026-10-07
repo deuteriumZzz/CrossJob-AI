@@ -47,6 +47,9 @@ from main import (
     block_headhunter_employer,
 )
 from main import bootstrap_data_folder as _bootstrap_data_folder
+from main import (
+    candidate_name,
+)
 from main import check_campaign_sending as _check_campaign_sending
 from main import create_cover_letter as _create_cover_letter
 from main import create_resume_audit as _create_resume_audit
@@ -97,6 +100,14 @@ from src.job_sources.apply_pacing import (
 )
 from src.job_sources.block_detection import is_still_blocked
 from src.job_sources.contact_book import ContactBook, company_key
+from src.job_sources.filters import (
+    FILTER_SUPPORT,
+    LEVELS,
+)
+from src.job_sources.filters import remote_only as remote_only_filter
+from src.job_sources.filters import (
+    work_formats,
+)
 from src.job_sources.hr_replies import (
     CATEGORY_LABELS,
     DraftStore,
@@ -626,7 +637,11 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
                 # src/job_sources/habr_career/client.py) — для
                 # остальных площадок просто останутся false/пусто,
                 # безвредно.
-                "remote_only": bool(source_config.get("remote_only")),
+                # Общий выбор «Формат работы» («Что ищу») главнее своего
+                # флага площадки: см. src/job_sources/filters.py.
+                "remote_only": remote_only_filter(ctx.config, name),
+                "remote_only_managed": bool(work_formats(ctx.config)),
+                "levels_managed": bool(ctx.config.get("levels")),
                 "experience_level": source_config.get("experience_level")
                 or [],
                 "qualification": source_config.get("qualification") or "",
@@ -1705,6 +1720,13 @@ def _plural(n: int, one: str, few: str, many: str) -> str:
     return one if n % 10 == 1 else few if 2 <= n % 10 <= 4 else many
 
 
+@app.get("/api/filters/support")
+def get_filters_support() -> dict:
+    """Какие общие фильтры («Что ищу») понимает каждая площадка — для
+    пометок «не поддерживается» в интерфейсе."""
+    return {"support": FILTER_SUPPORT}
+
+
 @app.get("/api/todo")
 def get_todo(ctx: AppContext = Depends(get_ctx)) -> dict:
     """«Что сделать сейчас» на Главной: только то, что ждёт человека,
@@ -2559,16 +2581,6 @@ def post_contact_draft(
     if card is None:
         raise HTTPException(404, "Компания не найдена")
     vacancy = card["vacancies"][-1] if card["vacancies"] else {}
-    person: dict = {}
-    resume_yaml = ctx.plain_text_resume_file
-    if resume_yaml and Path(resume_yaml).exists():
-        import yaml as _yaml
-
-        person = (
-            _yaml.safe_load(Path(resume_yaml).read_text(encoding="utf-8"))
-            or {}
-        ).get("personal_information") or {}
-    name = f"{person.get('name', '')} {person.get('surname', '')}".strip()
     # Было жёстко зашито на resume.pdf независимо от языка/площадки
     # компании — тот же баг, что уже чинил в тренажёре интервью и
     # кнопке "📎 Резюме" в Telegram-чате. company_uses_russian — та же
@@ -2583,6 +2595,7 @@ def post_contact_draft(
         raise HTTPException(
             404, "Резюме не найдено — загрузите в «Мои резюме»"
         )
+    name = candidate_name(ctx.config, resume)
     try:
         message = generate_first_message(
             resume,
@@ -3563,6 +3576,7 @@ _SEARCH_LIST_FIELDS = (
     "company_blacklist",
     "title_blacklist",
     "location_blacklist",
+    "levels",
 )
 # "Формат работы" hh.ru (см. HeadHunterSource/HeadHunterBrowserSource) —
 # top-level булевы флаги, а не список, поэтому отдельный кортеж со своей
@@ -3580,6 +3594,7 @@ class SearchSettingsUpdate(BaseModel):
     hybrid: Optional[bool] = None
     onsite: Optional[bool] = None
     only_with_salary: Optional[bool] = None
+    levels: Optional[list[str]] = None
 
 
 def _search_snapshot(ctx: AppContext) -> dict:
@@ -3606,6 +3621,8 @@ def post_search_settings(
     той же текстовой техникой (set_list_field), что и остальные
     настройки дашборда, — не yaml.safe_dump всего файла, чтобы не
     терять комментарии пользователя."""
+    if body.levels is not None:
+        body.levels = [lvl for lvl in LEVELS if lvl in body.levels]
     for field in _SEARCH_LIST_FIELDS:
         value = getattr(body, field)
         if value is not None:

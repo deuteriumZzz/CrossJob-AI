@@ -612,13 +612,22 @@
           <button id="search-generate-positions" class="btn btn-primary">🪄 Сгенерировать должности из резюме</button>
           <span id="search-generate-status" class="muted small"></span>
         </div>
-        <h4 style="margin-top:14px">Формат работы (только HeadHunter)</h4>
-        <p class="muted small">Как на hh.ru в фильтре «Формат работы» — можно включить несколько сразу.</p>
+        <h4 style="margin-top:14px">Формат работы</h4>
+        <p class="muted small">Один выбор для всех площадок. Где площадка такой фильтр не умеет, он просто не применяется.</p>
         <div class="filters">
           <label class="checkbox-row"><input id="search-remote" type="checkbox" class="switch" /> Удалённо</label>
           <label class="checkbox-row"><input id="search-hybrid" type="checkbox" class="switch" /> Гибрид</label>
           <label class="checkbox-row"><input id="search-onsite" type="checkbox" class="switch" /> На месте работодателя</label>
           <label class="checkbox-row"><input id="search-only-with-salary" type="checkbox" class="switch" /> Только с указанной зарплатой</label>
+        </div>
+        <h4 style="margin-top:14px">Уровень</h4>
+        <p class="muted small">Ничего не выбрано — любой уровень. Если выбрать, выдача сузится на тех площадках, которые это умеют.</p>
+        <div class="filters" id="search-levels">
+          <label class="checkbox-row"><input type="checkbox" class="switch search-level" value="intern" /> Стажёр</label>
+          <label class="checkbox-row"><input type="checkbox" class="switch search-level" value="junior" /> Junior</label>
+          <label class="checkbox-row"><input type="checkbox" class="switch search-level" value="middle" /> Middle</label>
+          <label class="checkbox-row"><input type="checkbox" class="switch search-level" value="senior" /> Senior</label>
+          <label class="checkbox-row"><input type="checkbox" class="switch search-level" value="lead" /> Lead</label>
         </div>
         <div class="filters">
           <label class="checkbox-row"><input id="outreach-skip-us" type="checkbox" class="switch" /> Пропускать удалёнку «только из США»</label>

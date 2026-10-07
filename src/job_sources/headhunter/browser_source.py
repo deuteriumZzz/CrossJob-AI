@@ -2,6 +2,7 @@ from src.job import Job
 from src.job_sources.applied_log import max_new_per_run, seen_ids_for
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import PlatformBlockedError
+from src.job_sources.filters import hh_experience
 from src.job_sources.headhunter.browser_client import HeadHunterBrowserClient
 from src.job_sources.headhunter.browser_mapping import (
     hh_html_vacancy_to_job,
@@ -38,6 +39,7 @@ class HeadHunterBrowserSource:
                     page=page,
                     work_formats=work_formats,
                     only_with_salary=bool(preferences.get("only_with_salary")),
+                    experience=tuple(hh_experience(preferences)),
                 )
                 items = parse_search_results(html)
                 if not items:

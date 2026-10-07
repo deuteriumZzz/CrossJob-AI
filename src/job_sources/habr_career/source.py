@@ -1,7 +1,12 @@
+import itertools
+from typing import Optional
+
 from src.job import Job
 from src.job_sources.applied_log import max_new_per_run, seen_ids_for
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import PlatformBlockedError
+from src.job_sources.filters import habr_qualifications
+from src.job_sources.filters import remote_only as remote_only_filter
 from src.job_sources.habr_career.client import HabrCareerClient
 from src.job_sources.habr_career.mapping import (
     habr_vacancy_to_job,
@@ -21,7 +26,7 @@ class HabrCareerSource:
 
     def search(self, preferences: dict) -> list[Job]:
         hc_preferences = preferences.get("habr_career") or {}
-        remote_only = bool(hc_preferences.get("remote_only"))
+        remote_only = remote_only_filter(preferences, "habr_career")
         qualification = hc_preferences.get("qualification") or None
         employment_type = hc_preferences.get("employment_type") or None
 
@@ -31,8 +36,15 @@ class HabrCareerSource:
         opened = 0
         jobs: list[Job] = []
 
-        for position in effective_list(
-            preferences, "habr_career", "positions"
+        # Общие «Уровни» («Что ищу»): Habr принимает один уровень за запрос —
+        # ищем по каждому выбранному (дешёвый HTTP). Не выбраны — своя
+        # настройка площадки.
+        qualifications: list[Optional[str]] = [
+            *habr_qualifications(preferences)
+        ] or [qualification]
+        for position, qualification in itertools.product(
+            effective_list(preferences, "habr_career", "positions"),
+            qualifications,
         ):
             # ponytail: тот же краш посреди прогона, что чинили у
             # GeekjobSource/GetMatchSource — Chrome может умереть между

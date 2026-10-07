@@ -23,6 +23,7 @@ import httpx
 from src.job import Job
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import raise_if_blocked
+from src.job_sources.filters import djinni_employment
 from src.job_sources.preferences import effective_list
 
 BASE = "https://djinni.co"
@@ -63,7 +64,9 @@ _CATEGORIES = {
 }
 
 
-def search_params(position: str, page: int = 1) -> dict:
+def search_params(
+    position: str, page: int = 1, preferences: Optional[dict] = None
+) -> dict:
     """«Python Backend Developer» → категория Python. Без узнаваемой
     технологии — полнотекстовый поиск по латинским словам должности
     (русские «разработчик» на Djinni почти не встречаются)."""
@@ -80,6 +83,9 @@ def search_params(position: str, page: int = 1) -> dict:
         )
         if latin:
             params.update(all_keywords=latin, search_type="full-text")
+    employment = djinni_employment(preferences or {})
+    if employment:
+        params["employment"] = employment
     if page > 1:
         params["page"] = page
     return params
@@ -177,7 +183,8 @@ def search(
         for position in effective_list(preferences, "djinni", "positions"):
             for page in range(1, PAGES_PER_POSITION + 1):
                 response = client.get(
-                    f"{BASE}/jobs/", params=search_params(position, page)
+                    f"{BASE}/jobs/",
+                    params=search_params(position, page, preferences),
                 )
                 page_jobs = parse_jobs(response.text)
                 found = parse_jobs(response.text, country, max_months)

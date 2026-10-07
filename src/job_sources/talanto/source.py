@@ -4,6 +4,7 @@ from src.job import Job
 from src.job_sources.applied_log import seen_ids_for
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import PlatformBlockedError
+from src.job_sources.filters import talanto_levels, talanto_work_formats
 from src.job_sources.preferences import effective_list
 from src.job_sources.talanto.client import TalantoClient
 from src.job_sources.talanto.selectors import SELECTORS
@@ -57,7 +58,12 @@ class TalantoSource:
         for position in effective_list(preferences, "talanto", "positions"):
             for page in range(1, PAGES_PER_POSITION + 1):
                 try:
-                    ids = self.client.search_job_ids(position, page)
+                    ids = self.client.search_job_ids(
+                        position,
+                        page,
+                        talanto_work_formats(preferences),
+                        talanto_levels(preferences),
+                    )
                 except PlatformBlockedError:
                     raise
                 except Exception as e:

@@ -29,7 +29,7 @@ class LinkedInSource:
         for position in effective_list(preferences, "linkedin", "positions"):
             for location in locations:
                 for job in search_easy_apply_jobs(
-                    self.driver, position, location
+                    self.driver, position, location, preferences
                 ):
                     if job.external_id in seen_ids:
                         continue

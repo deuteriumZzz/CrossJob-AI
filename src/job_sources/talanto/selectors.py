@@ -10,7 +10,8 @@ class TalantoSelectors:
     # Карточки в выдаче и ссылки внутри них ведут на /jobs/<uuid>.
     job_link: str = 'a[href^="/jobs/"]'
     job_path_regex: str = (
-        r"^/jobs/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
+        r"^/jobs/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
+        r"[0-9a-f]{12})$"
     )
     contacts_button_text: str = "Показать контакты"
     description_heading: str = "Описание вакансии"

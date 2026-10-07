@@ -73,10 +73,20 @@ class TalantoClient:
             self._driver = init_browser(self.profile_dir)
         return self._driver
 
-    def search_job_ids(self, query: str, page: int = 1) -> list[str]:
+    def search_job_ids(
+        self,
+        query: str,
+        page: int = 1,
+        work_formats: Optional[list[str]] = None,
+        levels: Optional[list[str]] = None,
+    ) -> list[str]:
         """id вакансий страницы выдачи, самые новые первыми (sort=new)."""
         driver = self._acquire_driver()
         url = f"{SELECTORS.base_url}/?q={quote_plus(query)}&sort=new"
+        for work_format in work_formats or []:
+            url += f"&work_formats={work_format}"
+        for level in levels or []:
+            url += f"&levels={level}"
         if page > 1:
             url += f"&page={page}"
         driver.get(url)

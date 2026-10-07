@@ -2886,6 +2886,9 @@ const render = {
       document.getElementById("search-onsite").checked = !!search.onsite;
       document.getElementById("search-only-with-salary").checked =
         !!search.only_with_salary;
+      document.querySelectorAll(".search-level").forEach((el) => {
+        el.checked = (search.levels || []).includes(el.value);
+      });
     });
 
     api("/api/settings/llm").then((llm) => {
@@ -3105,9 +3108,7 @@ const render = {
             }
             ${
               s.name === "avito"
-                ? `<label class="limit-field" style="justify-content:flex-end">
-                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-remote-only switch" ${s.remote_only ? "checked" : ""} />Только удалённые вакансии</span>
-              </label>
+                ? `${s.remote_only_managed ? "" : `<label class="limit-field" style="justify-content:flex-end"><span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-remote-only switch" ${s.remote_only ? "checked" : ""} />Только удалённые вакансии</span></label>`}
               <label class="limit-field">
                 <span>Опыт работы (пусто — любой)</span>
                 <select class="d-hc-qualification">
@@ -3133,10 +3134,8 @@ const render = {
             }
             ${
               s.name === "getmatch"
-                ? `<label class="limit-field" style="justify-content:flex-end">
-                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-remote-only switch" ${s.remote_only ? "checked" : ""} />Только удалённые вакансии</span>
-              </label>
-              <label class="limit-field">
+                ? `${s.remote_only_managed ? "" : `<label class="limit-field" style="justify-content:flex-end"><span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-remote-only switch" ${s.remote_only ? "checked" : ""} />Только удалённые вакансии</span></label>`}
+              ${s.levels_managed ? "" : `<label class="limit-field">
                 <span>Уровень вакансии (пусто — любой)</span>
                 <select class="d-gm-experience-level" multiple size="4">
                   <option value="junior" ${(s.experience_level || []).includes("junior") ? "selected" : ""}>Junior</option>
@@ -3144,15 +3143,13 @@ const render = {
                   <option value="senior" ${(s.experience_level || []).includes("senior") ? "selected" : ""}>Senior</option>
                   <option value="lead" ${(s.experience_level || []).includes("lead") ? "selected" : ""}>Lead / Manager</option>
                 </select>
-              </label>`
+              </label>`}`
                 : ""
             }
             ${
               s.name === "habr_career"
-                ? `<label class="limit-field" style="justify-content:flex-end">
-                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-remote-only switch" ${s.remote_only ? "checked" : ""} />Только удалённые вакансии</span>
-              </label>
-              <label class="limit-field">
+                ? `${s.remote_only_managed ? "" : `<label class="limit-field" style="justify-content:flex-end"><span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-remote-only switch" ${s.remote_only ? "checked" : ""} />Только удалённые вакансии</span></label>`}
+              ${s.levels_managed ? "" : `<label class="limit-field">
                 <span>Квалификация (пусто — любая)</span>
                 <select class="d-hc-qualification">
                   <option value="" ${!s.qualification ? "selected" : ""}>Любая</option>
@@ -3162,7 +3159,7 @@ const render = {
                   <option value="senior" ${s.qualification === "senior" ? "selected" : ""}>Старший (Senior)</option>
                   <option value="lead" ${s.qualification === "lead" ? "selected" : ""}>Ведущий (Lead)</option>
                 </select>
-              </label>
+              </label>`}
               <label class="limit-field">
                 <span>Тип занятости (пусто — любой)</span>
                 <select class="d-hc-employment-type">
@@ -6427,6 +6424,9 @@ function initDashboard() {
             only_with_salary: document.getElementById(
               "search-only-with-salary"
             ).checked,
+            levels: [...document.querySelectorAll(".search-level")]
+              .filter((el) => el.checked)
+              .map((el) => el.value),
           }),
         });
         status.textContent = "Сохранено.";

@@ -1,16 +1,20 @@
 import time
+from typing import Optional
 from urllib.parse import urlencode
 
 from bs4 import BeautifulSoup
 
 from src.job import Job
+from src.job_sources.filters import linkedin_search_params
 
 SEARCH_URL = "https://www.linkedin.com/jobs/search/"
 SCROLL_PAUSE_SECONDS = 1.5
 SCROLL_STEPS = 8
 
 
-def search_easy_apply_jobs(driver, keywords: str, location: str) -> list[Job]:
+def search_easy_apply_jobs(
+    driver, keywords: str, location: str, preferences: Optional[dict] = None
+) -> list[Job]:
     """f_AL=true — собственный параметр LinkedIn для фильтра "только Easy
     Apply", стабильный и широко используемый query-параметр (а не
     подобранный вслепую через скрейпинг). f_WT=2 — фильтр "только
@@ -23,13 +27,13 @@ def search_easy_apply_jobs(driver, keywords: str, location: str) -> list[Job]:
     локацию из профиля кандидата (без geoId все результаты уходили в
     Индонезию — там, где физически находится кандидат в резюме — а не
     по-настоящему worldwide, как задумывалось)."""
-    # sortBy=DD — сначала самые новые (по умолчанию выдача по
-    # релевантности, и свежие вакансии теряются за первыми экранами).
+    # f_AL/f_WT/sortBy — из единых фильтров (src/job_sources/filters.py);
+    # по умолчанию те же, что были зашиты: Easy Apply, только удалённые,
+    # сначала новые (по умолчанию LinkedIn сортирует по релевантности, и
+    # свежие вакансии теряются за первыми экранами).
     params = {
         "keywords": keywords,
-        "f_AL": "true",
-        "f_WT": "2",
-        "sortBy": "DD",
+        **linkedin_search_params(preferences or {}),
     }
     if location:
         params["location"] = location

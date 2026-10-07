@@ -1,6 +1,8 @@
 from src.job import Job
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import PlatformBlockedError
+from src.job_sources.filters import getmatch_seniority
+from src.job_sources.filters import remote_only as remote_only_filter
 from src.job_sources.getmatch.client import EXPERIENCE_LEVELS, GetMatchClient
 from src.job_sources.getmatch.mapping import parse_search_results
 from src.job_sources.preferences import effective_list
@@ -61,8 +63,8 @@ class GetMatchSource:
     def search(self, preferences: dict) -> list[Job]:
         gm_preferences = preferences.get("getmatch") or {}
         specializations = gm_preferences.get("specializations") or []
-        remote_only = bool(gm_preferences.get("remote_only"))
-        experience_levels = [
+        remote_only = remote_only_filter(preferences, "getmatch")
+        experience_levels = getmatch_seniority(preferences) or [
             level
             for level in gm_preferences.get("experience_level") or []
             if level in EXPERIENCE_LEVELS
