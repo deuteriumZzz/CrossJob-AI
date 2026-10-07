@@ -78,20 +78,40 @@ def _real_options(select_el) -> list[str]:
     ]
 
 
+_ERROR_TEXT_RE = (
+    "required|valid answer|invalid|please enter|enter a|select an option|"
+    "make a selection|обязательн|заполните"
+)
+_ERROR_TEXT_JS = """
+const re = new RegExp(arguments[1], 'i');
+return [...arguments[0].querySelectorAll('div,span,p,li')]
+  .filter((e) => e.children.length === 0 && e.offsetParent !== null)
+  .map((e) => (e.innerText || '').trim())
+  .filter((t) => t && t.length < 100 && re.test(t));"""
+
+
 def validation_errors(driver, form) -> list[str]:
     """Видимые сообщения об ошибках формы текущего шага ("This field is
     required", "Invalid input", "Enter a whole number"...). Нужны, чтобы
     после неудачного "Next" не повторять тот же ответ, а исправлять
-    именно то, что отклонил LinkedIn."""
+    именно то, что отклонил LinkedIn. Ищем и по классам, и по тексту:
+    у части форм сообщение — обычный <div> без «error» в классе (живьём
+    2026-10-07: «This field is required» под чекбоксом согласия)."""
     found: list[str] = []
     try:
-        for el in form.find_elements(By.CSS_SELECTOR, ERROR_SELECTOR):
-            text = (el.text or "").strip()
+        candidates = [
+            (el.text or "").strip()
+            for el in form.find_elements(By.CSS_SELECTOR, ERROR_SELECTOR)
+            if el.is_displayed()
+        ]
+        candidates += driver.execute_script(
+            _ERROR_TEXT_JS, form, _ERROR_TEXT_RE
+        )
+        for text in candidates:
             if (
                 text
                 and len(text) < 200
                 and not _SUCCESS_TEXT_RE.search(text)
-                and el.is_displayed()
                 and text not in found
             ):
                 found.append(text)
@@ -571,17 +591,25 @@ def draft_answers(
     return {a.index: a for a in result.answers}
 
 
-def check_required_consent_checkboxes(driver, form) -> None:
+_CONSENT_LABEL_RE = re.compile(
+    r"consent|i agree|agree to|i accept|accept the|i certify|acknowledge|"
+    r"i have read|согласен|согласна|принимаю|подтверждаю",
+    re.IGNORECASE,
+)
+
+
+def check_required_consent_checkboxes(
+    driver, form, labelled: bool = False
+) -> None:
     """ponytail: обязательные чекбоксы-подтверждения ("I agree to be
     contacted", "I certify the above is true" и т.п.) часто идут БЕЗ
     вопроса в <p> — просто текст рядом с чекбоксом. Ни p-цикл, ни
-    text-цикл в scrape_visible_fields их не видят (оба заточены под
-    вопросы с текстом), LinkedIn не пускал дальше по валидации без
-    единой причины в логе — форма зависала на "stuck (no Next/Submit)"
-    (подтверждено по логам демона 2026-09-09: 3 из 3 реальных вакансий
-    в одном заходе упёрлись сюда без единого краша). Единственное
-    честное действие тут — отметить: это гейт, не вопрос с выбором,
-    отказ не пропустит дальше вне зависимости от ответа."""
+    text-цикл в scrape_visible_fields их не видят, LinkedIn не пускал
+    дальше по валидации без единой причины в логе. Единственное честное
+    действие тут — отметить: это гейт, не вопрос с выбором.
+    labelled=True (форма уже показала ошибку) — отмечаем и чекбоксы без
+    атрибута required, если подпись — согласие с политикой
+    конфиденциальности ("I consent"; живьём 2026-10-07, Inetum)."""
     for checkbox in form.find_elements(
         By.CSS_SELECTOR, "input[type='checkbox']"
     ):
@@ -594,6 +622,12 @@ def check_required_consent_checkboxes(driver, form) -> None:
             checkbox.get_attribute("required") is not None
             or checkbox.get_attribute("aria-required") == "true"
         )
+        if not is_required and labelled:
+            try:
+                label = _radio_label(driver, checkbox)
+            except Exception:
+                label = ""
+            is_required = bool(_CONSENT_LABEL_RE.search(label or ""))
         if not is_required:
             continue
         try:

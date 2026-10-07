@@ -87,13 +87,57 @@ def search_easy_apply_jobs(
     return jobs
 
 
+_DESCRIPTION_SELECTORS = (
+    ".jobs-description__content, .jobs-box__html-content, "
+    "#job-details, [class*='jobs-description']"
+)
+_DESCRIPTION_HEADINGS = (
+    "about the job",
+    "о вакансии",
+    "описание вакансии",
+    "acerca del empleo",
+    "über diese stelle",
+    "sobre a vaga",
+)
+# Раздел описания у LinkedIn подгружается отдельным запросом позже шапки
+# вакансии; когда сессию ограничивают, он не приходит вообще (шапка есть,
+# описания нет) — тогда ждём и отдаём пустой текст, а вызывающий код
+# вакансию не оценивает вслепую.
+_DESCRIPTION_WAIT_SECONDS = 12
+
+_HEADING_JS = """
+const names = arguments[0];
+const heads = [...document.querySelectorAll('h1,h2,h3,h4,p,span,div')].filter(
+  (e) => names.includes((e.innerText || '').trim().toLowerCase())
+    && (e.innerText || '').trim().length < 40);
+for (const h of heads.reverse()) {
+  let p = h;
+  for (let i = 0; i < 8 && p.parentElement; i++) {
+    p = p.parentElement;
+    const text = (p.innerText || '').trim();
+    if (text.length > 300) return text;
+  }
+}
+return '';"""
+
+
+def _read_description(driver) -> str:
+    soup = BeautifulSoup(driver.page_source, "html.parser")
+    node = soup.select_one(_DESCRIPTION_SELECTORS)
+    if node and node.get_text(strip=True):
+        return node.get_text("\n", strip=True)
+    return (
+        driver.execute_script(_HEADING_JS, list(_DESCRIPTION_HEADINGS)) or ""
+    )
+
+
 def load_job_description(driver, job: Job) -> Job:
     driver.get(job.link)
-    time.sleep(2)
-    soup = BeautifulSoup(driver.page_source, "html.parser")
-    description = soup.select_one(
-        ".jobs-description__content, .jobs-box__html-content"
-    )
-    if description:
-        job.description = description.get_text("\n", strip=True)
+    deadline = time.monotonic() + _DESCRIPTION_WAIT_SECONDS
+    while True:
+        time.sleep(2)
+        text = _read_description(driver)
+        if text or time.monotonic() >= deadline:
+            break
+    job.description = text
     return job

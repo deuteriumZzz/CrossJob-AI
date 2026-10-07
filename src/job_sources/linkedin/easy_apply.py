@@ -159,11 +159,13 @@ def run_easy_apply(
         fields = []
         errors: list[str] = []
         if form is not None:
-            check_required_consent_checkboxes(driver, form)
             # Ошибки, оставшиеся после прошлого "Next": исправляем именно
             # их (в том числе уже заполненные поля), а не повторяем тот
             # же ответ до лимита шагов.
             errors = validation_errors(driver, form)
+            check_required_consent_checkboxes(
+                driver, form, labelled=bool(errors)
+            )
             fields = scrape_visible_fields(
                 driver, form, include_filled=bool(errors)
             )

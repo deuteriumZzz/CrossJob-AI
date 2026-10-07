@@ -2478,6 +2478,7 @@ def search_and_apply_linkedin(
         daily_limit = randomized_daily_limit(_linkedin_daily_limit(parameters))
         sent_count = 0
         no_modal_in_a_row = 0
+        empty_description_in_a_row = 0
         job_max_applications = _job_max_applications(parameters, "linkedin")
 
         for job in jobs:
@@ -2522,6 +2523,30 @@ def search_and_apply_linkedin(
                 )
                 break
 
+            if not job.description.strip():
+                # Описание не пришло (сайт ограничивает сессию): оценка по
+                # одному названию вслепую = случайный отклик. Не оцениваем и
+                # не записываем (вернёмся позже); три подряд — стоп хода.
+                empty_description_in_a_row += 1
+                logger.warning(
+                    f"LinkedIn: у вакансии {job.link} нет описания — "
+                    "пропускаю без оценки."
+                )
+                if empty_description_in_a_row >= 3:
+                    logger.warning(
+                        "LinkedIn не отдаёт описания вакансий 3 раза подряд "
+                        "— останавливаю ход, попробую позже."
+                    )
+                    notify_routine(
+                        parameters,
+                        "LinkedIn: описания вакансий не загружаются 3 раза "
+                        "подряд (похоже на ограничение сайта) — ход "
+                        "остановлен, повторю позже.",
+                        category="linkedin",
+                    )
+                    break
+                continue
+            empty_description_in_a_row = 0
             fit = score_job_fit(
                 resume_pdf_path,
                 job,
