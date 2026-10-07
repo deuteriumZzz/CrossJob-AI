@@ -9,7 +9,7 @@ import time
 import traceback
 from collections import Counter
 from contextlib import nullcontext
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional, Tuple
 
@@ -47,7 +47,11 @@ from src.direct.email_channel import (
 from src.direct.form_fill import prefill_application
 from src.direct.source import DirectSource
 from src.job import Job
-from src.job_sources.applied_log import AppliedLog, effective_stage
+from src.job_sources.applied_log import (
+    EASY_APPLY_MAX_ATTEMPTS,
+    AppliedLog,
+    effective_stage,
+)
 from src.job_sources.apply_pacing import (
     randomized_daily_limit,
     wait_before_apply,
@@ -91,6 +95,9 @@ from src.job_sources.habr_career.auth import HabrCareerSession
 from src.job_sources.habr_career.client import HabrCareerClient
 from src.job_sources.habr_career.source import HabrCareerSource
 from src.job_sources.headhunter.browser_client import HeadHunterBrowserClient
+from src.job_sources.headhunter.browser_mapping import (
+    hh_html_vacancy_to_job,
+)
 from src.job_sources.headhunter.browser_negotiation_states import (
     list_negotiation_states,
 )
@@ -157,7 +164,12 @@ from src.job_sources.interview_prep import generate_interview_prep
 from src.job_sources.job_fit import classify_fit, score_job_fit
 from src.job_sources.linkedin.answerer import EasyApplyAnswerer
 from src.job_sources.linkedin.auth import LinkedInSession
-from src.job_sources.linkedin.easy_apply import run_easy_apply
+from src.job_sources.linkedin.easy_apply import (
+    log_failure as log_easy_apply_failure,
+)
+from src.job_sources.linkedin.easy_apply import (
+    run_easy_apply,
+)
 from src.job_sources.linkedin.source import LinkedInSource
 from src.job_sources.llm_provider import (
     get_active_provider as get_active_llm_provider,
@@ -201,6 +213,11 @@ from src.job_sources.resume_routing import (
     resolve_resume_name,
     resume_relative_name,
 )
+from src.job_sources.talanto.client import (
+    TalantoClient,
+    company_from_apply_url,
+)
+from src.job_sources.talanto.source import TalantoSource
 from src.job_sources.telegram.client import TelegramSourceClient
 from src.job_sources.telegram.contact import extract_contact
 from src.job_sources.telegram.post_parser import parse_post
@@ -1647,9 +1664,23 @@ def _search_and_apply_headhunter_with_session(
                             cover_letter = generate_cover_letter_for_job(
                                 resume_pdf_path, job, llm_api_key
                             )
-                            letter_in_chat = client.send_letter_in_chat(
-                                job.link, job.external_id, cover_letter
+                            # Сначала родная кнопка «Приложить
+                            # сопроводительное письмо» на странице
+                            # вакансии — письмо идёт к самому отклику;
+                            # нет кнопки — первым сообщением в чат.
+                            attached = client.attach_cover_letter(
+                                job.link, cover_letter
                             )
+                            logger.info(
+                                f"Письмо к отклику {job.company}: "
+                                f"{attached} ({len(cover_letter)} симв.)"
+                            )
+                            if attached == "sent":
+                                letter_in_form = True
+                            else:
+                                letter_in_chat = client.send_letter_in_chat(
+                                    job.link, job.external_id, cover_letter
+                                )
                         except Exception as e:
                             logger.warning(
                                 f"Письмо в чат {job.company} сразу не "
@@ -2347,6 +2378,30 @@ def search_getmatch(
         )
 
 
+def _record_easy_apply_failure(
+    parameters: dict,
+    applied_log: AppliedLog,
+    job: Job,
+    fit,
+    reason: str,
+) -> None:
+    """Сбой формы Easy Apply — не приговор вакансии: запись получает
+    счётчик попыток и повторится позже (см. AppliedLog.
+    record_easy_apply_failure). Окончательная неудача — сообщение в
+    Telegram со ссылкой, чтобы вакансию можно было доделать руками, а
+    не терять молча."""
+    attempt = applied_log.record_easy_apply_failure(
+        job, fit.score, fit.gaps, reason
+    )
+    if attempt >= EASY_APPLY_MAX_ATTEMPTS:
+        notify_routine(
+            parameters,
+            f"LinkedIn: форма Easy Apply не прошла после {attempt} попыток "
+            f"({reason}) — {job.role} at {job.company}\n{job.link}",
+            category="linkedin",
+        )
+
+
 def search_and_apply_linkedin(
     parameters: dict,
     llm_api_key: str,
@@ -2422,6 +2477,7 @@ def search_and_apply_linkedin(
         resume_text = extract_pdf_text(str(resume_pdf_path))
         daily_limit = randomized_daily_limit(_linkedin_daily_limit(parameters))
         sent_count = 0
+        no_modal_in_a_row = 0
         job_max_applications = _job_max_applications(parameters, "linkedin")
 
         for job in jobs:
@@ -2540,21 +2596,49 @@ def search_and_apply_linkedin(
                     cover_letter,
                     llm_api_key,
                     dry_run=not auto_apply,
+                    failure_log=output_folder / "easy_apply_failures.jsonl",
                 )
             except Exception as e:
+                log_easy_apply_failure(
+                    session.driver,
+                    job,
+                    "crashed",
+                    0,
+                    [],
+                    output_folder / "easy_apply_failures.jsonl",
+                    error=str(e),
+                )
                 logger.exception(
                     f"Easy Apply crashed on {job.role} at {job.company}, "
                     f"skipping this vacancy: {e}"
                 )
-                applied_log.record(
-                    job,
-                    "",
-                    "",
-                    "skipped_easy_apply_failed",
-                    fit.score,
-                    fit.gaps,
+                _record_easy_apply_failure(
+                    parameters, applied_log, job, fit, f"crashed: {e}"
                 )
                 continue
+            if skip_reason == "no_modal":
+                # Окно формы не открылось ни после повторных кликов, ни
+                # после перезагрузки — это не сломанная форма, а LinkedIn
+                # не отзывается (страница висит на заглушках; живьём
+                # 2026-10-07 после серии тестовых проходов). Вакансию НЕ
+                # записываем сбоем (иначе она сгорит попытками), а после
+                # нескольких таких подряд останавливаем ход площадки.
+                no_modal_in_a_row += 1
+                if no_modal_in_a_row >= 3:
+                    logger.warning(
+                        "LinkedIn не открывает формы Easy Apply 3 раза "
+                        "подряд — останавливаю ход, попробую позже."
+                    )
+                    notify_routine(
+                        parameters,
+                        "LinkedIn: окна Easy Apply не открываются 3 раза "
+                        "подряд (похоже на ограничение со стороны сайта) — "
+                        "ход остановлен, повторю позже.",
+                        category="linkedin",
+                    )
+                    break
+                continue
+            no_modal_in_a_row = 0
             if not submitted:
                 # Без записи сюда та же сломанная форма (незнакомое
                 # поле, зависший Easy Apply и т.п.) пыталась бы
@@ -2571,14 +2655,14 @@ def search_and_apply_linkedin(
                     if skip_reason == "closed"
                     else "skipped_easy_apply_failed"
                 )
-                applied_log.record(
-                    job,
-                    "",
-                    "",
-                    status_reason,
-                    fit.score,
-                    fit.gaps,
-                )
+                if status_reason == "skipped_closed_posting":
+                    applied_log.record(
+                        job, "", "", status_reason, fit.score, fit.gaps
+                    )
+                else:
+                    _record_easy_apply_failure(
+                        parameters, applied_log, job, fit, skip_reason
+                    )
                 continue
 
             status: Literal["applied", "dry_run"] = (
@@ -3557,6 +3641,190 @@ def search_direct(
         )
 
 
+TALANTO_CONTACTS_FILE = ".talanto_contacts.json"
+DEFAULT_TALANTO_CONTACTS_PER_DAY = 20
+
+
+def _talanto_contacts_used_today(output_folder: Path) -> int:
+    try:
+        data = json.loads(
+            (output_folder / TALANTO_CONTACTS_FILE).read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return 0
+    return data["count"] if data.get("date") == str(date.today()) else 0
+
+
+def _talanto_contact_used(output_folder: Path) -> None:
+    count = _talanto_contacts_used_today(output_folder) + 1
+    (output_folder / TALANTO_CONTACTS_FILE).write_text(
+        json.dumps({"date": str(date.today()), "count": count}),
+        encoding="utf-8",
+    )
+
+
+def search_talanto(
+    parameters: dict,
+    llm_api_key: str,
+    stop_event: Optional[threading.Event] = None,
+):
+    """Канал «Talanto» (talanto: в work_preferences.yaml) — сборщик для
+    Базы, как «Сайты компаний». Откликов внутри talanto.work нет: сайт
+    собирает вакансии с сайтов работодателей и за кнопкой «Показать
+    контакты» отдаёт ссылку Apply (и иногда email/Telegram). Берёт свежие
+    вакансии, оценивает по резюме, подходящие кладёт в Базу компанией с
+    вакансией и контактами; ссылку Apply хранит в вакансии (apply_url) —
+    саму её бот не нажимает (клик записал бы отклик в трекере Talanto).
+    «Показать контакты» может тратить лимит тарифа — не больше
+    talanto.contacts_per_day в день. Слабые совпадения пишутся в
+    applied_log как skipped_low_fit."""
+    config = parameters.get("talanto") or {}
+    data_folder: Path = parameters["dataFolder"]
+    resume_pdf_path = data_folder / RESUME_PDF_LINKEDIN
+    if not resume_pdf_path.exists():
+        resume_pdf_path = data_folder / RESUME_PDF
+    if not resume_pdf_path.exists():
+        raise FileNotFoundError(f"Resume PDF not found in {data_folder}.")
+
+    output_folder: Path = parameters["outputFileDirectory"]
+    if is_still_blocked(output_folder, "talanto"):
+        logger.warning("Talanto is cooling down after a block — skipping.")
+        return
+    applied_log = AppliedLog(output_folder / "applied_log.json")
+    book = ContactBook(output_folder)
+    contacts_per_day = int(
+        config.get("contacts_per_day", DEFAULT_TALANTO_CONTACTS_PER_DAY)
+    )
+    job_max_applications = _job_max_applications(parameters, "talanto")
+
+    added = with_contacts = processed = 0
+    with TalantoClient(output_folder / ".chrome_profile_talanto") as client:
+        try:
+            jobs = TalantoSource(client).search(parameters)
+        except PlatformBlockedError as e:
+            logger.error(f"Talanto appears to have blocked us: {e}")
+            mark_blocked(output_folder, "talanto")
+            notify(
+                parameters,
+                f"Talanto: похоже на блокировку ({e}). Источник поставлен "
+                "на паузу на 24ч.",
+                category="talanto",
+            )
+            return
+        logger.info(f"Found {len(jobs)} new Talanto vacancies.")
+        in_book = {
+            v["link"]
+            for card in book.all().values()
+            for v in card["vacancies"]
+        }
+        for job in jobs:
+            if stop_event is not None and stop_event.is_set():
+                break
+            if processed >= job_max_applications:
+                break
+            if job.link in in_book or applied_log.already_applied(job):
+                continue
+            budget_left = (
+                _talanto_contacts_used_today(output_folder) < contacts_per_day
+            )
+            if not job.company and not budget_left:
+                # Название скрыто тарифом Talanto — узнать компанию можно
+                # только по ссылке из «Контактов», а лимит на сегодня
+                # выбран: не оцениваем и не записываем, вернёмся завтра.
+                continue
+            processed += 1
+            fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+            tier = classify_fit(
+                fit.score,
+                _job_min_score(parameters),
+                _job_suitability_score(parameters),
+            )
+            if tier == "skip":
+                applied_log.record(
+                    job, "", "", "skipped_low_fit", fit.score, fit.gaps
+                )
+                continue
+
+            contacts = [
+                {
+                    **c,
+                    "source": "Talanto: текст вакансии",
+                    "source_url": job.link,
+                }
+                for c in contacts_from_text(
+                    job.description, bare_mentions=False
+                )
+            ]
+            apply_url = hidden_company = ""
+            if budget_left:
+                try:
+                    info = client.show_contacts(job.external_id)
+                except PlatformBlockedError as e:
+                    mark_blocked(output_folder, "talanto")
+                    notify(
+                        parameters,
+                        f"Talanto: похоже на блокировку ({e}).",
+                        category="talanto",
+                    )
+                    break
+                except Exception as e:
+                    logger.warning(f"Talanto: контакты {job.role}: {e}")
+                    info = {"text": "", "apply_url": ""}
+                _talanto_contact_used(output_folder)
+                apply_url = info["apply_url"]
+                hidden_company = info.get("company", "")
+                contacts += [
+                    {
+                        **c,
+                        "source": "Talanto: контакты",
+                        "source_url": job.link,
+                    }
+                    for c in contacts_from_text(
+                        info["text"], bare_mentions=False
+                    )
+                ]
+            else:
+                logger.info("Talanto: дневной лимит открытия контактов.")
+
+            company = (
+                job.company
+                or hidden_company
+                or company_from_apply_url(apply_url)
+            )
+            if not company and not contacts:
+                # Контакты открывали, но ни компании, ни связи — делать
+                # с вакансией нечего; пометка, чтобы не оценивать снова.
+                applied_log.record(
+                    job, "", "", "skipped_requirements", fit.score, fit.gaps
+                )
+                continue
+            vacancy = {
+                "title": job.role,
+                "link": job.link,
+                "source": "talanto",
+                "text": job.description[:4000],
+                "score": fit.score,
+                "apply_url": apply_url,
+            }
+            book.add(company, contacts, vacancy=vacancy)
+            in_book.add(job.link)
+            added += 1
+            with_contacts += bool(contacts)
+            logger.info(
+                f"[в Базу] {job.role} at {company or '?'}"
+                + (f" — {contacts[0]['value']}" if contacts else "")
+                + (f" — {apply_url}" if apply_url else "")
+            )
+
+    if added:
+        notify_routine(
+            parameters,
+            f"🔎 Talanto: +{added} в Базе, с контактами — {with_contacts}. "
+            "Ссылки на отклик — в «Компаниях».",
+            category="Talanto",
+        )
+
+
 # Окна с предзаполненной формой должны жить, пока человек дозаполняет
 # и отправляет — держим ссылки, иначе сборщик мусора закроет драйвер.
 _PREFILL_BROWSERS: list = []
@@ -3596,6 +3864,17 @@ def prefill_direct_application(
 
 
 _EMAILED = "уже писали вручную"
+
+
+def _live_campaign_item(
+    store: "CampaignStore", campaign_id: str, email: str
+) -> Optional[dict]:
+    """Актуальная запись адреса в кампании. Список адресов и снимок
+    кампании берутся в момент старта отправки; если за это время кампанию
+    или адрес удалили, письмо уходить не должно (раньше уходило, пока
+    жив черновик во «Входящих»)."""
+    live = store.get(campaign_id)
+    return ((live or {}).get("items") or {}).get(email)
 
 
 def _emailed_directly(book: ContactBook, email: str) -> bool:
@@ -3819,9 +4098,17 @@ def start_campaign_job(
         ]
 
         def step(email: str) -> Optional[str]:
-            result = send_hr_draft(
-                parameters, campaign["items"][email]["follow_up_code"]
-            )
+            live_item = _live_campaign_item(store, campaign_id, email)
+            if (
+                live_item is None
+                or not live_item.get("follow_up_code")
+                or book.get(live_item["key"]) is None
+            ):
+                logger.info(
+                    f"Напоминание: {email} удалён из кампании — пропускаю."
+                )
+                return None
+            result = send_hr_draft(parameters, live_item["follow_up_code"])
             if not result.startswith("Отправлено"):
                 logger.warning(f"Напоминание {email}: {result}")
             return None
@@ -3847,7 +4134,24 @@ def start_campaign_job(
             guard = mail_guard.plan(parameters, output_folder)
             if not guard["can_send"]:
                 return guard["reason"]
-            code = campaign["items"][email]["code"]
+            live_item = _live_campaign_item(store, campaign_id, email)
+            if live_item is None or live_item["status"] != "draft":
+                logger.info(
+                    f"Рассылка: {email} удалён из кампании или уже не "
+                    "черновик — пропускаю."
+                )
+                return None
+            code = live_item["code"]
+            if book.get(live_item["key"]) is None:
+                # Контакт удалили из базы, пока шла отправка.
+                drafts.remove(code)
+                store.update_item(
+                    campaign_id,
+                    email,
+                    status="skipped",
+                    reason="контакт удалён из базы",
+                )
+                return None
             if drafts.get(code) is None:
                 store.update_item(
                     campaign_id,
@@ -4353,28 +4657,13 @@ def search_and_apply_djinni(
         logger.warning("djinni.co is cooling down after a block — skipping.")
         return
 
-    try:
-        jobs = search_djinni_jobs(parameters)
-    except PlatformBlockedError as e:
-        logger.error(f"djinni.co appears to have blocked us: {e}")
-        mark_blocked(output_folder, "djinni")
-        notify(
-            parameters,
-            f"djinni.co: похоже на блокировку ({e}). Площадка поставлена на "
-            "паузу на 24ч.",
-            category="djinni",
-        )
-        return
-    logger.info(f"Found {len(jobs)} matching djinni.co vacancies.")
-    already_seen = sum(1 for job in jobs if applied_log.already_applied(job))
-    run_start = datetime.now().astimezone()
-    job_max_applications = _job_max_applications(parameters, "djinni")
-    daily_limit = randomized_daily_limit(_daily_limit(parameters, "djinni"))
-
     # Браузер нужен только для отклика и поднятия профиля — иначе не открываем.
     session: Optional[DjinniSession] = None
     sent_count = 0
     try:
+        # Поднятие профиля — первым делом, до поиска и откликов: рекрутеры
+        # увидят поднятый профиль, пока мы откликаемся. Раньше шло после
+        # поиска и пропадало, если поиск упал или площадка ушла на паузу.
         if (parameters.get("djinni") or {}).get(
             "auto_bump_resume"
         ) and _djinni_bump_due(output_folder):
@@ -4395,6 +4684,27 @@ def search_and_apply_djinni(
             except Exception as e:
                 logger.warning(f"Не удалось поднять профиль на Djinni: {e}")
 
+        try:
+            jobs = search_djinni_jobs(parameters)
+        except PlatformBlockedError as e:
+            logger.error(f"djinni.co appears to have blocked us: {e}")
+            mark_blocked(output_folder, "djinni")
+            notify(
+                parameters,
+                f"djinni.co: похоже на блокировку ({e}). Площадка поставлена "
+                "на паузу на 24ч.",
+                category="djinni",
+            )
+            return
+        logger.info(f"Found {len(jobs)} matching djinni.co vacancies.")
+        already_seen = sum(
+            1 for job in jobs if applied_log.already_applied(job)
+        )
+        run_start = datetime.now().astimezone()
+        job_max_applications = _job_max_applications(parameters, "djinni")
+        daily_limit = randomized_daily_limit(
+            _daily_limit(parameters, "djinni")
+        )
         for job in jobs:
             if stop_event is not None and stop_event.is_set():
                 logger.info(
@@ -4554,6 +4864,7 @@ ALL_SOURCES: list[Tuple[str, Callable[..., Any]]] = [
     ("djinni", search_and_apply_djinni),
     ("avito", search_and_apply_avito),
     ("direct", search_direct),
+    ("talanto", search_talanto),
 ]
 
 
@@ -5159,7 +5470,13 @@ def _check_headhunter_replies_with_session(parameters: dict, llm_api_key: str):
                 parameters, driver, applied_log, llm_api_key
             )
         if hh_preferences.get("chat_cover_letter_followup"):
-            _send_missing_cover_letters(driver, applied_log)
+            _send_missing_cover_letters(
+                driver,
+                applied_log,
+                lambda entry: _generate_letter_for_entry(
+                    driver, entry, parameters, llm_api_key
+                ),
+            )
         if hh_preferences.get("auto_reminder"):
             _send_due_hh_reminders(parameters, driver, applied_log)
     finally:
@@ -5362,7 +5679,10 @@ def _hh_chat_send(driver, applied_log: AppliedLog, entry: dict, text: str):
             else "вакансия недоступна для аккаунта"
         )
         applied_log.update_fields(
-            "headhunter", external_id, chat_closed=reason
+            "headhunter",
+            external_id,
+            chat_closed=reason,
+            cover_letter_undeliverable=reason,
         )
     else:
         reason = "чат не открылся, повторю через сутки"
@@ -5423,25 +5743,83 @@ def _send_due_hh_reminders(
             )
 
 
-def _send_missing_cover_letters(driver, applied_log: AppliedLog) -> None:
+# Сколько писем за один заход проверки чата можно сгенерировать заново
+# (отклик ушёл, а письмо тогда не сгенерировалось) — чтобы ход не
+# растягивался на десятки LLM-вызовов.
+_MAX_REGENERATED_LETTERS_PER_CHECK = 5
+
+
+def _generate_letter_for_entry(
+    driver, entry: dict, parameters: dict, llm_api_key: str
+) -> str:
+    """Письмо для отклика, у которого его нет в журнале (генерация тогда
+    упала): открываем страницу вакансии, читаем описание и пишем письмо."""
+    link = entry.get("link") or f"https://hh.ru/vacancy/{entry['external_id']}"
+    driver.get(link)
+    time.sleep(4)
+    job = hh_html_vacancy_to_job(driver.page_source, entry["external_id"])
+    if not job.role:
+        job = Job(role=entry["title"], company=entry["company"])
+    job.link = link
+    return generate_cover_letter_for_job(
+        parameters["dataFolder"] / RESUME_PDF, job, llm_api_key
+    )
+
+
+def _send_missing_cover_letters(
+    driver,
+    applied_log: AppliedLog,
+    generate: Optional[Callable[[dict], str]] = None,
+) -> None:
     """headhunter.chat_cover_letter_followup: отклики, ушедшие без
     сопроводительного письма (форма его не приняла, и сразу после отклика
-    чат не открылся — см. search_and_apply_headhunter), досылаются первым
-    сообщением в чат."""
+    письмо не удалось приложить), досылаются кнопкой «Приложить письмо»
+    или первым сообщением в чат. Нет письма в журнале (генерация упала) —
+    пишем заново через generate. Отказ работодателя, архив и закрытый чат —
+    cover_letter_undeliverable: письмо больше не пытаемся доставить."""
+    regenerated = 0
     for entry in applied_log.entries_by_source_and_status(
         "headhunter", "applied"
     ):
         if (
-            not entry.get("cover_letter")
-            or entry.get("cover_letter_sent_via_chat")
+            entry.get("cover_letter_sent_via_chat")
             or entry.get("cover_letter_in_form")  # уже ушло в форме отклика
+            or entry.get("cover_letter_undeliverable")
             or not _hh_chat_allowed(entry)
         ):
             continue
-        try:
-            sent = _hh_chat_send(
-                driver, applied_log, entry, entry["cover_letter"]
+        if "отказ" in (entry.get("last_known_state") or "").casefold():
+            applied_log.update_fields(
+                "headhunter",
+                entry["external_id"],
+                cover_letter_undeliverable="работодатель отказал",
             )
+            logger.info(
+                f"Письмо не доставить (отказ): {entry['company']} — "
+                f"{entry['title']}"
+            )
+            continue
+        letter = entry.get("cover_letter")
+        if not letter:
+            if generate is None or (
+                regenerated >= _MAX_REGENERATED_LETTERS_PER_CHECK
+            ):
+                continue
+            regenerated += 1
+            try:
+                letter = generate(entry)
+            except Exception as e:
+                logger.warning(
+                    f"Не удалось написать письмо для {entry['company']}: {e}"
+                )
+                continue
+            if not letter:
+                continue
+            applied_log.update_fields(
+                "headhunter", entry["external_id"], cover_letter=letter
+            )
+        try:
+            sent = _hh_chat_send(driver, applied_log, entry, letter)
         except Exception as e:
             logger.warning(
                 f"Не удалось отправить письмо в чат {entry['company']}: {e}"
@@ -5452,8 +5830,7 @@ def _send_missing_cover_letters(driver, applied_log: AppliedLog) -> None:
                 "headhunter", entry["external_id"]
             )
             logger.info(
-                f"Письмо досослано в чат: {entry['company']} — "
-                f"{entry['title']}"
+                f"Письмо досослано: {entry['company']} — {entry['title']}"
             )
 
 

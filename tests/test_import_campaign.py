@@ -418,11 +418,17 @@ def test_campaign_follow_up_in_same_thread(client, monkeypatch):  # noqa: F811
 
     ctx = api.get_ctx()
     store = camp.CampaignStore(ctx.output_folder)
+    book = main.ContactBook(
+        ctx.output_folder
+    )  # адресаты есть в базе контактов
+    contact = {"kind": "email", "source": "t", "source_url": ""}
+    key_a = book.add("A", [{**contact, "value": "a@x.io"}])
+    key_b = book.add("B", [{**contact, "value": "b@x.io"}])
     cid = store.create(
         "t",
         [
-            {"key": "a", "email": "a@x.io", "company": "A"},
-            {"key": "b", "email": "b@x.io", "company": "B"},
+            {"key": key_a, "email": "a@x.io", "company": "A"},
+            {"key": key_b, "email": "b@x.io", "company": "B"},
         ],
     )
     old = (datetime.now().astimezone() - timedelta(days=8)).isoformat()
