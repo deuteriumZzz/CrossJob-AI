@@ -22,7 +22,9 @@ FILTER_SUPPORT: dict[str, dict] = {
     "avito": {"formats": "remote", "salary": False, "levels": True},
     # Djinni принимает один employment (при двух сразу берёт remote) —
     # фильтр ставим, только если выбран ровно один формат.
-    "djinni": {"formats": "single", "salary": False, "levels": False},
+    # Стаж у Djinni — exp_level (повторяемый, проверено вживую); «только с
+    # зарплатой» у сайта нет, поэтому её отсеиваем по самой вакансии.
+    "djinni": {"formats": "single", "salary": True, "levels": True},
     # GeekJob: rm=1 — удалённо, ih=1 — офис (inhouse), s=1&money — только с
     # зарплатой; своего «гибрида» и уровней нет.
     "geekjob": {"formats": "single", "salary": True, "levels": False},
@@ -31,7 +33,7 @@ FILTER_SUPPORT: dict[str, dict] = {
     # «удалённо» у них уже есть сам по себе, остальных фильтров нет.
     "wellfound": {"formats": "remote", "salary": False, "levels": False},
     "himalayas": {"formats": "remote", "salary": False, "levels": False},
-    "talanto": {"formats": True, "salary": False, "levels": True},
+    "talanto": {"formats": True, "salary": True, "levels": True},
 }
 
 # LinkedIn f_WT: 1 — на месте, 2 — удалённо, 3 — гибрид.
@@ -81,6 +83,17 @@ _TALANTO_LEVELS = {
 }
 
 
+# Djinni exp_level — стаж в годах, повторяемый (проверено вживую
+# 2026-10-07: 1y — 1 стр., 2y — 2 стр., оба вместе — 3 стр.).
+_DJINNI_EXPERIENCE = {
+    "intern": ["no_exp"],
+    "junior": ["no_exp", "1y", "2y"],
+    "middle": ["3y", "4y", "5y"],
+    "senior": ["5y", "6y", "7y", "8y", "9y", "10y"],
+    "lead": ["6y", "7y", "8y", "9y", "10y"],
+}
+
+
 def _mapped(table: dict, chosen: list[str]) -> list[str]:
     out: list[str] = []
     for level in chosen:
@@ -112,6 +125,14 @@ def habr_qualifications(preferences: dict) -> list[str]:
     return levels(preferences)
 
 
+def skip_remote_only_platform(preferences: dict) -> bool:
+    """Площадки, где все вакансии удалённые (Wellfound, Himalayas), нечего
+    делать тем, кто ищет только офис или гибрид: формат выбран, а
+    «удалённо» среди него нет."""
+    formats = work_formats(preferences)
+    return bool(formats) and "remote" not in formats
+
+
 def remote_only(preferences: dict, source: str) -> bool:
     """«Только удалённые» для площадок, у которых фильтр двоичный. Общий
     выбор из «Что ищу» главнее: пока в нём включён хоть один формат, один
@@ -126,18 +147,31 @@ def remote_only(preferences: dict, source: str) -> bool:
 
 def linkedin_search_params(preferences: dict) -> dict:
     """f_WT и сортировка LinkedIn из общих форматов; пока ни один не выбран —
-    как раньше, только удалённые. f_AL (только Easy Apply) не
+    формат не ограничивается (любой). f_AL (только Easy Apply) не
     настраивается: бот умеет откликаться лишь так."""
-    formats = work_formats(preferences) or ["remote"]
-    params = {
-        "f_AL": "true",
-        "f_WT": ",".join(sorted(_LINKEDIN_WORK_TYPE[f] for f in formats)),
-        "sortBy": "DD",
-    }
+    formats = work_formats(preferences)
+    params = {"f_AL": "true", "sortBy": "DD"}
+    if formats:
+        params["f_WT"] = ",".join(
+            sorted(_LINKEDIN_WORK_TYPE[f] for f in formats)
+        )
     experience = _mapped(_LINKEDIN_EXPERIENCE, levels(preferences))
     if experience:
         params["f_E"] = ",".join(sorted(experience))
     return params
+
+
+def djinni_experience(preferences: dict) -> list[str]:
+    return _mapped(_DJINNI_EXPERIENCE, levels(preferences))
+
+
+def talanto_salary_params(preferences: dict) -> str:
+    """«Только с зарплатой» у Talanto: salary_min=1 оставляет только
+    вакансии с указанной зарплатой (проверено вживую 2026-10-07: без
+    фильтра 16 из 35 «зарплата не указана», с ним — 0)."""
+    if preferences.get("only_with_salary"):
+        return "&salary_min=1&salary_input_currency=USD"
+    return ""
 
 
 def djinni_employment(preferences: dict) -> Optional[str]:

@@ -23,7 +23,7 @@ import httpx
 from src.job import Job
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import raise_if_blocked
-from src.job_sources.filters import djinni_employment
+from src.job_sources.filters import djinni_employment, djinni_experience
 from src.job_sources.preferences import effective_list
 
 BASE = "https://djinni.co"
@@ -86,6 +86,9 @@ def search_params(
     employment = djinni_employment(preferences or {})
     if employment:
         params["employment"] = employment
+    experience = djinni_experience(preferences or {})
+    if experience:
+        params["exp_level"] = experience
     if page > 1:
         params["page"] = page
     return params
@@ -108,8 +111,25 @@ def _countries(item: dict) -> list[str]:
     return result
 
 
+def _salary_text(base: object) -> str:
+    """baseSalary из JSON-LD → «550–700 USD»; пусто, если зарплаты нет."""
+    if not isinstance(base, dict):
+        return ""
+    value = base.get("value")
+    if not isinstance(value, dict):
+        return ""
+    low, high = value.get("minValue"), value.get("maxValue")
+    if not (low or high):
+        return ""
+    amount = f"{low}–{high}" if low and high else str(low or high)
+    return f"{amount} {base.get('currency', '')}".strip()
+
+
 def parse_jobs(
-    html: str, country: str = "", max_months: Optional[float] = None
+    html: str,
+    country: str = "",
+    max_months: Optional[float] = None,
+    only_with_salary: bool = False,
 ) -> list[Job]:
     """JobPosting из JSON-LD страницы выдачи → Job. country/max_months —
     сразу отсеять то, куда Djinni всё равно не даст откликнуться: вакансия
@@ -138,6 +158,9 @@ def parse_jobs(
                 continue
             if max_months is not None and months and months > max_months:
                 continue
+            salary = _salary_text(item.get("baseSalary"))
+            if only_with_salary and not salary:
+                continue
             remote = item.get("jobLocationType") == "TELECOMMUTE"
             org = item.get("hiringOrganization") or ""
             # Компания бывает объектом Organization, а бывает просто строкой.
@@ -154,6 +177,7 @@ def parse_jobs(
                     link=item["url"],
                     apply_method="djinni",
                     description=unescape(item.get("description", "")),
+                    salary=salary,
                     source="djinni",
                     external_id=str(item.get("identifier") or item["url"]),
                 )
@@ -187,7 +211,12 @@ def search(
                     params=search_params(position, page, preferences),
                 )
                 page_jobs = parse_jobs(response.text)
-                found = parse_jobs(response.text, country, max_months)
+                found = parse_jobs(
+                    response.text,
+                    country,
+                    max_months,
+                    bool(preferences.get("only_with_salary")),
+                )
                 # В обычной странице Djinni есть скрипт reCAPTCHA формы входа —
                 # слово «captcha» само по себе не блокировка. Блок — это
                 # 403/429

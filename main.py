@@ -84,6 +84,7 @@ from src.job_sources.djinni.apply import (
     unmet_requirements as djinni_unmet_requirements,
 )
 from src.job_sources.djinni.search import search as search_djinni_jobs
+from src.job_sources.filters import skip_remote_only_platform
 from src.job_sources.geekjob.auth import GeekjobSession
 from src.job_sources.geekjob.client import GeekjobClient
 from src.job_sources.geekjob.source import GeekjobSource
@@ -150,11 +151,11 @@ from src.job_sources.hr_replies import (
     company_uses_russian,
     due_follow_ups,
     due_hh_reminders,
-    is_reminder_hour,
     format_draft_notification,
     generate_company_email,
     generate_first_message,
     hh_reminder_text,
+    is_reminder_hour,
     looks_like_opt_out,
 )
 from src.job_sources.interview_calendar import (
@@ -2941,6 +2942,12 @@ def search_and_apply_wellfound(
     auto_apply: false по умолчанию независимо от того, что в итоге
     стоит в work_preferences.yaml — первый запуск всегда dry-run.
     """
+    if skip_remote_only_platform(parameters):
+        logger.info(
+            "wellfound: все вакансии удалённые, а в «Что ищу» выбран только "
+            "офис/гибрид — площадку пропускаю"
+        )
+        return
     data_folder: Path = parameters["dataFolder"]
     resume_pdf_path = data_folder / RESUME_PDF_LINKEDIN
     if resume_pdf_path.exists():
@@ -3160,6 +3167,12 @@ def search_and_apply_himalayas(
     результатах пришлите разработчику разметку страницы для правки
     селекторов, прежде чем включать auto_apply.
     """
+    if skip_remote_only_platform(parameters):
+        logger.info(
+            "himalayas: все вакансии удалённые, а в «Что ищу» выбран только "
+            "офис/гибрид — площадку пропускаю"
+        )
+        return
     data_folder: Path = parameters["dataFolder"]
     resume_pdf_path = data_folder / RESUME_PDF_LINKEDIN
     if resume_pdf_path.exists():

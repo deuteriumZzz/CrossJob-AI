@@ -79,6 +79,7 @@ class TalantoClient:
         page: int = 1,
         work_formats: Optional[list[str]] = None,
         levels: Optional[list[str]] = None,
+        extra_query: str = "",
     ) -> list[str]:
         """id вакансий страницы выдачи, самые новые первыми (sort=new)."""
         driver = self._acquire_driver()
@@ -87,6 +88,7 @@ class TalantoClient:
             url += f"&work_formats={work_format}"
         for level in levels or []:
             url += f"&levels={level}"
+        url += extra_query
         if page > 1:
             url += f"&page={page}"
         driver.get(url)

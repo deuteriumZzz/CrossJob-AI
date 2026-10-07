@@ -31,9 +31,9 @@ def test_platform_remote_only_used_only_when_no_common_format():
     assert remote_only({}, "avito") is False
 
 
-def test_linkedin_defaults_keep_previous_hardcoded_behaviour():
+def test_linkedin_without_chosen_format_does_not_restrict_it():
     params = linkedin_search_params({})
-    assert params == {"f_AL": "true", "f_WT": "2", "sortBy": "DD"}
+    assert params == {"f_AL": "true", "sortBy": "DD"}
 
 
 def test_linkedin_follows_common_formats():
@@ -113,3 +113,12 @@ def test_no_levels_means_no_level_filters():
     assert hh_experience({}) == []
     assert getmatch_seniority({}) == []
     assert "f_E" not in linkedin_search_params({})
+
+
+def test_remote_only_platforms_skipped_for_office_seekers():
+    from src.job_sources.filters import skip_remote_only_platform
+
+    assert skip_remote_only_platform({"onsite": True})
+    assert skip_remote_only_platform({"onsite": True, "hybrid": True})
+    assert not skip_remote_only_platform({"remote": True, "onsite": True})
+    assert not skip_remote_only_platform({})

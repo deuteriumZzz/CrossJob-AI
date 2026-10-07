@@ -93,3 +93,37 @@ def test_geekjob_params_follow_common_filters():
     mixed = geekjob_search_params({"remote": True, "onsite": True})
     assert "rm" not in mixed and "ih" not in mixed
     assert geekjob_search_params({"only_with_salary": True})["s"] == "1"
+
+
+def test_djinni_and_talanto_salary_and_experience():
+    import json
+
+    from src.job_sources.djinni.search import parse_jobs, search_params
+    from src.job_sources.filters import talanto_salary_params
+
+    params = search_params("Python", 1, {"levels": ["middle"]})
+    assert params["exp_level"] == ["3y", "4y", "5y"]
+    assert "exp_level" not in search_params("Python", 1, {})
+    assert talanto_salary_params({}) == ""
+    assert "salary_min=1" in talanto_salary_params({"only_with_salary": True})
+
+    def page(base):
+        item = {
+            "@type": "JobPosting",
+            "url": "https://djinni.co/jobs/1-x/",
+            "title": "Dev",
+            "identifier": 1,
+        }
+        if base:
+            item["baseSalary"] = base
+        return (
+            f'<script type="application/ld+json">{json.dumps(item)}</script>'
+        )
+
+    salary = {
+        "currency": "USD",
+        "value": {"minValue": 550, "maxValue": 700},
+    }
+    assert parse_jobs(page(salary))[0].salary == "550–700 USD"
+    assert parse_jobs(page(None), only_with_salary=True) == []
+    assert len(parse_jobs(page(salary), only_with_salary=True)) == 1
