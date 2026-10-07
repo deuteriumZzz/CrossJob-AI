@@ -441,11 +441,17 @@ def test_due_hh_reminders_skips_viewed_and_already_reminded():
             "applied_at": recent,
             "last_known_state": None,
         },
-        {  # уже просмотрели — не молчание
+        {  # просмотрели, но молчат неделю — тоже напоминаем
             "external_id": "3",
             "title": "Dev",
             "applied_at": old,
             "last_known_state": "Просмотрен",
+        },
+        {  # отказ — не молчание
+            "external_id": "6",
+            "title": "Dev",
+            "applied_at": old,
+            "last_known_state": "Отказ",
         },
         {  # уже напоминали — не повторяем
             "external_id": "4",
@@ -462,7 +468,7 @@ def test_due_hh_reminders_skips_viewed_and_already_reminded():
         },
     ]
     due = due_hh_reminders(entries, days=7, now=now)
-    assert [e["external_id"] for e in due] == ["1"]
+    assert [e["external_id"] for e in due] == ["1", "3"]
     assert "Python разработчик" in hh_reminder_text(due[0])
 
     assert due_hh_reminders(entries, days=0, now=now) == []

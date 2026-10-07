@@ -224,8 +224,9 @@ def is_reminder_hour(now: datetime | None = None) -> bool:
 def due_hh_reminders(
     entries: list[dict], days: int, now: datetime | None = None
 ) -> list[dict]:
-    """Отклики HH, которые никто не просмотрел (или без сохранённого
-    статуса вовсе) дольше days дней, — кандидаты на напоминание в чате.
+    """Отклики HH, на которые работодатель молчит (не просмотрел или
+    просмотрел, но не ответил — или статуса нет вовсе) дольше days дней, —
+    кандидаты на напоминание в чате.
     Уже напомненные (reminder_sent_at) не повторяются — одно
     напоминание на отклик, не спам."""
     if days <= 0:
@@ -236,8 +237,10 @@ def due_hh_reminders(
         if entry.get("reminder_sent_at"):
             continue
         state = entry.get("last_known_state")
-        if state not in (None, "", "Не просмотрен"):
-            continue  # уже посмотрели/ответили/отказали — не молчание
+        # «Не просмотрен» и «Просмотрен» — работодатель молчит. Отказ,
+        # приглашение, архив — не молчание, напоминать не нужно.
+        if state not in (None, "", "Не просмотрен", "Просмотрен"):
+            continue
         applied_at = entry.get("applied_at")
         if not applied_at:
             continue

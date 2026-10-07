@@ -3335,7 +3335,7 @@ const render = {
                 <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto-bump switch" ${s.auto_bump_resume ? "checked" : ""} />Бамп резюме на HH</span>
               </label>
               <label class="limit-field">
-                <span title="0 — выключить напоминания. Список готовых напоминаний — во «Входящих»">Напомнить о себе, если не просмотрели, через (дней)</span>
+                <span title="0 — выключить напоминания. Список готовых напоминаний — во «Входящих»">Напомнить о себе, если молчат (не просмотрели или не ответили), через (дней)</span>
                 <input type="number" class="d-reminder-days" min="0" value="${s.reminder_follow_up_days ?? 7}" style="width:80px" />
               </label>
               <label class="limit-field">

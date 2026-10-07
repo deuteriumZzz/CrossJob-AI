@@ -141,12 +141,12 @@ def test_send_due_hh_reminders_sends_and_marks():
             "reminder_sent_at": None,
         },
         {
-            # Уже просмотрели — не молчание, напоминать не нужно.
+            # Отказ — не молчание, напоминать не нужно.
             "external_id": "2",
-            "company": "Seen",
+            "company": "Rejected",
             "title": "Dev",
             "applied_at": (now - timedelta(days=10)).isoformat(),
-            "last_known_state": "Просмотрен",
+            "last_known_state": "Отказ",
             "reminder_sent_at": None,
         },
     ]
