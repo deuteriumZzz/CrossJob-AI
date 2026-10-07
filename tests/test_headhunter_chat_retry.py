@@ -10,6 +10,12 @@ from src.job_sources.headhunter.browser_replies import ChatSendResult
 from src.utils.constants import RESUME_PDF
 
 
+@pytest.fixture(autouse=True)
+def _working_hours(monkeypatch):
+    # Напоминания уходят только в будни 10–18 МСК — тесты от часов не зависят.
+    monkeypatch.setattr(main, "is_reminder_hour", lambda: True)
+
+
 def _parameters(data_folder: Path) -> dict:
     (data_folder / RESUME_PDF).write_bytes(b"%PDF-fake")
     secrets_file = data_folder / "secrets.yaml"
