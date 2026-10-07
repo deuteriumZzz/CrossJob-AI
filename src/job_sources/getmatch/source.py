@@ -1,8 +1,15 @@
 from src.job import Job
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import PlatformBlockedError
-from src.job_sources.filters import getmatch_seniority
+from src.job_sources.filters import (
+    getmatch_locations,
+    getmatch_period,
+    getmatch_seniority,
+)
 from src.job_sources.filters import remote_only as remote_only_filter
+from src.job_sources.filters import (
+    work_formats,
+)
 from src.job_sources.getmatch.client import EXPERIENCE_LEVELS, GetMatchClient
 from src.job_sources.getmatch.mapping import parse_search_results
 from src.job_sources.preferences import effective_list
@@ -63,7 +70,15 @@ class GetMatchSource:
     def search(self, preferences: dict) -> list[Job]:
         gm_preferences = preferences.get("getmatch") or {}
         specializations = gm_preferences.get("specializations") or []
-        remote_only = remote_only_filter(preferences, "getmatch")
+        locations = getmatch_locations(preferences)
+        # «Удалённо» теперь входит в locations; свой remote_only площадки
+        # действует, только если общие форматы не выбраны.
+        remote_only = (
+            False
+            if work_formats(preferences)
+            else remote_only_filter(preferences, "getmatch")
+        )
+        period = getmatch_period(preferences)
         experience_levels = getmatch_seniority(preferences) or [
             level
             for level in gm_preferences.get("experience_level") or []
@@ -93,6 +108,8 @@ class GetMatchSource:
                     specializations=specializations,
                     remote_only=remote_only,
                     experience_levels=experience_levels,
+                    locations=locations,
+                    period=period,
                 )
             except PlatformBlockedError:
                 raise

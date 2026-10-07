@@ -2,6 +2,7 @@ from src.job import Job
 from src.job_sources.avito.search import search_jobs
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import PlatformBlockedError
+from src.job_sources.filters import avito_click_format
 from src.job_sources.filters import remote_only as remote_only_filter
 from src.job_sources.filters import single_employment
 from src.job_sources.preferences import effective_list
@@ -36,6 +37,7 @@ class AvitoSource:
                     remote_only,
                     experience_level,
                     employment_type,
+                    avito_click_format(preferences),
                 )
             except PlatformBlockedError:
                 raise

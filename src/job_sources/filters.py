@@ -32,7 +32,12 @@ FILTER_SUPPORT: dict[str, dict] = {
         "employment": True,
         "period": True,
     },
-    "getmatch": {"formats": "remote", "salary": False, "levels": True},
+    "getmatch": {
+        "formats": True,
+        "salary": False,
+        "levels": True,
+        "period": True,
+    },
     "habr_career": {
         "formats": "remote",
         "salary": True,
@@ -214,6 +219,46 @@ def skip_remote_only_platform(preferences: dict) -> bool:
     «удалённо» среди него нет."""
     formats = work_formats(preferences)
     return bool(formats) and "remote" not in formats
+
+
+# GetMatch l= (проверено вживую 2026-10-08 по чекбоксам и адресу): remote —
+# «Удалённо»; «офис или гибрид» — moscow, saints_p, regions_ru, relocate.
+_GETMATCH_OFFICE_PLACES = ["moscow", "saints_p", "regions_ru", "relocate"]
+_GETMATCH_PERIOD = {1: "1d", 3: "3d", 7: "7d", 30: "30d"}
+
+
+def getmatch_locations(preferences: dict) -> list[str]:
+    """l= GetMatch из общих форматов. Офис и гибрид у сайта — один пункт
+    «Офис или гибрид в …» (по городам), поэтому они идут вместе. Все
+    форматы выбраны или ни одного — без фильтра."""
+    formats = work_formats(preferences)
+    places: list[str] = []
+    if "remote" in formats:
+        places.append("remote")
+    if "hybrid" in formats or "onsite" in formats:
+        places += _GETMATCH_OFFICE_PLACES
+    if len(places) == 1 + len(_GETMATCH_OFFICE_PLACES):
+        return []
+    return places
+
+
+def getmatch_period(preferences: dict) -> str:
+    return _GETMATCH_PERIOD.get(posted_within_days(preferences), "")
+
+
+def avito_click_format(preferences: dict) -> str:
+    """Формат Avito, который ставится кликом по радио «Формат работы» (на
+    сайте один выбор): office или hybrid, если выбран ровно он один.
+    Удалённо идёт через адрес (см. remote_only), остальное — без фильтра.
+    Проверено вживую 2026-10-08: «В офисе» — 84 из 89 по «python»;
+    клик «Гибрид» выдачу не изменил (в этой выдаче гибридных нет или
+    маркер не срабатывает) — не подтверждено."""
+    formats = work_formats(preferences)
+    if formats == ["onsite"]:
+        return "office"
+    if formats == ["hybrid"]:
+        return "hybrid"
+    return ""
 
 
 def remote_only(preferences: dict, source: str) -> bool:

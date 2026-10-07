@@ -75,6 +75,8 @@ def test_source_search_filters_by_position_keyword():
         specializations=[],
         remote_only=False,
         experience_levels=[],
+        locations=[],
+        period="",
     )
 
 
@@ -135,6 +137,8 @@ def test_source_search_with_specializations_skips_keyword_filter():
         specializations=["python", "data_science"],
         remote_only=False,
         experience_levels=[],
+        locations=[],
+        period="",
     )
 
 
@@ -160,6 +164,8 @@ def test_source_search_passes_remote_only_and_experience_level():
         specializations=[],
         remote_only=True,
         experience_levels=["senior"],
+        locations=[],
+        period="",
     )
 
 

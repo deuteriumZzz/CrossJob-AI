@@ -144,3 +144,23 @@ def test_employment_and_period_adapters():
     )
     assert params["f_JT"] == "C,F" and params["f_TPR"] == "r86400"
     assert "f_JT" not in linkedin_search_params({})
+
+
+def test_getmatch_and_avito_office_hybrid_adapters():
+    from src.job_sources.filters import (
+        avito_click_format,
+        getmatch_locations,
+        getmatch_period,
+    )
+
+    assert getmatch_locations({}) == []
+    assert getmatch_locations({"remote": True}) == ["remote"]
+    office = getmatch_locations({"onsite": True})
+    assert "remote" not in office and "moscow" in office
+    # удалённо + офис/гибрид = все пять пунктов сайта = без фильтра
+    assert getmatch_locations({"remote": True, "hybrid": True}) == []
+    assert getmatch_locations({"hybrid": True, "onsite": True}) == office
+    assert getmatch_period({"posted_within_days": 3}) == "3d"
+    assert avito_click_format({"onsite": True}) == "office"
+    assert avito_click_format({"hybrid": True}) == "hybrid"
+    assert avito_click_format({"onsite": True, "hybrid": True}) == ""

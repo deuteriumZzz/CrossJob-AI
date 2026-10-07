@@ -120,6 +120,8 @@ class GetMatchClient:
         specializations: Optional[list] = None,
         remote_only: bool = False,
         experience_levels: Optional[list] = None,
+        locations: Optional[list] = None,
+        period: str = "",
     ) -> str:
         """Без текстового запроса — GetMatch убрал его со страницы
         /vacancies (подтверждено вживую 2026-09-02: `?q=...` в URL
@@ -149,8 +151,13 @@ class GetMatchClient:
         driver, owns_it = self._acquire_driver()
         try:
             url = f"{GM_BASE}/vacancies?p={page}"
-            if remote_only:
-                url += "&l=remote"
+            places = list(locations or [])
+            if remote_only and "remote" not in places:
+                places.append("remote")
+            for place in places:
+                url += f"&l={place}"
+            if period:
+                url += f"&pa={period}"
             for level in experience_levels or []:
                 url += f"&se={level}"
             for slug in specializations or []:

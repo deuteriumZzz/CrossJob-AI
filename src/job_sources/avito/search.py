@@ -57,6 +57,54 @@ EMPLOYMENT_TYPE_CHECKBOX_MARKERS = {
 }
 FILTER_CLICK_WAIT_SECONDS = 1.5
 
+# «Формат работы» — радио params[172815]; в отличие от «Занятости» выдачу
+# обновляет только кнопка «Найти» (проверено вживую 2026-10-08).
+WORK_FORMAT_MARKERS = {
+    "office": "params[172815]/3286366",
+    "hybrid": "params[172815]/3286368",
+}
+SUBMIT_MARKER = '[data-marker="search-form/submit-button"]'
+
+
+COUNT_SCRIPT = (
+    "const c=document.querySelector('[data-marker=\"page-title/count\"]');"
+    "return c?c.innerText:'';"
+)
+
+
+def _result_signature(driver) -> str:
+    """Счётчик объявлений + адрес: меняется, когда фильтр применился."""
+    count = driver.execute_script(COUNT_SCRIPT) or ""
+    return f"{count}|{'f=' in driver.current_url}"
+
+
+def _apply_work_format(driver, work_format: str) -> bool:
+    """Радио + «Найти». Сайт принимает клик не каждый раз (вживую
+    2026-10-08: то 84 из 89, то без изменений), поэтому сверяем выдачу
+    до и после и повторяем один раз."""
+    marker = WORK_FORMAT_MARKERS.get(work_format)
+    if not marker:
+        return False
+    for _ in range(2):
+        radios = driver.find_elements(
+            By.CSS_SELECTOR, f'[data-marker="{marker}"]'
+        )
+        submit = driver.find_elements(By.CSS_SELECTOR, SUBMIT_MARKER)
+        if not radios or not submit:
+            return False
+        before = _result_signature(driver)
+        driver.execute_script(
+            "arguments[0].scrollIntoView({block: 'center'});", radios[0]
+        )
+        # Обычный клик Selenium по радио не проходит (элемент перекрыт).
+        driver.execute_script("arguments[0].click();", radios[0])
+        time.sleep(FILTER_CLICK_WAIT_SECONDS)
+        driver.execute_script("arguments[0].click();", submit[0])
+        time.sleep(PAGE_LOAD_WAIT_SECONDS + 3)
+        if _result_signature(driver) != before:
+            return True
+    return False
+
 
 def _apply_click_filters(
     driver, experience_level: str, employment_type: str
@@ -99,6 +147,7 @@ def search_jobs(
     remote_only: bool = False,
     experience_level: str = "",
     employment_type: str = "",
+    work_format: str = "",
 ) -> list[Job]:
     """Одна страница выдачи на позицию — подтверждено вживую 2026-09-29:
     для узкого поискового запроса пагинация на avito.ru не появляется
@@ -114,6 +163,14 @@ def search_jobs(
     time.sleep(PAGE_LOAD_WAIT_SECONDS)
     dismiss_vpn_notice(driver)
     raise_if_blocked(visible_text(driver))
+    if work_format and not remote_only:
+        try:
+            if _apply_work_format(driver, work_format):
+                time.sleep(PAGE_LOAD_WAIT_SECONDS)
+                dismiss_vpn_notice(driver)
+                raise_if_blocked(visible_text(driver))
+        except Exception:
+            pass  # необязательное уточнение, как и остальные клики
     if experience_level or employment_type:
         try:
             if _apply_click_filters(driver, experience_level, employment_type):
