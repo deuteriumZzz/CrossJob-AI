@@ -27,6 +27,7 @@ const SOURCE_LABELS = {
   djinni: "Djinni",
   avito: "Авито Работа",
   direct: "Сайты компаний",
+  talanto: "Talanto",
 };
 
 // ponytail: настоящие логотипы площадок — товарные знаки, тащить их к себе
@@ -47,10 +48,11 @@ const SOURCE_ICON = {
   djinni: { text: "DJ", color: "#27825b" },
   avito: { text: "AV", color: "#6b4c9a" },
   direct: { text: "→", color: "#407e73" },
+  talanto: { text: "TL", color: "#b4541f" },
 };
 
 // Площадки, нацеленные на зарубежный рынок — остальные площадки RU.
-const OWN_CHANNELS = new Set(["telegram", "direct"]);
+const OWN_CHANNELS = new Set(["telegram", "direct", "talanto"]);
 // "Расписание" звучит как редкий цикл раз в день — площадка на деле
 // проверяется почти непрерывно (следующий заход сразу после конца
 // предыдущего + этот интервал), просто с паузой, чтобы не выглядеть

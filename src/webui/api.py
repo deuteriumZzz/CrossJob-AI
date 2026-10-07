@@ -430,6 +430,7 @@ _CREDENTIAL_REQUIREMENTS: dict = {
     "himalayas": None,
     "djinni": None,
     "avito": None,
+    "talanto": None,
 }
 
 
