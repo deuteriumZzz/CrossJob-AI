@@ -1227,6 +1227,7 @@ async function renderOwnChannels() {
       </h3>
       <div class="row"><span>Состояние</span><span>${tgText}</span></div>
       <div class="row"><span>Каналов</span><span>${w.channels}</span></div>
+      ${w.running && w.last_post_at ? `<div class="row"><span>Последний пост</span><span>${relativeTimeRu(new Date(w.last_post_at * 1000).toISOString())}</span></div>` : ""}
       <div class="row"><span>Вакансий найдено с запуска</span><span>${w.matched}</span></div>
       <div class="row"><span>Контактов HR в базе</span><span>${w.contacts_collected}</span></div>
       <div class="row"><span>Ответы HR в диалогах</span><span>${w.running ? "ловит сразу" : "проверяет каждые 30 мин"}</span></div>
@@ -2136,7 +2137,45 @@ function stepHead(n, title, state) {
   return `<div class="step-head"><span class="step-num ${state}">${state === "done" ? "✓" : n}</span><h3>${title}</h3></div>`;
 }
 
+const SENT_LABELS = { sent: "отправлено", replied: "ответили", bounced: "возврат", failed: "не ушло" };
+let sentRows = [];
+function renderSentLog() {
+  const q = document.getElementById("sent-search").value.trim().toLowerCase();
+  const st = document.getElementById("sent-status").value;
+  const rows = sentRows.filter(
+    (r) => (!st || r.status === st) && (!q || `${r.company} ${r.email} ${r.subject}`.toLowerCase().includes(q))
+  );
+  const el = document.getElementById("sent-list");
+  if (!rows.length) {
+    el.textContent = sentRows.length ? "Ничего не найдено." : "Пока ни одно письмо не отправлено.";
+    return;
+  }
+  const counts = {};
+  sentRows.forEach((r) => (counts[r.status] = (counts[r.status] || 0) + 1));
+  el.innerHTML = `<p>${Object.entries(counts).map(([k, n]) => `${SENT_LABELS[k] || k}: <b>${n}</b>`).join(" · ")}</p>
+    <table class="table"><thead><tr><th>Дата</th><th>Кому</th><th>Тема</th><th>Статус</th></tr></thead><tbody>${rows
+      .slice(0, 200)
+      .map(
+        (r) => `<tr><td>${r.sent_at ? escapeHtml(fmtDay(r.sent_at)) : "—"}</td>
+        <td title="${escapeHtml(r.email)}">${escapeHtml(r.company || r.email)}</td>
+        <td><details><summary>${escapeHtml(r.subject || "(без темы)")}</summary><pre class="small" style="white-space:pre-wrap">${escapeHtml(r.text)}</pre></details></td>
+        <td title="${escapeHtml(r.reason)}">${SENT_LABELS[r.status] || r.status}</td></tr>`
+      )
+      .join("")}</tbody></table>`;
+}
+async function loadSentLog() {
+  try {
+    sentRows = (await api("/api/outreach/sent")).items;
+  } catch (e) {
+    return;
+  }
+  renderSentLog();
+}
+document.getElementById("sent-search")?.addEventListener("input", renderSentLog);
+document.getElementById("sent-status")?.addEventListener("change", renderSentLog);
+
 async function loadCampaigns() {
+  loadSentLog();
   const [data, watch] = await Promise.all([api("/api/campaigns"), api("/api/settings/telegram-watch")]);
   const resumes = watch.resumes || [];
   const sources = Object.entries(data.sources);
@@ -2561,6 +2600,7 @@ const render = {
             </h3>
             ${modeRow}
             <div class="row" title="Следующая проверка: ${escapeHtml(fmtTime(s.next_run))}"><span>Последняя проверка</span><span>${s.schedule_enabled ? fmtDay(s.last_run) : "—"}</span></div>
+            ${s.schedule_enabled && s.duration_seconds != null ? `<div class="row"><span>Последний ход</span><span>${Math.max(1, Math.round(s.duration_seconds / 60))} мин${s.idle_streak >= 2 ? ", пусто — следующий реже" : ""}</span></div>` : ""}
             ${responseRow}
             ${errorRowHtml(s.last_error)}
           </div>`;

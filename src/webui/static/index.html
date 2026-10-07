@@ -329,6 +329,20 @@
         <li class="panel step" id="step-letters"></li>
         <li class="panel step" id="step-send"></li>
       </ol>
+      <div class="panel" id="sent-log">
+        <h3 class="mt0">Отправленные</h3>
+        <div class="toolbar">
+          <input id="sent-search" type="search" placeholder="Компания, адрес или тема" aria-label="Поиск по отправленным" />
+          <select id="sent-status" aria-label="Статус">
+            <option value="">Все статусы</option>
+            <option value="sent">Отправлено</option>
+            <option value="replied">Ответили</option>
+            <option value="bounced">Возврат</option>
+            <option value="failed">Не ушло</option>
+          </select>
+        </div>
+        <div id="sent-list" class="muted small">Загрузка…</div>
+      </div>
     </section>
 
     <section id="view-telegram" class="view">

@@ -4191,6 +4191,7 @@ def start_campaign_job(
                     campaign_id, email, status="skipped", reason=_EMAILED
                 )
                 return None
+            sent_draft = drafts.get(code) or {}
             result = send_hr_draft(parameters, code, attachment=resume_path)
             if _gmail_auth_failed(result):
                 # Пароль приложения отозван/сменён — все письма упадут так же.
@@ -4208,6 +4209,8 @@ def start_campaign_job(
                     status="sent",
                     sent_at=datetime.now().astimezone().isoformat(),
                     reason="",
+                    subject=sent_draft.get("subject", ""),
+                    text=sent_draft.get("text", ""),
                 )
                 return None
             if result.startswith("⏸"):

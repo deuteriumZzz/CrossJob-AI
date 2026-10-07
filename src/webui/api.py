@@ -654,6 +654,8 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
                     ctx.config, name, "locations"
                 ),
                 "last_run": entry.get("last_run"),
+                "duration_seconds": entry.get("duration_seconds"),
+                "idle_streak": entry.get("idle_streak") or 0,
                 "next_run": entry.get("next_run"),
                 "status": entry.get("status", "never_run"),
                 "last_error": _classify_error(entry.get("last_error")),
@@ -2368,6 +2370,33 @@ def _campaign_view(ctx: AppContext, campaign: Optional[dict]) -> dict:
     }
 
 
+@app.get("/api/outreach/sent")
+def get_outreach_sent(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Журнал «Отправленные»: все письма рассылок, которые ушли (в том
+    числе ответившие, возвраты и неудачи), новые сверху."""
+    drafts = DraftStore(ctx.output_folder / HR_DRAFTS_FILE).all()
+    rows = []
+    for campaign in CampaignStore(ctx.output_folder).all().values():
+        for email, item in campaign["items"].items():
+            if item["status"] not in ("sent", "replied", "bounced", "failed"):
+                continue
+            draft = drafts.get(item.get("code", ""), {})
+            rows.append(
+                {
+                    "sent_at": item.get("sent_at") or "",
+                    "email": email,
+                    "company": item.get("company", ""),
+                    "subject": item.get("subject") or draft.get("subject", ""),
+                    "text": item.get("text") or draft.get("text", ""),
+                    "status": item["status"],
+                    "reason": item.get("reason", ""),
+                    "campaign": campaign["name"],
+                }
+            )
+    rows.sort(key=lambda r: r["sent_at"], reverse=True)
+    return {"items": rows}
+
+
 @app.get("/api/campaigns")
 def get_campaigns(ctx: AppContext = Depends(get_ctx)) -> dict:
     """Рассылки и сколько адресов из базы ещё можно в них взять."""
@@ -3864,6 +3893,7 @@ def _telegram_watch_snapshot(ctx: AppContext) -> dict:
         "builtin_stop_words": list(CANDIDATE_SELF_POST_MARKERS),
         "forward_to": telegram.get("watch_forward_to") or "me",
         "running": watcher is not None,
+        "last_post_at": gateway_state()["last_post_at"],
         "channels": len(telegram.get("channels") or []),
         "matched": watcher.matched_count if watcher else 0,
         # Сколько контактов HR парсер уже положил в «Базу компаний».
