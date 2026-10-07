@@ -57,11 +57,14 @@ class GeekjobClient:
             return self._driver, False
         return init_browser(self.profile_dir), True
 
-    def search_vacancies_html(self, query: str, page: int = 1) -> str:
+    def search_vacancies_html(
+        self, query: str, page: int = 1, filters: Optional[dict] = None
+    ) -> str:
         driver, owns_it = self._acquire_driver()
         try:
             path = "/vacancies" if page == 1 else f"/vacancies/{page}"
-            driver.get(f"{GJ_BASE}{path}?{urlencode({'qs': query})}")
+            params = {**(filters or {}), "qs": query}
+            driver.get(f"{GJ_BASE}{path}?{urlencode(params)}")
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
             raise_if_blocked(visible_text(driver))
             return driver.page_source

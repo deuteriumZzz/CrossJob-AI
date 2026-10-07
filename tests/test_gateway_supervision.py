@@ -83,3 +83,13 @@ def test_reminder_hours_moscow():
     assert is_reminder_hour(mon_noon)
     assert not is_reminder_hour(sat_noon)
     assert not is_reminder_hour(mon_night)
+
+
+def test_geekjob_params_follow_common_filters():
+    from src.job_sources.filters import geekjob_search_params
+
+    assert geekjob_search_params({"remote": True}) == {"rm": "1"}
+    assert geekjob_search_params({"onsite": True})["ih"] == "1"
+    mixed = geekjob_search_params({"remote": True, "onsite": True})
+    assert "rm" not in mixed and "ih" not in mixed
+    assert geekjob_search_params({"only_with_salary": True})["s"] == "1"

@@ -23,7 +23,9 @@ FILTER_SUPPORT: dict[str, dict] = {
     # Djinni принимает один employment (при двух сразу берёт remote) —
     # фильтр ставим, только если выбран ровно один формат.
     "djinni": {"formats": "single", "salary": False, "levels": False},
-    "geekjob": {"formats": False, "salary": False, "levels": False},
+    # GeekJob: rm=1 — удалённо, ih=1 — офис (inhouse), s=1&money — только с
+    # зарплатой; своего «гибрида» и уровней нет.
+    "geekjob": {"formats": "single", "salary": True, "levels": False},
     "wellfound": {"formats": False, "salary": False, "levels": False},
     "himalayas": {"formats": False, "salary": False, "levels": False},
     "talanto": {"formats": True, "salary": False, "levels": True},
@@ -146,6 +148,24 @@ def djinni_employment(preferences: dict) -> Optional[str]:
     if formats in (["onsite"], ["hybrid"]):
         return "office"
     return None
+
+
+def geekjob_search_params(preferences: dict) -> dict:
+    """Параметры /vacancies и /json/find/vacancy у GeekJob (проверено
+    вживую 2026-10-07: python — 43 вакансии, rm=1 — 37, ih=1 — 22,
+    s=1&money=120000 — 16). Сортировка sort=1 работает только в JSON-запросе,
+    страница её из адреса не читает — поэтому её здесь нет. Формат ставится
+    при одном выбранном (удалённо или офис), «гибрида» на сайте нет."""
+    params: dict = {}
+    formats = work_formats(preferences)
+    if formats == ["remote"]:
+        params["rm"] = "1"
+    elif formats == ["onsite"]:
+        params["ih"] = "1"
+    if preferences.get("only_with_salary"):
+        params["s"] = "1"
+        params["money"] = "10000"  # нижняя граница ползунка — «любая»
+    return params
 
 
 # Talanto work_formats: remote, hybrid, office (проверено кликами).

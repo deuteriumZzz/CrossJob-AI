@@ -2,6 +2,7 @@ from src.job import Job
 from src.job_sources.applied_log import max_new_per_run, seen_ids_for
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import PlatformBlockedError
+from src.job_sources.filters import geekjob_search_params
 from src.job_sources.geekjob.client import GeekjobClient
 from src.job_sources.geekjob.mapping import (
     geekjob_vacancy_to_job,
@@ -48,7 +49,9 @@ class GeekjobSource:
                 # паттерном, что уже чинил Wellfound apply.
                 try:
                     html = self.client.search_vacancies_html(
-                        position, page=page
+                        position,
+                        page=page,
+                        filters=geekjob_search_params(preferences),
                     )
                 except PlatformBlockedError:
                     raise
