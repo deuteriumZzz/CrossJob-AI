@@ -357,7 +357,17 @@ def get_with_retry(
             time.sleep(pause_seconds)
 
 
-def init_browser(profile_dir: Optional[Path] = None) -> webdriver.Chrome:
+def init_browser(profile_dir: Optional[Path] = None):
+    """С profile_dir — вкладка общего свёрнутого Chrome (см.
+    shared_browser), без него — отдельный браузер как раньше."""
+    if profile_dir is None:
+        return _launch_browser(None)
+    from src.utils.shared_browser import open_tab
+
+    return open_tab(profile_dir, _launch_browser)
+
+
+def _launch_browser(profile_dir: Optional[Path]) -> webdriver.Chrome:
     if profile_dir is not None:
         clear_profile_cache(profile_dir)
 

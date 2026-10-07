@@ -12,6 +12,7 @@ from src.utils.chrome_utils import (
     clear_profile_cache,
     launch_chrome_with_retry,
 )
+from src.utils.shared_browser import hide_extra_window
 
 
 def _installed_chrome_major_version() -> Optional[int]:
@@ -55,7 +56,7 @@ def init_avito_browser(profile_dir: Path) -> uc.Chrome:
         driver.set_page_load_timeout(30)
         return driver
 
-    return launch_chrome_with_retry(_build, profile_dir)
+    return hide_extra_window(launch_chrome_with_retry(_build, profile_dir))
 
 
 def dismiss_vpn_notice(driver) -> None:

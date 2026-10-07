@@ -8,6 +8,7 @@ import yaml
 
 from src.logging import logger
 from src.utils.file_lock import state_file_lock
+from src.utils.shared_browser import reveal_shared_browser
 
 TELEGRAM_API_BASE = "https://api.telegram.org"
 TOPICS_CACHE_FILE = ".telegram_topics.json"
@@ -41,7 +42,9 @@ def notify_manual_login_required(
 ) -> None:
     """Шлём сразу, как только открылось окно ручного входа — иначе
     уведомление о сбое приходит только после timeout_seconds, когда
-    окно логина уже закрыто (driver.quit()) и реагировать поздно."""
+    окно логина уже закрыто (driver.quit()) и реагировать поздно.
+    Общий браузер свёрнут — здесь же показываем его для ручного входа."""
+    reveal_shared_browser()
     notify_from_secrets(
         parameters,
         f"CrossJob-AI: {source_name} требует ручного входа — "

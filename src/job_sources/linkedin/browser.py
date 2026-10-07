@@ -9,6 +9,7 @@ from src.utils.chrome_utils import (
     clear_profile_cache,
     launch_chrome_with_retry,
 )
+from src.utils.shared_browser import hide_extra_window
 
 
 def _installed_chrome_major_version() -> Optional[int]:
@@ -92,4 +93,4 @@ def init_linkedin_browser(profile_dir: Path) -> uc.Chrome:
         )
         return uc.Chrome(options=options, version_main=version_main)
 
-    return launch_chrome_with_retry(_build, profile_dir)
+    return hide_extra_window(launch_chrome_with_retry(_build, profile_dir))
