@@ -26,8 +26,11 @@ FILTER_SUPPORT: dict[str, dict] = {
     # GeekJob: rm=1 — удалённо, ih=1 — офис (inhouse), s=1&money — только с
     # зарплатой; своего «гибрида» и уровней нет.
     "geekjob": {"formats": "single", "salary": True, "levels": False},
-    "wellfound": {"formats": False, "salary": False, "levels": False},
-    "himalayas": {"formats": False, "salary": False, "levels": False},
+    # Wellfound ищет по /role/r/<роль> — это страница удалённых вакансий
+    # (/role/l/... — по городам), Himalayas целиком удалённая: формат
+    # «удалённо» у них уже есть сам по себе, остальных фильтров нет.
+    "wellfound": {"formats": "remote", "salary": False, "levels": False},
+    "himalayas": {"formats": "remote", "salary": False, "levels": False},
     "talanto": {"formats": True, "salary": False, "levels": True},
 }
 
