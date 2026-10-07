@@ -1093,6 +1093,8 @@ function renderBaseBulk() {
     }</span>
     <button type="button" class="btn btn-primary btn-small" data-bulk="write">✉️ Написать выбранным</button>
     <button type="button" class="btn btn-secondary btn-small" data-bulk="${skipped ? "unskip" : "skip"}">${skipped ? "Снова можно писать" : "🚫 Не писать"}</button>
+    <button type="button" class="btn btn-ghost btn-small" data-bulk="mark_written" title="Вы уже писали этим компаниям сами — рассылка их пропустит">Писал сам</button>
+    <button type="button" class="btn btn-ghost btn-small" data-bulk="unmark_written" title="Снять ручную отметку «писал сам»">Не писал</button>
     <button type="button" class="btn btn-ghost btn-small" data-bulk="delete">🗑 Удалить</button>
     <button type="button" class="btn btn-ghost btn-small" data-bulk="clear">Снять выбор</button>`;
   bar.querySelectorAll("[data-bulk]").forEach((b) =>
@@ -5604,6 +5606,23 @@ function renderMarket(market) {
         .join("")
     : emptyStateHtml("Появится после новых откликов — навыки извлекаются из текста вакансий с этого обновления.");
   growFunnelBars(skillsEl);
+
+  const srcEl = document.getElementById("vacancy-sources");
+  const srcRows = Object.entries(market.by_source || {}).sort((a, b) => b[1] - a[1]);
+  const srcMax = srcRows.length ? srcRows[0][1] : 1;
+  srcEl.innerHTML = srcRows.length
+    ? srcRows
+        .map(
+          ([name, n]) => `
+      <div class="funnel-row">
+        <span class="funnel-label">${escapeHtml(sourceLabel(name))}</span>
+        <span class="funnel-track"><span class="funnel-bar" style="width:${Math.round((n / srcMax) * 100)}%"></span></span>
+        <span class="funnel-value">${n}</span>
+      </div>`
+        )
+        .join("")
+    : emptyStateHtml("Пока нет собранных вакансий.");
+  growFunnelBars(srcEl);
 
   const fmt = (n) => n.toLocaleString("ru-RU");
   const salaryEl = document.getElementById("salary-stats");

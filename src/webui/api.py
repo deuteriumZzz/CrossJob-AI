@@ -1597,6 +1597,24 @@ def post_contacts_bulk(
     if body.action in ("skip", "unskip"):
         book.update(body.keys, do_not_contact=body.action == "skip")
         return {"ok": True}
+    if body.action in ("mark_written", "unmark_written"):
+        # «Писал сам» — письмо ушло мимо бота; ручная отметка снимается,
+        # а настоящая отправка (с message_id) — нет.
+        now = datetime.now().astimezone().isoformat()
+        cards = book.all()
+        for key in body.keys:
+            for c in (cards.get(key) or {}).get("contacts", []):
+                if body.action == "mark_written" and not c.get("sent_at"):
+                    book.update_contact(
+                        c["value"], sent_at=now, manual_written=True
+                    )
+                elif body.action == "unmark_written" and c.get(
+                    "manual_written"
+                ):
+                    book.update_contact(
+                        c["value"], sent_at="", manual_written=False
+                    )
+        return {"ok": True}
     if body.action == "delete":
         return {"removed": book.delete(body.keys)}
     raise HTTPException(400, "Неизвестное действие")
@@ -3228,10 +3246,14 @@ def get_market(ctx: AppContext = Depends(get_ctx)) -> dict:
         if e.get("remote_region"):
             label = REGION_LABELS[e["remote_region"]]
             regions[label] = regions.get(label, 0) + 1
+    by_source: dict[str, int] = {}
+    for e in entries:
+        by_source[e["source"]] = by_source.get(e["source"], 0) + 1
     return {
         "salaries": salary_stats(entries),
         "skills": skill_demand(entries, resume_text)[:20],
         "regions": regions,
+        "by_source": by_source,
     }
 
 
