@@ -150,6 +150,7 @@ from src.job_sources.hr_replies import (
     company_uses_russian,
     due_follow_ups,
     due_hh_reminders,
+    is_reminder_hour,
     format_draft_notification,
     generate_company_email,
     generate_first_message,
@@ -5737,6 +5738,8 @@ def _send_due_hh_reminders(
     days = int(
         (parameters.get("headhunter") or {}).get("reminder_follow_up_days", 7)
     )
+    if not is_reminder_hour():
+        return
     entries = applied_log.entries_by_source_and_status("headhunter", "applied")
     sent_count = 0
     for entry in due_hh_reminders(entries, days):

@@ -70,3 +70,16 @@ def test_bot_token_is_masked_in_logs():
     app_logging._mask_tokens(record)
     assert "AAAAAAAA" not in record["message"]
     assert "bot<скрыт>/getUpdates" in record["message"]
+
+
+def test_reminder_hours_moscow():
+    from datetime import datetime, timezone
+
+    from src.job_sources.hr_replies import is_reminder_hour
+
+    mon_noon = datetime(2026, 10, 5, 9, 0, tzinfo=timezone.utc)  # 12:00 МСК
+    sat_noon = datetime(2026, 10, 10, 9, 0, tzinfo=timezone.utc)
+    mon_night = datetime(2026, 10, 5, 0, 0, tzinfo=timezone.utc)
+    assert is_reminder_hour(mon_noon)
+    assert not is_reminder_hour(sat_noon)
+    assert not is_reminder_hour(mon_night)

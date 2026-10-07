@@ -210,6 +210,17 @@ def due_follow_ups(
     return due
 
 
+def is_reminder_hour(now: datetime | None = None) -> bool:
+    """Напоминание работодателю — только в его рабочее время: будни
+    10–18 по Москве (ночное или субботнее сообщение от «бота» выдаёт)."""
+    from zoneinfo import ZoneInfo
+
+    moscow = (now or datetime.now().astimezone()).astimezone(
+        ZoneInfo("Europe/Moscow")
+    )
+    return moscow.weekday() < 5 and 10 <= moscow.hour < 18
+
+
 def due_hh_reminders(
     entries: list[dict], days: int, now: datetime | None = None
 ) -> list[dict]:
@@ -486,9 +497,16 @@ def generate_first_message(
     text = humanize(text, llm_api_key)
     if channel == "telegram":
         text = _fit_telegram_length(text)
-    subject = f"{job_title} — {'отклик' if russian else 'Application'}"
-    if candidate_name:
-        subject += f" — {candidate_name}"
+    # Название вакансии из Telegram-поста — часто «#middle #удаленка»:
+    # хэштеги и заготовки «[Your Name]» в тему не пускаем.
+    title = re.sub(r"#\w+", "", job_title or "")
+    title = re.sub(r"\[[^\]]*\]", "", title)
+    title = " ".join(title.split()).strip(" —-|,")
+    label = "отклик" if russian else "Application"
+    subject = f"{title} — {label}" if title else label.capitalize()
+    name = re.sub(r"\[[^\]]*\]", "", candidate_name or "").strip()
+    if name:
+        subject += f" — {name}"
     return {"subject": subject, "text": text}
 
 
