@@ -1,6 +1,64 @@
+import re
+from typing import Optional
+
 from src.job import Job
 from src.job_sources.market_stats import remote_region
 from src.job_sources.preferences import effective_list
+from src.logging import logger
+
+# Признаки сомнительных вакансий («лёгкий заработок», ввод данных на дому и
+# т.п.) — живой случай 2026-10-07: «Ewped. Без опыта. Обработка и сортировка
+# данных» получила 9/10 от LLM (за час до этого — 1/10), и на неё ушёл
+# отклик. Оценке LLM тут доверять нельзя, поэтому — жёсткий фильтр до неё.
+# Только сильные сигналы: «без опыта» само по себе законно у junior-ролей.
+_SUSPICIOUS_PHRASES = (
+    "лёгкий заработок",
+    "легкий заработок",
+    "быстрый заработок",
+    "лёгкие деньги",
+    "легкие деньги",
+    "ежедневная оплата",
+    "ежедневные выплаты",
+    "оплата ежедневно",
+    "выплаты ежедневно",
+    "оплата каждый день",
+    "выплаты каждый день",
+    "без вложений",
+    "работа на дому",
+    "подработка на дому",
+    "обработка и сортировка данных",
+    "заполнение анкет",
+    "набор текста на дому",
+    "оператор ввода данных",
+    "easy money",
+    "quick cash",
+    "make money online",
+    "data entry from home",
+    "work from home and earn",
+)
+_SUSPICIOUS_INCOME_RE = re.compile(
+    r"(доход|заработок|зарплата|earn)\s*(от\s*)?\$?\d[\d\s,.]*\s*"
+    r"(₽|руб|р\.|usd|\$|€)?\s*(в|/|per|a)\s*(день|сутки|час|day|hour)",
+    re.IGNORECASE,
+)
+
+
+def suspicious_reason(job: Job, preferences: dict) -> Optional[str]:
+    """Что именно в вакансии выглядит как «лёгкие деньги»/мошенничество, или
+    None. Отключается suspicious_filter: false; свои фразы —
+    suspicious_phrases: [...] в work_preferences.yaml."""
+    if not preferences.get("suspicious_filter", True):
+        return None
+    text = f"{job.role}\n{job.description}".lower()
+    phrases = _SUSPICIOUS_PHRASES + tuple(
+        p.lower() for p in preferences.get("suspicious_phrases") or []
+    )
+    for phrase in phrases:
+        if phrase in text:
+            return phrase
+    match = _SUSPICIOUS_INCOME_RE.search(text)
+    return match.group(0) if match else None
+
 
 # ponytail: подстрочный маркер "удал" вместо точного списка меток —
 # сейчас единственный источник, реально размечающий remote в job.location,
@@ -21,6 +79,12 @@ def passes_blacklists(job: Job, preferences: dict) -> bool:
         return any(marker in location_lower for marker in _REMOTE_MARKERS)
 
     if matches_any(job.company, preferences.get("company_blacklist", [])):
+        return False
+    reason = suspicious_reason(job, preferences)
+    if reason:
+        logger.info(
+            f"Сомнительная вакансия, пропускаю: {job.role!r} ({reason!r})"
+        )
         return False
     title_blacklist = preferences.get("title_blacklist", [])
     # Не только заголовок — некоторые нежелательные вакансии (военные

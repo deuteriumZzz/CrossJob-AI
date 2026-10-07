@@ -9,6 +9,8 @@ clear() письмо дописывалось бы после шаблона, а
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from src.job_sources.geekjob.client import GeekjobClient
 
 
@@ -48,7 +50,7 @@ def test_apply_fills_textarea_when_present():
         submit_button.click.assert_called_once()
 
 
-def test_apply_skips_letter_when_no_textarea():
+def test_apply_refuses_to_submit_without_letter_field():
     with patch(
         "src.job_sources.geekjob.client.init_browser"
     ) as mock_init, patch(
@@ -69,9 +71,10 @@ def test_apply_skips_letter_when_no_textarea():
         driver.find_elements.side_effect = find_elements
 
         client = GeekjobClient(profile_dir="profile")
-        applied = client.apply(
-            "https://geekjob.ru/vacancy/abc", "profile", "Здравствуйте!"
-        )
+        # Поля письма нет — отклик НЕ отправляется (иначе уйдёт шаблон).
+        with pytest.raises(RuntimeError, match="поле сопроводительного"):
+            client.apply(
+                "https://geekjob.ru/vacancy/abc", "profile", "Здравствуйте!"
+            )
 
-        assert applied is True
-        respond_button.click.assert_called_once()
+        respond_button.click.assert_not_called()

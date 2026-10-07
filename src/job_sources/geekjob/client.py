@@ -112,29 +112,45 @@ class GeekjobClient:
             )
             if not buttons:
                 return False
+            if cover_letter:
+                # Подтверждено вживую 2026-10-07: поле письма (#respond-text,
+                # «Измените сопроводительный текст по своему усмотрению»)
+                # стоит на странице вакансии ДО нажатия «Откликнуться», сразу
+                # с шаблоном geekjob; клик отправляет то, что в поле сейчас.
+                # Раньше бот жал «Откликнуться» первым — уходил шаблон, а
+                # письмо искалось уже после отправки и никуда не попадало.
+                # Нет поля или письмо не вписалось — не отправляем вовсе
+                # (исключение: вызывающий код пропускает вакансию без записи
+                # в журнал, и следующий прогон попробует снова).
+                letter = html_letter_to_plain_text(cover_letter)
+                boxes = [
+                    t
+                    for t in driver.find_elements(By.TAG_NAME, "textarea")
+                    if t.is_displayed()
+                ]
+                if not boxes:
+                    raise RuntimeError(
+                        "geekjob: поле сопроводительного письма не найдено "
+                        "— отклик не отправлен"
+                    )
+                boxes[0].clear()
+                boxes[0].send_keys(letter)
+                if not (boxes[0].get_attribute("value") or "").strip():
+                    raise RuntimeError(
+                        "geekjob: письмо не вставилось в поле — отклик не "
+                        "отправлен"
+                    )
             buttons[0].click()
             time.sleep(1)
             if cover_letter:
-                textareas = driver.find_elements(By.TAG_NAME, "textarea")
-                if textareas:
-                    # geekjob подставляет в это поле свой дефолтный
-                    # шаблон ("Меня заинтересовала вакансия ...,
-                    # можете посмотреть резюме по ссылке ...") — без
-                    # clear() наше письмо дописывалось бы ПОСЛЕ этого
-                    # шаблона, а не вместо него (подтверждено вживую:
-                    # именно этот шаблонный текст и уходил отдельно).
-                    textareas[0].clear()
-                    textareas[0].send_keys(
-                        html_letter_to_plain_text(cover_letter)
-                    )
-                    submit_buttons = driver.find_elements(
-                        By.XPATH,
-                        "//button[contains(normalize-space(), "
-                        '"Отправить")]',
-                    )
-                    if submit_buttons:
-                        submit_buttons[0].click()
-                        time.sleep(1)
+                # Двухшаговая форма: после клика может появиться «Отправить».
+                submit_buttons = driver.find_elements(
+                    By.XPATH,
+                    '//button[contains(normalize-space(), "Отправить")]',
+                )
+                if submit_buttons:
+                    submit_buttons[0].click()
+                    time.sleep(1)
             return True
         finally:
             driver.quit()
