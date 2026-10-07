@@ -1,4 +1,5 @@
 from src.job import Job
+from src.job_sources.applied_log import max_new_per_run, seen_ids_for
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import PlatformBlockedError
 from src.job_sources.geekjob.client import GeekjobClient
@@ -28,6 +29,9 @@ class GeekjobSource:
 
     def search(self, preferences: dict) -> list[Job]:
         seen_ids: set = set()
+        already_seen = seen_ids_for(preferences, "geekjob")
+        max_new = max_new_per_run(preferences, "geekjob")
+        opened = 0
         jobs: list[Job] = []
 
         for position in effective_list(preferences, "geekjob", "positions"):
@@ -63,6 +67,11 @@ class GeekjobSource:
                     if vacancy_id in seen_ids:
                         continue
                     seen_ids.add(vacancy_id)
+                    if vacancy_id in already_seen:
+                        continue  # уже в журнале — страницу не открываем
+                    if opened >= max_new:
+                        return jobs
+                    opened += 1
 
                     try:
                         detail_html = self.client.get_vacancy_html(vacancy_id)

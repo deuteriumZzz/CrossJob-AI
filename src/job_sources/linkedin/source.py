@@ -1,4 +1,5 @@
 from src.job import Job
+from src.job_sources.applied_log import max_new_per_run, seen_ids_for
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.linkedin.search import (
     load_job_description,
@@ -21,6 +22,9 @@ class LinkedInSource:
         locations = linkedin_preferences.get("locations") or [""]
 
         seen_ids: set = set()
+        already_seen = seen_ids_for(preferences, "linkedin")
+        max_new = max_new_per_run(preferences, "linkedin")
+        opened = 0
         jobs: list[Job] = []
         for position in effective_list(preferences, "linkedin", "positions"):
             for location in locations:
@@ -30,6 +34,11 @@ class LinkedInSource:
                     if job.external_id in seen_ids:
                         continue
                     seen_ids.add(job.external_id)
+                    if job.external_id in already_seen:
+                        continue  # уже в журнале — страницу не открываем
+                    if opened >= max_new:
+                        return jobs
+                    opened += 1
                     if passes_blacklists(job, preferences):
                         jobs.append(load_job_description(self.driver, job))
 

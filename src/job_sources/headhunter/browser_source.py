@@ -1,4 +1,5 @@
 from src.job import Job
+from src.job_sources.applied_log import max_new_per_run, seen_ids_for
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import PlatformBlockedError
 from src.job_sources.headhunter.browser_client import HeadHunterBrowserClient
@@ -24,6 +25,9 @@ class HeadHunterBrowserSource:
         work_formats = tuple(_hh_work_formats(preferences))
 
         seen_ids: set = set()
+        already_seen = seen_ids_for(preferences, "headhunter")
+        max_new = max_new_per_run(preferences, "headhunter")
+        opened = 0
         jobs: list[Job] = []
 
         for position in effective_list(preferences, "headhunter", "positions"):
@@ -43,6 +47,11 @@ class HeadHunterBrowserSource:
                     if item.external_id in seen_ids:
                         continue
                     seen_ids.add(item.external_id)
+                    if item.external_id in already_seen:
+                        continue  # уже в журнале — страницу не открываем
+                    if opened >= max_new:
+                        return jobs
+                    opened += 1
 
                     try:
                         detail_html = self.client.get_vacancy_html(

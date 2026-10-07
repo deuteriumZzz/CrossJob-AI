@@ -1,4 +1,5 @@
 from src.job import Job
+from src.job_sources.applied_log import max_new_per_run, seen_ids_for
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import PlatformBlockedError
 from src.job_sources.habr_career.client import HabrCareerClient
@@ -25,6 +26,9 @@ class HabrCareerSource:
         employment_type = hc_preferences.get("employment_type") or None
 
         seen_ids: set = set()
+        already_seen = seen_ids_for(preferences, "habr_career")
+        max_new = max_new_per_run(preferences, "habr_career")
+        opened = 0
         jobs: list[Job] = []
 
         for position in effective_list(
@@ -55,6 +59,11 @@ class HabrCareerSource:
                 if vacancy_id in seen_ids:
                     continue
                 seen_ids.add(vacancy_id)
+                if vacancy_id in already_seen:
+                    continue  # уже в журнале — страницу не открываем
+                if opened >= max_new:
+                    return jobs
+                opened += 1
 
                 try:
                     detail_html = self.client.get_vacancy_html(vacancy_id)

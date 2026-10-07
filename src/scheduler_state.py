@@ -8,6 +8,7 @@ from typing import Literal, Optional
 from src.utils.file_lock import atomic_write_text, state_file_lock
 
 RunStatus = Literal["ok", "error", "blocked"]
+RUN_HISTORY_FILE = ".run_history.jsonl"
 
 
 def _state_path(output_folder: Path) -> Path:
@@ -40,6 +41,7 @@ def record_run_result(
     next_run: datetime,
     run_at: datetime,
     error: Optional[str] = None,
+    idle_streak: Optional[int] = None,
 ) -> None:
     """Фиксирует результат одного тика планировщика для источника —
     читает web UI (Фаза B), чтобы показать 🟢/🟡/🔴 и время следующего
@@ -47,6 +49,12 @@ def record_run_result(
     read-modify-write — демон/ручной запуск/генерация резюме в
     дашборде работают в отдельных потоках и могут писать почти
     одновременно."""
+    # Сколько длился ход — без этого не понять, какая площадка съедает
+    # время круга; пишется и в историю (в состоянии хранится только
+    # последний запуск).
+    duration = round(
+        max(0.0, (datetime.now(run_at.tzinfo) - run_at).total_seconds()), 1
+    )
     with state_file_lock(_state_path(output_folder)):
         state = load_state(output_folder)
         state[source] = {
@@ -54,8 +62,30 @@ def record_run_result(
             "next_run": next_run.isoformat(),
             "status": status,
             "last_error": error,
+            "duration_seconds": duration,
         }
+        if idle_streak is not None:
+            state[source]["idle_streak"] = idle_streak
         _save_state(output_folder, state)
+        try:
+            with (output_folder / RUN_HISTORY_FILE).open(
+                "a", encoding="utf-8"
+            ) as fh:
+                fh.write(
+                    json.dumps(
+                        {
+                            "source": source,
+                            "status": status,
+                            "run_at": run_at.isoformat(),
+                            "duration_seconds": duration,
+                            "error": error,
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except OSError:
+            pass
 
 
 def get_next_run(output_folder: Path, source: str) -> Optional[datetime]:
@@ -63,3 +93,10 @@ def get_next_run(output_folder: Path, source: str) -> Optional[datetime]:
     if not entry or not entry.get("next_run"):
         return None
     return datetime.fromisoformat(entry["next_run"])
+
+
+def get_idle_streak(output_folder: Path, source: str) -> int:
+    """Сколько ходов подряд площадка не нашла ничего нового."""
+    return int(
+        (load_state(output_folder).get(source) or {}).get("idle_streak", 0)
+    )

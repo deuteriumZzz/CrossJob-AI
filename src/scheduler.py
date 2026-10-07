@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -10,7 +11,11 @@ from src.job_sources.applied_log import AppliedLog
 from src.job_sources.llm_usage import check_and_mark_alert
 from src.job_sources.telegram_notify import notify_from_secrets
 from src.logging import logger
-from src.scheduler_state import get_next_run, record_run_result
+from src.scheduler_state import (
+    get_idle_streak,
+    get_next_run,
+    record_run_result,
+)
 
 DEFAULT_INTERVAL_HOURS = 3
 
@@ -34,6 +39,25 @@ CONTINUOUS_CYCLE_SOURCES = {
     # отдельный часовой таймер.
     "check_hh_replies",
 }
+
+
+# Предохранитель от зависания: ход площадки в постоянном цикле мягко
+# останавливается (через stop_event) по истечении этого времени.
+TURN_TIME_LIMIT_SECONDS = 40 * 60
+
+# Пауза до следующего хода площадки, которая N ходов подряд не нашла
+# ничего нового (все вакансии уже в журнале): чем дольше пусто, тем реже
+# заглядываем. Появилось новое — пауза снова обычная (gap).
+IDLE_BACKOFF_HOURS = {2: 0.25, 3: 0.5}
+IDLE_BACKOFF_MAX_HOURS = 1.0
+
+
+def _idle_interval_hours(gap_hours: float, idle_streak: int) -> float:
+    if idle_streak < 2:
+        return gap_hours
+    return max(
+        gap_hours, IDLE_BACKOFF_HOURS.get(idle_streak, IDLE_BACKOFF_MAX_HOURS)
+    )
 
 
 # Как часто проверять ответы, если в настройках не задано: команды боту —
@@ -117,6 +141,30 @@ class Scheduler:
                 due.append(name)
         return due
 
+    def _seen_count(self, name: str) -> int:
+        return len(
+            AppliedLog(self.output_folder / "applied_log.json").seen_ids(name)
+        )
+
+    def _call_source(self, name: str, platform_turn: bool) -> None:
+        """Запуск источника; ход площадки в постоянном цикле получает
+        stop_event, который сам срабатывает через TURN_TIME_LIMIT_SECONDS."""
+        fn = self.source_map[name]
+        if (
+            not platform_turn
+            or "stop_event" not in inspect.signature(fn).parameters
+        ):
+            fn(self.parameters, self.llm_api_key)
+            return
+        stop = threading.Event()
+        timer = threading.Timer(TURN_TIME_LIMIT_SECONDS, stop.set)
+        timer.daemon = True
+        timer.start()
+        try:
+            fn(self.parameters, self.llm_api_key, stop_event=stop)
+        finally:
+            timer.cancel()
+
     def _continuous(self) -> bool:
         limits = self.parameters.get("limits") or {}
         return bool(limits.get("continuous_cycle_enabled"))
@@ -159,8 +207,14 @@ class Scheduler:
                 )
             )
             next_run = run_at + timedelta(hours=interval_hours)
+            platform_turn = (
+                continuous
+                and name in CONTINUOUS_CYCLE_SOURCES
+                and name != "check_hh_replies"
+            )
+            seen_before = self._seen_count(name) if platform_turn else 0
             try:
-                self.source_map[name](self.parameters, self.llm_api_key)
+                self._call_source(name, platform_turn)
             except Exception as e:
                 logger.exception(f"[scheduler] {name} failed: {e}")
                 record_run_result(
@@ -177,7 +231,23 @@ class Scheduler:
                     f"планового запуска — {e}",
                 )
                 continue
-            record_run_result(self.output_folder, name, "ok", next_run, run_at)
+            idle_streak: Optional[int] = None
+            if platform_turn:
+                idle_streak = (
+                    get_idle_streak(self.output_folder, name) + 1
+                    if self._seen_count(name) == seen_before
+                    else 0
+                )
+                interval_hours = _idle_interval_hours(gap_hours, idle_streak)
+            next_run = run_at + timedelta(hours=interval_hours)
+            record_run_result(
+                self.output_folder,
+                name,
+                "ok",
+                next_run,
+                run_at,
+                idle_streak=idle_streak,
+            )
 
         self._check_llm_cost_alert()
         self._purge_old_cover_letters()

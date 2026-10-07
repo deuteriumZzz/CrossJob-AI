@@ -21,6 +21,8 @@ Status = Literal[
     "skipped_requirements",
 ]
 Period = Literal["day", "week", "month"]
+EASY_APPLY_MAX_ATTEMPTS = 3
+EASY_APPLY_RETRY_HOURS = 6
 
 # Организационно-правовые формы, из-за которых одна компания на разных
 # площадках пишется по-разному ("ООО Яндекс" / "Яндекс", "Acme Inc." /
@@ -109,6 +111,81 @@ class AppliedLog:
                 self.path, json.dumps(fresh, indent=2, ensure_ascii=False)
             )
 
+    @staticmethod
+    def _retryable(entry: dict) -> bool:
+        """Сломанная форма Easy Apply — не приговор вакансии: пробуем ещё
+        EASY_APPLY_MAX_ATTEMPTS раз с паузой. Записи старого формата (без
+        retry_after) считаются готовыми к повтору."""
+        if entry.get("status") != "skipped_easy_apply_failed":
+            return False
+        if entry.get("retry_count", 1) >= EASY_APPLY_MAX_ATTEMPTS:
+            return False
+        retry_after = entry.get("retry_after")
+        return not retry_after or (
+            datetime.fromisoformat(retry_after) <= datetime.now().astimezone()
+        )
+
+    def record_easy_apply_failure(
+        self, job: Job, score: int | None, gaps: list[str], reason: str
+    ) -> int:
+        """Сбой формы Easy Apply: первая запись или счётчик попыток у
+        существующей. Возвращает номер попытки; на последней вакансия
+        закрывается насовсем (дальше _retryable даёт False)."""
+        attempt = 1
+
+        def _mutate(data: dict) -> None:
+            nonlocal attempt
+            key = self._key(job)
+            retry_after = (
+                datetime.now().astimezone()
+                + timedelta(hours=EASY_APPLY_RETRY_HOURS)
+            ).isoformat()
+            for e in data["applications"]:
+                if (e["source"], e["external_id"]) == key and e[
+                    "status"
+                ] == "skipped_easy_apply_failed":
+                    e["retry_count"] = attempt = e.get("retry_count", 1) + 1
+                    e["retry_after"] = retry_after
+                    e["failure_reason"] = reason
+                    return
+            data["applications"].append(
+                {
+                    "source": job.source,
+                    "external_id": job.external_id,
+                    "company": job.company,
+                    "title": job.role,
+                    "link": job.link,
+                    "salary": job.salary,
+                    "company_url": job.company_url,
+                    "cover_letter": "",
+                    "resume_id": "",
+                    "status": "skipped_easy_apply_failed",
+                    "score": score,
+                    "gaps": gaps,
+                    "applied_at": datetime.now().astimezone().isoformat(),
+                    "skills": extract_skills(job.description),
+                    "remote_region": remote_region(
+                        f"{job.location}\n{job.description}"
+                    ),
+                    "retry_count": 1,
+                    "retry_after": retry_after,
+                    "failure_reason": reason,
+                }
+            )
+
+        self._write_locked(_mutate)
+        return attempt
+
+    def seen_ids(self, source: str) -> set[str]:
+        """external_id всех вакансий площадки, что уже есть в журнале (любой
+        статус) — чтобы поиск не открывал страницу вакансии, на которую
+        already_applied() всё равно скажет «уже было»."""
+        return {
+            e["external_id"]
+            for e in self._data["applications"]
+            if e["source"] == source and not self._retryable(e)
+        }
+
     def already_applied(self, job: Job) -> bool:
         """Та же вакансия на этой площадке (любой статус) — или та же
         компания+должность, на которую уже реально откликнулись с
@@ -124,6 +201,8 @@ class AppliedLog:
         role = _normalize(job.role)
         for e in self._data["applications"]:
             if (e["source"], e["external_id"]) == key:
+                if self._retryable(e):
+                    continue  # форма сломалась раньше — пробуем снова
                 return True
             if (
                 company
@@ -415,6 +494,17 @@ class AppliedLog:
             entry["contacts"] = contacts
 
         def _mutate(data: dict) -> None:
+            if status in ("applied", "dry_run"):
+                # Повтор после сломанной формы удался — старую запись о
+                # сбое убираем, чтобы она не раздувала статистику сбоев.
+                data["applications"][:] = [
+                    e
+                    for e in data["applications"]
+                    if not (
+                        (e["source"], e["external_id"]) == self._key(job)
+                        and e["status"] == "skipped_easy_apply_failed"
+                    )
+                ]
             data["applications"].append(entry)
 
         self._write_locked(_mutate)
@@ -529,3 +619,30 @@ class AppliedLog:
 
         self._write_locked(_mutate)
         return removed
+
+
+def seen_ids_for(preferences: dict, source: str) -> set[str]:
+    """seen_ids() по папке результатов из параметров прогона; без неё
+    (тесты, ручной вызов) — ничего не пропускаем."""
+    output_folder = preferences.get("outputFileDirectory")
+    if not output_folder:
+        return set()
+    return AppliedLog(Path(output_folder) / "applied_log.json").seen_ids(
+        source
+    )
+
+
+DEFAULT_MAX_NEW_PER_RUN = 30
+
+
+def max_new_per_run(preferences: dict, source: str) -> int:
+    """Сколько НОВЫХ вакансий (ещё не в журнале) поиск площадки открывает за
+    один ход. Выдача по дате полна новых вакансий, и сотня открытых страниц
+    подряд привела к капче на hh.ru (живьём 2026-10-07); остальные
+    достанутся следующему ходу — в журнал они не попадают, пока не
+    оценены."""
+    return int(
+        (preferences.get(source) or {}).get(
+            "max_new_per_run", DEFAULT_MAX_NEW_PER_RUN
+        )
+    )

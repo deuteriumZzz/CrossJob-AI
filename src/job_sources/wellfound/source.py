@@ -1,4 +1,5 @@
 from src.job import Job
+from src.job_sources.applied_log import max_new_per_run, seen_ids_for
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import PlatformBlockedError
 from src.job_sources.preferences import effective_list
@@ -20,6 +21,9 @@ class WellfoundSource:
 
     def search(self, preferences: dict) -> list[Job]:
         seen_ids: set = set()
+        already_seen = seen_ids_for(preferences, "wellfound")
+        max_new = max_new_per_run(preferences, "wellfound")
+        opened = 0
         jobs: list[Job] = []
 
         for position in effective_list(preferences, "wellfound", "positions"):
@@ -31,6 +35,11 @@ class WellfoundSource:
                 if job_id in seen_ids:
                     continue
                 seen_ids.add(job_id)
+                if job_id in already_seen:
+                    continue  # уже в журнале — страницу не открываем
+                if opened >= max_new:
+                    return jobs
+                opened += 1
 
                 try:
                     detail_html = self.client.get_vacancy_html(job_id, slug)

@@ -7,7 +7,7 @@ from src.job import Job
 
 SEARCH_URL = "https://www.linkedin.com/jobs/search/"
 SCROLL_PAUSE_SECONDS = 1.5
-SCROLL_STEPS = 5
+SCROLL_STEPS = 8
 
 
 def search_easy_apply_jobs(driver, keywords: str, location: str) -> list[Job]:
@@ -23,7 +23,14 @@ def search_easy_apply_jobs(driver, keywords: str, location: str) -> list[Job]:
     локацию из профиля кандидата (без geoId все результаты уходили в
     Индонезию — там, где физически находится кандидат в резюме — а не
     по-настоящему worldwide, как задумывалось)."""
-    params = {"keywords": keywords, "f_AL": "true", "f_WT": "2"}
+    # sortBy=DD — сначала самые новые (по умолчанию выдача по
+    # релевантности, и свежие вакансии теряются за первыми экранами).
+    params = {
+        "keywords": keywords,
+        "f_AL": "true",
+        "f_WT": "2",
+        "sortBy": "DD",
+    }
     if location:
         params["location"] = location
     else:
