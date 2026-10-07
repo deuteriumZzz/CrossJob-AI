@@ -2160,6 +2160,77 @@ async function renderLiveFeed() {
 }
 document.getElementById("live-feed")?.addEventListener("toggle", renderLiveFeed);
 
+// Пометки «не поддерживается»: по выбранным в «Что ищу» фильтрам — на каких
+// площадках каждый действует, а на каких нет (данные: /api/filters/support).
+let filterSupport = null;
+function currentSearchFilters() {
+  const checked = (sel) => [...document.querySelectorAll(sel)].filter((e) => e.checked).map((e) => e.value);
+  const formats = ["remote", "hybrid", "onsite"].filter((f) => document.getElementById(`search-${f}`)?.checked);
+  return {
+    formats,
+    salary: !!document.getElementById("search-only-with-salary")?.checked,
+    levels: checked(".search-level"),
+    employment: checked(".search-employment"),
+    period: Number(document.getElementById("search-posted-within")?.value || 0),
+  };
+}
+// ok — применяется, partial — применяется при условии, none — не применяется
+function filterVerdict(name, want, v) {
+  if (name === "formats") {
+    if (v === true) return "ok";
+    if (!v) return "none";
+    const only = want.length === 1;
+    if (v === "remote") return want.length === 1 && want[0] === "remote" ? "ok" : want.includes("remote") ? "partial" : "none";
+    return only ? "ok" : "partial"; // single
+  }
+  if (name === "employment") {
+    if (v === true) return "ok";
+    if (!v) return "none";
+    const fp = want.filter((e) => e === "full" || e === "part");
+    return fp.length === 1 ? "ok" : "partial"; // single: полная или частичная
+  }
+  return v ? "ok" : "none";
+}
+async function renderFilterCoverage() {
+  const box = document.getElementById("search-filter-coverage");
+  if (!box) return;
+  try {
+    if (!filterSupport) filterSupport = (await api("/api/filters/support")).support;
+  } catch (e) {
+    return;
+  }
+  const f = currentSearchFilters();
+  const rows = [
+    ["formats", "Формат работы", f.formats.length ? f.formats : null],
+    ["levels", "Уровень", f.levels.length ? f.levels : null],
+    ["salary", "Только с зарплатой", f.salary ? [1] : null],
+    ["employment", "Тип занятости", f.employment.length ? f.employment : null],
+    ["period", "Опубликовано", f.period ? [f.period] : null],
+  ].filter((r) => r[2]);
+  if (!rows.length) {
+    box.innerHTML = "Фильтры не выбраны — поиск идёт без ограничений на всех площадках.";
+    return;
+  }
+  box.innerHTML = rows
+    .map(([key, title, want]) => {
+      const none = [];
+      const partial = [];
+      Object.entries(filterSupport).forEach(([src, sup]) => {
+        const verdict = filterVerdict(key, want, sup[key]);
+        if (verdict === "none") none.push(sourceLabel(src));
+        if (verdict === "partial") partial.push(sourceLabel(src));
+      });
+      const parts = [];
+      if (none.length) parts.push(`не применяется: ${none.join(", ")}`);
+      if (partial.length) parts.push(`частично (нужен один вариант): ${partial.join(", ")}`);
+      return `<div><b>${title}</b> — ${parts.length ? parts.join("; ") : "применяется на всех площадках"}</div>`;
+    })
+    .join("");
+}
+document
+  .querySelectorAll("#search-remote,#search-hybrid,#search-onsite,#search-only-with-salary,.search-level,.search-employment,#search-posted-within")
+  .forEach((el) => el.addEventListener("change", renderFilterCoverage));
+
 const SENT_LABELS = { sent: "отправлено", replied: "ответили", bounced: "возврат", failed: "не ушло" };
 let sentRows = [];
 function renderSentLog() {
@@ -2959,6 +3030,7 @@ const render = {
         el.checked = (search.employment_types || []).includes(el.value);
       });
       document.getElementById("search-posted-within").value = String(search.posted_within_days || 0);
+      renderFilterCoverage();
     });
 
     api("/api/settings/llm").then((llm) => {
