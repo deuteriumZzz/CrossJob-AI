@@ -108,6 +108,7 @@ def test_source_search_passes_remote_only_and_qualification_filters():
         remote_only=True,
         qualification="senior",
         employment_type="full_time",
+        only_with_salary=False,
     )
 
 
@@ -123,6 +124,7 @@ def test_source_search_without_filters_passes_none():
         remote_only=False,
         qualification=None,
         employment_type=None,
+        only_with_salary=False,
     )
 
 

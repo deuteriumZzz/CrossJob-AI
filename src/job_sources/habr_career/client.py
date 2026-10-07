@@ -92,6 +92,7 @@ class HabrCareerClient:
         remote_only: bool = False,
         qualification: Optional[str] = None,
         employment_type: Optional[str] = None,
+        only_with_salary: bool = False,
     ) -> str:
         """Фильтры сайдбара /vacancies — подтверждено вживую
         2026-09-29 (см. QUALIFICATION_IDS/EMPLOYMENT_TYPES выше):
@@ -110,6 +111,9 @@ class HabrCareerClient:
             params["qid"] = str(QUALIFICATION_IDS[qualification])
         if employment_type in EMPLOYMENT_TYPES:
             params["employment_type"] = employment_type
+        if only_with_salary:
+            # Проверено вживую 2026-10-07: 4 страницы выдачи против 5.
+            params["with_salary"] = "true"
         response = self._client.get("/vacancies", params=params)
         response.raise_for_status()
         raise_if_blocked(response)

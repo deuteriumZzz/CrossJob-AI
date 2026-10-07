@@ -57,6 +57,7 @@ class HabrCareerSource:
                     remote_only=remote_only,
                     qualification=qualification,
                     employment_type=employment_type,
+                    only_with_salary=bool(preferences.get("only_with_salary")),
                 )
             except PlatformBlockedError:
                 raise

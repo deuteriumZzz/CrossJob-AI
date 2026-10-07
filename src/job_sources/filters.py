@@ -18,7 +18,7 @@ FILTER_SUPPORT: dict[str, dict] = {
     "headhunter": {"formats": True, "salary": True, "levels": True},
     "linkedin": {"formats": True, "salary": False, "levels": True},
     "getmatch": {"formats": "remote", "salary": False, "levels": True},
-    "habr_career": {"formats": "remote", "salary": False, "levels": True},
+    "habr_career": {"formats": "remote", "salary": True, "levels": True},
     "avito": {"formats": "remote", "salary": False, "levels": True},
     # Djinni принимает один employment (при двух сразу берёт remote) —
     # фильтр ставим, только если выбран ровно один формат.
