@@ -15,6 +15,7 @@ from src.logging import logger
 from src.scheduler_state import (
     get_idle_streak,
     get_next_run,
+    load_state,
     record_run_result,
 )
 
@@ -102,6 +103,7 @@ class Scheduler:
         self._gateway_alerted = 0.0
         self._disk_checked = 0.0
         self._disk_alerted = 0.0
+        self._error_alerted: dict[str, float] = {}
 
     def due_sources(self) -> list[str]:
         if self.paused:
@@ -229,6 +231,39 @@ class Scheduler:
                 f"{free / 1024**3:.1f} ГБ — при нехватке места падают шлюз "
                 "Telegram и браузеры. Освободите место.",
             )
+
+    def _check_shared_errors(self) -> None:
+        """Одна и та же ошибка у трёх и более площадок за последние 3 часа —
+        значит, ломается общее (ключ ИИ, браузер, сеть), а не одна площадка:
+        одно сообщение на такую ошибку в сутки."""
+        now = self.now_fn()
+        since = now - timedelta(hours=3)
+        by_error: dict[str, list[str]] = {}
+        for name, entry in load_state(self.output_folder).items():
+            if entry.get("status") != "error" or not entry.get("last_error"):
+                continue
+            try:
+                last = datetime.fromisoformat(entry.get("last_run") or "")
+            except ValueError:
+                continue
+            if last.tzinfo is None and since.tzinfo is not None:
+                last = last.astimezone()
+            if last < since:
+                continue
+            key = " ".join(str(entry["last_error"]).split())[:80]
+            by_error.setdefault(key, []).append(name)
+        for key, names in by_error.items():
+            stamp = now.timestamp()
+            if (
+                len(names) >= 3
+                and stamp - self._error_alerted.get(key, 0.0) > 86400
+            ):
+                self._error_alerted[key] = stamp
+                notify_from_secrets(
+                    self.parameters,
+                    f"CrossJob-AI: одна ошибка у {len(names)} площадок "
+                    f"({', '.join(sorted(names))}): {key}",
+                )
 
     def _continuous(self) -> bool:
         limits = self.parameters.get("limits") or {}
@@ -388,6 +423,7 @@ class Scheduler:
                     logger.exception(f"[scheduler] тик упал, продолжаю: {e}")
                 self._supervise_gateway()
                 self._check_disk_space()
+                self._check_shared_errors()
                 self.stop_event.wait(tick_seconds)
         finally:
             # Парсер могли включить/выключить из дашборда на ходу — гасим

@@ -127,3 +127,32 @@ def test_djinni_and_talanto_salary_and_experience():
     assert parse_jobs(page(salary))[0].salary == "550–700 USD"
     assert parse_jobs(page(None), only_with_salary=True) == []
     assert len(parse_jobs(page(salary), only_with_salary=True)) == 1
+
+
+def test_same_error_on_three_platforms_alerts_once():
+    import json
+
+    with tempfile.TemporaryDirectory() as tmp:
+        scheduler = _scheduler(tmp, {})
+        run = datetime(2026, 10, 7, 11, 0, 0).isoformat()
+        state = {
+            name: {
+                "status": "error",
+                "last_run": run,
+                "last_error": "LLM key rejected (401)",
+            }
+            for name in ("djinni", "habr_career", "getmatch")
+        }
+        state["linkedin"] = {
+            "status": "error",
+            "last_run": run,
+            "last_error": "other",
+        }
+        (Path(tmp) / ".scheduler_state.json").write_text(
+            json.dumps(state), encoding="utf-8"
+        )
+        with patch("src.scheduler.notify_from_secrets") as notify:
+            scheduler._check_shared_errors()
+            scheduler._check_shared_errors()
+        notify.assert_called_once()
+        assert "3 площадок" in notify.call_args[0][1]
