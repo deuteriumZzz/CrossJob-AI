@@ -220,9 +220,9 @@ const STATUS_LABELS = {
 };
 
 const REGION_LABELS = {
-  us_only: "🇺🇸 только США",
-  europe_only: "🇪🇺 только Европа",
-  global: "🌍 откуда угодно",
+  us_only: "только США",
+  europe_only: "только Европа",
+  global: "откуда угодно",
 };
 
 const STAGE_LABELS = {
@@ -366,7 +366,7 @@ async function refreshTelegramConnectStatus() {
   try {
     const data = await api("/api/settings/telegram/connect/status");
     if (data.status === "connected") {
-      statusEl.innerHTML = `✅ Подключено (chat_id: ${escapeHtml(String(data.chat_id))}) <button type="button" class="copy-btn" title="Скопировать chat_id" aria-label="Скопировать chat_id">${COPY_ICON_SVG}</button>`;
+      statusEl.innerHTML = `Подключено (chat_id: ${escapeHtml(String(data.chat_id))}) <button type="button" class="copy-btn" title="Скопировать chat_id" aria-label="Скопировать chat_id">${COPY_ICON_SVG}</button>`;
       statusEl.querySelector(".copy-btn").addEventListener("click", (e) => {
         copyToClipboard(String(data.chat_id), e.currentTarget);
       });
@@ -394,7 +394,7 @@ async function refreshTelegramGroupConnectStatus() {
   try {
     const data = await api("/api/settings/telegram/connect-group/status");
     if (data.status === "connected") {
-      statusEl.innerHTML = `✅ Группа подключена (chat_id: ${escapeHtml(String(data.chat_id))}) <button type="button" class="copy-btn" title="Скопировать chat_id" aria-label="Скопировать chat_id">${COPY_ICON_SVG}</button> — теперь включите «Темы» в настройках группы и сделайте бота админом с правом «Управление темами».`;
+      statusEl.innerHTML = `Группа подключена (chat_id: ${escapeHtml(String(data.chat_id))}) <button type="button" class="copy-btn" title="Скопировать chat_id" aria-label="Скопировать chat_id">${COPY_ICON_SVG}</button> — теперь включите «Темы» в настройках группы и сделайте бота админом с правом «Управление темами».`;
       statusEl.querySelector(".copy-btn").addEventListener("click", (e) => {
         copyToClipboard(String(data.chat_id), e.currentTarget);
       });
@@ -590,7 +590,7 @@ function applyLLMSelection(provider, currentModel) {
   modelSelect.innerHTML = models
     .map(
       (m) =>
-        `<option value="${m.id}">${m.recommended ? "👑 " : ""}${m.id}${m.free ? " · бесплатно" : ""}</option>`
+        `<option value="${m.id}">${m.id}${m.recommended ? " · рекомендуем" : ""}${m.free ? " · бесплатно" : ""}</option>`
     )
     .join("");
   const recommended = models.find((m) => m.recommended);
@@ -598,7 +598,7 @@ function applyLLMSelection(provider, currentModel) {
     modelSelect.value = currentModel;
   } else if (recommended) {
     // Свежее переключение провайдера без сохранённой модели — сразу
-    // подставляем рекомендованную (👑), а не первую по силе: для
+    // подставляем рекомендованную («рекомендуем»), а не первую по силе: для
     // наших задач (оценка вакансии, письма) это лучший выбор
     // цена/скорость/качество, не обязательно самая мощная модель.
     modelSelect.value = recommended.id;
@@ -737,7 +737,7 @@ function renderTotalBudget(status, totalLimit) {
     <div class="limit-bar"><div class="limit-bar-fill ${usedClass}" style="width:${Math.round(usedRatio * 100)}%"></div></div>
     ${
       overBudget
-        ? `<div class="risk-banner" style="margin-top:10px;margin-bottom:0">⚠️ ${distributionLine} — превышает общий лимит, снизьте лимиты отдельных площадок.</div>`
+        ? `<div class="risk-banner" style="margin-top:10px;margin-bottom:0">${distributionLine} — превышает общий лимит, снизьте лимиты отдельных площадок.</div>`
         : `<p class="muted small" style="margin-top:8px">${distributionLine}</p>`
     }
   `;
@@ -1119,7 +1119,7 @@ function fillFileOptions() {
   const value = select.value;
   select.querySelectorAll('option[value^="file:"]').forEach((o) => o.remove());
   const anchor = select.querySelector('option[value="file"]');
-  files.reverse().forEach((f) => anchor.after(new Option(`↳ 📄 ${f}`, `file:${f}`)));
+  files.reverse().forEach((f) => anchor.after(new Option(`↳ ${f}`, `file:${f}`)));
   select.value = [...select.options].some((o) => o.value === value) ? value : "";
 }
 
@@ -1965,7 +1965,7 @@ function openPlatform(key) {
   else openSourceDrawer(key);
 }
 
-// «🏢 Компании и рассылка» — весь путь в одной карточке: собрали → в Базе →
+// «Компании и рассылка» — весь путь в одной карточке: собрали → в Базе →
 // отправка. Крупно — одна кнопка следующего шага, остальное мелко и в
 // «Подробнее». Действия — здесь же или в боковой панели, без перехода.
 function pipelineNext(o) {
@@ -1978,7 +1978,7 @@ function pipelineNext(o) {
       : "";
   if (!o.base_total) return { kind: "empty" };
   if (ms?.state === "stopped") {
-    return { tone: "alert", status: `⛔ ${ms.text}`, action: ms.goto.startsWith("settings-")
+    return { tone: "alert", status: ms.text, action: ms.goto.startsWith("settings-")
       ? { label: "Что делать", attrs: `data-own-settings="${ms.goto}"`, primary: true }
       : { label: "Проверить адреса в Базе", attrs: `data-own-go="${ms.goto}"`, primary: true } };
   }
@@ -1987,25 +1987,25 @@ function pipelineNext(o) {
   const autoOn = o.auto_send && cur?.reviewed;
   const autoOff = { label: "Выключить автоматический режим", attrs: `data-pipeline="auto-off"` };
   if (ms?.state === "active" || ms?.state === "waiting") {
-    return { tone: ms.state, status: `${ms.state === "active" ? "🔄" : "⏸"} ${ms.text}`,
+    return { tone: ms.state, status: ms.text,
       small: { label: "Остановить рассылку", attrs: `data-pipeline="stop" data-id="${ms.campaign}"` },
       extra: autoOn ? autoOff : null };
   }
   if (autoOn && cur?.progress?.kind === "prepare") {
     const pr = cur.progress;
-    return { tone: "active", status: `🤖 Пишу сегодняшнюю порцию: ${pr.done} из ${pr.total} — отправлю сам в рабочее время`,
+    return { tone: "active", status: `Пишу сегодняшнюю порцию: ${pr.done} из ${pr.total} — отправлю сам в рабочее время`,
       progress: pr.done / Math.max(1, pr.total), small: autoOff };
   }
   if (autoOn && cur?.pending && !cur.draft) {
     const today = new Date().toLocaleDateString("sv-SE"); // ГГГГ-ММ-ДД по вашему поясу, как batch_day
     const when = cur.batch_day === today ? "завтра" : "в ближайшие минуты";
     return { tone: "waiting",
-      status: `🤖 Автоматический режим: каждый день бот сам пишет и отправляет порцию. Следующая — ${when}; в очереди ${cur.pending.toLocaleString("ru-RU")}.`,
+      status: `Автоматический режим: каждый день бот сам пишет и отправляет порцию. Следующая — ${when}; в очереди ${cur.pending.toLocaleString("ru-RU")}.`,
       small: autoOff };
   }
   if (cur?.progress?.kind === "prepare") {
     const pr = cur.progress;
-    return { tone: "active", status: `✍️ Пишу письма: ${pr.done} из ${pr.total}`, progress: pr.done / Math.max(1, pr.total),
+    return { tone: "active", status: `Пишу письма: ${pr.done} из ${pr.total}`, progress: pr.done / Math.max(1, pr.total),
       small: { label: "Остановить", attrs: `data-pipeline="stop" data-id="${cur.id}"` } };
   }
   if (cur?.draft) {
@@ -2014,36 +2014,36 @@ function pipelineNext(o) {
         action: { label: "Подключить Gmail", attrs: `data-own-settings="settings-outreach"`, primary: true } };
     }
     return { status: `Готово ${cur.draft} ${plural(cur.draft, "письмо", "письма", "писем")}. Просмотрите — можно поправить или убрать — и отправьте.${o.auto_send && !cur.reviewed ? " Это первая порция: дальше в автоматическом режиме бот будет писать и отправлять сам." : ""}`,
-      action: { label: `👀 Просмотреть и отправить (${cur.draft})`, attrs: `data-pipeline="review"`, primary: true } };
+      action: { label: `Просмотреть и отправить (${cur.draft})`, attrs: `data-pipeline="review"`, primary: true } };
   }
   if (cur?.pending) {
     const n = Math.min(cur.pending, p.limit);
     return { status: `В очереди рассылки ${cur.pending} ${plural(cur.pending, "компания", "компании", "компаний")}. ${todayText(n)}${o.auto_send ? " Автоматический режим включён: первую порцию проверьте сами, дальше бот будет писать и отправлять сам." : ""}`,
-      action: { label: `✍️ Написать ${n} ${plural(n, "письмо", "письма", "писем")}`, attrs: `data-pipeline="prepare" data-id="${cur.id}"`, primary: true } };
+      action: { label: `Написать ${n} ${plural(n, "письмо", "письма", "писем")}`, attrs: `data-pipeline="prepare" data-id="${cur.id}"`, primary: true } };
   }
   if (o.available) {
     const n = Math.min(o.available, p.limit);
     return { status: `Можно написать ${o.available.toLocaleString("ru-RU")} ${plural(o.available, "компании", "компаниям", "компаниям")}. ${todayText(n)}${o.auto_send ? " Автоматический режим включён: первую порцию проверьте сами, дальше бот будет писать и отправлять сам." : ""}`,
-      action: { label: `✍️ Написать ${n} ${plural(n, "письмо", "письма", "писем")}`, attrs: `data-pipeline="create"`, primary: true } };
+      action: { label: `Написать ${n} ${plural(n, "письмо", "письма", "писем")}`, attrs: `data-pipeline="create"`, primary: true } };
   }
   return { status: "Всем компаниям из Базы уже написали. Загрузите новый список — бот напишет и им.",
-    action: { label: "📥 Загрузить список", attrs: `data-pipeline="upload"`, primary: true } };
+    action: { label: "Загрузить список", attrs: `data-pipeline="upload"`, primary: true } };
 }
 
 function pipelineCardHtml(o) {
   const next = pipelineNext(o);
   const a = o.added_week;
-  const settingsBtn = `<button type="button" class="icon-btn" data-own-settings="settings-outreach" title="Настройки почты и защиты" aria-label="Настройки почты">⚙</button>`;
+  const settingsBtn = `<button type="button" class="icon-btn" data-own-settings="settings-outreach" title="Настройки почты и защиты" aria-label="Настройки почты"><svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1"/></svg></button>`;
   if (next.kind === "empty") {
     return `<div class="source-card own-card pipeline-card">
-      <h3>🏢 Компании и рассылка ${settingsBtn}</h3>
+      <h3>Компании и рассылка ${settingsBtn}</h3>
       <ol class="pipeline-intro small">
         <li>Соберите компании — загрузите список или включите сбор с сайтов компаний.</li>
         <li>Бот напишет каждой компании личное письмо по вашему резюме.</li>
         <li>Письма уйдут с вашей почты Gmail — по одному, в рабочее время.</li>
       </ol>
       <div class="pipeline-actions">
-        <button type="button" class="btn btn-primary" data-pipeline="upload">📥 Загрузить список компаний</button>
+        <button type="button" class="btn btn-primary" data-pipeline="upload">Загрузить список компаний</button>
         <button type="button" class="btn btn-ghost btn-small" data-pipeline="prompt">Где взять список?</button>
       </div>
       <label class="checkbox-row small"><input type="checkbox" class="switch" id="pipeline-sites" ${o.sites_enabled ? "checked" : ""} /> Собирать компании с сайтов компаний сам</label>
@@ -2052,8 +2052,8 @@ function pipelineCardHtml(o) {
   const btn = (x) => x ? `<button type="button" class="btn ${x.primary ? "btn-primary" : "btn-ghost btn-small"}" ${x.attrs}>${escapeHtml(x.label)}</button>` : "";
   const ms = o.mail_status;
   return `<div class="source-card own-card pipeline-card${next.tone === "alert" ? " is-alert" : ""}">
-    <h3><span class="dot ${next.tone === "alert" ? "error" : next.tone === "active" ? "ok running" : next.tone === "waiting" ? "never_run" : "ok"}"></span> 🏢 Компании и рассылка
-      ${o.auto_send ? `<span class="auto-badge" title="Бот сам пишет и отправляет новые порции писем">🤖 авто</span>` : ""}${settingsBtn}</h3>
+    <h3><span class="dot ${next.tone === "alert" ? "error" : next.tone === "active" ? "ok running" : next.tone === "waiting" ? "never_run" : "ok"}"></span> Компании и рассылка
+      ${o.auto_send ? `<span class="auto-badge" title="Бот сам пишет и отправляет новые порции писем">авто</span>` : ""}${settingsBtn}</h3>
     <p class="pipeline-status${next.tone === "alert" ? " err-text" : ""}">${escapeHtml(next.status)}</p>
     ${next.progress !== undefined ? `<div class="progress"><div style="width:${Math.round(next.progress * 100)}%"></div></div>` : ""}
     <div class="pipeline-actions">${btn(next.action)}${btn(next.small)}${btn(next.extra)}</div>
@@ -2065,13 +2065,13 @@ function pipelineCardHtml(o) {
     <label class="checkbox-row small"><input type="checkbox" class="switch" id="pipeline-sites" ${o.sites_enabled ? "checked" : ""} /> Собирать компании с сайтов компаний сам</label>
     <details class="pipeline-more small">
       <summary>Подробнее</summary>
-      <div class="row"><span>Откуда за неделю</span><span>🏢 сайты +${a.sites} · ✈️ Telegram +${a.telegram} · 📄 файлы +${a.file}</span></div>
+      <div class="row"><span>Откуда за неделю</span><span>сайты +${a.sites} · Telegram +${a.telegram} · файлы +${a.file}</span></div>
       <div class="row"><span>Всего в Базе</span><span>${o.base_total.toLocaleString("ru-RU")}</span></div>
       ${ms?.last ? `<div class="row"><span>Последнее письмо</span><span>${fmtDay(ms.last.at)} → ${escapeHtml(ms.last.company)}</span></div>` : ""}
       <div class="row"><span>Всего отправлено</span><span>${o.sent} · ответили ${o.replied} · возвраты ${o.bounced}${o.followups ? ` · напоминаний готово ${o.followups}` : ""}</span></div>
       ${o.days_needed > 1 ? `<div class="row"><span>На всю Базу</span><span>≈ ${o.days_needed} ${plural(o.days_needed, "день", "дня", "дней")} отправки</span></div>` : ""}
       <div class="pipeline-links">
-        <button type="button" class="btn btn-ghost btn-small" data-pipeline="upload">📥 Загрузить список</button>
+        <button type="button" class="btn btn-ghost btn-small" data-pipeline="upload">Загрузить список</button>
         <button type="button" class="btn btn-ghost btn-small" data-own-go="contacts">Открыть Базу</button>
         <button type="button" class="btn btn-ghost btn-small" data-own-go="outreach">История рассылок</button>
         <button type="button" class="btn btn-ghost btn-small" data-own-settings="settings-direct">Сайты компаний: настроить</button>
@@ -2161,8 +2161,8 @@ function openPromptDrawer() {
     <p class="small">Откройте ChatGPT в режиме <b>Deep Research</b> или Claude с <b>Research</b> — нужен поиск в интернете: обычный чат придумывает адреса. Вставьте промт, поменяйте то, что в [скобках], попросите сохранить таблицу в Excel или CSV и загрузите файл.</p>
     <textarea id="drawer-prompt" rows="16" readonly aria-label="Промт для ИИ">${escapeHtml(document.getElementById("ai-prompt").value)}</textarea>
     <div class="step-actions">
-      <button type="button" class="btn btn-secondary btn-small" id="drawer-prompt-copy">📋 Скопировать промт</button>
-      <button type="button" class="btn btn-primary btn-small" id="drawer-upload">📥 Загрузить файл</button>
+      <button type="button" class="btn btn-secondary btn-small" id="drawer-prompt-copy">Скопировать промт</button>
+      <button type="button" class="btn btn-primary btn-small" id="drawer-upload">Загрузить файл</button>
     </div>`);
   body.querySelector("#drawer-prompt-copy").addEventListener("click", async (e) => {
     try {
@@ -2192,12 +2192,12 @@ function openReviewDrawer() {
           ${resumes.map((r) => `<option value="${escapeHtml(r.name)}">${escapeHtml(r.name)}</option>`).join("")}
         </select>
       </label>
-      <button type="button" class="btn btn-primary" id="review-send">🚀 Начать отправку (${cur.draft})</button>
+      <button type="button" class="btn btn-primary" id="review-send">Начать отправку (${cur.draft})</button>
       <label class="checkbox-row small"><input type="checkbox" class="switch" id="review-auto" ${lastOutreach.auto_send ? "checked" : ""} />
         Дальше бот отправляет новые порции сам, без моего просмотра</label>
       <p class="muted small">${escapeHtml(mailPlanText(lastOutreach.plan))}. По одному, со случайными паузами — как человек; что не уйдёт сегодня, отправлю в следующие дни сам.</p>
     </div>
-    <p class="small review-about">✍️ Письма написаны по вашему резюме: обращение по имени, почему именно эта компания, 2–3 ваших достижения, 150–180 слов. Резюме — во вложении. Любое письмо можно поправить или убрать.</p>
+    <p class="small review-about">Письма написаны по вашему резюме: обращение по имени, почему именно эта компания, 2–3 ваших достижения, 150–180 слов. Резюме — во вложении. Любое письмо можно поправить или убрать.</p>
     <div class="letters">${cur.drafts
       .map(
         (i) => `<details class="letter">
@@ -2614,13 +2614,13 @@ async function loadTelegramWatch() {
   document.getElementById("tgq-daily-limit").value = w.daily_message_limit;
   document.getElementById("tgq-backfill-days").value = w.channel_backfill_days;
   document.getElementById("tgq-pending-status").textContent = w.pending_sends
-    ? `⏳ В очереди на отправку: ${w.pending_sends}`
+    ? `В очереди на отправку: ${w.pending_sends}`
     : "Очередь пуста — нет отложенных сообщений";
   renderTelegramResumes(w.resumes);
-  document.getElementById("tgq-resume-route").innerHTML = `📎 <b>Автовыбор при отклике:</b> русская вакансия → ${w.resume_route_ru ? escapeHtml(w.resume_route_ru) : "⚠️ не найдено"}, зарубежная → ${w.resume_route_en ? escapeHtml(w.resume_route_en) : "⚠️ не найдено"}`;
+  document.getElementById("tgq-resume-route").innerHTML = `<b>Автовыбор при отклике:</b> русская вакансия → ${w.resume_route_ru ? escapeHtml(w.resume_route_ru) : "не найдено"}, зарубежная → ${w.resume_route_en ? escapeHtml(w.resume_route_en) : "не найдено"}`;
   document.getElementById("tgq-bot-state").innerHTML = w.bot_connected
-    ? "✅ В ваш CrossJob-бот — с кнопками быстрого ответа."
-    : `⚠️ Бот уведомлений не подключён — <a href="#" data-goto-settings="settings-notifications">подключить</a> (1 минута), иначе кнопок не будет.`;
+    ? "Приходят в ваш бот в Telegram — с кнопками быстрого ответа."
+    : `Бот уведомлений не подключён — <a href="#" data-goto-settings="settings-notifications">подключить</a> (1 минута), иначе кнопок не будет.`;
   bindGotoSettings(document.getElementById("tgq-bot-state"));
   return w;
 }
@@ -2721,7 +2721,7 @@ async function renderResumes() {
       try {
         const payload = Object.fromEntries(fields.map((field) => [field.dataset.resumeRoute, field.value]));
         await api("/api/resumes/routing", { method: "PUT", body: JSON.stringify(payload) });
-        status.textContent = "✅ Сохранено";
+        status.textContent = "Сохранено";
       } catch (err) {
         status.textContent = err.message.replace(/^\d+: /, "");
         showToast(status.textContent, "error");
@@ -2745,7 +2745,7 @@ async function uploadTelegramResumes(files) {
     }
     renderTelegramResumes((await response.json()).resumes);
   }
-  status.textContent = "✅ Сохранено";
+  status.textContent = "Сохранено";
 }
 
 async function saveTelegramWatch() {
@@ -2773,7 +2773,7 @@ async function saveTelegramWatch() {
       }),
     });
     await loadTelegramWatch();
-    status.textContent = "✅ Сохранено — применяется сразу.";
+    status.textContent = "Сохранено — применяется сразу.";
   } catch (err) {
     status.textContent = err.message;
   }
@@ -2873,8 +2873,8 @@ async function importPreview(file, el = document.getElementById("import-preview"
         refreshOwnChannels();
         return;
       }
-      el.innerHTML = `<p class="ok-text">✅ Добавлено: компаний ${res.companies}, контактов ${res.contacts} из ${escapeHtml(res.filename)}. </p>
-        <button type="button" class="btn btn-primary btn-small" data-goto-outreach>✉️ Перейти к рассылке →</button>`;
+      el.innerHTML = `<p class="ok-text">Добавлено: компаний ${res.companies}, контактов ${res.contacts} из ${escapeHtml(res.filename)}. </p>
+        <button type="button" class="btn btn-primary btn-small" data-goto-outreach>Перейти к рассылке →</button>`;
       el.querySelector("[data-goto-outreach]").addEventListener("click", () => switchTab("outreach"));
       // Сразу показать новое: фильтр по этому файлу, подсветка строк.
       document.getElementById("contacts-filter-source").value = `file:${res.filename}`;
@@ -3940,7 +3940,7 @@ const render = {
 // который просто хочет знать, что бот сейчас делает. Человеческий вид
 // её прячет и убирает DEBUG, "Технические детали" возвращают как есть.
 const LOG_LINE_RE = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\.\d+ \| (\w+)\s*\| [^-]*- (.*)$/;
-const LOG_LEVEL_ICON = { WARNING: "⚠️ ", ERROR: "❌ ", CRITICAL: "❌ " };
+const LOG_LEVEL_ICON = { WARNING: "внимание · ", ERROR: "ошибка · ", CRITICAL: "ошибка · " };
 
 function humanizeLogLine(line) {
   const m = line.match(LOG_LINE_RE);
@@ -4604,7 +4604,16 @@ function emptyStateHtml(message) {
   </div>`;
 }
 
+// Всплывающие сообщения этого окна — в «Уведомлениях» (вкладка «В окне»):
+// пропустили уведомление — его можно перечитать.
+const toastLog = [];
+function logToast(message, type) {
+  toastLog.unshift({ at: new Date().toISOString(), text: String(message), kind: type === "error" ? "failure" : "activity", status: "window" });
+  toastLog.length = Math.min(toastLog.length, 50);
+}
+
 function showToast(message, type = "info", duration = 3500) {
+  logToast(message, type);
   const container = document.getElementById("toast-container");
   if (!container) return;
   const el = document.createElement("div");
@@ -4626,6 +4635,7 @@ function showToast(message, type = "info", duration = 3500) {
 // «Сохранено» с кнопкой «Отменить»: изменение уже записано, отмена
 // возвращает прежнее значение.
 function showSavedToast(message, undo = null, duration = 6000) {
+  logToast(message, "success");
   const container = document.getElementById("toast-container");
   if (!container) return;
   const el = document.createElement("div");
@@ -5768,20 +5778,20 @@ function rowActionsHtml(e, i) {
   const actions = [];
   if (e.effective_stage === "interview") {
     actions.push(
-      `<button type="button" data-prep-btn data-row-index="${i}">🎯 Подготовка к интервью</button>`,
-      `<button type="button" data-trainer-btn data-row-index="${i}">🎤 Тренажёр</button>`,
-      `<button type="button" data-calendar-btn data-row-index="${i}">📅 В календарь</button>`
+      `<button type="button" data-prep-btn data-row-index="${i}">Подготовка к интервью</button>`,
+      `<button type="button" data-trainer-btn data-row-index="${i}">Тренажёр вопросов</button>`,
+      `<button type="button" data-calendar-btn data-row-index="${i}">Интервью в календарь</button>`
     );
   }
   if (e.source === "direct" && e.status === "dry_run" && /greenhouse\.io|lever\.co/.test(e.link)) {
-    actions.push(`<button type="button" data-prefill-btn data-row-index="${i}">✍️ Заполнить форму отклика</button>`);
+    actions.push(`<button type="button" data-prefill-btn data-row-index="${i}">Заполнить форму отклика</button>`);
   }
   if (e.company) {
-    actions.push(`<button type="button" data-find-hr data-row-index="${i}">👤 Найти HR этой компании</button>`);
+    actions.push(`<button type="button" data-find-hr data-row-index="${i}">Найти HR компании</button>`);
   }
   if (e.contacts && e.contacts.length) {
     actions.push(
-      ...e.contacts.map((c) => `<a href="mailto:${escapeHtml(c)}">✉️ ${escapeHtml(c)}</a>`)
+      ...e.contacts.map((c) => `<a href="mailto:${escapeHtml(c)}">${escapeHtml(c)}</a>`)
     );
   }
   if (!actions.length) return "";
@@ -5879,11 +5889,11 @@ async function renderDraftsQueue() {
       ${d.company ? ` · ${escapeHtml(d.company)}${d.title ? " — " + escapeHtml(d.title) : ""}` : ""}
       ${d.job_link ? ` · <a href="${escapeHtml(d.job_link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">вакансия</a>` : ""}`,
     detailHtml: d.resume_file
-      ? `<div class="muted small">📎 Приложится резюме: <b>${escapeHtml(d.resume_file)}</b>${
+      ? `<div class="muted small">Приложится резюме: <b>${escapeHtml(d.resume_file)}</b>${
           d.resume_russian === true ? " (для русской вакансии)" : d.resume_russian === false ? " (для зарубежной вакансии)" : ""
         }</div>`
       : d.channel === "email" && d.kind !== "follow_up"
-      ? `<div class="err-text small">⚠️ Резюме для вложения не найдено — загрузите в «Мои резюме», иначе письмо не уйдёт</div>`
+      ? `<div class="err-text small">Резюме для вложения не найдено — загрузите в «Мои резюме», иначе письмо не уйдёт</div>`
       : "",
     send: async (text) => {
       const res = await api(`/api/hr-drafts/${d.code}/send`, {
@@ -6008,7 +6018,7 @@ function mailPlanText(p) {
   if (!p) return "";
   const warm = p.warmup && p.limit < p.daily_limit ? ` (разогрев, день ${p.warmup_day} — до ${p.daily_limit} дойдёт постепенно)` : "";
   const when = `${p.weekdays_only ? "будни" : "каждый день"} ${p.send_from}:00–${p.send_to}:00`;
-  return `Сегодня отправлено ${p.sent_today} из ${p.limit}${warm} · отправка: ${when}${p.can_send ? "" : ` · ⏸ ${p.reason}`}`;
+  return `Сегодня отправлено ${p.sent_today} из ${p.limit}${warm} · отправка: ${when}${p.can_send ? "" : ` · пауза: ${p.reason}`}`;
 }
 
 async function loadOutreachSettings() {
@@ -6019,7 +6029,7 @@ async function loadOutreachSettings() {
     ? "Пароль сохранён — введите новый, чтобы заменить"
     : "Пароль приложения (16 символов)";
   document.getElementById("outreach-email-status").textContent = s.email_connected
-    ? `✅ Почта подключена: ${s.email_address}`
+    ? `Почта подключена: ${s.email_address}`
     : "Почта не подключена — письма HR будут только черновиками для ручной отправки.";
   document.getElementById("outreach-hunter-status").textContent = s.hunter_preview
     ? `сохранён: ${s.hunter_preview}`
@@ -6046,9 +6056,9 @@ async function loadOutreachSettings() {
   document.getElementById("outreach-candidate-whatsapp").value = s.candidate_whatsapp;
   document.getElementById("outreach-candidate-linkedin").value = s.candidate_linkedin;
   document.getElementById("outreach-resume-route").innerHTML =
-    `📎 <b>Автовыбор при отправке письма:</b> компания РФ/СНГ → ${
-      s.resume_route_ru ? escapeHtml(s.resume_route_ru) : "⚠️ не найдено"
-    }, зарубежная → ${s.resume_route_en ? escapeHtml(s.resume_route_en) : "⚠️ не найдено"}`;
+    `<b>Автовыбор при отправке письма:</b> компания РФ/СНГ → ${
+      s.resume_route_ru ? escapeHtml(s.resume_route_ru) : "не найдено"
+    }, зарубежная → ${s.resume_route_en ? escapeHtml(s.resume_route_en) : "не найдено"}`;
 }
 
 async function saveOutreachSettings() {
@@ -6097,10 +6107,10 @@ async function updateActivity() {
     return;
   }
   const el = document.getElementById("activity");
-  // state: нет/active — крутится; waiting — ⏸ спокойно; stopped — красным, нужны вы.
+  // state: нет/active — крутится; waiting — жёлтая точка; stopped — красная, нужны вы.
   const icon = (a) =>
-    a.state === "waiting" ? `<span class="activity-icon" aria-hidden="true">⏸</span>`
-      : a.state === "stopped" ? `<span class="activity-icon" aria-hidden="true">⛔</span>`
+    a.state === "waiting" ? `<span class="dot warn activity-icon" aria-hidden="true"></span>`
+      : a.state === "stopped" ? `<span class="dot error activity-icon" aria-hidden="true"></span>`
       : `<span class="activity-spin" aria-hidden="true"></span>`;
   el.innerHTML = items
     .map(
@@ -6299,9 +6309,9 @@ async function testOutreachEmail() {
   status.textContent = "Отправляю письмо себе…";
   try {
     await api("/api/settings/outreach/test-email", { method: "POST" });
-    status.textContent = "✅ Письмо отправлено — проверьте почту. Всё работает.";
+    status.textContent = "Письмо отправлено — проверьте почту. Всё работает.";
   } catch (err) {
-    status.textContent = `❌ ${err.message.replace(/^\d+: /, "")}`;
+    status.textContent = `Ошибка: ${err.message.replace(/^\d+: /, "")}`;
   }
 }
 
@@ -6919,6 +6929,10 @@ const CHANGELOG_ITEMS = [
   "Площадка на паузе после капчи — в её шторке кнопка «Я прошёл проверку — снять паузу» (то же, что /resume в боте)",
   "Изменения в шторке площадки сохраняются сразу — с кнопкой «Отменить» в уведомлении",
   "Палитра ⌘K ищет разделы, настройки, площадки и действия",
+  "«Пауза на всё» в шапке Главной: отклики, рассылка и переписка от вашего имени стоят разом (в боте — /pause all)",
+  "У каждой вакансии — «Почему бот так решил»; «Это была ошибка» запоминается и учитывается при оценке похожих, а пропущенную можно «Откликнуться всё равно»",
+  "Вакансии из Telegram-каналов — прямо в «Общении», с черновиком от ИИ, выбором резюме и «Утром, в 10:00»",
+  "«Уведомления» в меню: всё, что бот сообщал, даже без подключённого бота; в Настройках — что присылать",
 ];
 
 function initChangelogPopover() {
@@ -7159,7 +7173,7 @@ function initDashboard() {
         });
         toggle.checked = result.enabled;
         note.textContent = result.enabled
-          ? "✅ Будет запускаться при входе в систему."
+          ? "Будет запускаться при входе в систему."
           : "Автозапуск выключен.";
       } catch (e) {
         toggle.checked = !wanted;
@@ -7184,7 +7198,7 @@ function initDashboard() {
         });
         toggle.checked = result.enabled;
         note.textContent = result.enabled
-          ? "✅ Бот работает в фоне, даже когда окно закрыто."
+          ? "Бот работает в фоне, даже когда окно закрыто."
           : "Фоновый сервис выключен.";
       } catch (e) {
         toggle.checked = !wanted;
@@ -7378,16 +7392,16 @@ function initDashboard() {
     select.innerHTML = styles
       .map((s) => {
         const risks = atsReport[s] || [];
-        const warn = risks.length ? "⚠️ " : "";
+        const warn = risks.length ? "· есть замечания ATS" : "";
         const title = risks.length ? ` title="${escapeHtml(risks.join(" "))}"` : "";
-        return `<option value="${s}"${title}>${warn}${escapeHtml(s)}</option>`;
+        return `<option value="${s}"${title}>${escapeHtml(s)}${warn ? " " + warn : ""}</option>`;
       })
       .join("");
     const updateNote = () => {
       const risks = atsReport[select.value] || [];
       note.innerHTML = risks.length
-        ? `⚠️ Возможные проблемы с ATS у стиля «${escapeHtml(select.value)}»: ${risks.map(escapeHtml).join(" ")}`
-        : `✅ У стиля «${escapeHtml(select.value)}» известных проблем с ATS не найдено (проверка эвристическая, не гарантия).`;
+        ? `Возможные проблемы с ATS у стиля «${escapeHtml(select.value)}»: ${risks.map(escapeHtml).join(" ")}`
+        : `У стиля «${escapeHtml(select.value)}» известных проблем с ATS не найдено (проверка эвристическая, не гарантия).`;
     };
     select.addEventListener("change", updateNote);
     if (styles.length) updateNote();
@@ -7422,12 +7436,12 @@ function initDashboard() {
         renderResumes();
         if (kind === "primary") {
           // ИИ перечитывает новое резюме — из него берутся имя, опыт и навыки для писем.
-          status.textContent = "✅ Загружено. ИИ перечитывает резюме…";
+          status.textContent = "Загружено. ИИ перечитывает резюме…";
           api("/api/resume/refresh-plain-text", { method: "POST" })
-            .then(() => (status.textContent = "✅ Резюме обновлено — письма пойдут уже по нему"))
+            .then(() => (status.textContent = "Резюме обновлено — письма пойдут уже по нему"))
             .catch((e) => (status.textContent = `Загружено, но ИИ не смог его прочитать: ${e.message.replace(/^\d+: /, "")}`));
         } else {
-          status.textContent = "✅ Резюме обновлено";
+          status.textContent = "Резюме обновлено";
         }
       } catch (e) {
         status.textContent = `Ошибка: ${e.message.replace(/^\d+: /, "")}`;
@@ -7707,7 +7721,7 @@ function initDashboard() {
             "telegram-login-password-row"
           ).style.display = "";
         } else {
-          status.textContent = "✅ Вход выполнен.";
+          status.textContent = "Вход выполнен.";
           document.getElementById("telegram-login-code-row").style.display =
             "none";
           await render.telegram();
@@ -7734,7 +7748,7 @@ function initDashboard() {
           method: "POST",
           body: JSON.stringify({ password }),
         });
-        status.textContent = "✅ Вход выполнен.";
+        status.textContent = "Вход выполнен.";
         document.getElementById("telegram-login-password-row").style.display =
           "none";
         await render.telegram();
@@ -8051,7 +8065,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     try {
       await navigator.clipboard.writeText(document.getElementById("ai-prompt").value);
       e.target.textContent = "✓ Скопировано";
-      setTimeout(() => (e.target.textContent = "📋 Скопировать промт"), 2000);
+      setTimeout(() => (e.target.textContent = "Скопировать промт"), 2000);
     } catch (err) {
       document.getElementById("ai-prompt").select(); // без доступа к буферу — выделить для Cmd+C
     }
@@ -8280,6 +8294,7 @@ const NOTIF_STATUS = {
   app: "только здесь — бот не подключён",
   muted: "не отправлено — этот вид выключен",
   digest: "в утренней сводке",
+  window: "сообщение в этом окне",
 };
 let notifItems = [];
 
@@ -8323,7 +8338,7 @@ function notifRowHtml(n) {
 
 async function openNotifications() {
   await refreshNotifications();
-  const filters = [["all", "Все"], ["failure", "Сбои"], ["activity", "Отклики и ответы"]];
+  const filters = [["all", "Все"], ["failure", "Сбои"], ["activity", "Отклики и ответы"], ["window", "В окне"]];
   const body = openSideDrawer({
     title: "Уведомления",
     sub: "Что бот сообщал. Что присылать в Telegram — в Настройках → Уведомления",
@@ -8335,10 +8350,10 @@ async function openNotifications() {
   openDrawerSource = null;
   const list = body.querySelector("#notif-list");
   const show = (kind) => {
-    const items = notifItems.filter((n) => kind === "all" || n.kind === kind);
+    const items = kind === "window" ? toastLog : notifItems.filter((n) => kind === "all" || n.kind === kind);
     list.innerHTML = items.length
       ? items.map(notifRowHtml).join("")
-      : `<li>${emptyStateHtml(kind === "failure" ? "Сбоев не было." : "Пока бот ничего не сообщал.")}</li>`;
+      : `<li>${emptyStateHtml(kind === "failure" ? "Сбоев не было." : kind === "window" ? "В этом окне сообщений ещё не было." : "Пока бот ничего не сообщал.")}</li>`;
   };
   show("all");
   body.querySelectorAll("[data-notif-filter]").forEach((btn) =>
