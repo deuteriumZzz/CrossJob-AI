@@ -111,6 +111,38 @@ class CampaignStore:
             self._save(data)
         return added
 
+    def skip_orphans(
+        self, valid_keys: set[str], valid_emails: Optional[set[str]] = None
+    ) -> tuple[int, list[str]]:
+        """Письма компаний, которых больше нет в Базе (их удалили), — в
+        «пропущено»: иначе рассылка вечно «идёт» с тысячами ожидающих
+        адресов, а отправлять нечего. Возвращает (сколько закрыто, коды
+        черновиков этих писем — их тоже надо убрать из «Входящих»). Письмо
+        остаётся, если компания есть в Базе по ключу или её адрес есть среди
+        контактов Базы (ключ компании мог измениться при слиянии)."""
+        count = 0
+        codes: list[str] = []
+        known_emails = valid_emails or set()
+        with state_file_lock(self.path):
+            data = self._load()
+            for campaign in data.values():
+                for email, item in campaign["items"].items():
+                    if (
+                        item["status"] in ("pending", "draft")
+                        and item["key"] not in valid_keys
+                        and email.lower() not in known_emails
+                    ):
+                        if item.get("code"):
+                            codes.append(item["code"])
+                        item.update(
+                            status="skipped",
+                            reason="компании больше нет в Базе",
+                        )
+                        count += 1
+            if count:
+                self._save(data)
+        return count, codes
+
     def update(self, campaign_id: str, **fields) -> None:
         """Поля самой рассылки (например, день последней порции писем)."""
         with state_file_lock(self.path):

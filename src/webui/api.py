@@ -1622,7 +1622,9 @@ def post_contacts_bulk(
                     )
         return {"ok": True}
     if body.action == "delete":
-        return {"removed": book.delete(body.keys)}
+        removed = book.delete(body.keys)
+        _close_orphan_letters(ctx)
+        return {"removed": removed}
     raise HTTPException(400, "Неизвестное действие")
 
 
@@ -2544,6 +2546,26 @@ def _campaign_targets(
     return targets
 
 
+def _close_orphan_letters(ctx: AppContext) -> int:
+    """Письма компаний, удалённых из Базы, закрываются: ни ожидающих адресов,
+    ни черновиков в рассылке и во «Входящих» от них не остаётся."""
+    cards = ContactBook(ctx.output_folder).all()
+    emails = {
+        c["value"].lower()
+        for card in cards.values()
+        for c in card["contacts"]
+        if c["kind"] == "email"
+    }
+    count, codes = CampaignStore(ctx.output_folder).skip_orphans(
+        set(cards), emails
+    )
+    if codes:
+        drafts = DraftStore(ctx.output_folder / HR_DRAFTS_FILE)
+        for code in codes:
+            drafts.remove(code)
+    return count
+
+
 def _absorb_new_companies(ctx: AppContext) -> int:
     """Новые компании Базы — в очередь идущей рассылки «всем» (не для
     выбранных вручную и не по одному источнику). Письма им пишутся первыми
@@ -2556,6 +2578,7 @@ def _absorb_new_companies(ctx: AppContext) -> int:
     поэтому Telegram держали за отдельной галочкой; теперь мусор
     отсекается до Базы, и галочка не нужна."""
     store = CampaignStore(ctx.output_folder)
+    _close_orphan_letters(ctx)
     started = [
         c
         for c in store.all().values()

@@ -4126,6 +4126,7 @@ def prefill_direct_application(
 
 
 _EMAILED = "уже писали вручную"
+_COMPANY_WRITTEN = "этой компании уже писали"
 
 
 def _live_campaign_item(
@@ -4147,6 +4148,41 @@ def _emailed_directly(book: ContactBook, email: str) -> bool:
         c.get("sent_at") and c["value"].lower() == email.lower()
         for card in book.all().values()
         for c in card["contacts"]
+    )
+
+
+def _company_already_written(
+    book: ContactBook, store: CampaignStore, email: str
+) -> bool:
+    """Компании этого адреса уже отправили письмо — рассылкой или вручную,
+    на другой её адрес: второе не шлём (одна компания — одно письмо)."""
+    email = email.lower()
+    card = next(
+        (
+            c
+            for c in book.all().values()
+            if any(x["value"].lower() == email for x in c["contacts"])
+        ),
+        None,
+    )
+    if card is None:
+        return False
+    others = {
+        x["value"].lower()
+        for x in card["contacts"]
+        if x["kind"] == "email" and x["value"].lower() != email
+    }
+    if any(
+        x.get("sent_at")
+        for x in card["contacts"]
+        if x["value"].lower() in others
+    ):
+        return True
+    return any(
+        item["status"] in ("sent", "replied")
+        for campaign in store.all().values()
+        for other, item in campaign["items"].items()
+        if other in others
     )
 
 
@@ -4222,6 +4258,14 @@ def start_campaign_job(
             if _emailed_directly(book, email):
                 store.update_item(
                     campaign_id, email, status="skipped", reason=_EMAILED
+                )
+                return None
+            if _company_already_written(book, store, email):
+                store.update_item(
+                    campaign_id,
+                    email,
+                    status="skipped",
+                    reason=_COMPANY_WRITTEN,
                 )
                 return None
             card = book.get(item["key"]) or {"company": item["company"]}
@@ -4426,6 +4470,15 @@ def start_campaign_job(
                 drafts.remove(code)
                 store.update_item(
                     campaign_id, email, status="skipped", reason=_EMAILED
+                )
+                return None
+            if _company_already_written(book, store, email):
+                drafts.remove(code)
+                store.update_item(
+                    campaign_id,
+                    email,
+                    status="skipped",
+                    reason=_COMPANY_WRITTEN,
                 )
                 return None
             sent_draft = drafts.get(code) or {}
