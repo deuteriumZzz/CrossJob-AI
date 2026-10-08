@@ -1436,7 +1436,7 @@ def _notify_hh_blocked(parameters: dict, error: Exception) -> None:
     notify(
         parameters,
         f"hh.ru: похоже на блокировку ({error}). Площадка поставлена на "
-        "паузу на 24ч. Решите капчу вручную в открытом Chrome-профиле и "
+        "паузу на час. Решите капчу вручную в открытом Chrome-профиле и "
         "пришлите /resume headhunter — попробуем снова раньше.",
         category="headhunter",
     )
@@ -1809,7 +1809,7 @@ def search_geekjob(
         notify(
             parameters,
             f"geekjob.ru: похоже на блокировку ({e}). Площадка "
-            "поставлена на паузу на 24ч. Решите капчу вручную в "
+            "поставлена на паузу на час. Решите капчу вручную в "
             "открытом Chrome-профиле и пришлите /resume geekjob — "
             "попробуем снова раньше.",
             category="geekjob",
@@ -2259,7 +2259,7 @@ def search_getmatch(
             notify(
                 parameters,
                 f"GetMatch: похоже на блокировку ({e}). Площадка "
-                "поставлена на паузу на 24ч. Решите капчу вручную в "
+                "поставлена на паузу на час. Решите капчу вручную в "
                 "открытом Chrome-профиле и пришлите /resume getmatch — "
                 "попробуем снова раньше.",
                 category="getmatch",
@@ -2780,7 +2780,7 @@ def search_and_apply_habr_career(
         notify(
             parameters,
             f"career.habr.com: похоже на блокировку ({e}). Площадка "
-            "поставлена на паузу на 24ч. Решите капчу вручную в "
+            "поставлена на паузу на час. Решите капчу вручную в "
             "открытом Chrome-профиле и пришлите /resume habr_career — "
             "попробуем снова раньше.",
             category="habr_career",
@@ -3002,7 +3002,7 @@ def search_and_apply_wellfound(
         notify(
             parameters,
             f"wellfound.com: похоже на блокировку ({e}). "
-            "Площадка поставлена на паузу на 24ч.",
+            "Площадка поставлена на паузу на час.",
             category="wellfound",
         )
         return
@@ -3228,7 +3228,7 @@ def search_and_apply_himalayas(
             notify(
                 parameters,
                 f"himalayas.app: похоже на блокировку ({e}). "
-                "Площадка поставлена на паузу на 24ч.",
+                "Площадка поставлена на паузу на час.",
                 category="himalayas",
             )
             return
@@ -3437,7 +3437,7 @@ def search_and_apply_avito(
             notify(
                 parameters,
                 f"avito.ru: похоже на блокировку ({e}). Площадка "
-                "поставлена на паузу на 24ч.",
+                "поставлена на паузу на час.",
                 category="avito",
             )
             return
@@ -3750,7 +3750,7 @@ def search_talanto(
             notify(
                 parameters,
                 f"Talanto: похоже на блокировку ({e}). Источник поставлен "
-                "на паузу на 24ч.",
+                "на паузу на час.",
                 category="talanto",
             )
             return
@@ -3953,7 +3953,7 @@ def search_hirify(
             notify(
                 parameters,
                 f"Hirify: похоже на блокировку ({e}). Источник поставлен "
-                "на паузу на 24ч.",
+                "на паузу на час.",
                 category="hirify",
             )
             return
@@ -5010,7 +5010,7 @@ def search_and_apply_djinni(
             notify(
                 parameters,
                 f"djinni.co: похоже на блокировку ({e}). Площадка поставлена "
-                "на паузу на 24ч.",
+                "на паузу на час.",
                 category="djinni",
             )
             return
@@ -5121,7 +5121,7 @@ def search_and_apply_djinni(
                     notify(
                         parameters,
                         f"djinni.co: похоже на блокировку ({e}). Площадка "
-                        "поставлена на паузу на 24ч.",
+                        "поставлена на паузу на час.",
                         category="djinni",
                     )
                     break
@@ -6362,7 +6362,7 @@ def _run_control_commands(
             if action == "resume":
                 # ponytail: /resume — это ещё и "я решил капчу вручную",
                 # не только "включи обратно после /pause". Снимаем
-                # 24ч-кулдаун block_detection и форсируем next_run на
+                # кулдаун block_detection и форсируем next_run на
                 # "сейчас", иначе площадка молча ждала бы истечения
                 # cooldown/interval_hours несмотря на schedule_enabled.
                 clear_blocked(output_folder, source)

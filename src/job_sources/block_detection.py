@@ -7,7 +7,10 @@ from pathlib import Path
 
 from src.utils.file_lock import state_file_lock
 
-BLOCK_COOLDOWN_HOURS = 24
+# Час, а не сутки: капчу обычно проходят сразу, и в постоянном круге
+# площадка просто проверяет её на следующем ходу (8.10: HH стоял сутки
+# после уже пройденной капчи). Не пройдена — снова пауза на час.
+BLOCK_COOLDOWN_HOURS = 1
 # ponytail: "captcha"/"подозрительная активность" ловили не всякую
 # капчу вживую (см. инцидент — hh.ru показал капчу, эти два слова не
 # совпали, детект молчал, демон продолжал долбить). Точный текст той
@@ -122,7 +125,7 @@ def mark_blocked(output_folder: Path, source: str) -> None:
 
 
 def clear_blocked(output_folder: Path, source: str) -> None:
-    """Снимает блокировку раньше 24ч-кулдауна — вызывается, когда
+    """Снимает блокировку раньше кулдауна — вызывается, когда
     пользователь вручную решил капчу в персистентном Chrome-профиле и
     прислал /resume <площадка> в Telegram (см. check_telegram_commands
     в main.py). Без реальной блокировки (source не в .blocked_until.json)
