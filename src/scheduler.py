@@ -156,13 +156,13 @@ class Scheduler:
         )
 
     def _call_source(self, name: str, platform_turn: bool) -> None:
-        """Запуск источника; ход площадки в постоянном цикле получает
-        stop_event, который сам срабатывает через TURN_TIME_LIMIT_SECONDS."""
+        """Запуск источника; источник со stop_event получает его, и он сам
+        срабатывает через TURN_TIME_LIMIT_SECONDS."""
         fn = self.source_map[name]
-        if (
-            not platform_turn
-            or "stop_event" not in inspect.signature(fn).parameters
-        ):
+        # Предохранитель на 40 минут — у каждого источника, который умеет
+        # останавливаться (stop_event): и у площадок круга, и у сборщиков
+        # Базы (Talanto, Hirify), которым раньше он не включался.
+        if "stop_event" not in inspect.signature(fn).parameters:
             fn(self.parameters, self.llm_api_key)
             return
         stop = threading.Event()

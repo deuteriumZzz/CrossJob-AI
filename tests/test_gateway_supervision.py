@@ -156,3 +156,24 @@ def test_same_error_on_three_platforms_alerts_once():
             scheduler._check_shared_errors()
         notify.assert_called_once()
         assert "3 площадок" in notify.call_args[0][1]
+
+
+def test_time_limit_guard_applies_to_collectors_outside_the_cycle():
+    received = {}
+
+    def collector(parameters, key, stop_event=None):
+        received["stop"] = stop_event
+
+    def plain(parameters, key):
+        received["plain"] = True
+
+    scheduler = Scheduler(
+        source_map={"hirify": collector, "direct_like": plain},
+        parameters={},
+        llm_api_key="k",
+        output_folder=Path("."),
+    )
+    scheduler._call_source("hirify", platform_turn=False)
+    scheduler._call_source("direct_like", platform_turn=False)
+    assert received["stop"] is not None and not received["stop"].is_set()
+    assert received["plain"] is True
