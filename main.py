@@ -215,6 +215,7 @@ from src.job_sources.resume_routing import (
     resolve_resume_name,
     resume_relative_name,
 )
+from src.job_sources.talanto.channels import route_telegram_handles
 from src.job_sources.talanto.client import (
     TalantoClient,
     company_from_apply_url,
@@ -3737,6 +3738,7 @@ def search_talanto(
     job_max_applications = _job_max_applications(parameters, "talanto")
 
     added = with_contacts = processed = 0
+    tg_handles: list[str] = []
     with TalantoClient(output_folder / ".chrome_profile_talanto") as client:
         try:
             jobs = TalantoSource(client).search(parameters)
@@ -3847,6 +3849,9 @@ def search_talanto(
             }
             book.add(company, contacts, vacancy=vacancy)
             in_book.add(job.link)
+            tg_handles += [
+                c["value"] for c in contacts if c["kind"] == "telegram"
+            ]
             added += 1
             with_contacts += bool(contacts)
             logger.info(
@@ -3855,11 +3860,25 @@ def search_talanto(
                 + (f" — {apply_url}" if apply_url else "")
             )
 
-    if added:
+    new_channels: list[str] = []
+    if tg_handles:
+        # Telegram-канал из вакансии — ещё один источник нашего парсера;
+        # личные адреса остаются в Базе. Сбой проверки не ломает ход.
+        try:
+            new_channels = route_telegram_handles(parameters, tg_handles)
+        except Exception as e:
+            logger.warning(f"Talanto: каналы в парсер не добавлены: {e}")
+    if added or new_channels:
+        channels_part = (
+            f" Каналов в парсер: +{len(new_channels)} "
+            f"({', '.join('@' + c for c in new_channels)})."
+            if new_channels
+            else ""
+        )
         notify_routine(
             parameters,
-            f"🔎 Talanto: +{added} в Базе, с контактами — {with_contacts}. "
-            "Ссылки на отклик — в «Компаниях».",
+            f"🔎 Talanto: +{added} в Базе, с контактами — {with_contacts}."
+            f"{channels_part}",
             category="Talanto",
         )
 
