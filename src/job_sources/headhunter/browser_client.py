@@ -303,8 +303,8 @@ class HeadHunterBrowserClient:
     ) -> bool:
         """Сразу после отклика без поля для письма (быстрый отклик,
         анкета) — письмо первым сообщением в чат этой вакансии, в том же
-        Chrome, что и отклик. False — чат не открылся: письмо дошлёт
-        плановая проверка чата (_send_missing_cover_letters)."""
+        Chrome, что и отклик. False — чат не открылся: письмо в течение
+        суток дошлёт плановая проверка чата (_send_missing_cover_letters)."""
         from src.job_sources.headhunter.browser_replies import (
             send_chat_cover_letter_result,
         )

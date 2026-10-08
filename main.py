@@ -1662,8 +1662,8 @@ def _search_and_apply_headhunter_with_session(
                         # Форма отклика не приняла письмо (быстрый отклик,
                         # анкета) — сразу, в этом же Chrome, письмо первым
                         # сообщением в чат вакансии. Не вышло — оно
-                        # остаётся в applied_log, и его дошлёт проверка
-                        # чата (check_headhunter_replies →
+                        # остаётся в applied_log, и в течение суток его
+                        # дошлёт проверка чата (check_headhunter_replies →
                         # _send_missing_cover_letters).
                         try:
                             cover_letter = generate_cover_letter_for_job(
@@ -6023,22 +6023,25 @@ def _send_due_hh_reminders(
     hh_reminder_text) — ровно одно напоминание на отклик, никогда не
     спамит. Выключено по умолчанию, как и остальные auto_*-флаги.
 
-    Не больше HH_REMINDERS_PER_RUN отправленных за заход, с паузой между
-    ними: 20 накопившихся подряд за минуту выглядят для HH как бот."""
+    Не больше HH_REMINDERS_PER_RUN попыток (открытых чатов) за заход, с
+    паузой после отправленных: 20 накопившихся подряд за минуту выглядят
+    для HH как бот, а неудачные чаты без счёта держали планировщик
+    часами (8.10: круг площадок стоял ~5 ч)."""
     days = int(
         (parameters.get("headhunter") or {}).get("reminder_follow_up_days", 7)
     )
     if not is_reminder_hour():
         return
     entries = applied_log.entries_by_source_and_status("headhunter", "applied")
-    sent_count = 0
+    tried = sent_count = 0
     for entry in due_hh_reminders(entries, days):
-        if sent_count >= HH_REMINDERS_PER_RUN:
+        if tried >= HH_REMINDERS_PER_RUN:
             break
         if not _hh_chat_allowed(entry):
             continue
         if sent_count:
             wait_before_apply()
+        tried += 1
         try:
             sent = _hh_chat_send(
                 driver, applied_log, entry, hh_reminder_text(entry)
@@ -6064,10 +6067,13 @@ def _send_due_hh_reminders(
             )
 
 
-# Сколько писем за один заход проверки чата можно сгенерировать заново
-# (отклик ушёл, а письмо тогда не сгенерировалось) — чтобы ход не
-# растягивался на десятки LLM-вызовов.
-_MAX_REGENERATED_LETTERS_PER_CHECK = 5
+# Досылка письма — только к откликам последних суток (форма не открылась,
+# вышло время, ИИ не ответил): к старым вакансиям письмо через дни не к
+# месту, а 8.10 досылка по ~140 старым откликам держала круг площадок
+# ~5 часов. Попыток (чат/генерация) за заход — не больше
+# _MAX_LETTER_FOLLOWUPS_PER_CHECK.
+HH_LETTER_FOLLOWUP_HOURS = 24
+_MAX_LETTER_FOLLOWUPS_PER_CHECK = 5
 
 
 def _generate_letter_for_entry(
@@ -6092,18 +6098,26 @@ def _send_missing_cover_letters(
     applied_log: AppliedLog,
     generate: Optional[Callable[[dict], str]] = None,
 ) -> None:
-    """headhunter.chat_cover_letter_followup: отклики, ушедшие без
-    сопроводительного письма (форма его не приняла, и сразу после отклика
-    письмо не удалось приложить), досылаются кнопкой «Приложить письмо»
-    или первым сообщением в чат. Нет письма в журнале (генерация упала) —
-    пишем заново через generate. Отказ работодателя, архив и закрытый чат —
-    cover_letter_undeliverable: письмо больше не пытаемся доставить."""
-    regenerated = 0
+    """headhunter.chat_cover_letter_followup: отклики последних
+    HH_LETTER_FOLLOWUP_HOURS часов, ушедшие без сопроводительного письма
+    (форма его не приняла, и сразу после отклика письмо не удалось
+    приложить), досылаются кнопкой «Приложить письмо» или первым
+    сообщением в чат. Старые отклики не трогаем. Нет письма в журнале
+    (генерация упала) — пишем заново через generate. Отказ работодателя,
+    архив и закрытый чат — cover_letter_undeliverable: письмо больше не
+    пытаемся доставить."""
+    since = datetime.now().astimezone() - timedelta(
+        hours=HH_LETTER_FOLLOWUP_HOURS
+    )
+    tried = sent_count = 0
     for entry in applied_log.entries_by_source_and_status(
         "headhunter", "applied"
     ):
+        if tried >= _MAX_LETTER_FOLLOWUPS_PER_CHECK:
+            break
         if (
-            entry.get("cover_letter_sent_via_chat")
+            datetime.fromisoformat(entry["applied_at"]) < since
+            or entry.get("cover_letter_sent_via_chat")
             or entry.get("cover_letter_in_form")  # уже ушло в форме отклика
             or entry.get("cover_letter_undeliverable")
             or not _hh_chat_allowed(entry)
@@ -6121,12 +6135,13 @@ def _send_missing_cover_letters(
             )
             continue
         letter = entry.get("cover_letter")
+        if not letter and generate is None:
+            continue
+        if sent_count:
+            # Как у напоминаний: письма в чаты подряд за минуту — бот.
+            wait_before_apply()
+        tried += 1
         if not letter:
-            if generate is None or (
-                regenerated >= _MAX_REGENERATED_LETTERS_PER_CHECK
-            ):
-                continue
-            regenerated += 1
             try:
                 letter = generate(entry)
             except Exception as e:
@@ -6147,6 +6162,7 @@ def _send_missing_cover_letters(
             )
             continue
         if sent:
+            sent_count += 1
             applied_log.mark_cover_letter_sent_via_chat(
                 "headhunter", entry["external_id"]
             )

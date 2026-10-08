@@ -10,6 +10,12 @@ from src.job_sources.headhunter.browser_replies import ChatSendResult
 from src.utils.constants import RESUME_PDF
 
 
+def _just_now() -> str:
+    from datetime import datetime
+
+    return datetime.now().astimezone().isoformat()
+
+
 @pytest.fixture(autouse=True)
 def _working_hours(monkeypatch):
     # Напоминания уходят только в будни 10–18 МСК — тесты от часов не зависят.
@@ -65,6 +71,7 @@ def test_send_missing_cover_letters_skips_already_sent_and_empty():
             "external_id": "1",
             "company": "Acme",
             "title": "Dev",
+            "applied_at": _just_now(),
             "cover_letter": "Hello Acme",
             "cover_letter_sent_via_chat": False,
         },
@@ -72,6 +79,7 @@ def test_send_missing_cover_letters_skips_already_sent_and_empty():
             "external_id": "2",
             "company": "NoLetter",
             "title": "Dev",
+            "applied_at": _just_now(),
             "cover_letter": "",
             "cover_letter_sent_via_chat": False,
         },
@@ -79,6 +87,7 @@ def test_send_missing_cover_letters_skips_already_sent_and_empty():
             "external_id": "3",
             "company": "AlreadySent",
             "title": "Dev",
+            "applied_at": _just_now(),
             "cover_letter": "Hi",
             "cover_letter_sent_via_chat": True,
         },
@@ -87,6 +96,7 @@ def test_send_missing_cover_letters_skips_already_sent_and_empty():
             "external_id": "4",
             "company": "InForm",
             "title": "Dev",
+            "applied_at": _just_now(),
             "cover_letter": "Hi",
             "cover_letter_in_form": True,
         },
@@ -110,6 +120,7 @@ def test_send_missing_cover_letters_does_not_mark_on_failed_send():
             "external_id": "1",
             "company": "Acme",
             "title": "Dev",
+            "applied_at": _just_now(),
             "cover_letter": "Hello Acme",
             "cover_letter_sent_via_chat": False,
         }
@@ -120,6 +131,55 @@ def test_send_missing_cover_letters_does_not_mark_on_failed_send():
     ):
         main._send_missing_cover_letters(MagicMock(), applied_log)
     applied_log.mark_cover_letter_sent_via_chat.assert_not_called()
+
+
+def test_send_missing_cover_letters_only_recent_and_capped():
+    """8.10: досылка по ~140 старым откликам держала круг площадок ~5 ч.
+    Теперь — только отклики последних суток и не больше
+    _MAX_LETTER_FOLLOWUPS_PER_CHECK попыток за заход."""
+    from datetime import datetime, timedelta
+
+    old = (
+        datetime.now().astimezone()
+        - timedelta(hours=main.HH_LETTER_FOLLOWUP_HOURS + 1)
+    ).isoformat()
+    fresh = [
+        {
+            "external_id": str(i),
+            "company": f"Co{i}",
+            "title": "Dev",
+            "applied_at": _just_now(),
+            "cover_letter": "Hi",
+        }
+        for i in range(main._MAX_LETTER_FOLLOWUPS_PER_CHECK + 2)
+    ]
+    applied_log = MagicMock()
+    applied_log.entries_by_source_and_status.return_value = [
+        {
+            "external_id": "old",
+            "company": "Old",
+            "title": "Dev",
+            "applied_at": old,
+            "cover_letter": "Hi",
+        },
+        *fresh,
+    ]
+    with patch(
+        "main.send_chat_cover_letter_result",
+        return_value=ChatSendResult(sent=False),
+    ) as send_mock:
+        main._send_missing_cover_letters(MagicMock(), applied_log)
+    sent_ids = [c.args[1] for c in send_mock.call_args_list]
+    assert "old" not in sent_ids
+    assert len(sent_ids) == main._MAX_LETTER_FOLLOWUPS_PER_CHECK
+
+    # Отправленные — с паузой между ними, как у напоминаний.
+    with patch(
+        "main.send_chat_cover_letter_result",
+        return_value=ChatSendResult(sent=True),
+    ), patch("main.wait_before_apply") as pause:
+        main._send_missing_cover_letters(MagicMock(), applied_log)
+    assert pause.call_count == main._MAX_LETTER_FOLLOWUPS_PER_CHECK - 1
 
 
 def test_send_due_hh_reminders_sends_and_marks():
@@ -556,6 +616,33 @@ def test_send_due_hh_reminders_caps_per_run_with_pauses():
         main._send_due_hh_reminders({}, MagicMock(), applied_log)
     assert send_mock.call_count == main.HH_REMINDERS_PER_RUN
     assert pause.call_count == main.HH_REMINDERS_PER_RUN - 1
+
+
+def test_send_due_hh_reminders_caps_failed_attempts_too():
+    """8.10: неудачные чаты шли без счёта и держали проверку HH часами.
+    Лимит HH_REMINDERS_PER_RUN — на попытки, а не только на отправленные."""
+    from datetime import datetime, timedelta
+
+    old = (datetime.now().astimezone() - timedelta(days=10)).isoformat()
+    applied_log = MagicMock()
+    applied_log.entries_by_source_and_status.return_value = [
+        {
+            "external_id": str(i),
+            "company": f"Co{i}",
+            "title": "Python разработчик",
+            "applied_at": old,
+            "last_known_state": None,
+            "reminder_sent_at": None,
+        }
+        for i in range(main.HH_REMINDERS_PER_RUN + 3)
+    ]
+    with patch(
+        "main.send_chat_cover_letter_result",
+        return_value=ChatSendResult(sent=False),
+    ) as send_mock, patch("main.wait_before_apply") as pause:
+        main._send_due_hh_reminders({}, MagicMock(), applied_log)
+    assert send_mock.call_count == main.HH_REMINDERS_PER_RUN
+    pause.assert_not_called()
 
 
 def test_hh_chat_failures_back_off_instead_of_retrying_every_visit():

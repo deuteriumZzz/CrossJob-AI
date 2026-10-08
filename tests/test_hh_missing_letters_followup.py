@@ -28,6 +28,7 @@ def test_followup_regenerates_missing_letter_and_skips_rejected(
         return True
 
     monkeypatch.setattr(main, "_hh_chat_send", fake_send)
+    monkeypatch.setattr(main, "wait_before_apply", lambda: None)
 
     main._send_missing_cover_letters(
         object(), log, lambda entry: f"Новое {entry['external_id']}"
