@@ -111,3 +111,24 @@ if __name__ == "__main__":
     test_clear_blocked_lifts_cooldown_early()
     test_clear_blocked_on_never_blocked_source_is_a_noop()
     print("All tests passed.")
+
+
+def test_page_block_error_carries_page_url_for_telegram_link():
+    """8.10: капча, найденная по тексту страницы, приходила в Telegram
+    без ссылки — проходить её было негде. Адрес страницы — в ошибке."""
+    from unittest.mock import MagicMock
+
+    import pytest
+
+    from src.job_sources.block_detection import (
+        PlatformBlockedError,
+        raise_if_page_blocked,
+    )
+
+    driver = MagicMock(current_url="https://hh.ru/search/vacancy?text=python")
+    driver.execute_script.return_value = "Подтвердите, что вы не робот: captcha"
+    with pytest.raises(PlatformBlockedError, match=r"https://hh\.ru/search"):
+        raise_if_page_blocked(driver)
+
+    driver.execute_script.return_value = "Обычная страница вакансий"
+    raise_if_page_blocked(driver)  # без капчи — ничего

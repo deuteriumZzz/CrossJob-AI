@@ -67,6 +67,18 @@ def raise_if_blocked(response_or_html) -> None:
             )
 
 
+def raise_if_page_blocked(driver) -> None:
+    """raise_if_blocked для открытой Selenium-страницы — с её адресом в
+    ошибке. Ошибка уходит в Telegram (notify), и адрес приходит ссылкой:
+    открыл — прошёл капчу руками. Раньше ссылка была только при
+    редиректе HH на /account/captcha; при капче, найденной по тексту
+    страницы (8.10), сообщение приходило без неё."""
+    try:
+        raise_if_blocked(visible_text(driver))
+    except PlatformBlockedError as e:
+        raise PlatformBlockedError(f"{e}: {driver.current_url}") from None
+
+
 def raise_if_blocked_after_wait(
     driver, seconds: float = 45, interval: float = 3
 ) -> None:
@@ -78,7 +90,7 @@ def raise_if_blocked_after_wait(
     deadline = time.monotonic() + seconds
     while True:
         try:
-            raise_if_blocked(visible_text(driver))
+            raise_if_page_blocked(driver)
             return
         except PlatformBlockedError:
             if time.monotonic() >= deadline:

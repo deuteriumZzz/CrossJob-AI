@@ -10,8 +10,7 @@ from selenium.webdriver.common.by import By
 
 from src.job_sources.block_detection import (
     PlatformBlockedError,
-    raise_if_blocked,
-    visible_text,
+    raise_if_page_blocked,
 )
 from src.job_sources.headhunter.browser_test_answer import (
     answer_full_page_questionnaire,
@@ -109,7 +108,7 @@ class HeadHunterBrowserClient:
         """Живой инцидент (лог): hh.ru редиректнул на
         /account/captcha?backurl=..., но текст той страницы не совпал
         ни с одним словом из block_detection._BLOCK_KEYWORDS —
-        raise_if_blocked(visible_text(driver)) промолчал, и код упал
+        raise_if_page_blocked(driver) промолчал, и код упал
         в общий путь "кнопка не найдена" → тихий dry-run, без
         mark_blocked и без кулдауна: демон продолжал долбить капчу.
         URL редиректа стабилен и не зависит от текста конкретной
@@ -176,7 +175,7 @@ class HeadHunterBrowserClient:
                 params += f"&search_period={period_days}"
             driver.get(f"{HH_BASE}/search/vacancy?{params}")
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
-            raise_if_blocked(visible_text(driver))
+            raise_if_page_blocked(driver)
             self._raise_if_captcha_redirect(driver)
             return driver.page_source
         finally:
@@ -188,7 +187,7 @@ class HeadHunterBrowserClient:
         try:
             driver.get(f"{HH_BASE}/vacancy/{vacancy_id}")
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
-            raise_if_blocked(visible_text(driver))
+            raise_if_page_blocked(driver)
             self._raise_if_captcha_redirect(driver)
             return driver.page_source
         finally:
@@ -219,7 +218,7 @@ class HeadHunterBrowserClient:
         try:
             driver.get(vacancy_url)
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
-            raise_if_blocked(visible_text(driver))
+            raise_if_page_blocked(driver)
             self._raise_if_captcha_redirect(driver)
 
             buttons = driver.find_elements(
@@ -333,7 +332,7 @@ class HeadHunterBrowserClient:
         try:
             driver.get(f"{HH_BASE}/resume/{resume_id}")
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
-            raise_if_blocked(visible_text(driver))
+            raise_if_page_blocked(driver)
             self._raise_if_captcha_redirect(driver)
 
             buttons = driver.find_elements(
@@ -359,7 +358,7 @@ class HeadHunterBrowserClient:
         try:
             driver.get(f"{HH_BASE}/applicant/resumes")
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
-            raise_if_blocked(visible_text(driver))
+            raise_if_page_blocked(driver)
             return sorted(set(_RESUME_LINK_RE.findall(driver.page_source)))
         finally:
             if owns_it:

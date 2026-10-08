@@ -8,7 +8,10 @@ import httpx
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 
-from src.job_sources.block_detection import raise_if_blocked, visible_text
+from src.job_sources.block_detection import (
+    raise_if_blocked,
+    raise_if_page_blocked,
+)
 from src.job_sources.html_text import html_letter_to_plain_text
 from src.job_sources.user_agents import random_user_agent
 from src.logging import logger
@@ -151,7 +154,7 @@ class HabrCareerClient:
         try:
             driver.get(vacancy_url)
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
-            raise_if_blocked(visible_text(driver))
+            raise_if_page_blocked(driver)
 
             apply_buttons = [
                 el

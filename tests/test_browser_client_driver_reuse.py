@@ -32,9 +32,9 @@ def test_headhunter_client_reuses_one_driver_inside_with_block():
     with patch(
         "src.job_sources.headhunter.browser_client.init_browser"
     ) as mock_init, patch(
-        "src.job_sources.headhunter.browser_client.raise_if_blocked"
+        "src.job_sources.headhunter.browser_client.raise_if_page_blocked"
     ), patch(
-        "src.job_sources.headhunter.browser_client.visible_text",
+        "src.job_sources.block_detection.visible_text",
         return_value="",
     ), patch(
         "src.job_sources.headhunter.browser_client.time.sleep"
@@ -62,9 +62,9 @@ def test_headhunter_client_builds_work_format_query_params():
     with patch(
         "src.job_sources.headhunter.browser_client.init_browser"
     ) as mock_init, patch(
-        "src.job_sources.headhunter.browser_client.raise_if_blocked"
+        "src.job_sources.headhunter.browser_client.raise_if_page_blocked"
     ), patch(
-        "src.job_sources.headhunter.browser_client.visible_text",
+        "src.job_sources.block_detection.visible_text",
         return_value="",
     ), patch(
         "src.job_sources.headhunter.browser_client.time.sleep"
@@ -89,9 +89,9 @@ def test_headhunter_client_without_with_opens_and_closes_per_call():
     with patch(
         "src.job_sources.headhunter.browser_client.init_browser"
     ) as mock_init, patch(
-        "src.job_sources.headhunter.browser_client.raise_if_blocked"
+        "src.job_sources.headhunter.browser_client.raise_if_page_blocked"
     ), patch(
-        "src.job_sources.headhunter.browser_client.visible_text",
+        "src.job_sources.block_detection.visible_text",
         return_value="",
     ), patch(
         "src.job_sources.headhunter.browser_client.time.sleep"
@@ -115,9 +115,9 @@ def test_headhunter_client_reconnects_after_dead_session_mid_run():
     with patch(
         "src.job_sources.headhunter.browser_client.init_browser"
     ) as mock_init, patch(
-        "src.job_sources.headhunter.browser_client.raise_if_blocked"
+        "src.job_sources.headhunter.browser_client.raise_if_page_blocked"
     ), patch(
-        "src.job_sources.headhunter.browser_client.visible_text",
+        "src.job_sources.block_detection.visible_text",
         return_value="",
     ), patch(
         "src.job_sources.headhunter.browser_client.time.sleep"
@@ -145,7 +145,7 @@ def test_getmatch_client_reuses_one_driver_inside_with_block():
     with patch(
         "src.job_sources.getmatch.client.init_browser"
     ) as mock_init, patch(
-        "src.job_sources.getmatch.client.raise_if_blocked"
+        "src.job_sources.getmatch.client.raise_if_page_blocked"
     ), patch(
         "src.job_sources.getmatch.client.visible_text",
         return_value="Найдено 5 вакансий",
@@ -173,10 +173,10 @@ def test_getmatch_apply_returns_false_when_site_shows_new_wizard():
     with patch(
         "src.job_sources.getmatch.client.init_browser"
     ) as mock_init, patch(
-        "src.job_sources.getmatch.client.raise_if_blocked"
+        "src.job_sources.getmatch.client.raise_if_page_blocked"
     ), patch(
         "src.job_sources.getmatch.client.visible_text",
-        side_effect=["", "Шаг 1 из 5. Выберите форматы работы:"],
+        side_effect=["Шаг 1 из 5. Выберите форматы работы:"],
     ), patch(
         "src.job_sources.getmatch.client.time.sleep"
     ):
@@ -200,7 +200,7 @@ def test_getmatch_client_reconnects_after_dead_session_mid_run():
     with patch(
         "src.job_sources.getmatch.client.init_browser"
     ) as mock_init, patch(
-        "src.job_sources.getmatch.client.raise_if_blocked"
+        "src.job_sources.getmatch.client.raise_if_page_blocked"
     ), patch(
         "src.job_sources.getmatch.client.visible_text", return_value=""
     ), patch(
@@ -225,7 +225,7 @@ def test_habr_career_client_reconnects_after_dead_session_mid_run():
     ) as mock_init, patch(
         "src.job_sources.habr_career.client.raise_if_blocked"
     ), patch(
-        "src.job_sources.habr_career.client.visible_text", return_value=""
+        "src.job_sources.block_detection.visible_text", return_value=""
     ), patch(
         "src.job_sources.habr_career.client.time.sleep"
     ):
@@ -247,9 +247,9 @@ def test_geekjob_client_reuses_one_driver_inside_with_block():
     with patch(
         "src.job_sources.geekjob.client.init_browser"
     ) as mock_init, patch(
-        "src.job_sources.geekjob.client.raise_if_blocked"
+        "src.job_sources.geekjob.client.raise_if_page_blocked"
     ), patch(
-        "src.job_sources.geekjob.client.visible_text", return_value=""
+        "src.job_sources.block_detection.visible_text", return_value=""
     ), patch(
         "src.job_sources.geekjob.client.time.sleep"
     ):
@@ -265,9 +265,9 @@ def test_geekjob_client_reconnects_after_dead_session_mid_run():
     with patch(
         "src.job_sources.geekjob.client.init_browser"
     ) as mock_init, patch(
-        "src.job_sources.geekjob.client.raise_if_blocked"
+        "src.job_sources.geekjob.client.raise_if_page_blocked"
     ), patch(
-        "src.job_sources.geekjob.client.visible_text", return_value=""
+        "src.job_sources.block_detection.visible_text", return_value=""
     ), patch(
         "src.job_sources.geekjob.client.time.sleep"
     ):
@@ -288,9 +288,9 @@ def test_geekjob_client_without_with_opens_and_closes_per_call():
     with patch(
         "src.job_sources.geekjob.client.init_browser"
     ) as mock_init, patch(
-        "src.job_sources.geekjob.client.raise_if_blocked"
+        "src.job_sources.geekjob.client.raise_if_page_blocked"
     ), patch(
-        "src.job_sources.geekjob.client.visible_text", return_value=""
+        "src.job_sources.block_detection.visible_text", return_value=""
     ), patch(
         "src.job_sources.geekjob.client.time.sleep"
     ):
@@ -309,9 +309,9 @@ def test_geekjob_search_uses_qs_query_param_not_q():
     with patch(
         "src.job_sources.geekjob.client.init_browser"
     ) as mock_init, patch(
-        "src.job_sources.geekjob.client.raise_if_blocked"
+        "src.job_sources.geekjob.client.raise_if_page_blocked"
     ), patch(
-        "src.job_sources.geekjob.client.visible_text", return_value=""
+        "src.job_sources.block_detection.visible_text", return_value=""
     ), patch(
         "src.job_sources.geekjob.client.time.sleep"
     ):
@@ -336,9 +336,9 @@ def test_headhunter_client_raises_on_captcha_redirect_and_saves_screenshot(
     with patch(
         "src.job_sources.headhunter.browser_client.init_browser"
     ) as mock_init, patch(
-        "src.job_sources.headhunter.browser_client.raise_if_blocked"
+        "src.job_sources.headhunter.browser_client.raise_if_page_blocked"
     ), patch(
-        "src.job_sources.headhunter.browser_client.visible_text",
+        "src.job_sources.block_detection.visible_text",
         return_value="совершенно обычная страница, без ключевых слов",
     ), patch(
         "src.job_sources.headhunter.browser_client.time.sleep"
@@ -412,7 +412,7 @@ def _getmatch_apply_with(textareas, typed_value):
     with patch(
         "src.job_sources.getmatch.client.init_browser"
     ) as mock_init, patch(
-        "src.job_sources.getmatch.client.raise_if_blocked"
+        "src.job_sources.getmatch.client.raise_if_page_blocked"
     ), patch(
         "src.job_sources.getmatch.client.visible_text",
         return_value="Откликнуться",

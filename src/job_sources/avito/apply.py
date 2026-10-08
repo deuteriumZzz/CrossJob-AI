@@ -3,7 +3,7 @@ import time
 from selenium.webdriver.common.by import By
 
 from src.job_sources.avito.browser import dismiss_vpn_notice
-from src.job_sources.block_detection import raise_if_blocked, visible_text
+from src.job_sources.block_detection import raise_if_page_blocked
 
 PAGE_LOAD_WAIT_SECONDS = 4
 # ponytail: точная разметка кнопки отклика на детальной странице НЕ
@@ -22,7 +22,7 @@ def apply_to_job(driver, job_link: str) -> bool:
     driver.get(job_link)
     time.sleep(PAGE_LOAD_WAIT_SECONDS)
     dismiss_vpn_notice(driver)
-    raise_if_blocked(visible_text(driver))
+    raise_if_page_blocked(driver)
 
     for el in driver.find_elements(
         By.CSS_SELECTOR, 'button, a[role="button"]'

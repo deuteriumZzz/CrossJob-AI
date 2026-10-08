@@ -161,6 +161,7 @@ def test_unmet_requirements_reads_djinni_reasons(monkeypatch):
         "Intermediate\nupdate your profile\nFooter"
     )
     monkeypatch.setattr(da, "visible_text", lambda d: page)
+    monkeypatch.setattr(da, "raise_if_page_blocked", lambda d: None)
     monkeypatch.setattr(da.time, "sleep", lambda s: None)
     driver = type("D", (), {"get": lambda self, url: None})()
     assert da.unmet_requirements(driver, "u") == [

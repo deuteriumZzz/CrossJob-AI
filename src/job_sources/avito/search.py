@@ -6,7 +6,7 @@ from selenium.webdriver.common.by import By
 from src.job import Job
 from src.job_sources.avito.browser import dismiss_vpn_notice
 from src.job_sources.avito.mapping import parse_search_html
-from src.job_sources.block_detection import raise_if_blocked, visible_text
+from src.job_sources.block_detection import raise_if_page_blocked
 
 SEARCH_URL = "https://www.avito.ru/all/vakansii"
 # ponytail: фильтр "Удалённо" — отдельный URL-путь, не query-параметр
@@ -162,13 +162,13 @@ def search_jobs(
     driver.get(url)
     time.sleep(PAGE_LOAD_WAIT_SECONDS)
     dismiss_vpn_notice(driver)
-    raise_if_blocked(visible_text(driver))
+    raise_if_page_blocked(driver)
     if work_format and not remote_only:
         try:
             if _apply_work_format(driver, work_format):
                 time.sleep(PAGE_LOAD_WAIT_SECONDS)
                 dismiss_vpn_notice(driver)
-                raise_if_blocked(visible_text(driver))
+                raise_if_page_blocked(driver)
         except Exception:
             pass  # необязательное уточнение, как и остальные клики
     if experience_level or employment_type:
@@ -176,7 +176,7 @@ def search_jobs(
             if _apply_click_filters(driver, experience_level, employment_type):
                 time.sleep(PAGE_LOAD_WAIT_SECONDS)
                 dismiss_vpn_notice(driver)
-                raise_if_blocked(visible_text(driver))
+                raise_if_page_blocked(driver)
         except Exception:
             # ponytail: разметка фильтров могла смениться — best-effort,
             # не роняем весь поиск позиции из-за необязательного уточнения.

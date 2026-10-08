@@ -5,7 +5,7 @@ import time
 
 from selenium.webdriver.common.by import By
 
-from src.job_sources.block_detection import raise_if_blocked, visible_text
+from src.job_sources.block_detection import raise_if_page_blocked
 
 HH_BASE = "https://hh.ru"
 PAGE_LOAD_WAIT_SECONDS = 4
@@ -41,7 +41,7 @@ def list_negotiation_states(driver) -> dict[str, str]:
     for page in range(MAX_PAGES):
         driver.get(f"{HH_BASE}/applicant/negotiations?page={page}")
         time.sleep(PAGE_LOAD_WAIT_SECONDS)
-        raise_if_blocked(visible_text(driver))
+        raise_if_page_blocked(driver)
         new_on_page = 0
         for item in driver.find_elements(By.CSS_SELECTOR, _ITEM_SELECTOR):
             links = item.find_elements(By.CSS_SELECTOR, 'a[href*="/vacancy/"]')

@@ -19,7 +19,7 @@ from pathlib import Path
 
 from selenium.webdriver.common.by import By
 
-from src.job_sources.block_detection import raise_if_blocked, visible_text
+from src.job_sources.block_detection import raise_if_page_blocked, visible_text
 from src.job_sources.telegram_notify import notify_manual_login_required
 from src.logging import logger
 from src.utils.chrome_utils import get_with_retry, init_browser
@@ -222,7 +222,7 @@ def unmet_requirements(driver, job_link: str) -> list[str]:
     requirements». Проверяем до письма, чтобы не тратить ИИ зря."""
     driver.get(job_link)
     time.sleep(PAGE_LOAD_WAIT_SECONDS)
-    raise_if_blocked(visible_text(driver))
+    raise_if_page_blocked(driver)
     text = visible_text(driver)
     if "can't apply for jobs right now" in text.lower():
         raise DjinniProfileRequired(
@@ -251,7 +251,7 @@ def apply_to_job(driver, job_link: str, message: str) -> bool:
     нашли кнопку/форму, попали на вход или не увидели подтверждения."""
     driver.get(job_link)
     time.sleep(PAGE_LOAD_WAIT_SECONDS)
-    raise_if_blocked(visible_text(driver))
+    raise_if_page_blocked(driver)
     if _guest_redirect(driver):
         return False
     if _already_applied(driver):

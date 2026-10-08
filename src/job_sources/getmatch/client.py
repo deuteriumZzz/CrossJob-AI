@@ -6,7 +6,7 @@ from typing import Optional
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 
-from src.job_sources.block_detection import raise_if_blocked, visible_text
+from src.job_sources.block_detection import raise_if_page_blocked, visible_text
 from src.job_sources.html_text import html_letter_to_plain_text
 from src.utils.chrome_utils import init_browser, is_driver_dead
 
@@ -164,7 +164,7 @@ class GetMatchClient:
                 url += f"&sp={slug}"
             driver.get(url)
             _wait_for_vacancies_page(driver)
-            raise_if_blocked(visible_text(driver))
+            raise_if_page_blocked(driver)
             return driver.page_source
         finally:
             if owns_it:
@@ -211,7 +211,7 @@ class GetMatchClient:
                 return bool(buttons)
 
             _wait_until(_respond_button_ready)
-            raise_if_blocked(visible_text(driver))
+            raise_if_page_blocked(driver)
             if not buttons:
                 return False
             buttons[0].click()
