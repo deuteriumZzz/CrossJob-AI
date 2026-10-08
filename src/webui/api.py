@@ -194,6 +194,7 @@ from src.scheduler_state import load_state, record_run_result
 from src.utils import autostart, daemon_service
 from src.utils.constants import RESUME_PDF, RESUME_PDF_LINKEDIN, SECRETS_YAML
 from src.utils.pause_all import pause_state, set_paused
+from src.utils.vocabulary import error_kind
 
 # В PyInstaller-сборке (desktop_app.spec) __file__ не указывает на
 # реальную папку с забандленным src/webui/static — она распакована в
@@ -501,6 +502,11 @@ def _resume_readiness(data_folder: Path, source: str) -> Optional[dict]:
 # теряется — ухудшается только читаемость нераспознанных случаев.
 _ERROR_PATTERNS = (
     (
+        ("timed out waiting for",),
+        "Нужен вход: площадка ждала, пока вы войдёте, и время вышло. "
+        "Нажмите «Войти» — откроется окно площадки, войдите там.",
+    ),
+    (
         ("timed out receiving message from renderer",),
         "Страница площадки не загрузилась — браузер завис на ней. Бот "
         "повторяет загрузку сам; если повторяется часто — площадка "
@@ -563,14 +569,16 @@ def _classify_error(raw: Optional[str]) -> Optional[dict]:
     if not raw:
         return None
     lowered = raw.lower()
+    # kind — статус из единого словаря: "login" (нужен вход) или "error".
+    kind = error_kind(raw)
     for needles, summary in _ERROR_PATTERNS:
         if any(needle in lowered for needle in needles):
-            return {"summary": summary, "detail": raw}
+            return {"summary": summary, "detail": raw, "kind": kind}
     first_line = raw.strip().splitlines()[0]
     summary = (
         first_line if len(first_line) <= 160 else first_line[:157] + "..."
     )
-    return {"summary": summary, "detail": raw}
+    return {"summary": summary, "detail": raw, "kind": kind}
 
 
 def _readiness(secrets: dict, data_folder: Path, source: str) -> dict:
@@ -697,7 +705,7 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
             "name": "check_hh_replies",
             "label": "HeadHunter — статусы откликов и чат",
             "note": (
-                "Приглашения/отказы → «Входящие». Автоответ в чате — "
+                "Приглашения и отказы — в «Общение». Автоответ в чате — "
                 "если включён headhunter.auto_reply, напоминания молчащим "
                 "работодателям — если включён headhunter.auto_reminder."
             ),
@@ -707,17 +715,17 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
             "label": "Telegram — ответы HR в диалогах",
             "note": (
                 "Разбирает ответ (интерес/вопрос/отказ), готовит черновик "
-                "ответа во «Входящие»."
+                "ответа в «Общение»."
             ),
         },
         {
             "name": "check_email_replies",
             "label": "Почта — ответы на письма HR",
-            "note": "Нужна подключённая почта: Настройки → Контакты и письма.",
+            "note": "Нужна подключённая почта: Настройки → Почта и письма.",
         },
         {
             "name": "check_telegram_commands",
-            "label": "CrossJob-бот — команды и утренняя сводка",
+            "label": "Бот в Telegram — команды и утренняя сводка",
             "note": "/status, «отправить <код>», сводка в заданный час.",
         },
     ]
@@ -1959,7 +1967,7 @@ def get_todo(ctx: AppContext = Depends(get_ctx)) -> dict:
                 "text": _plural(
                     len(interviews), "интервью", "интервью", "интервью"
                 )
-                + " — «Подготовиться» у каждого во «Входящих»",
+                + " — справка к интервью у каждого в «Общении»",
             }
         )
     # «Кому ещё не писали» — в карточке «Компании и рассылка» с кнопкой
@@ -2059,7 +2067,7 @@ def _setup_checklist(ctx: AppContext) -> list[dict]:
         ),
         (
             "bot",
-            "CrossJob-бот",
+            "Бот в Telegram",
             bot_credentials(ctx.config) is not None,
             "сюда приходят вакансии с кнопками и ответы HR",
             "settings-notifications",
@@ -4365,6 +4373,36 @@ def get_telegram_status(ctx: AppContext = Depends(get_ctx)) -> dict:
     return {"configured": True, "connected": connected}
 
 
+@app.post("/api/telegram/logout")
+def post_telegram_logout(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """«Отключить» Telegram-аккаунт (Настройки → Подключения): парсер
+    останавливается, сеанс закрывается в Telegram. Ключи api_id/api_hash,
+    переписка и База остаются — подключить снова можно по номеру и коду.
+    Не вышло закрыть сеанс на сервере (нет сети) — файл сессии убирается
+    в сторону, а не удаляется: сеанс можно завершить в самом Telegram."""
+    from src.job_sources.telegram.watcher import active_watcher
+
+    watcher = active_watcher()
+    if watcher is not None:
+        watcher.stop()
+        watcher.join(timeout=10)
+    creds = _telegram_secrets(ctx)
+    session = _telegram_session_path(ctx)
+    session_file = session.with_name(session.name + ".session")
+    logged_out = False
+    if creds is not None and session_file.exists():
+        try:
+            with TelegramStatusClient(int(creds[0]), creds[1], session) as c:
+                logged_out = c.is_authorized() and c.log_out()
+        except Exception as e:
+            logger.warning(f"Telegram: выход из аккаунта не удался: {e}")
+    if session_file.exists():
+        session_file.replace(
+            session_file.with_name(session_file.name + ".disconnected")
+        )
+    return {"connected": False, "logged_out": logged_out}
+
+
 class TelegramLoginPhone(BaseModel):
     phone: str
 
@@ -4414,8 +4452,8 @@ def post_telegram_login_start(
     if creds is None:
         raise HTTPException(
             400,
-            "Сначала вставьте api_id и api_hash: Общение → Telegram-парсер "
-            "→ «Подключение аккаунта».",
+            "Сначала подключите Telegram-аккаунт: Настройки → Подключения "
+            "→ «Telegram-аккаунт».",
         )
     if ctx.telegram_login_session is not None:
         ctx.telegram_login_session.close()
@@ -4586,8 +4624,8 @@ def post_telegram_message(
     if creds is None:
         raise HTTPException(
             400,
-            "Сначала вставьте api_id и api_hash: Общение → Telegram-парсер "
-            "→ «Подключение аккаунта».",
+            "Сначала подключите Telegram-аккаунт: Настройки → Подключения "
+            "→ «Telegram-аккаунт».",
         )
     if not body.text.strip():
         raise HTTPException(400, "Message text is empty")
@@ -4625,8 +4663,8 @@ def post_telegram_send_resume(
     if creds is None:
         raise HTTPException(
             400,
-            "Сначала вставьте api_id и api_hash: Общение → Telegram-парсер "
-            "→ «Подключение аккаунта».",
+            "Сначала подключите Telegram-аккаунт: Настройки → Подключения "
+            "→ «Telegram-аккаунт».",
         )
     conversations = TelegramConversations(
         ctx.output_folder / "telegram_conversations.json"
@@ -5997,7 +6035,7 @@ _GENERATORS = {
     "resume-audit": lambda ctx, body: _create_resume_audit(
         ctx.config,
         ctx.llm_api_key,
-        job_url=body.job_url,
+        job_url=body.job_url or "",
     ),
 }
 # resume-audit возвращает dict (текст 3 шагов аудита), а не путь к PDF —
@@ -6019,10 +6057,8 @@ def post_generate(
     через Selenium небыстрый — гоняем в фоновом потоке, как run-now."""
     if kind not in _GENERATORS:
         raise HTTPException(404, f"Unknown generator: {kind}")
-    if (
-        kind in ("resume-tailored", "cover-letter", "resume-audit")
-        and not body.job_url
-    ):
+    # Аудит без ссылки — общая проверка под ваши должности из «Что ищу».
+    if kind in ("resume-tailored", "cover-letter") and not body.job_url:
         raise HTTPException(400, "job_url is required for this generator.")
     if ctx.generate_thread is not None and ctx.generate_thread.is_alive():
         raise HTTPException(409, "A generation is already in progress.")

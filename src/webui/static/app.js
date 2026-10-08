@@ -1384,11 +1384,15 @@ function sourceRowModel(s, runNow) {
     dot = "idle";
     text = "выключена";
   } else if (s.status === "blocked" || s.paused) {
+    // Четыре статуса из единого словаря: работает, пауза, нужен вход, ошибка.
     dot = "warn";
-    text = s.last_error?.summary || "пауза после капчи — нужна проверка на сайте";
+    text = `пауза · ${s.last_error?.summary || "после капчи нужна проверка на сайте"}`;
+  } else if (s.status === "error" && s.last_error?.kind === "login") {
+    dot = "warn";
+    text = "нужен вход · откройте и нажмите «Войти»";
   } else if (s.status === "error") {
     dot = "error";
-    text = s.last_error?.summary || "ошибка в последнем ходе";
+    text = `ошибка · ${s.last_error?.summary || "последний ход не удался"}`;
   } else if (s.status === "never_run") {
     dot = "never_run";
     text = `${mode} · ещё не запускалась`;
@@ -1516,14 +1520,16 @@ function fixBlockHtml(s) {
   const blocked = s.status === "blocked" || s.paused;
   if (!blocked && s.status !== "error") return "";
   const err = s.last_error || {};
-  const summary = err.summary || (blocked ? "Площадка на паузе после капчи или проверки на сайте." : "Последний ход закончился ошибкой.");
+  const login = !blocked && err.kind === "login";
+  const summary = err.summary || (blocked ? "Пауза: площадка ждёт проверки на сайте после капчи." : "Ошибка: последний ход не удался.");
   const actions = blocked
     ? `<button type="button" class="btn btn-primary btn-small" data-drawer-action="unblock">Я прошёл проверку — снять паузу</button>
        <button type="button" class="btn btn-ghost btn-small" data-drawer-action="accounts">Подключения</button>`
-    : `<button type="button" class="btn btn-primary btn-small" data-drawer-action="run">Повторить сейчас</button>
+    : `<button type="button" class="btn btn-primary btn-small" data-drawer-action="run">${login ? "Войти" : "Повторить сейчас"}</button>
        <button type="button" class="btn btn-ghost btn-small" data-drawer-action="logs">Журнал</button>`;
-  return `<div class="fix ${blocked ? "is-warn" : "is-error"}" data-ui="home.platform.error drawer.fix">
-    <span class="dot ${blocked ? "warn" : "error"}"></span>
+  const warn = blocked || login;
+  return `<div class="fix ${warn ? "is-warn" : "is-error"}" data-ui="home.platform.error drawer.fix">
+    <span class="dot ${warn ? "warn" : "error"}"></span>
     <div class="fix-body">
       <div>${escapeHtml(summary)}${blocked ? ` Откройте сайт в окне бота, пройдите проверку и нажмите кнопку ниже (то же, что <code>/resume ${s.name}</code> в боте).` : ""}</div>
       ${err.detail ? `<details class="fix-detail"><summary>Подробности</summary><pre>${escapeHtml(err.detail)}</pre></details>` : ""}
@@ -3474,6 +3480,8 @@ function applyTelegramAccountStatus(status) {
   // сбивать с толку полем для повторного ввода номера.
   document.getElementById("telegram-login-row").style.display =
     status.connected ? "none" : "";
+  const offRow = document.getElementById("tg-account-off-row");
+  if (offRow) offRow.hidden = !status.connected;
   if (status.connected) {
     document.getElementById("telegram-login-code-row").style.display =
       "none";
@@ -4255,15 +4263,16 @@ async function pollResumeAuditStatus() {
   }
 }
 
-async function startResumeAudit() {
+async function startResumeAudit(general = false) {
   const statusEl = document.getElementById("gen-status");
   const downloadEl = document.getElementById("gen-download");
   const progressEl = document.getElementById("gen-progress");
-  const jobUrl = document.getElementById("gen-job-url").value.trim() || null;
-  if (!jobUrl) {
-    showToast("Укажите ссылку на вакансию.", "error");
+  const jobUrl = general ? null : document.getElementById("gen-job-url").value.trim() || null;
+  if (!jobUrl && !general) {
+    showToast("Вставьте ссылку на вакансию — или «Проверить резюме» ниже, без вакансии.", "error");
     return;
   }
+  if (general) document.getElementById("gen-status").scrollIntoView({ block: "center", behavior: REDUCE_MOTION ? "auto" : "smooth" });
   downloadEl.style.display = "none";
   statusEl.textContent = "Запуск…";
   progressEl.classList.add("active");
@@ -7394,7 +7403,10 @@ function initDashboard() {
     .addEventListener("click", () => startGenerate("cover-letter"));
   document
     .getElementById("gen-resume-audit")
-    .addEventListener("click", startResumeAudit);
+    .addEventListener("click", () => startResumeAudit(false));
+  document
+    .getElementById("gen-resume-audit-general")
+    .addEventListener("click", () => startResumeAudit(true));
 
   ["primary", "linkedin"].forEach((kind) => {
     const input = document.getElementById(`resume-upload-${kind}`);
@@ -8224,7 +8236,23 @@ async function moveFallback(index, delta) {
   }
 }
 
+async function disconnectTelegramAccount() {
+  const ok = await showConfirm(
+    "Отключить Telegram-аккаунт? Парсер и сообщения HR с вашего имени остановятся, сеанс закроется и в самом Telegram. Переписка, База и ключи останутся — подключить снова можно по номеру и коду."
+  );
+  if (!ok) return;
+  try {
+    const res = await api("/api/telegram/logout", { method: "POST" });
+    showToast(res.logged_out ? "Telegram-аккаунт отключён" : "Отключено здесь. Если сеанс остался — завершите его в Telegram: Настройки → Устройства", "success", 7000);
+    document.getElementById("tg-connect-panel").open = true;
+    refreshTelegramAccount();
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  }
+}
+
 function initSettingsExtras() {
+  document.getElementById("tg-account-off")?.addEventListener("click", disconnectTelegramAccount);
   document.getElementById("backup-now")?.addEventListener("click", (e) => backupNow(e.currentTarget));
   document.getElementById("llm-fallback-order")?.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-order-move]");

@@ -282,6 +282,7 @@ from src.utils.constants import (
 )
 from src.utils.file_lock import state_file_lock
 from src.utils.pause_all import is_paused, set_paused
+from src.utils.vocabulary import STATUS_WORDS, platform_name, platform_state
 
 # Профиль HH нельзя открывать двумя WebDriver одновременно: Chrome оставляет
 # блокировку профиля, а второй ручной клик тогда выглядит для пользователя как
@@ -893,10 +894,40 @@ def create_cover_letter(
         raise
 
 
+def general_audit_brief(parameters: dict) -> str:
+    """«Вакансия» для общей проверки резюме без ссылки (Мои резюме →
+    «Проверить резюме»): должности и пожелания из «Что ищу», требования —
+    типичные для рынка, их знает сама модель."""
+    from src.job_sources.reply_answerer import build_preferences_summary
+
+    positions = [str(p) for p in parameters.get("positions") or [] if p]
+    levels = [
+        name
+        for key, name in (
+            ("internship", "стажировка"),
+            ("entry", "junior"),
+            ("associate", "middle"),
+            ("mid_senior_level", "senior"),
+            ("director", "руководитель"),
+            ("executive", "топ-менеджмент"),
+        )
+        if (parameters.get("experience_level") or {}).get(key)
+    ]
+    return (
+        "Общая проверка — конкретной вакансии нет. Оцени резюме как "
+        "рекрутер, который нанимает на такие позиции: "
+        f"{', '.join(positions) or 'по профилю резюме'}.\n"
+        + (f"Уровень: {', '.join(levels)}.\n" if levels else "")
+        + f"{build_preferences_summary(parameters)}\n"
+        "Требования бери типичные для этих позиций на рынке сейчас; "
+        "о конкретной компании ничего не придумывай."
+    )
+
+
 def create_resume_audit(
     parameters: dict,
     llm_api_key: str,
-    job_url: str,
+    job_url: str = "",
 ) -> dict:
     """
     Аудит резюме под конкретную вакансию (дашборд — тот же блок
@@ -907,11 +938,16 @@ def create_resume_audit(
     здесь не нужны — результат 3-шаговой LLM-цепочки из
     resume_audit.py возвращается как текст, не как файл.
     """
-    logger.info("Running resume audit against job posting: %s", job_url)
-
     plain_text_resume_file = ensure_plain_text_resume(parameters, llm_api_key)
     with open(plain_text_resume_file, "r", encoding="utf-8") as file:
         plain_text_resume = file.read()
+    if not job_url:
+        # Без ссылки — общая проверка под ваши должности, без браузера.
+        logger.info("Running general resume audit (no job posting)")
+        return run_full_resume_audit(
+            plain_text_resume, general_audit_brief(parameters), llm_api_key
+        )
+    logger.info("Running resume audit against job posting: %s", job_url)
 
     style_manager = StyleManager()
     resume_generator = ResumeGenerator()
@@ -4473,7 +4509,7 @@ def start_campaign_job(
                     campaign_id,
                     email,
                     status="skipped",
-                    reason="черновик удалён во «Входящих»",
+                    reason="черновик удалён в «Общении»",
                 )
                 return None
             if _emailed_directly(book, email):
@@ -6272,22 +6308,30 @@ def _sync_headhunter_negotiation_states(
 
 
 def _format_telegram_status(parameters: dict, applied_log: AppliedLog) -> str:
+    """/status в боте — теми же словами, что площадки на Главной: название
+    площадки и статус (работает, пауза, нужен вход, ошибка)."""
     output_folder: Path = parameters["outputFileDirectory"]
     state = load_state(output_folder)
-    lines = [
-        f"Всего откликов сегодня: {applied_log.applied_today_count_all()}"
-    ]
+    lines = []
+    if is_paused(output_folder):
+        lines.append("Пауза на всё — снять: /resume all")
+    lines.append(f"Откликов сегодня: {applied_log.applied_today_count_all()}")
     for name, _ in ALL_SOURCES:
         source_config = parameters.get(name) or {}
         if not source_config.get("schedule_enabled"):
             continue
         info = state.get(name) or {}
-        status = info.get("status")
-        dot = "🟢" if status == "ok" else "🔴" if status == "error" else "⚪"
+        word = STATUS_WORDS[
+            platform_state(
+                info.get("status"),
+                is_still_blocked(output_folder, name),
+                info.get("last_error"),
+            )
+        ]
         count = applied_log.applied_today_count(name)
         limit = _daily_limit(parameters, name)
-        line = f"{dot} {name}: {count}/{limit}"
-        if info.get("last_error"):
+        line = f"{platform_name(name)}: {word} · {count} из {limit}"
+        if word != STATUS_WORDS["ok"] and info.get("last_error"):
             line += f" — {info['last_error'].splitlines()[0][:80]}"
         lines.append(line)
     return "\n".join(lines)
@@ -6989,7 +7033,8 @@ def _handle_vacancy_button(
                     "sendMessage",
                     {
                         "chat_id": message["chat"]["id"],
-                        "text": "Остальные — в дашборде: Компании → Рассылки.",
+                        "text": "Остальные — в окне приложения: "
+                        "Компании → Рассылка.",
                     },
                 )
                 break
@@ -7164,7 +7209,8 @@ def prepare_interview(parameters: dict, llm_api_key: str, entry: dict) -> str:
         f"🎯 Подготовка к интервью: {entry.get('company')} — "
         f"{entry.get('title')}\n\n{prep[:1500]}"
         + (
-            "\n\n…полностью — в «Истории» в дашборде."
+            "\n\n…полностью — в окне приложения: Вакансии → шторка "
+            "вакансии → «Подготовка»."
             if len(prep) > 1500
             else ""
         ),

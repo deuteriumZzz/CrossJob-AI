@@ -742,9 +742,27 @@ def test_generate_download_without_result_is_404(client):
     assert response.status_code == 404
 
 
-def test_generate_resume_audit_requires_job_url(client):
-    response = client.post("/api/generate/resume-audit", json={})
-    assert response.status_code == 400
+def test_generate_resume_audit_without_job_url_is_general(client):
+    """Без ссылки — общая проверка под должности из «Что ищу» (раньше 400);
+    резюме и письму под вакансию ссылка по-прежнему нужна."""
+    calls = []
+    with patch(
+        "src.webui.api._create_resume_audit",
+        side_effect=lambda config, key, job_url=None: calls.append(job_url)
+        or {"audit": "общая"},
+    ):
+        response = client.post("/api/generate/resume-audit", json={})
+        assert response.status_code == 200
+        for _ in range(50):
+            if not client.get("/api/generate/status").json()["running"]:
+                break
+            time.sleep(0.05)
+    assert calls == [""]
+    assert client.get("/api/generate/status").json()["result"] == {
+        "audit": "общая"
+    }
+    tailored = client.post("/api/generate/resume-tailored", json={})
+    assert tailored.status_code == 400
 
 
 def test_generate_resume_audit_runs_and_reports_result(client):

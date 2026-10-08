@@ -692,3 +692,115 @@ def test_do_not_contact_from_talk_creates_and_marks_card(
         json={"value": "anna_hr", "on": False},
     )
     assert ContactBook(out).all()[key]["do_not_contact"] is False
+
+
+# --- Мои резюме: проверка без вакансии, Telegram: «Отключить» ---------------
+
+
+def test_general_audit_brief_uses_search_preferences():
+    import main
+
+    brief = main.general_audit_brief(
+        {
+            "positions": ["Python Developer", "Backend Engineer"],
+            "experience_level": {"associate": True, "mid_senior_level": True},
+            "remote": True,
+        }
+    )
+    assert "Python Developer, Backend Engineer" in brief
+    assert "middle, senior" in brief and "удалённо" in brief
+    assert "конкретной вакансии нет" in brief
+
+
+def test_general_audit_skips_browser(tmp_path):
+    import main
+
+    plain = tmp_path / "plain.yaml"
+    plain.write_text("personal_information: {}", encoding="utf-8")
+    with patch.object(
+        main, "ensure_plain_text_resume", return_value=plain
+    ), patch.object(main, "init_browser") as browser, patch.object(
+        main, "run_full_resume_audit", return_value={"audit": "ok"}
+    ) as run:
+        result = main.create_resume_audit({"positions": ["QA"]}, "key")
+    browser.assert_not_called()
+    assert result == {"audit": "ok"}
+    assert "QA" in run.call_args.args[1]
+
+
+def test_telegram_logout_keeps_keys_and_moves_session(client):  # noqa: F811
+    ctx = api.get_ctx()
+    client.post(
+        "/api/telegram/keys",
+        json={"api_id": "123", "api_hash": "a" * 32},
+    )
+    session_file = ctx.output_folder / ".telegram_session.session"
+    session_file.write_text("x", encoding="utf-8")
+    with patch.object(api, "TelegramStatusClient") as status_client:
+        session = status_client.return_value.__enter__.return_value
+        session.is_authorized.return_value = True
+        session.log_out.return_value = True
+        response = client.post("/api/telegram/logout")
+    assert response.status_code == 200
+    assert response.json() == {"connected": False, "logged_out": True}
+    assert not session_file.exists()
+    assert (
+        ctx.output_folder / ".telegram_session.session.disconnected"
+    ).exists()
+    assert api._telegram_secrets(ctx) is not None
+
+
+# --- Единый словарь: площадки и четыре статуса -----------------------------
+
+
+def test_platform_state_words():
+    from src.utils.vocabulary import STATUS_WORDS, platform_state
+
+    login = "RuntimeError: Timed out waiting for LinkedIn login."
+    assert STATUS_WORDS[platform_state("error", False, login)] == "нужен вход"
+    assert STATUS_WORDS[platform_state("error", False, "boom")] == "ошибка"
+    assert STATUS_WORDS[platform_state("error", True, login)] == "пауза"
+    assert STATUS_WORDS[platform_state("ok", False, None)] == "работает"
+
+
+def test_status_marks_login_errors(client):  # noqa: F811
+    from src.scheduler_state import record_run_result
+
+    record_run_result(
+        api.get_ctx().output_folder,
+        "linkedin",
+        "error",
+        datetime.now(),
+        datetime.now(),
+        error="Timed out waiting for LinkedIn login.",
+    )
+    sources = client.get("/api/status").json()["sources"]
+    linkedin = next(s for s in sources if s["name"] == "linkedin")
+    assert linkedin["last_error"]["kind"] == "login"
+    assert linkedin["last_error"]["summary"].startswith("Нужен вход")
+
+
+def test_bot_status_uses_platform_names_and_words(tmp_path):
+    import main
+    from src.job_sources.applied_log import AppliedLog
+    from src.scheduler_state import record_run_result
+    from src.utils.pause_all import set_paused
+
+    record_run_result(
+        tmp_path,
+        "headhunter",
+        "error",
+        datetime.now(),
+        datetime.now(),
+        error="Timed out waiting for hh.ru login.",
+    )
+    set_paused(tmp_path, True)
+    text = main._format_telegram_status(
+        {
+            "outputFileDirectory": tmp_path,
+            "headhunter": {"schedule_enabled": True},
+        },
+        AppliedLog(tmp_path / "applied_log.json"),
+    )
+    assert text.startswith("Пауза на всё")
+    assert "HeadHunter: нужен вход · 0 из" in text
