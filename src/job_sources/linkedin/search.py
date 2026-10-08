@@ -137,8 +137,12 @@ def _read_description(driver) -> str:
 # LinkedIn не отдаёт блок «About the job» вовсе (шапка есть, описания нет
 # даже через 12 с) — гостевая отдаёт полный текст. Плюс: вакансию не
 # открываем в аккаунте лишний раз, Easy Apply откроет её сам.
-_GUEST_POSTING_URL = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{}"
-_GUEST_DESCRIPTION_SELECTOR = ".show-more-less-html__markup, .description__text"
+_GUEST_POSTING_URL = (
+    "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{}"
+)
+_GUEST_DESCRIPTION_SELECTOR = (
+    ".show-more-less-html__markup, .description__text"
+)
 
 
 def _guest_description(job_id: str) -> str:
