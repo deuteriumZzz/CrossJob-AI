@@ -6,7 +6,7 @@
 <title>CrossJob-AI</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%278%27 fill=%27%23121417%27/%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%275%27 fill=%27%232fb36b%27/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="/vendor/fonts/fonts.css" />
-<link rel="stylesheet" href="/style.css?v=53" />
+<link rel="stylesheet" href="/style.css?v=54" />
 </head>
 <body>
 <div id="setup-screen" class="setup-screen" style="display:none" data-ui="shell.first-run">
@@ -167,8 +167,10 @@
         <button type="button" class="btn" id="home-palette" title="Найти действие (Ctrl/⌘+K)">
           <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>Поиск<kbd>⌘K</kbd>
         </button>
+        <button type="button" class="btn" id="home-pause-all" data-ui="home.pause-all" aria-pressed="false" title="Остановить отклики, рассылку и переписку от вашего имени разом">Пауза на всё</button>
         <button type="button" class="btn btn-primary" id="home-run" data-ui="bot.toggle">Запустить</button>
       </header>
+      <div id="pause-banner" class="pause-banner" role="status" hidden></div>
 
       <section id="todo-panel" class="card todo-panel" aria-label="Нужно ваше решение" data-ui="home.setup home.todo home.todo.calm home.queue.telegram home.queue.hh shell.tour"></section>
 
@@ -959,6 +961,6 @@
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=73"></script>
+<script src="/app.js?v=74"></script>
 </body>
 </html>

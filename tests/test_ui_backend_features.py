@@ -194,3 +194,196 @@ def test_letter_instructions_round_trip(client):  # noqa: F811
     assert response.status_code == 200
     assert response.json()["letter_instructions"] == text
     assert api.get_ctx().config["direct"]["letter_instructions"] == text
+
+
+# --- «Пауза на всё» -------------------------------------------------------
+
+
+def test_pause_all_keeps_only_incoming_checks(tmp_path):
+    from src.scheduler import Scheduler
+    from src.utils.pause_all import set_paused
+
+    noop = lambda p, k: None  # noqa: E731
+    scheduler = Scheduler(
+        source_map={
+            "headhunter": noop,
+            "check_hh_replies": noop,
+            "check_telegram_commands": noop,
+            "check_email_replies": noop,
+        },
+        parameters={"headhunter": {"schedule_enabled": True}},
+        llm_api_key="key",
+        output_folder=tmp_path,
+        now_fn=lambda: datetime(2026, 10, 8, 10, 0),
+    )
+    assert "headhunter" in scheduler.due_sources()
+    set_paused(tmp_path, True)
+    assert sorted(scheduler.due_sources()) == [
+        "check_email_replies",
+        "check_telegram_commands",
+    ]
+    set_paused(tmp_path, False)
+    assert "headhunter" in scheduler.due_sources()
+
+
+def test_pause_all_api_round_trip(client):  # noqa: F811
+    assert client.get("/api/status").json()["pause_all"]["paused"] is False
+    response = client.post("/api/pause-all", json={"paused": True})
+    assert response.status_code == 200
+    assert response.json()["paused"] is True and response.json()["since"]
+    assert client.get("/api/status").json()["pause_all"]["paused"] is True
+    client.post("/api/pause-all", json={"paused": False})
+    assert client.get("/api/status").json()["pause_all"]["paused"] is False
+
+
+def test_pause_all_holds_telegram_send_queue(tmp_path):
+    from src.job_sources.telegram.watcher import (
+        PENDING_SENDS_FILE,
+        TelegramWatcher,
+        queue_telegram_send,
+    )
+    from src.utils.pause_all import set_paused
+
+    queue_telegram_send(tmp_path, "anna_hr", "Здравствуйте", "link", 0, 0)
+    watcher = TelegramWatcher.__new__(TelegramWatcher)
+    watcher.output_folder = tmp_path
+    watcher.parameters = {}
+    set_paused(tmp_path, True)
+    with patch(
+        "src.job_sources.telegram.watcher.flush_pending_telegram_sends"
+    ) as flush:
+        watcher._flush_pending_sends()
+    flush.assert_not_called()
+    assert (tmp_path / PENDING_SENDS_FILE).exists()
+
+
+def test_bot_pause_all_command(tmp_path):
+    import main
+    from src.utils.pause_all import is_paused
+
+    params = {"outputFileDirectory": tmp_path}
+    with patch.object(main, "send_notification") as send:
+        main._run_control_commands(
+            params, [{"action": "pause", "source": "all"}], "t", "1"
+        )
+        assert is_paused(tmp_path)
+        main._run_control_commands(
+            params, [{"action": "resume", "source": "all"}], "t", "1"
+        )
+    assert not is_paused(tmp_path)
+    assert "Пауза снята" in send.call_args.args[2]
+
+
+# --- «Это была ошибка» и «Откликнуться всё равно» --------------------------
+
+
+def _log_with_skip(out: Path):
+    from src.job import Job
+    from src.job_sources.applied_log import AppliedLog
+
+    log = AppliedLog(out / "applied_log.json")
+    job = Job(
+        role="Python Developer",
+        company="Nova Tech",
+        link="https://hh.ru/vacancy/1",
+        source="headhunter",
+        external_id="1",
+    )
+    log.record(job, "", "", "skipped_low_fit", 3, ["Нет Kubernetes"])
+    return log, job
+
+
+def test_feedback_mark_round_trip_and_reaches_scoring(client):  # noqa: F811
+    from src.job_sources import job_fit
+    from src.job_sources.llm_usage import set_output_folder
+
+    out = api.get_ctx().output_folder
+    _, job = _log_with_skip(out)
+    response = client.post(
+        "/api/applications/feedback",
+        json={
+            "source": "headhunter",
+            "external_id": "1",
+            "verdict": "should_apply",
+            "reason": "Kubernetes не обязателен",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["feedback"]["verdict"] == "should_apply"
+    (entry,) = client.get("/api/applications").json()
+    assert entry["feedback"]["reason"] == "Kubernetes не обязателен"
+
+    set_output_folder(out)
+    try:
+        lines, forced = job_fit._decision_feedback(job)
+    finally:
+        set_output_folder(None)
+    assert "Nova Tech" in lines and "стоило откликнуться" in lines
+    assert "Kubernetes не обязателен" in lines and forced is False
+
+    client.post(
+        "/api/applications/feedback",
+        json={"source": "headhunter", "external_id": "1", "verdict": ""},
+    )
+    (entry,) = client.get("/api/applications").json()
+    assert "feedback" not in entry
+
+
+def test_feedback_rejects_unknown_verdict_and_missing_entry(
+    client,  # noqa: F811
+):
+    bad = client.post(
+        "/api/applications/feedback",
+        json={"source": "hh", "external_id": "x", "verdict": "maybe"},
+    )
+    assert bad.status_code == 400
+    missing = client.post(
+        "/api/applications/feedback",
+        json={"source": "hh", "external_id": "x", "verdict": "should_skip"},
+    )
+    assert missing.status_code == 404
+
+
+def test_apply_anyway_skips_scoring_and_replaces_skip(tmp_path):
+    from src.job_sources import job_fit
+    from src.job_sources.llm_usage import set_output_folder
+
+    log, job = _log_with_skip(tmp_path)
+    assert log.already_applied(job) is True
+    log.set_feedback("headhunter", "1", "should_apply", "подходит")
+    log.set_apply_anyway("headhunter", "1", True)
+    # Площадка снова видит вакансию — и не отбрасывает её как виденную.
+    assert log.already_applied(job) is False
+
+    set_output_folder(tmp_path)
+    try:
+        with patch.object(job_fit, "get_chat_llm") as llm:
+            fit = job_fit.score_job_fit(Path("нет.pdf"), job, "key")
+    finally:
+        set_output_folder(None)
+    llm.assert_not_called()
+    assert fit.score == 10
+
+    log.record(job, "письмо", "", "applied", 10, [])
+    entries = log.find_by_company("")
+    assert [e["status"] for e in entries] == ["applied"]
+    assert entries[0]["apply_anyway"] is True
+    assert entries[0]["feedback"]["verdict"] == "should_apply"
+    assert log.already_applied(job) is True
+
+
+def test_apply_anyway_api(client):  # noqa: F811
+    out = api.get_ctx().output_folder
+    log, job = _log_with_skip(out)
+    response = client.post(
+        "/api/applications/apply-anyway",
+        json={"source": "headhunter", "external_id": "1"},
+    )
+    assert response.status_code == 200
+    assert response.json()["apply_anyway"] is True
+    log.record(job, "письмо", "", "applied", 10, [])
+    again = client.post(
+        "/api/applications/apply-anyway",
+        json={"source": "headhunter", "external_id": "1"},
+    )
+    assert again.status_code == 409

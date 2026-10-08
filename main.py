@@ -279,6 +279,7 @@ from src.utils.constants import (
     WORK_PREFERENCES_YAML,
 )
 from src.utils.file_lock import state_file_lock
+from src.utils.pause_all import is_paused, set_paused
 
 # Профиль HH нельзя открывать двумя WebDriver одновременно: Chrome оставляет
 # блокировку профиля, а второй ручной клик тогда выглядит для пользователя как
@@ -4723,8 +4724,10 @@ def check_campaign_sending(parameters: dict, llm_api_key: str) -> None:
     """Раз в 5 минут, пока открыт дашборд (не зависит от «▶ Запустить»):
     следующая порция писем (раз в день) и продолжение начатых рассылок,
     когда снова можно — время отправки, лимит, нет волны возвратов."""
-    _prepare_campaign_batches(parameters, llm_api_key)
     output_folder: Path = parameters["outputFileDirectory"]
+    if is_paused(output_folder):
+        return  # «Пауза на всё»: ни новых порций, ни отправки
+    _prepare_campaign_batches(parameters, llm_api_key)
     if not mail_guard.plan(parameters, output_folder)["can_send"]:
         return
     for cid, campaign in CampaignStore(output_folder).all().items():
@@ -4742,6 +4745,18 @@ def check_campaign_sending(parameters: dict, llm_api_key: str) -> None:
             )
             start_campaign_job(parameters, llm_api_key, cid, "send", resume)
             return  # по одной рассылке за раз — лимит общий
+
+
+def stop_campaign_sending(output_folder: Path) -> int:
+    """«Пауза на всё»: идущие отправки писем останавливаются после текущего
+    письма. Рассылки остаются «в отправке» и продолжат сами, когда пауза
+    снята (check_campaign_sending). Возвращает, сколько остановили."""
+    stopped = 0
+    for job in list(CampaignJob.RUNNING.values()):
+        if job.kind in ("send", "followups") and job.is_alive():
+            job.stop()
+            stopped += 1
+    return stopped
 
 
 def _prepare_campaign_batches(parameters: dict, llm_api_key: str) -> None:
@@ -6174,6 +6189,7 @@ def _send_missing_cover_letters(
             wait_before_apply()
         tried += 1
         if not letter:
+            assert generate is not None  # пустое письмо без генератора — выше
             try:
                 letter = generate(entry)
             except Exception as e:
@@ -6377,6 +6393,21 @@ def _run_control_commands(
                 bot_token,
                 chat_id,
                 _format_telegram_status(parameters, applied_log),
+            )
+        elif action in ("pause", "resume") and cmd["source"] == "all":
+            # /pause all — то же, что «Пауза на всё» на Главной.
+            set_paused(output_folder, action == "pause")
+            if action == "pause":
+                stop_campaign_sending(output_folder)
+            send_notification(
+                bot_token,
+                chat_id,
+                (
+                    "Всё на паузе: отклики, рассылка и переписка стоят. "
+                    "Снять — /resume all."
+                    if action == "pause"
+                    else "Пауза снята — бот продолжает."
+                ),
             )
         elif action in ("pause", "resume"):
             source = cmd["source"]

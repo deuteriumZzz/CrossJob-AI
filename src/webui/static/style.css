@@ -8180,3 +8180,54 @@ a.btn-primary:hover {
 #outreach-letter-current {
   margin: 4px 0 0;
 }
+
+/* «Это была ошибка» и «Откликнуться всё равно» */
+.mistake-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  animation: rise 260ms var(--ease) both;
+}
+.mistake-panel .field-row-inline input {
+  flex: 1;
+  min-width: 0;
+}
+.mistake-note {
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+#platform-drawer-foot .foot-end {
+  margin-left: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mistake-panel {
+    animation: none;
+  }
+}
+
+/* «Пауза на всё» — полоса под шапкой Главной */
+.pause-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  background: color-mix(in srgb, var(--warn) 9%, var(--surface));
+}
+.pause-banner[hidden] {
+  display: none;
+}
+.pause-banner .pause-text {
+  flex: 1;
+  min-width: 0;
+}
+.dot.warn {
+  background: var(--warn);
+}

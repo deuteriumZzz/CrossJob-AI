@@ -18,6 +18,8 @@ from src.scheduler_state import (
     load_state,
     record_run_result,
 )
+from src.utils.pause_all import ALWAYS_ON as PAUSE_ALWAYS_ON
+from src.utils.pause_all import is_paused
 
 DEFAULT_INTERVAL_HOURS = 3
 MIN_FREE_DISK_BYTES = 2 * 1024**3
@@ -108,8 +110,13 @@ class Scheduler:
     def due_sources(self) -> list[str]:
         if self.paused:
             return []
+        # «Пауза на всё»: от вашего имени ничего не уходит, но ответы HR и
+        # команды боту читаются (см. src/utils/pause_all.py).
+        paused_all = is_paused(self.output_folder)
         due = []
         for name in self.source_map:
+            if paused_all and name not in PAUSE_ALWAYS_ON:
+                continue
             source_config = self.parameters.get(name) or {}
             # Постоянный Telegram-шлюз сам получает каждый новый пост.
             # Пока его поток жив, плановый search_telegram открыл бы

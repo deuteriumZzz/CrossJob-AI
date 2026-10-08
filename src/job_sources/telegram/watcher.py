@@ -33,6 +33,7 @@ from src.job_sources.telegram_notify import (
 )
 from src.logging import logger
 from src.utils.file_lock import state_file_lock
+from src.utils.pause_all import is_paused
 
 _ACTIVE: Optional["TelegramWatcher"] = None
 RECONNECT_DELAY_SECONDS = 30
@@ -350,6 +351,8 @@ class TelegramWatcher(threading.Thread):
                 self._stopping.wait(5)
 
     def _flush_pending_sends(self) -> None:
+        if is_paused(self.output_folder):
+            return  # «Пауза на всё» — очередь ждёт, ничего не уходит
         tg_prefs = self.parameters.get("telegram") or {}
         start, end = tg_prefs.get("active_hours_start"), tg_prefs.get(
             "active_hours_end"
@@ -613,6 +616,9 @@ class TelegramWatcher(threading.Thread):
             tg_prefs.get("auto_message")
             and not unverified
             and len(telegram_contacts) == 1
+            # На паузе вакансия приходит в бот с кнопками, как без
+            # автоотправки, — не копится очередью, которая уйдёт разом.
+            and not is_paused(self.output_folder)
         ):
             from src.job_sources.apply_pacing import (
                 MAX_TELEGRAM_MESSAGE_DELAY_SECONDS,

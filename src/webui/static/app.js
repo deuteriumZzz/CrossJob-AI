@@ -3255,8 +3255,9 @@ function renderDaemonState(status) {
     : "бот работает";
   const gw = status.telegram_gateway;
   badge.title = gw?.alive ? (gw.connected ? "Telegram-шлюз на связи" : "Telegram-шлюз переподключается") : "";
+  const pausedAll = !!status.pause_all?.paused;
   badge.innerHTML = `<span class="badge-dot"></span><span class="btn-label">${
-    status.daemon_running ? (status.daemon_paused ? "бот на паузе" : runningLabel) : "бот остановлен"
+    pausedAll ? "пауза на всё" : status.daemon_running ? (status.daemon_paused ? "бот на паузе" : runningLabel) : "бот остановлен"
   }${gw?.alive ? (gw.connected ? " · Telegram ✓" : " · Telegram …") : ""}</span>`;
   badge.classList.toggle("on", status.daemon_running && !status.daemon_paused);
   badge.classList.toggle("off", !status.daemon_running || !!status.daemon_paused);
@@ -3276,7 +3277,7 @@ function renderDaemonState(status) {
   const homeRun = document.getElementById("home-run");
   if (homeRun) {
     homeRun.textContent = !status.daemon_running ? "Запустить бота" : status.daemon_paused ? "Возобновить" : "Остановить бота";
-    homeRun.classList.toggle("btn-primary", !status.daemon_running || !!status.daemon_paused);
+    homeRun.classList.toggle("btn-primary", !status.pause_all?.paused && (!status.daemon_running || !!status.daemon_paused));
     homeRun.title = toggleBtn.title;
   }
 }
@@ -3533,6 +3534,7 @@ const render = {
     lastOverviewSnapshot = snapshot;
 
     renderDaemonState(status);
+    renderPauseAll(status);
     renderHomeMode(status);
     renderHomeLimit(status, stats);
 
@@ -3599,7 +3601,7 @@ const render = {
           <td class="mono small muted nowrap">${fmtDay(e.applied_at)}</td>
           <td><div class="job-cell">${plogoHtml(e.source)}<span class="row-main"><span class="row-title">${escapeHtml(e.company || "—")}</span><span class="row-sub">${escapeHtml(e.title)}${e.remote_region ? ` · ${REGION_LABELS[e.remote_region] || ""}` : ""}</span></span></div></td>
           <td class="small nowrap">${escapeHtml(e.salary || "—")}</td>
-          <td><span class="status-text ${tone}">${escapeHtml(statusLabel(e.status))}</span>${stage ? `<span class="stage-tag">${escapeHtml(stage)}</span>` : ""}</td>
+          <td><span class="status-text ${tone}">${escapeHtml(statusLabel(e.status))}</span>${stage ? `<span class="stage-tag">${escapeHtml(stage)}</span>` : ""}${e.apply_anyway && isSkipped(e) ? `<span class="stage-tag">отклик запланирован</span>` : ""}${e.feedback ? `<span class="stage-tag" title="${escapeHtml(e.feedback.reason || "")}">ваша пометка</span>` : ""}</td>
           <td class="num mono">${e.score ?? "—"}${e.score != null ? `<span class="muted"> / 10</span>` : ""}</td>
         </tr>`;
       })
@@ -5061,6 +5063,9 @@ function collectCommandItems(query) {
     { label: "Только искать, без откликов", hint: "Режим", action: () => setHomeMode("search") },
     { label: "Снова откликаться", hint: "Режим", action: () => setHomeMode("apply") },
     { label: status?.daemon_running ? "Остановить бота" : "Запустить бота", hint: "Действие", action: () => document.getElementById("daemon-toggle").click() },
+    { label: status?.pause_all?.paused ? "Снять паузу" : "Пауза на всё", hint: "Действие", action: () => setPauseAll(!status?.pause_all?.paused) },
+    { label: "Уведомления", hint: "История", action: () => openNotifications() },
+    { label: "Сделать резервную копию сейчас", hint: "Настройки", action: () => { gotoSettings("settings-backups"); document.getElementById("backup-now")?.click(); } },
     { label: "Тема: светлая", hint: "Вид", ui: "shell.theme", action: () => setTheme("light") },
     { label: "Тема: тёмная", hint: "Вид", ui: "shell.theme", action: () => setTheme("dark") },
     { label: "Тема: как в системе", hint: "Вид", ui: "shell.theme", action: () => setTheme("system") },
@@ -5429,6 +5434,7 @@ function jobDrawerBody(e, tab) {
     ${e.skills && e.skills.length ? `<div class="field-block"><div class="field-title">Навыки из вакансии</div><div class="tag-row">${e.skills.map((x) => `<span class="tag">${escapeHtml(x)}</span>`).join("")}</div></div>` : ""}
     <div class="field-block"><div class="field-title">Не хватает</div>${e.gaps && e.gaps.length ? `<ul class="plain-list">${e.gaps.map((g) => `<li>${escapeHtml(g)}</li>`).join("")}</ul>` : `<div class="field-hint">всё основное в резюме есть</div>`}</div>
     ${jobStageButtons(e)}
+    ${jobMistakeHtml(e)}
     ${e.contacts && e.contacts.length ? `<div class="field-block" data-ui="jobs.contacts"><div class="field-title">Контакты из вакансии</div>${e.contacts.map((c) => `<a href="mailto:${escapeHtml(c)}">${escapeHtml(c)}</a>`).join("<br>")}</div>` : ""}`;
 }
 
@@ -5447,9 +5453,9 @@ function openJobDrawer(e, tab = "decision") {
     body: `<div class="segmented drawer-tabs" role="tablist" data-ui="jobs.drawer"><span class="segmented-ind" aria-hidden="true"></span>${tabs
       .map(([k, l]) => `<button type="button" role="tab" class="${k === tab ? "on" : ""}" aria-selected="${k === tab}" data-job-tab="${k}">${l}</button>`)
       .join("")}</div><div id="job-tab-body" class="field-stack">${jobDrawerBody(e, tab)}</div>`,
-    foot: `${e.link ? `<a class="btn btn-primary" href="${escapeHtml(e.link)}" target="_blank" rel="noopener" data-ui="jobs.open">Открыть на ${escapeHtml(site)} ↗</a>` : ""}
-      ${e.company ? `<button type="button" class="btn btn-ghost" data-job-action="find-hr" data-ui="jobs.find-hr">Найти HR компании</button>` : ""}`,
+    foot: jobDrawerFoot(e, site),
   });
+  jobMistakeOpen = false;
   openDrawerSource = null;
   const seg = body.querySelector(".drawer-tabs");
   requestAnimationFrame(() => positionSegmented(seg));
@@ -5472,8 +5478,116 @@ function openJobDrawer(e, tab = "decision") {
 }
 
 let currentJobEntry = null;
+let jobMistakeOpen = false;
+
+// «Это была ошибка»: причины — как в демо; пометка уходит в оценку
+// следующих вакансий (job_fit.score_job_fit).
+const MISTAKE_REASONS = {
+  should_apply: ["Стоило откликнуться", "Требование не обязательное", "Неверно понял формат работы"],
+  should_skip: ["Не стоило откликаться", "Не мой стек", "Зарплата ниже ожиданий", "Не та география"],
+};
+const canApplyAnyway = (e) => isSkipped(e) && !!e.external_id;
+
+function jobMistakeHtml(e) {
+  const fb = e.feedback;
+  if (fb && !jobMistakeOpen) {
+    return `<div class="field-block mistake-note" data-ui="jobs.mistake"><div class="field-title">Ваша пометка</div>
+      <div>«${escapeHtml(fb.reason || (fb.verdict === "should_apply" ? "Стоило откликнуться" : "Не стоило откликаться"))}» — бот учитывает её, когда оценивает похожие вакансии.</div>
+      <div class="fix-actions"><button type="button" class="btn btn-small btn-ghost" data-job-action="mistake-clear">Снять пометку</button></div></div>`;
+  }
+  if (!jobMistakeOpen) return "";
+  const verdict = isSkipped(e) ? "should_apply" : "should_skip";
+  return `<div class="mistake-panel" data-ui="jobs.mistake"><div class="field-title">Что не так с этим решением?</div>
+    <div class="chip-row">${MISTAKE_REASONS[verdict]
+      .map((r) => `<button type="button" class="chip" data-mistake-reason="${escapeHtml(r)}" data-verdict="${verdict}">${escapeHtml(r)}</button>`)
+      .join("")}</div>
+    <form class="field-row-inline" data-mistake-form data-verdict="${verdict}"><input type="text" maxlength="300" placeholder="Или своими словами" aria-label="Своя причина" /><button type="submit" class="btn btn-small">Запомнить</button></form></div>`;
+}
+
+function jobDrawerFoot(e, site) {
+  const anyway = canApplyAnyway(e);
+  const planned = anyway && e.apply_anyway;
+  return `${anyway ? `<button type="button" class="btn${planned ? "" : " btn-primary"}" data-job-action="apply-anyway" data-ui="jobs.apply-anyway" aria-pressed="${planned ? "true" : "false"}">${planned ? "Отклик запланирован · отменить" : "Откликнуться всё равно"}</button>` : ""}
+    ${e.link ? `<a class="btn${anyway ? "" : " btn-primary"}" href="${escapeHtml(e.link)}" target="_blank" rel="noopener" data-ui="jobs.open">Открыть на ${escapeHtml(site)} ↗</a>` : ""}
+    ${e.company ? `<button type="button" class="btn btn-ghost" data-job-action="find-hr" data-ui="jobs.find-hr">Найти HR компании</button>` : ""}
+    ${e.external_id ? `<button type="button" class="btn btn-ghost foot-end" data-job-action="mistake" aria-expanded="${jobMistakeOpen}">Это была ошибка</button>` : ""}`;
+}
+
+function refreshJobDrawer(e) {
+  const tabBody = document.getElementById("job-tab-body");
+  if (!tabBody || currentJobEntry !== e) return;
+  const active = document.querySelector("#platform-drawer [data-job-tab].on")?.dataset.jobTab || "decision";
+  tabBody.innerHTML = jobDrawerBody(e, active);
+  bindJobDrawer(tabBody, e);
+  const site = (() => {
+    try {
+      return new URL(e.link).hostname.replace(/^www\./, "");
+    } catch (err) {
+      return "сайте";
+    }
+  })();
+  document.getElementById("platform-drawer-foot").innerHTML = jobDrawerFoot(e, site);
+  lastHistorySnapshot = "";
+  render.history();
+}
+
+async function saveJobFeedback(e, verdict, reason) {
+  const prev = e.feedback || null;
+  const post = (v, r) =>
+    api("/api/applications/feedback", { method: "POST", body: JSON.stringify({ source: e.source, external_id: e.external_id, verdict: v || "", reason: r || "" }) });
+  try {
+    const saved = await post(verdict, reason);
+    e.feedback = saved.feedback || null;
+    jobMistakeOpen = false;
+    refreshJobDrawer(e);
+    showSavedToast(
+      verdict ? `Запомнил: «${reason}». Похожие вакансии буду оценивать иначе` : "Пометка снята",
+      async () => {
+        const back = await post(prev?.verdict, prev?.reason);
+        e.feedback = back.feedback || null;
+        refreshJobDrawer(e);
+      }
+    );
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  }
+}
+
+async function toggleApplyAnyway(e) {
+  const on = !e.apply_anyway;
+  const post = (v) =>
+    api("/api/applications/apply-anyway", { method: "POST", body: JSON.stringify({ source: e.source, external_id: e.external_id, on: v }) });
+  try {
+    await post(on);
+    e.apply_anyway = on;
+    refreshJobDrawer(e);
+    showSavedToast(
+      on
+        ? `Откликнусь, когда ${sourceLabel(e.source)} снова покажет вакансию — без оценки ИИ, с письмом и в пределах лимита`
+        : "Отклик отменён",
+      async () => {
+        await post(!on);
+        e.apply_anyway = !on;
+        refreshJobDrawer(e);
+      },
+      9000
+    );
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  }
+}
 
 function bindJobDrawer(root, e) {
+  root.querySelectorAll("[data-mistake-reason]").forEach((b) =>
+    b.addEventListener("click", () => saveJobFeedback(e, b.dataset.verdict, b.dataset.mistakeReason))
+  );
+  root.querySelectorAll("[data-mistake-form]").forEach((f) =>
+    f.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const text = f.querySelector("input").value.trim();
+      if (text) saveJobFeedback(e, f.dataset.verdict, text);
+    })
+  );
   root.querySelectorAll("[data-set-stage]").forEach((b) =>
     b.addEventListener("click", async () => {
       try {
@@ -5506,6 +5620,22 @@ async function handleJobAction(btn) {
   const e = currentJobEntry;
   if (!e) return;
   const action = btn.dataset.jobAction;
+  if (action === "mistake") {
+    jobMistakeOpen = !jobMistakeOpen;
+    const decision = document.querySelector('#platform-drawer [data-job-tab="decision"]');
+    if (decision && !decision.classList.contains("on")) decision.click();
+    refreshJobDrawer(e);
+    document.querySelector("#platform-drawer .mistake-panel .chip")?.focus();
+    return;
+  }
+  if (action === "mistake-clear") {
+    saveJobFeedback(e, null, "");
+    return;
+  }
+  if (action === "apply-anyway") {
+    toggleApplyAnyway(e);
+    return;
+  }
   if (action === "copy-letter") {
     copyToClipboard(e.cover_letter || "", btn);
     showToast("Письмо скопировано", "success");
@@ -6894,6 +7024,7 @@ function initDashboard() {
     b.addEventListener("click", () => setHomeMode(b.dataset.mode))
   );
   document.getElementById("home-run").addEventListener("click", () => document.getElementById("daemon-toggle").click());
+  document.getElementById("home-pause-all").addEventListener("click", () => setPauseAll(!pauseAllState.paused));
   document.getElementById("home-palette").addEventListener("click", openCommandPalette);
   document.getElementById("palette-open").addEventListener("click", openCommandPalette);
   window.addEventListener("resize", () => positionSegmented(document.getElementById("home-mode")));
@@ -8189,4 +8320,48 @@ function initNotifications() {
   document.getElementById("notif-open")?.addEventListener("click", openNotifications);
   refreshNotifications();
   setInterval(refreshNotifications, 30000);
+}
+
+
+// --- «Пауза на всё»: отклики, рассылка и переписка от вашего имени разом ---
+
+let pauseAllState = { paused: false, since: "" };
+
+function renderPauseAll(status) {
+  pauseAllState = status.pause_all || { paused: false, since: "" };
+  const paused = pauseAllState.paused;
+  const btn = document.getElementById("home-pause-all");
+  if (btn) {
+    btn.textContent = paused ? "Снять паузу" : "Пауза на всё";
+    btn.classList.toggle("btn-primary", paused);
+    btn.setAttribute("aria-pressed", String(paused));
+  }
+  const banner = document.getElementById("pause-banner");
+  if (!banner) return;
+  banner.hidden = !paused;
+  if (!paused) return;
+  const since = pauseAllState.since ? fmtDay(pauseAllState.since) : "";
+  banner.innerHTML = `<span class="dot warn" aria-hidden="true"></span>
+    <span class="pause-text"><b>Всё на паузе${since ? ` с ${escapeHtml(since.replace(/^сегодня /, ""))}` : ""}.</b> Отклики, рассылка и переписка от вашего имени стоят. Ответы HR и команды боту приходят как обычно.</span>
+    <button type="button" class="btn btn-small" data-pause-resume>Снять паузу</button>`;
+  banner.querySelector("[data-pause-resume]").addEventListener("click", () => setPauseAll(false));
+}
+
+async function setPauseAll(paused) {
+  try {
+    const state = await api("/api/pause-all", { method: "POST", body: JSON.stringify({ paused }) });
+    pauseAllState = state;
+    lastOverviewSnapshot = "";
+    if (currentView === "overview") render.overview();
+    showSavedToast(
+      paused ? "Всё на паузе: ничего не уходит от вашего имени" : "Пауза снята — бот продолжает",
+      async () => {
+        await api("/api/pause-all", { method: "POST", body: JSON.stringify({ paused: !paused }) });
+        lastOverviewSnapshot = "";
+        if (currentView === "overview") render.overview();
+      }
+    );
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  }
 }

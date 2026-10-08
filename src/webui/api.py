@@ -192,6 +192,7 @@ from src.scheduler import (
 from src.scheduler_state import load_state, record_run_result
 from src.utils import autostart, daemon_service
 from src.utils.constants import RESUME_PDF, RESUME_PDF_LINKEDIN, SECRETS_YAML
+from src.utils.pause_all import pause_state, set_paused
 
 # В PyInstaller-сборке (desktop_app.spec) __file__ не указывает на
 # реальную папку с забандленным src/webui/static — она распакована в
@@ -742,6 +743,7 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
             and ctx.scheduler.paused
         ),
         "sources": sources,
+        "pause_all": pause_state(ctx.output_folder),
         "telegram_gateway": gateway_state(),
         "chat_checks": chat_checks,
         "total_applied_today": ctx.applied_log.applied_today_count_all(),
@@ -900,6 +902,82 @@ def post_application_stage(
     if not found:
         raise HTTPException(status_code=404, detail="Заявка не найдена")
     return {"ok": True}
+
+
+class FeedbackUpdate(BaseModel):
+    source: str
+    external_id: str
+    # should_apply — бот пропустил зря, should_skip — откликнулся зря;
+    # пусто — снять пометку.
+    verdict: str = ""
+    reason: str = ""
+
+
+@app.post("/api/applications/feedback")
+def post_application_feedback(
+    body: FeedbackUpdate, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """«Это была ошибка» с причиной: пометка хранится в записи журнала и
+    уходит в оценку следующих вакансий (job_fit.score_job_fit)."""
+    if body.verdict and body.verdict not in ("should_apply", "should_skip"):
+        raise HTTPException(400, "Неизвестная пометка")
+    entry = ctx.applied_log.set_feedback(
+        body.source, body.external_id, body.verdict or None, body.reason
+    )
+    if entry is None:
+        raise HTTPException(404, "Заявка не найдена")
+    return {**entry, "effective_stage": effective_stage(entry)}
+
+
+class ApplyAnywayUpdate(BaseModel):
+    source: str
+    external_id: str
+    on: bool = True
+
+
+@app.post("/api/applications/apply-anyway")
+def post_application_apply_anyway(
+    body: ApplyAnywayUpdate, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """«Откликнуться всё равно» на пропущенную вакансию: площадка
+    откликнется, когда снова её увидит, — без оценки ИИ, с обычным
+    письмом и в пределах лимитов."""
+    current = next(
+        (
+            e
+            for e in reversed(ctx.applied_log.find_by_company(""))
+            if e["source"] == body.source
+            and e["external_id"] == body.external_id
+        ),
+        None,
+    )
+    if current is None:
+        raise HTTPException(404, "Заявка не найдена")
+    if body.on and current["status"] in ("applied", "dry_run"):
+        raise HTTPException(409, "На эту вакансию уже откликнулись")
+    entry = ctx.applied_log.set_apply_anyway(
+        body.source, body.external_id, body.on
+    )
+    assert entry is not None
+    return {**entry, "effective_stage": effective_stage(entry)}
+
+
+class PauseAllUpdate(BaseModel):
+    paused: bool
+
+
+@app.post("/api/pause-all")
+def post_pause_all(
+    body: PauseAllUpdate, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """«Пауза на всё»: отклики, рассылка и переписка от вашего имени разом.
+    Флаг в файле — его видит и бот в фоне (служба автозапуска)."""
+    from main import stop_campaign_sending
+
+    state = set_paused(ctx.output_folder, body.paused)
+    if body.paused:
+        stop_campaign_sending(ctx.output_folder)
+    return state
 
 
 @app.get("/api/replies")
