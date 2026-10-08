@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -231,6 +233,25 @@ _RATE_LIMIT_MARKERS = (
 )
 
 
+# Пауза провайдера после отказа по лимиту: ближайшие минуты вызовы идут
+# сразу к запасному, а не снова упираются в тот же 429.
+RATE_LIMIT_COOLDOWN_SECONDS = 7 * 60
+_cooldown_until: dict[str, float] = {}
+_cooldown_lock = threading.Lock()
+
+
+def mark_provider_rate_limited(provider: str) -> None:
+    with _cooldown_lock:
+        _cooldown_until[provider] = time.monotonic() + (
+            RATE_LIMIT_COOLDOWN_SECONDS
+        )
+
+
+def provider_in_cooldown(provider: str) -> bool:
+    with _cooldown_lock:
+        return time.monotonic() < _cooldown_until.get(provider, 0.0)
+
+
 def _classify_error(error: BaseException) -> str:
     text = str(error).lower()
     return (
@@ -390,3 +411,5 @@ class UsageCallback(BaseCallbackHandler):
             ok=False,
             error=error,
         )
+        if _classify_error(error) == "rate_limit":
+            mark_provider_rate_limited(self.provider)

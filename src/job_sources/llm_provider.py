@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import Runnable
@@ -6,7 +6,11 @@ from langchain_core.runnables.fallbacks import RunnableWithFallbacks
 from pydantic import SecretStr
 
 from config import LLM_API_URL, LLM_MODEL, LLM_MODEL_TYPE
-from src.job_sources.llm_usage import UsageCallback, get_output_folder
+from src.job_sources.llm_usage import (
+    UsageCallback,
+    get_output_folder,
+    provider_in_cooldown,
+)
 
 _provider_override: Optional[str] = None
 _model_override: Optional[str] = None
@@ -640,6 +644,32 @@ def get_active_provider() -> str:
     return _provider_override or LLM_MODEL_TYPE
 
 
+def _provider_of(llm: Any) -> str:
+    """Провайдер модели по UsageCallback (его вешает get_chat_llm);
+    пусто — неизвестен (например, без папки результатов в тестах)."""
+    for callback in getattr(llm, "callbacks", None) or []:
+        provider = getattr(callback, "provider", "")
+        if provider:
+            return str(provider)
+    return ""
+
+
+def _prefer_available(llm: Any, fallbacks: list[Any]) -> tuple[Any, list[Any]]:
+    """Если основной провайдер недавно отказал по лимиту (пауза в
+    llm_usage), первым ставим запасного, чей провайдер не на паузе, а
+    основной уходит в конец цепочки: вызовы не упираются каждый раз в тот
+    же 429. Провайдера не опознали или запасных нет — без изменений."""
+    primary = _provider_of(llm)
+    if not (primary and fallbacks and provider_in_cooldown(primary)):
+        return llm, fallbacks
+    for index, candidate in enumerate(fallbacks):
+        provider = _provider_of(candidate)
+        if provider and not provider_in_cooldown(provider):
+            rest = fallbacks[:index] + fallbacks[index + 1 :]
+            return candidate, rest + [llm]
+    return llm, fallbacks
+
+
 def get_chat_llm(
     api_key: str,
     provider: Optional[str] = None,
@@ -695,6 +725,7 @@ def get_chat_llm(
             ]
         fallbacks = _build_fallback_llms(provider, temperature)
 
+    llm, fallbacks = _prefer_available(llm, fallbacks)
     result: Runnable = llm
     if fallbacks:
         result = _ChatModelWithFallbacks(runnable=llm, fallbacks=fallbacks)
