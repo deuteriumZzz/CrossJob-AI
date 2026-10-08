@@ -6,7 +6,7 @@
 <title>CrossJob-AI</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%278%27 fill=%27%23121417%27/%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%275%27 fill=%27%232fb36b%27/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="/vendor/fonts/fonts.css" />
-<link rel="stylesheet" href="/style.css?v=49" />
+<link rel="stylesheet" href="/style.css?v=52" />
 </head>
 <body>
 <div id="setup-screen" class="setup-screen" style="display:none" data-ui="shell.first-run">
@@ -116,7 +116,7 @@
         <li>Нажмите <b>Запустить бота</b>. Ответы работодателей — в «Общении».</li>
       </ol>
     </section>
-    <section class="help-case">
+    <section class="help-case" data-ui="talk.tg.howto">
       <h3>2. Telegram-парсер</h3>
       <ol>
         <li>Общение → Telegram-парсер: войдите своим аккаунтом (один раз), в Настройки → Telegram-парсер добавьте каналы.</li>
@@ -146,7 +146,7 @@
   </dialog>
 
   <main>
-    <nav id="subnav" class="subnav" aria-label="Подразделы" style="display:none" data-ui="nav.subtabs"></nav>
+    <nav id="subnav" class="subnav" aria-label="Подразделы" style="display:none" data-ui="nav.subtabs jobs.tabs companies.tabs"></nav>
     <section id="view-overview" class="view active">
       <header class="page-head">
         <div class="page-title">
@@ -203,14 +203,17 @@
     </section>
 
     <section id="view-history" class="view">
-      <div class="view-header">
-        <div>
+      <header class="page-head">
+        <div class="page-title">
           <h2>Вакансии</h2>
-          <p class="muted">Всё, что бот нашёл: куда откликнулся, что пропустил и почему, этап по каждой. У вакансии — «Действия»: найти HR, подготовка к интервью</p>
+          <p class="muted">Куда бот откликнулся, что пропустил и почему. Нажмите на строку — подробности справа</p>
         </div>
-      </div>
-      <div class="filters">
-        <select id="filter-source">
+        <span id="history-today" class="home-limit mono"></span>
+      </header>
+      <div class="jobs-filters">
+        <div class="chip-group" id="history-chips" role="group" aria-label="Статус" data-ui="jobs.filter.status jobs.filter.rejected"></div>
+        <div class="jobs-filter-row">
+          <select id="filter-source" aria-label="Площадка" data-ui="jobs.filter.source">
           <option value="">Все площадки</option>
           <option value="headhunter">HeadHunter</option>
           <option value="geekjob">geekjob.ru</option>
@@ -226,69 +229,108 @@
           <option value="hirify">Hirify</option>
           <option value="direct">Сайты компаний</option>
         </select>
-        <select id="filter-status">
-          <option value="">Любой статус</option>
-          <option value="applied">Отправлено</option>
-          <option value="dry_run">Тестовый прогон</option>
-          <option value="skipped_low_fit">Пропущено (слабое совпадение)</option>
-          <option value="skipped_requirements">Пропущено (не проходит требования)</option>
-          <option value="skipped_easy_apply_failed">Пропущено (форма Easy Apply)</option>
-        </select>
-        <label class="checkbox-row"><input id="filter-show-rejected" type="checkbox" class="switch" /> Показать также отклонённые</label>
-        <input id="filter-query" type="text" class="search-input" placeholder="Поиск по компании/названию" aria-label="Поиск по компании/названию" />
-        <button id="history-apply-filters" class="btn btn-secondary">Применить</button>
+          <input id="filter-query" type="search" class="search-input" placeholder="Компания или должность" aria-label="Поиск по компании и должности" data-ui="jobs.search" />
+          <select id="filter-status" hidden aria-hidden="true" tabindex="-1">
+            <option value="">Любой статус</option>
+            <option value="applied">Отправлено</option>
+            <option value="dry_run">Тестовый прогон</option>
+            <option value="skipped_low_fit">Пропущено (слабое совпадение)</option>
+            <option value="skipped_requirements">Пропущено (не проходит требования)</option>
+            <option value="skipped_easy_apply_failed">Пропущено (форма Easy Apply)</option>
+          </select>
+          <input id="filter-show-rejected" type="checkbox" hidden aria-hidden="true" tabindex="-1" />
+          <button id="history-apply-filters" class="btn" hidden type="button" data-ui="jobs.apply-filters">Применить</button>
+        </div>
       </div>
-      <div class="table-wrap" id="history-table-wrap">
-        <table>
-          <thead>
-            <tr><th>Дата</th><th>Площадка</th><th>Компания</th><th>Вакансия</th><th>Статус</th><th>Этап</th><th>Балл</th><th>Письмо</th></tr>
-          </thead>
-          <tbody id="history-rows"></tbody>
-        </table>
+      <div class="card table-card" id="history-table-wrap" data-ui="jobs.table jobs.region jobs.keys">
+        <div class="table-wrap">
+          <table class="jobs-table">
+            <thead>
+              <tr><th>Время</th><th>Компания и должность</th><th data-ui="jobs.salary">Зарплата</th><th>Статус</th><th class="num">Оценка</th></tr>
+            </thead>
+            <tbody id="history-rows"></tbody>
+          </table>
+        </div>
+        <div class="table-foot muted small"><span><kbd>j</kbd> <kbd>k</kbd> выбрать · <kbd>↵</kbd> почему так решил · <kbd>Esc</kbd> закрыть</span><span id="history-count"></span></div>
       </div>
     </section>
 
     <section id="view-replies" class="view">
-      <div class="view-header">
-        <div>
-          <h2>Входящие</h2>
-          <p class="muted">Что ответили работодатели — с площадок, в Telegram и на ваши письма. Отклики бот шлёт сам, а здесь то, где нужен человек: интервью, вопросы HR, черновики ответов.</p>
+      <header class="page-head">
+        <div class="page-title">
+          <h2>Общение</h2>
+          <p class="muted">Работодатели, письма и Telegram — в одном окне. Без вашего «Отправить» ничего не уходит</p>
         </div>
+        <div class="talk-parser" data-ui="talk.tg.status">
+          <span id="telegram-status-badge" class="badge off"><span class="badge-dot"></span>проверка…</span>
+          <span id="tg-quick-line-status" class="parser-state small muted">Парсер: …</span>
+        </div>
+        <button type="button" class="btn btn-ghost btn-small" id="parser-open-base" data-ui="talk.tg.contacts">Контакты из Telegram</button>
+        <button type="button" class="btn btn-small" data-goto-settings="settings-tg-quick" data-ui="talk.tg.rules" title="Каналы, ключевые слова, текст «Здравствуйте» и резюме для кнопок">Правила парсера</button>
+      </header>
+      <div class="results-numbers talk-numbers" id="parser-numbers"></div>
+
+      <div id="drafts-queue" class="card pad-card talk-queue" style="display:none" data-ui="talk.drafts talk.drafts.send-all"></div>
+      <div id="hh-reminders-queue" class="card pad-card talk-queue" style="display:none" data-ui="talk.hh-reminders">
+        <details class="talk-queue-details">
+          <summary><span class="dot warn"></span><b>Молчат дольше срока — напомнить о себе на HH</b> <span class="muted small" id="hh-reminders-count"></span></summary>
+          <p class="field-hint">Отклик не просмотрели дольше срока из Настройки → Отклики и переписка. Отправка только по кнопке — текст можно поправить.</p>
+          <div id="hh-reminders-list"></div>
+        </details>
       </div>
-      <div id="drafts-queue" class="panel" style="display:none"></div>
-      <div id="hh-reminders-queue" class="panel" style="display:none">
-        <h3>🔔 Молчат долго — напомнить о себе на HH</h3>
-        <p class="muted small">Отклик не просмотрели дольше настроенного срока (Настройки → Площадки → HH → ⚙ Настроить). Отправка только по кнопке — текст можно поправить перед отправкой.</p>
-        <div id="hh-reminders-list"></div>
+
+      <div class="talk-layout">
+        <aside class="card talk-list" aria-label="Разговоры">
+          <div class="talk-list-head">
+            <div class="chip-group" id="replies-kind" role="group" aria-label="Что показать" data-ui="talk.filter"></div>
+            <input id="replies-filter-query" type="search" class="search-input" placeholder="Компания, вакансия или контакт" aria-label="Поиск по разговорам" data-ui="talk.search" />
+          </div>
+          <div id="replies-rows" class="inbox-list" data-ui="talk.item talk.open-dialog"></div>
+          <div class="grp">Все диалоги в Telegram</div>
+          <div id="tg-conv-list" class="conv-list" data-ui="talk.tg.list">
+            <p class="muted small">Загрузка…</p>
+          </div>
+        </aside>
+
+        <section class="card talk-thread" aria-label="Разговор">
+          <div id="tg-chat-empty" class="talk-empty muted">Выберите разговор слева. Автоответа на входящие нет — отвечаете вы, здесь или в CrossJob-боте.</div>
+          <div id="talk-item-panel" class="talk-item-panel" hidden></div>
+          <div id="tg-chat-panel" style="display:none" data-ui="talk.tg.chat">
+            <div class="thread-head"><h3 id="tg-chat-contact" class="m0"></h3><span class="muted small">Telegram · с вашего личного аккаунта</span></div>
+            <div id="tg-chat-messages" class="chat-messages"></div>
+            <div class="chat-composer" data-ui="talk.tg.input talk.tg.attach">
+              <input id="tg-chat-input" type="text" placeholder="Написать сообщение…" aria-label="Текст сообщения" />
+              <button id="tg-chat-attach-resume" class="btn" type="button" title="Отправить резюме файлом">Резюме</button>
+              <button id="tg-chat-send" class="btn btn-primary" type="button">Отправить</button>
+            </div>
+            <span id="tg-chat-status" class="muted small"></span>
+          </div>
+        </section>
+
+        <aside class="card talk-context" id="talk-context" aria-label="Подробности" data-ui="talk.open-gmail talk.prep talk.stage talk.tg.delete">
+          <div id="talk-context-body" class="talk-context-body muted small">Здесь — вакансия, этап и действия по выбранному разговору.</div>
+          <button id="tg-chat-delete" class="btn btn-ghost btn-small" type="button" title="Удалить диалог из истории" hidden>Удалить диалог</button>
+        </aside>
       </div>
-      <div class="filters">
-        <div class="chip-group" id="replies-kind" role="group" aria-label="Что показать"></div>
-        <input id="replies-filter-query" type="text" class="search-input" placeholder="Поиск по компании или вакансии" aria-label="Поиск по компании или вакансии" />
-      </div>
-      <div id="replies-rows" class="inbox-list"></div>
     </section>
 
 
     <section id="view-contacts" class="view">
-      <div class="view-header">
-        <div>
-          <h2>База компаний</h2>
-          <p class="muted">Все компании и HR, которых вы собрали: из своего файла, Telegram-каналов, сайтов компаний и вакансий. Нажмите на строку — контакты и история.</p>
+      <header class="page-head">
+        <div class="page-title">
+          <h2>Компании</h2>
+          <p class="muted">Ваша база компаний и HR — из своего файла, Telegram-каналов, сайтов компаний и вакансий. Нажмите на строку — контакты и история справа</p>
         </div>
-        <div class="toolbar">
+        <div class="toolbar" data-ui="companies.import companies.export companies.ai-prompt">
           <input type="file" id="import-file" accept=".csv,.tsv,.xlsx,.md,.txt,.pdf,.docx" hidden />
-          <button type="button" id="import-btn" class="btn btn-secondary">📥 Загрузить файл</button>
-          <a class="btn btn-ghost" href="/api/contacts/export" download title="Файл .csv — открывается в Excel и Google Таблицах, можно поправить и загрузить обратно">⬇ Скачать в Excel</a>
+          <button type="button" id="import-btn" class="btn btn-primary">Загрузить файл</button>
+          <button type="button" id="ai-prompt-open" class="btn btn-ghost" title="Готовый промт для ИИ с поиском в интернете">Где взять список?</button>
+          <a class="btn" href="/api/contacts/export" download title="Файл .csv — открывается в Excel и Google Таблицах, можно поправить и загрузить обратно">Скачать в Excel</a>
         </div>
-      </div>
+      </header>
       <div id="import-preview"></div>
-      <details class="panel import-help" id="import-help">
-        <summary><strong>Где взять список компаний?</strong> <span class="muted small">— готовый промт для ИИ с поиском в интернете</span></summary>
-        <ol class="small plain-steps">
-          <li>Откройте ChatGPT в режиме <b>Deep Research</b> или Claude с <b>Research</b> — нужен поиск в интернете. Обычный чат без поиска придумывает адреса: такие письма вернутся и испортят репутацию вашей почты.</li>
-          <li>Вставьте промт ниже, поменяйте то, что в [скобках].</li>
-          <li>Попросите сохранить таблицу файлом Excel или CSV (или скопируйте её в Google Таблицы → «Скачать → CSV») и загрузите сюда кнопкой «📥 Загрузить файл». PDF с таблицей тоже подойдёт.</li>
-        </ol>
+      <details class="import-help" id="import-help" hidden>
+        <summary>Где взять список компаний?</summary>
         <textarea id="ai-prompt" rows="16" readonly aria-label="Промт для ИИ">Найди [30] IT-компаний, которые сейчас нанимают [Python-разработчиков] [в России / удалённо в Европе], и публичные адреса для откликов в них.
 
 Правила:
@@ -300,145 +342,82 @@
 Ответ — одна таблица без текста вокруг, столбцы по порядку:
 Компания | Сайт | Email | Имя | Должность | Вакансия | Ссылка | Источник
 «Должность» — должность человека из столбца «Имя»; «Ссылка» — ссылка на вакансию, если есть; «Источник» — страница, где опубликован email.</textarea>
-        <div class="step-actions">
-          <button type="button" class="btn btn-secondary btn-small" id="ai-prompt-copy">📋 Скопировать промт</button>
-          <span class="muted small">При загрузке бот проверит домены, отбросит ящики для жалоб, склеит дубли и покажет всё до сохранения.</span>
-        </div>
+        <button type="button" class="btn btn-small" id="ai-prompt-copy">Скопировать промт</button>
       </details>
 
-      <div class="chip-group" id="base-chips" role="group" aria-label="Статус"></div>
-      <div class="filters">
-        <input id="contacts-filter-query" type="text" class="search-input" placeholder="Поиск: компания, email, HR, вакансия" aria-label="Поиск" />
-        <select id="contacts-filter-source" aria-label="Источник">
+      <div class="jobs-filters">
+        <div class="chip-group" id="base-chips" role="group" aria-label="Статус" data-ui="companies.chips"></div>
+        <div class="jobs-filter-row">
+          <input id="contacts-filter-query" type="search" class="search-input" placeholder="Компания, email, HR, вакансия" aria-label="Поиск по Базе" data-ui="companies.search" />
+          <select id="contacts-filter-source" data-ui="companies.filter.source" aria-label="Источник">
           <option value="">Любой источник</option>
-          <option value="file">📄 Мой файл</option>
-          <option value="telegram">✈️ Telegram</option>
-          <option value="vacancy">💼 Вакансии</option>
-          <option value="sites">🏢 Сайты компаний</option>
-          <option value="talanto">🔎 Talanto</option>
-          <option value="hirify">🔎 Hirify</option>
-          <option value="dossier">🔎 Найдено кнопкой «Найти ещё контакты»</option>
+          <option value="file">Мой файл</option>
+          <option value="telegram">Telegram</option>
+          <option value="vacancy">Вакансии</option>
+          <option value="sites">Сайты компаний</option>
+          <option value="talanto">Talanto</option>
+          <option value="hirify">Hirify</option>
+          <option value="dossier">Найдено кнопкой «Найти ещё контакты»</option>
         </select>
-        <select id="contacts-filter-contact" aria-label="Контакт">
+          <select id="contacts-filter-contact" data-ui="companies.filter.contact" aria-label="Контакт">
           <option value="">Любой контакт</option>
-          <option value="email">✉️ Есть email</option>
+          <option value="email">Есть email</option>
           <option value="none">Нет контакта</option>
         </select>
+        </div>
       </div>
-      <div class="base-bulk" id="base-bulk" hidden></div>
-      <div class="table-wrap">
-        <table class="base-table" id="base-table">
-          <thead>
-            <tr>
-              <th class="base-check"><input type="checkbox" id="base-select-all" aria-label="Выбрать все" /></th>
-              <th data-sort="company">Компания</th>
-              <th>Контакт</th>
-              <th class="col-source">Откуда</th>
-              <th data-sort="status">Статус</th>
-              <th data-sort="last" class="col-last">Последнее действие</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="contacts-list"></tbody>
-        </table>
+      <div class="base-bulk" id="base-bulk" hidden data-ui="companies.bulk companies.select"></div>
+      <div class="card table-card" data-ui="companies.table companies.detail">
+        <div class="table-wrap">
+          <table class="base-table" id="base-table">
+            <thead>
+              <tr>
+                <th class="base-check"><input type="checkbox" id="base-select-all" aria-label="Выбрать все на странице" /></th>
+                <th data-sort="company">Компания и контакт</th>
+                <th class="col-source">Откуда</th>
+                <th data-sort="status">Статус</th>
+                <th data-sort="last" class="col-last">Последнее</th>
+              </tr>
+            </thead>
+            <tbody id="contacts-list"></tbody>
+          </table>
+        </div>
+        <div class="table-foot muted small"><nav class="base-pager" id="base-pager" aria-label="Страницы базы" data-ui="companies.pager"></nav><span data-ui="companies.note">База только пополняется — удаляете только вы. Копия Базы каждый день, хранится 7 дней.</span></div>
       </div>
-      <nav class="base-pager" id="base-pager" aria-label="Страницы базы"></nav>
-      <p class="muted small">База только пополняется — компании и контакты сами не удаляются, только вручную. Плюс раз в день бот сохраняет запасную копию всей Базы на случай ошибки (копии за последние 7 дней).</p>
     </section>
 
     <section id="view-outreach" class="view">
-      <div class="view-header">
-        <div>
+      <header class="page-head">
+        <div class="page-title">
           <h2>Рассылка</h2>
-          <p class="muted">Персональное письмо каждой компании из базы, которой вы ещё не писали — по вашему промту, с резюме во вложении, через Gmail.</p>
+          <p class="muted">Личное письмо каждой компании из Базы, которой вы ещё не писали — по вашему резюме, с резюме во вложении, через ваш Gmail</p>
         </div>
-      </div>
-      <ol class="steps">
-        <li class="panel step" id="step-base"></li>
-        <li class="panel step" id="step-letters"></li>
-        <li class="panel step" id="step-send"></li>
+      </header>
+      <ol class="steps mail-steps">
+        <li class="card pad-card step" id="step-base" data-ui="mail.step.base"></li>
+        <li class="card pad-card step" id="step-letters" data-ui="mail.step.letters mail.review"></li>
+        <li class="card pad-card step" id="step-send" data-ui="mail.step.send mail.auto-off mail.stopped mail.followups"></li>
       </ol>
-      <div class="panel" id="sent-log">
-        <h3 class="mt0">Отправленные</h3>
-        <div class="toolbar">
-          <input id="sent-search" type="search" placeholder="Компания, адрес или тема" aria-label="Поиск по отправленным" />
-          <select id="sent-status" aria-label="Статус">
-            <option value="">Все статусы</option>
-            <option value="sent">Отправлено</option>
-            <option value="replied">Ответили</option>
-            <option value="bounced">Возврат</option>
-            <option value="failed">Не ушло</option>
-          </select>
-        </div>
-        <div id="sent-list" class="muted small">Загрузка…</div>
+      <div class="analytics-grid two mail-bottom">
+        <section class="card pad-card" id="mail-guard" aria-labelledby="mail-guard-h" data-ui="mail.guard"></section>
+        <section class="card pad-card" id="sent-log" aria-labelledby="sent-h" data-ui="mail.sent">
+          <div class="card-head flat between"><h3 id="sent-h">Отправленные</h3></div>
+          <div class="jobs-filter-row">
+            <input id="sent-search" type="search" class="search-input" placeholder="Компания, адрес или тема" aria-label="Поиск по отправленным" />
+            <select id="sent-status" aria-label="Статус">
+              <option value="">Все статусы</option>
+              <option value="sent">Отправлено</option>
+              <option value="replied">Ответили</option>
+              <option value="bounced">Возврат</option>
+              <option value="failed">Не ушло</option>
+            </select>
+          </div>
+          <div id="sent-list" class="muted small">Загрузка…</div>
+        </section>
       </div>
     </section>
 
-    <section id="view-telegram" class="view">
-      <div class="view-header">
-        <div>
-          <h2>Telegram-парсер</h2>
-          <p class="muted">Слушает каналы с вакансиями в реальном времени: пост с вашими ключевыми словами за секунды приходит в бота с кнопками ответа, а контакты HR из поста сами попадают в «Базу компаний».</p>
-        </div>
-        <div class="toolbar">
-          <span id="telegram-status-badge" class="badge off"><span class="badge-dot"></span>проверка…</span>
-        </div>
-      </div>
 
-      <div class="panel tg-howto">
-        <h3 class="mt0">Как это работает</h3>
-        <div class="howto-grid">
-          <div><b>1. Читает каналы</b><p class="muted small">Через ваш личный аккаунт Telegram — как будто вы сами листаете каналы из списка. Если вы не подписаны на канал, парсер подпишется сам.</p></div>
-          <div><b>2. Присылает вакансию</b><p class="muted small">Пост с вашими ключевыми словами за секунды приходит в ваш <b>CrossJob-бот</b> с кнопками «Здравствуйте», «+ резюме», «Сопроводительное». Контакты HR из поста — сразу в «Базу компаний».</p></div>
-          <div><b>3. Пишет HR от вашего имени</b><p class="muted small">Когда вы нажимаете кнопку, сообщение уходит <b>с вашего личного аккаунта</b> — HR видит вас, а не бота и не канал. Без вашего нажатия никому ничего не отправляется.</p></div>
-        </div>
-      </div>
-
-      <ol class="steps">
-        <li class="panel step">
-          <div class="step-head"><span class="step-num">1</span><h3>Подключить аккаунт</h3></div>
-          <p class="muted small">Вход в ваш аккаунт Telegram — один раз, в <a href="#" data-goto-settings="settings-accounts">Настройки → Подключения</a>.</p>
-        </li>
-
-        <li class="panel step">
-          <div class="step-head"><span class="step-num">2</span><h3>Слушает и присылает вакансии</h3></div>
-          <div class="parser-head">
-            <span id="tg-quick-line-status" class="parser-state">Парсер: …</span>
-            <span class="step-actions m0">
-              <button type="button" class="btn btn-ghost btn-small" id="parser-open-base">Контакты из Telegram →</button>
-              <button type="button" class="btn btn-secondary btn-small" data-goto-settings="settings-tg-quick" title="Каналы, ключевые слова, текст «Здравствуйте» и резюме для кнопок — в одном месте">Настроить</button>
-            </span>
-          </div>
-          <div class="results-numbers" id="parser-numbers"></div>
-        </li>
-
-        <li class="panel step">
-          <div class="step-head"><span class="step-num">3</span><h3>Диалоги — отвечать нужно самому</h3></div>
-          <p class="muted small">Автоответа на входящие нет — только уведомление в CrossJob-бот и здесь.</p>
-          <div class="telegram-layout">
-            <div id="tg-conv-list" class="conv-list">
-              <p class="muted small">Загрузка…</p>
-            </div>
-            <div class="chat-thread">
-              <div id="tg-chat-empty" class="muted small">Выберите диалог слева.</div>
-              <div id="tg-chat-panel" style="display:none">
-                <div class="filters" style="justify-content:space-between;margin-bottom:8px">
-                  <h3 id="tg-chat-contact" class="m0"></h3>
-                  <button id="tg-chat-delete" class="btn btn-ghost btn-small" title="Удалить диалог из истории">🗑 Удалить диалог</button>
-                </div>
-                <div id="tg-chat-messages" class="chat-messages"></div>
-                <div class="chat-composer">
-                  <input id="tg-chat-input" type="text" placeholder="Написать сообщение…" aria-label="Текст сообщения" />
-                  <button id="tg-chat-attach-resume" class="btn btn-secondary" title="Отправить resume.pdf файлом">📎 Резюме</button>
-                  <button id="tg-chat-send" class="btn btn-primary">Отправить</button>
-                </div>
-                <span id="tg-chat-status" class="muted small"></span>
-              </div>
-            </div>
-          </div>
-        </li>
-      </ol>
-    </section>
 
     <section id="view-resume" class="view">
       <header class="page-head">
@@ -857,13 +836,14 @@
     </section>
 
     <section id="view-logs" class="view">
-      <div class="view-header">
-        <div>
-          <h2>Логи</h2>
-          <p class="muted">Последние строки исполнения</p>
+      <header class="page-head">
+        <div class="page-title">
+          <h2>Журнал бота</h2>
+          <p class="muted">Технические подробности для разбора ошибок — последние строки исполнения</p>
         </div>
-        <div class="toolbar">
-          <select id="log-source">
+      </header>
+      <div class="jobs-filter-row">
+        <select id="log-source" aria-label="Площадка" data-ui="jobs.log.source">
             <option value="">Все источники</option>
             <option value="headhunter">HeadHunter</option>
             <option value="geekjob">geekjob.ru</option>
@@ -877,13 +857,11 @@
             <option value="avito">Авито Работа</option>
             <option value="talanto">Talanto</option>
             <option value="hirify">Hirify</option>
-          <option value="hirify">Hirify</option>
           </select>
-          <input id="log-search" type="text" class="search-input" placeholder="Поиск по тексту…" aria-label="Поиск по тексту лога" />
-          <label class="checkbox-row"><input id="log-raw-toggle" type="checkbox" /> Без перевода (сырой лог)</label>
-        </div>
+        <input id="log-search" type="search" class="search-input" placeholder="Поиск по тексту…" aria-label="Поиск по тексту журнала" data-ui="jobs.log.search" />
+        <label class="check-chip" data-ui="jobs.log.raw"><input id="log-raw-toggle" type="checkbox" /> Без перевода (сырой журнал)</label>
       </div>
-      <pre id="log-output" class="logs"></pre>
+      <div class="card log-card"><pre id="log-output" class="logs" data-ui="jobs.log.output"></pre></div>
     </section>
   </main>
 </div>
@@ -976,6 +954,6 @@
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=69"></script>
+<script src="/app.js?v=72"></script>
 </body>
 </html>

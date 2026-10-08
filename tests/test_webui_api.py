@@ -1330,3 +1330,38 @@ def test_source_resume_clears_block_and_enables_source(client):
     )
     assert hh["schedule_enabled"] is True
     assert client.post("/api/sources/nope/resume").status_code == 404
+
+
+def test_inbox_lists_manual_stage_without_platform_state(client):
+    """Этап «интервью», поставленный руками для отклика без статуса
+    переговоров с площадки (LinkedIn), раньше ронял /api/inbox."""
+    import json
+    from datetime import datetime
+
+    ctx = api.get_ctx()
+    now = datetime.now().astimezone().isoformat()
+    ctx.applied_log.path.write_text(
+        json.dumps(
+            {
+                "applications": [
+                    {
+                        "source": "linkedin",
+                        "external_id": "1",
+                        "company": "Acme",
+                        "title": "Dev",
+                        "link": "https://x/1",
+                        "status": "applied",
+                        "applied_at": now,
+                        "stage": "interview",
+                        "stage_at": now,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    response = client.get("/api/inbox")
+    assert response.status_code == 200
+    item = response.json()[0]
+    assert item["stage"] == "interview"
+    assert item["text"] == ""

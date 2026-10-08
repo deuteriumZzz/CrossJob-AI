@@ -926,7 +926,9 @@ def get_inbox(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
             "company": e["company"],
             "title": e["title"],
             "link": e["link"],
-            "text": e["last_known_state"],
+            # Этап, поставленный вручную (LinkedIn и др.), бывает без
+            # статуса переговоров с площадки.
+            "text": e.get("last_known_state") or "",
             "at": e.get("state_at") or e.get("stage_at") or e["applied_at"],
             "unread": False,
             "contact": None,

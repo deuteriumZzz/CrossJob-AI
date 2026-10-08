@@ -274,7 +274,9 @@ function statusLabel(status) {
 function fmtTime(iso) {
   if (!iso) return "—";
   const d = new Date(iso);
-  return d.toLocaleString();
+  if (Number.isNaN(d.getTime())) return "—";
+  // Русский формат всегда, независимо от языка браузера/окна.
+  return d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: d.getFullYear() === new Date().getFullYear() ? undefined : "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 // «Уменьшить движение»: из системы или Настройки → Вид → «Анимации: выключить».
@@ -425,16 +427,15 @@ const NAV_GROUPS = {
   // (топ-навигация против "Настройки"), хотя отвечают на один и тот же
   // вопрос "что бот сейчас делает и сделал".
   history: [
-    ["history", "Вакансии"],
-    ["logs", "Технические детали"],
+    ["history", "Отклики"],
+    ["logs", "Журнал бота"],
   ],
-  replies: [
-    ["replies", "Входящие"],
-    ["telegram", "Telegram-парсер"],
-  ],
+  // Входящие и Telegram-диалоги — одно окно «Общение»; старый адрес
+  // #telegram ведёт туда же (см. switchTab).
+  replies: [["replies", "Общение"]],
   contacts: [
     ["contacts", "База"],
-    ["outreach", "Рассылки"],
+    ["outreach", "Рассылка"],
   ],
   analytics: [["analytics", "Аналитика"]],
   settings: [
@@ -469,6 +470,10 @@ function renderSubnav(group, view) {
 }
 
 function switchTab(name) {
+  if (name === "telegram") {
+    name = "replies";
+    repliesKind = "telegram";
+  }
   if (!VIEW_GROUP[name]) name = "overview";
   const prevName = currentView;
   currentView = name;
@@ -775,8 +780,8 @@ function skeletonRows(rows, cols) {
 }
 
 const CONTACT_KIND = {
-  telegram: { icon: "✈️", label: "Telegram" },
-  email: { icon: "✉️", label: "Email" },
+  telegram: { icon: "TG", label: "Telegram" },
+  email: { icon: "@", label: "Email" },
   linkedin: { icon: "in", label: "LinkedIn" },
 };
 // Один язык статусов для базы, рассылки и входящих: слово + цвет.
@@ -796,13 +801,13 @@ const CONTACT_STATUS_HINT = {
   skip: "Помечено вручную «не писать» — бот пропускает эту компанию в рассылке.",
 };
 const SOURCE_KIND = {
-  file: "📄 мой файл",
-  telegram: "✈️ Telegram",
-  sites: "🏢 сайты компаний",
-  talanto: "🔎 Talanto",
-  hirify: "🔎 Hirify",
-  dossier: "🔎 найден кнопкой",
-  vacancy: "💼 вакансия",
+  file: "мой файл",
+  telegram: "Telegram",
+  sites: "сайты компаний",
+  talanto: "Talanto",
+  hirify: "Hirify",
+  dossier: "найден кнопкой",
+  vacancy: "вакансия",
 };
 let lastContacts = [];
 let focusContactKey = null;
@@ -856,12 +861,12 @@ function renderContactsList() {
   );
 
   if (!lastContacts.length) {
-    el.innerHTML = `<tr><td colspan="7">${emptyStateHtml("База пока пуста. Загрузите свой список компаний кнопкой «📥 Загрузить файл» — или включите Telegram-парсер: он сам добавляет HR из постов.")}</td></tr>`;
-    // База пуста — это ровно момент, когда вопрос "где взять список
-    // компаний" актуален; разворачиваем сам, а не оставляем свёрнутой
-    // строкой среди прочих <details> на экране. Для уже заполненной
-    // базы (у кого этот промт уже не нужен) поведение не меняется.
-    document.getElementById("import-help").open = true;
+    // База пуста — ровно момент, когда нужен вопрос «где взять список»:
+    // обе кнопки прямо в пустом состоянии.
+    el.innerHTML = `<tr><td colspan="5"><div class="empty-state"><p>База пока пуста. Загрузите свой список компаний — Excel, CSV, PDF или Word — или включите Telegram-парсер: он сам добавляет HR из постов.</p>
+      <div class="fix-actions"><button type="button" class="btn btn-primary btn-small" data-empty-import>Загрузить файл</button><button type="button" class="btn btn-small" data-empty-prompt>Где взять список?</button></div></div></td></tr>`;
+    el.querySelector("[data-empty-import]").addEventListener("click", () => document.getElementById("import-file").click());
+    el.querySelector("[data-empty-prompt]").addEventListener("click", openPromptDrawer);
     renderBaseBulk();
     return;
   }
@@ -893,7 +898,7 @@ function renderContactsList() {
   baseState.page = Math.min(baseState.page, pages - 1);
   renderBasePager(filtered.length, pages);
   if (!filtered.length) {
-    el.innerHTML = `<tr><td colspan="7">${emptyStateHtml("Ничего не найдено.")}</td></tr>`;
+    el.innerHTML = `<tr><td colspan="5">${emptyStateHtml("Ничего не найдено.")}</td></tr>`;
     renderBaseBulk();
     return;
   }
@@ -906,51 +911,40 @@ function renderContactsList() {
     });
   }
   baseSeen = new Map(lastContacts.map((c) => [c.key, c.updated_at]));
-  el.innerHTML =
-    rows
-      .map((card) => {
-        const p = card.primary;
-        const more = card.contacts.length - 1;
-        const open = baseState.open.has(card.key) || card.key === focusContactKey;
-        return `
-      <tr class="base-row${fresh.has(card.key) ? " row-fresh" : ""}${open ? " is-open" : ""}${card.key === focusContactKey ? " is-focused" : ""}" data-card-key="${escapeHtml(card.key)}" tabindex="0" aria-expanded="${open}">
+  el.innerHTML = rows
+    .map((card) => {
+      const p = card.primary;
+      const more = card.contacts.length - 1;
+      return `
+      <tr class="base-row${fresh.has(card.key) ? " row-fresh" : ""}${card.key === focusContactKey ? " is-focused" : ""}" data-card-key="${escapeHtml(card.key)}" tabindex="0">
         <td class="base-check"><input type="checkbox" data-select="${escapeHtml(card.key)}" aria-label="Выбрать" ${baseState.selected.has(card.key) ? "checked" : ""} /></td>
-        <td><strong>${escapeHtml(card.company || p?.value || "Без названия")}</strong>
-          ${card.website ? `<div class="muted small">${escapeHtml(card.website.replace(/^https?:\/\//, "").replace(/\/$/, ""))}</div>` : ""}</td>
-        <td>${p ? `${CONTACT_KIND[p.kind]?.icon || "•"} ${escapeHtml(p.kind === "telegram" ? "@" + p.value : p.value)}` : "—"}${more > 0 ? ` <span class="muted small">+${more}</span>` : ""}
-          ${card.hr ? `<div class="muted small">${escapeHtml(card.hr)}</div>` : ""}</td>
-        <td class="small col-source">${card.source_kinds.map((k) => SOURCE_KIND[k]).join("<br>")}</td>
+        <td><div class="row-main"><span class="row-title">${escapeHtml(card.company || p?.value || "Без названия")}</span>
+          <span class="row-sub">${p ? `${escapeHtml(p.kind === "telegram" ? "@" + p.value : p.value)}${more > 0 ? ` · +${more}` : ""}` : "контакта нет"}${card.hr ? ` · ${escapeHtml(card.hr)}` : ""}</span></div></td>
+        <td class="small col-source muted">${card.source_kinds.map((k) => SOURCE_KIND[k]).join(", ")}</td>
         <td>${statusPill(card.status)}</td>
         <td class="small col-last">${card.last ? `${escapeHtml(truncate(card.last.text, 60))}<div class="muted">${fmtDay(card.last.at)}</div>` : "—"}</td>
-        <td class="base-toggle" aria-hidden="true">${open ? "▾" : "▸"}</td>
-      </tr>
-      ${open ? `<tr class="base-detail"><td colspan="7">${baseDetailHtml(card)}</td></tr>` : ""}`;
-      })
-      .join("");
-  if (focusContactKey) {
-    el.querySelector(".base-row.is-focused")?.scrollIntoView({ block: "center", behavior: REDUCE_MOTION ? "auto" : "smooth" });
-    baseState.open.add(focusContactKey);
-    focusContactKey = null;
-  }
-  const toggleRow = (row) => {
-    const k = row.dataset.cardKey;
-    baseState.open.has(k) ? baseState.open.delete(k) : baseState.open.add(k);
-    renderContactsList();
-    el.querySelector(`.base-row[data-card-key="${CSS.escape(k)}"]`)?.focus();
-  };
+      </tr>`;
+    })
+    .join("");
+  const openKey = focusContactKey;
+  focusContactKey = null;
   el.querySelectorAll(".base-row").forEach((row) => {
     row.addEventListener("click", (e) => {
       if (e.target.closest("input, a, button")) return;
-      toggleRow(row);
+      openCompanyDrawer(row.dataset.cardKey);
     });
-    // С клавиатуры: Tab до строки, Enter/пробел — раскрыть.
+    // С клавиатуры: Tab до строки, Enter/пробел — открыть карточку.
     row.addEventListener("keydown", (e) => {
       if ((e.key === "Enter" || e.key === " ") && e.target === row) {
         e.preventDefault();
-        toggleRow(row);
+        openCompanyDrawer(row.dataset.cardKey);
       }
     });
   });
+  if (openKey) {
+    el.querySelector(".base-row.is-focused")?.scrollIntoView({ block: "center", behavior: REDUCE_MOTION ? "auto" : "smooth" });
+    openCompanyDrawer(openKey);
+  }
   el.querySelectorAll("[data-select]").forEach((box) =>
     box.addEventListener("change", () => {
       box.checked ? baseState.selected.add(box.dataset.select) : baseState.selected.delete(box.dataset.select);
@@ -964,8 +958,50 @@ function renderContactsList() {
     renderContactsList();
   };
   baseState.pageKeys = rows.map((c) => c.key);
-  bindBaseDetail(el);
   renderBaseBulk();
+}
+
+// Карточка компании — шторка справа: контакты, вакансии, история и
+// действия, вместо строки, раскрывающейся посреди таблицы.
+function openCompanyDrawer(key) {
+  const card = lastContacts.find((c) => c.key === key);
+  if (!card) return;
+  const skipped = card.status === "skip";
+  const written = card.status === "written" || card.status === "replied";
+  const body = openSideDrawer({
+    title: `<span>${escapeHtml(card.company || card.primary?.value || "Без названия")}</span>`,
+    sub: `${statusPill(card.status)}<span>${escapeHtml(card.source_kinds.map((k) => SOURCE_KIND[k]).join(", "))}</span>`,
+    body: `${written ? `<div class="fix is-warn"><span class="dot warn"></span><div class="fix-body">Этой компании уже писали${card.last ? " " + fmtDay(card.last.at) : ""}. Второй раз бот не напишет, даже на другой адрес.</div></div>` : ""}
+      ${card.website ? `<div class="field-hint"><a href="${escapeHtml(/^https?:/.test(card.website) ? card.website : "https://" + card.website)}" target="_blank" rel="noopener">${escapeHtml(card.website.replace(/^https?:\/\//, ""))} ↗</a></div>` : ""}
+      ${baseDetailHtml(card)}`,
+    foot: `${skipped || written ? "" : `<button type="button" class="btn btn-primary" data-company-action="write" data-ui="companies.detail.contacts">Написать письмо</button>`}
+      <button type="button" class="btn btn-ghost" data-company-action="${skipped ? "unskip" : "skip"}" data-ui="companies.detail.skip">${skipped ? "Снова можно писать" : "Не писать"}</button>`,
+  });
+  openDrawerSource = null;
+  bindBaseDetail(body);
+  document.getElementById("platform-drawer-foot").querySelectorAll("[data-company-action]").forEach((btn) =>
+    btn.addEventListener("click", async () => {
+      const action = btn.dataset.companyAction;
+      try {
+        if (action === "write") {
+          await api("/api/campaigns", { method: "POST", body: JSON.stringify({ keys: [card.key] }) });
+          showToast("Письмо для компании готовится — появится в рассылке", "success");
+          closePlatformDrawer();
+          switchTab("outreach");
+          return;
+        }
+        await api("/api/contacts/bulk", { method: "POST", body: JSON.stringify({ keys: [card.key], action }) });
+        showSavedToast(action === "skip" ? `${card.company || "Компания"}: больше не пишем` : `${card.company || "Компания"}: снова можно писать`, async () => {
+          await api("/api/contacts/bulk", { method: "POST", body: JSON.stringify({ keys: [card.key], action: action === "skip" ? "unskip" : "skip" }) });
+          render.contacts();
+        });
+        closePlatformDrawer();
+        render.contacts();
+      } catch (err) {
+        showToast(err.message.replace(/^\d+: /, ""), "error");
+      }
+    })
+  );
 }
 
 function baseDetailHtml(card) {
@@ -981,19 +1017,19 @@ function baseDetailHtml(card) {
                 <div class="muted small">${escapeHtml(c.source || "")}</div></span>
               <span>${statusPill(c.status)}
                 ${(c.kind === "telegram" || c.kind === "email") && c.status === "new" && card.status !== "skip"
-                  ? `<button type="button" class="btn btn-secondary btn-small" data-contact-draft data-key="${escapeHtml(card.key)}" data-kind="${c.kind}" data-value="${escapeHtml(c.value)}">✍️ Написать</button>`
+                  ? `<button type="button" class="btn btn-small" data-contact-draft data-key="${escapeHtml(card.key)}" data-kind="${c.kind}" data-value="${escapeHtml(c.value)}">Написать</button>`
                   : ""}</span>
             </div>`
           )
           .join("")}
         ${card.emphasis ? `<p class="small"><b>На что сделать упор:</b> ${escapeHtml(card.emphasis)}</p>` : ""}
-        <p class="small">${card.resume_hint ? `📎 <b>Резюме для письма:</b> ${escapeHtml(card.resume_hint)}` : `⚠️ <b>Резюме для письма:</b> не найдено — проверьте Настройки → Почта и письма → маршруты резюме`}</p>
-        ${card.vacancies.length ? `<h4>Вакансии</h4>${card.vacancies.slice(-3).map((v) => `<div class="small">${sourceIconHtml(v.source)}<a href="${escapeHtml(v.link)}" target="_blank" rel="noopener">${escapeHtml(v.title || v.link)}</a></div>`).join("")}` : ""}
+        <p class="small" data-ui="companies.detail.resume">${card.resume_hint ? `<b>Резюме для письма:</b> ${escapeHtml(card.resume_hint)}` : `<span class="warn-text"><b>Резюме для письма:</b> не найдено — проверьте «Мои резюме» → «Какое резюме куда уходит»</span>`}</p>
+        ${card.vacancies.length ? `<h4 data-ui="companies.detail.vacancies">Вакансии компании</h4>${card.vacancies.slice(-3).map((v) => `<div class="small">${sourceIconHtml(v.source)}<a href="${escapeHtml(v.link)}" target="_blank" rel="noopener">${escapeHtml(v.title || v.link)}</a></div>`).join("")}` : ""}
         ${card.company ? `<div class="step-actions">${card.website ? "" : `<input type="text" class="dossier-site" placeholder="сайт компании" aria-label="Сайт компании" />`}
-          <button type="button" class="btn btn-ghost btn-small" data-dossier data-key="${escapeHtml(card.key)}" title="Найти контакты на сайте компании и через Hunter">🔎 Найти ещё контакты</button></div>` : ""}
+          <button type="button" class="btn btn-small" data-dossier data-key="${escapeHtml(card.key)}" title="Найти контакты на сайте компании и через Hunter" data-ui="companies.detail.dossier">Найти ещё контакты</button></div>` : ""}
       </div>
       <div>
-        <h4>История</h4>
+        <h4 data-ui="companies.detail.history">История</h4>
         <ol class="base-history">${card.history
           .slice()
           .reverse()
@@ -1020,7 +1056,7 @@ function bindBaseDetail(el) {
       } catch (err) {
         showToast(err.message.replace(/^\d+: /, ""), "error", 6000);
         btn.disabled = false;
-        btn.textContent = "🔎 Найти ещё контакты";
+        btn.textContent = "Найти ещё контакты";
       }
     });
   });
@@ -1033,7 +1069,7 @@ function bindBaseDetail(el) {
           method: "POST",
           body: JSON.stringify({ key: btn.dataset.key, kind: btn.dataset.kind, value: btn.dataset.value }),
         });
-        showToast("Черновик готов — проверьте и отправьте в «Общение → Входящие».", "success", 6000);
+        showToast("Черновик готов — проверьте и отправьте в «Общении».", "success", 6000);
         render.contacts();
       } catch (err) {
         showToast(err.message.replace(/^\d+: /, ""), "error");
@@ -1102,15 +1138,20 @@ function renderBaseBulk() {
   const pageAll = (baseState.pageKeys || []).length && baseState.pageKeys.every((k) => baseState.selected.has(k));
   const moreByFilter = pageAll && baseFiltered.length > keys.length;
   bar.innerHTML = `
-    <span>Выбрано: <b>${keys.length.toLocaleString("ru-RU")}</b>${
-      moreByFilter ? ` · <button type="button" class="link-btn" data-bulk="all">Выбрать все ${baseFiltered.length.toLocaleString("ru-RU")} по фильтру</button>` : ""
-    }</span>
-    <button type="button" class="btn btn-primary btn-small" data-bulk="write">✉️ Написать выбранным</button>
-    <button type="button" class="btn btn-secondary btn-small" data-bulk="${skipped ? "unskip" : "skip"}">${skipped ? "Снова можно писать" : "🚫 Не писать"}</button>
-    <button type="button" class="btn btn-ghost btn-small" data-bulk="mark_written" title="Вы уже писали этим компаниям сами — рассылка их пропустит">Писал сам</button>
-    <button type="button" class="btn btn-ghost btn-small" data-bulk="unmark_written" title="Снять ручную отметку «писал сам»">Не писал</button>
-    <button type="button" class="btn btn-ghost btn-small" data-bulk="delete">🗑 Удалить</button>
-    <button type="button" class="btn btn-ghost btn-small" data-bulk="clear">Снять выбор</button>`;
+    <span class="bulk-count">Выбрано <b class="mono">${keys.length.toLocaleString("ru-RU")}</b></span>
+    <button type="button" class="btn btn-primary btn-small" data-bulk="write">Написать письма</button>
+    <button type="button" class="btn btn-small" data-bulk="mark_written" title="Вы уже писали этим компаниям сами — рассылка их пропустит">Писал сам</button>
+    <button type="button" class="btn btn-small" data-bulk="${skipped ? "unskip" : "skip"}">${skipped ? "Снова можно писать" : "Не писать"}</button>
+    <button type="button" class="btn btn-ghost btn-small" data-bulk="clear">Снять выбор</button>
+    <details class="bulk-more">
+      <summary class="btn btn-ghost btn-small">Ещё</summary>
+      <div class="bulk-menu">
+        ${moreByFilter ? `<button type="button" data-bulk="all">Выбрать все ${baseFiltered.length.toLocaleString("ru-RU")} по фильтру</button>` : ""}
+        <button type="button" data-bulk="unmark_written" title="Снять ручную отметку «писал сам»">Не писал</button>
+        ${skipped ? "" : `<button type="button" data-bulk="unskip">Снова можно писать</button>`}
+        <button type="button" data-bulk="delete" class="danger">Удалить из Базы</button>
+      </div>
+    </details>`;
   bar.querySelectorAll("[data-bulk]").forEach((b) =>
     b.addEventListener("click", async () => {
       const action = b.dataset.bulk;
@@ -2514,17 +2555,17 @@ async function loadTelegramWatch() {
   if (line) {
     const state = w.running ? "on" : w.enabled ? "wait" : "off";
     line.className = `parser-state is-${state}`;
-    line.textContent = {
-      on: "● Парсер работает",
-      wait: w.daemon_running ? "● Парсер подключается…" : "● Парсер включён — заработает после «▶ Запустить»",
-      off: "● Парсер выключен — включите в «Настроить»",
-    }[state];
+    line.innerHTML = `<span class="dot ${state === "on" ? "ok" : state === "wait" ? "never_run" : "idle"}"></span>${escapeHtml({
+      on: `Telegram-парсер слушает ${w.channels} ${plural(w.channels, "канал", "канала", "каналов")}`,
+      wait: w.daemon_running ? "Telegram-парсер подключается…" : "Telegram-парсер заработает после «Запустить»",
+      off: "Telegram-парсер выключен — включается в «Правилах парсера»",
+    }[state])}`;
     document.getElementById("parser-numbers").innerHTML = [
       [w.channels, w.running ? "каналов слушаю" : "каналов в списке"],
       [w.matched, "вакансий найдено с запуска"],
       [w.contacts_collected, "контактов HR в базе"],
     ]
-      .map(([n, t]) => `<div><span class="results-big">${n}</span><span class="muted">${t}</span></div>`)
+      .map(([n, t]) => `<span><b class="mono">${n}</b> ${t}</span>`)
       .join("");
   }
   const pane = document.getElementById("settings-tg-quick");
@@ -2537,7 +2578,7 @@ async function loadTelegramWatch() {
     : w.enabled
       ? w.daemon_running
         ? "Подключаюсь к Telegram…"
-        : "Включено — заработает, когда нажмёте «Запустить» слева"
+        : "Включено — заработает, когда нажмёте «Запустить бота»"
       : "Выключено";
   const keywords = document.getElementById("tgq-keywords");
   keywords.value = w.keywords.join("\n");
@@ -2993,7 +3034,7 @@ async function loadCampaigns() {
   // ① База
   const base = document.getElementById("step-base");
   base.innerHTML = `
-    ${stepHead(1, "База", data.available || cur ? "done" : "active")}
+    ${stepHead(1, "Кому писать", data.available || cur ? "done" : "active")}
     ${
       data.available
         ? `<p>Можно написать <b>${data.available}</b> ${plural(data.available, "компании", "компаниям", "компаниям")} с email, которым вы ещё не писали:</p>
@@ -3001,7 +3042,7 @@ async function loadCampaigns() {
         : `<p class="muted">${cur ? "Все новые адреса уже в текущей рассылке." : "Пока некому писать — загрузите свой список или подождите, пока бот соберёт контакты из Telegram и вакансий."}</p>`
     }
     <div class="step-actions">
-      <button type="button" class="btn btn-ghost btn-small" data-base-open>Открыть базу и загрузить свой файл →</button>
+      <button type="button" class="btn btn-small" data-base-open>Выбрать в Базе</button>
     </div>`;
   base.querySelector("[data-base-open]").addEventListener("click", () => switchTab("contacts"));
 
@@ -3017,18 +3058,18 @@ async function loadCampaigns() {
     const days = Math.ceil((cur.stats.pending + drafts.length) / Math.max(1, data.daily_limit));
     body = batch
       ? `<p>В очереди: <b>${cur.stats.pending}</b>. Письма пишутся порциями по дневному лимиту (${data.daily_limit}), следующие — сами на следующий день, придут в бот.</p>
-         <button type="button" class="btn btn-primary" data-campaign="${cur.id}" data-action="prepare">✍️ Написать ${batch} ${plural(batch, "письмо", "письма", "писем")}</button>`
+         <button type="button" class="btn btn-primary" data-campaign="${cur.id}" data-action="prepare">Написать ${batch} ${plural(batch, "письмо", "письма", "писем")}</button>`
       : `<p class="muted">Ещё в очереди: <b>${cur.stats.pending}</b> — следующая порция будет готова завтра, когда эти письма уйдут${days > 1 ? ` (≈ ${days} ${plural(days, "день", "дня", "дней")} на всю рассылку)` : ""}.</p>`;
   } else if (!cur && data.available) {
     const days = data.days_needed;
     body = `<p class="muted small">Для каждой компании — своё письмо: обращение по имени, почему именно она, 2–3 ваших достижения под её профиль, 150–180 слов, тема «[Должность] Application — Имя Фамилия».</p>
-      ${days > 1 ? `<p class="muted small">Сейчас можно ${data.daily_limit} писем в день${data.mail_plan.warmup && data.daily_limit < data.mail_plan.daily_limit ? ` (разогрев ящика — дальше больше, до ${data.mail_plan.daily_limit})` : ""}: вся база — ≈ ${days} ${plural(days, "день", "дня", "дней")} отправки. Письма пишутся порциями, каждый день новая порция приходит в бот. Быстрее — выберите нужные компании в Базе фильтрами и «✉️ Написать выбранным».</p>` : ""}
+      ${days > 1 ? `<p class="muted small">Сейчас можно ${data.daily_limit} писем в день${data.mail_plan.warmup && data.daily_limit < data.mail_plan.daily_limit ? ` (разогрев ящика — дальше больше, до ${data.mail_plan.daily_limit})` : ""}: вся база — ≈ ${days} ${plural(days, "день", "дня", "дней")} отправки. Письма пишутся порциями, каждый день новая порция приходит в бот. Быстрее — выберите нужные компании в Базе фильтрами и «Написать письма».</p>` : ""}
       <div class="step-actions">
         ${sources.length > 1 ? `<select id="campaign-source" aria-label="Кому писать">
           <option value="">всем (${data.available})</option>
           ${sources.map(([s, n]) => `<option value="${escapeHtml(s)}">${escapeHtml(s)} (${n})</option>`).join("")}
         </select>` : ""}
-        <button type="button" class="btn btn-primary" id="campaign-create">✍️ Подготовить письма</button>
+        <button type="button" class="btn btn-primary" id="campaign-create">Подготовить письма</button>
       </div>`;
   } else {
     body = drafts.length ? "" : `<p class="muted">Появится, когда в базе будут адреса.</p>`;
@@ -3057,9 +3098,9 @@ async function loadCampaigns() {
     sendBody = progressHtml(cur.progress.kind === "send" ? "Отправляю" : "Отправляю напоминания", cur.progress, cur.id);
   } else if (drafts.length && cur.sending) {
     // Отправка включена, но сейчас ждёт: вечер/выходные, лимит, возвраты.
-    sendBody = `<p>⏸ Отправка идёт по расписанию — ждут ещё <b>${drafts.length}</b>. ${escapeHtml(data.mail_plan.reason || "Следующее письмо — в течение 15 минут.")}</p>
+    sendBody = `<p>Отправка идёт по расписанию — ждут ещё <b>${drafts.length}</b>. ${escapeHtml(data.mail_plan.reason || "Следующее письмо — в течение 15 минут.")}</p>
       <div class="step-actions"><button type="button" class="btn btn-ghost btn-small" data-campaign="${cur.id}" data-action="stop">Остановить рассылку</button></div>
-      <p class="small">🛡 ${escapeHtml(mailPlanText(data.mail_plan))} · <a href="#" data-goto-settings="settings-outreach">настроить</a></p>`;
+      <p class="field-hint">${escapeHtml(mailPlanText(data.mail_plan))}</p>`;
   } else if (drafts.length) {
     sendBody = `<div class="step-actions">
         <label class="muted small">Резюме во вложении
@@ -3068,10 +3109,10 @@ async function loadCampaigns() {
             ${resumes.map((r) => `<option value="${escapeHtml(r.name)}">${escapeHtml(r.name)}</option>`).join("")}
           </select>
         </label>
-        <button type="button" class="btn btn-primary" data-campaign="${cur.id}" data-action="send">🚀 Начать отправку (${drafts.length})</button>
+        <button type="button" class="btn btn-primary" data-campaign="${cur.id}" data-action="send">Начать отправку (${drafts.length})</button>
       </div>
       <p class="muted small">Бот отправляет по одному, со случайными паузами в течение рабочего дня — как человек. Что не уйдёт сегодня, продолжит сам в следующее время отправки. Можно закрыть окно.</p>
-      <p class="small">🛡 ${escapeHtml(mailPlanText(data.mail_plan))} · <a href="#" data-goto-settings="settings-outreach">настроить</a></p>`;
+      <p class="field-hint">${escapeHtml(mailPlanText(data.mail_plan))}</p>`;
   } else {
     sendBody = `<p class="muted">Когда письма будут готовы — здесь одна кнопка отправки.</p>`;
   }
@@ -3089,7 +3130,7 @@ async function loadCampaigns() {
         const due = c.items.filter((i) => i.follow_up_text);
         if (!due.length) return "";
         return `<div class="followups">
-          <p><b>⏳ Молчат больше недели: ${due.length}</b> — короткое напоминание уйдёт в ту же ветку письма, без вложения.</p>
+          <p><b>Молчат больше недели: ${due.length}</b> — короткое напоминание уйдёт в ту же ветку письма, без вложения.</p>
           <div class="letters">${due
             .map(
               (i) => `<details class="letter">
@@ -3099,7 +3140,7 @@ async function loadCampaigns() {
               </details>`
             )
             .join("")}</div>
-          ${c.progress ? "" : `<div class="step-actions"><button type="button" class="btn btn-primary btn-small" data-campaign="${c.id}" data-action="followups">⏳ Отправить напоминания (${due.length})</button></div>`}
+          ${c.progress ? "" : `<div class="step-actions"><button type="button" class="btn btn-primary btn-small" data-campaign="${c.id}" data-action="followups">Отправить напоминания (${due.length})</button></div>`}
         </div>`;
       })()}
       ${(() => {
@@ -3116,6 +3157,7 @@ async function loadCampaigns() {
     stepHead(3, "Отправка и результат", drafts.length && data.email_connected ? "active" : all.some((c) => c.stats.sent) ? "done" : "locked") +
     sendBody +
     (all.length ? `<h4 class="muted small">Рассылки</h4>${all.map(statsFor).join("")}` : "");
+  renderMailGuard(data.mail_plan);
 
   const view = document.getElementById("view-outreach");
   bindGotoSettings(view);
@@ -3174,6 +3216,24 @@ async function loadCampaigns() {
   if (data.campaigns.some((c) => c.progress) && currentView === "outreach") {
     campaignPoll = setTimeout(loadCampaigns, 4000);
   }
+}
+
+// «Защита почты»: сколько ушло сегодня из лимита, возвраты, разогрев,
+// часы отправки и почему сейчас пауза.
+function renderMailGuard(p) {
+  const el = document.getElementById("mail-guard");
+  if (!el || !p) return;
+  const pct = p.limit ? Math.round((100 * p.sent_today) / p.limit) : 0;
+  el.innerHTML = `<div class="card-head flat between"><h3 id="mail-guard-h">Защита почты</h3><button type="button" class="link-btn small" data-goto-settings="settings-outreach">настроить</button></div>
+    <div class="guard-row"><span>Сегодня</span><span class="mono">${p.sent_today} / ${p.limit}</span></div>
+    <div class="progress"><div style="width:${Math.min(100, pct)}%"></div></div>
+    <div class="kv-list flat">
+      <div class="kv"><span>Возвратов за сутки</span><span class="mono ${p.bounce_stopped ? "err-text" : ""}">${p.recent_bounces} · стоп после ${p.bounce_stop}</span></div>
+      ${p.warmup ? `<div class="kv"><span>Разогрев ящика</span><span>день ${p.warmup_day}${p.limit < p.daily_limit ? `, до ${p.daily_limit} — постепенно` : ""}</span></div>` : ""}
+      <div class="kv"><span>Когда отправляю</span><span>${p.weekdays_only ? "по будням" : "каждый день"}, ${p.send_from}:00–${p.send_to}:00</span></div>
+      <div class="kv"><span>Сейчас</span><span>${p.can_send ? "можно отправлять" : escapeHtml(p.reason || "пауза")}</span></div>
+    </div>`;
+  bindGotoSettings(el);
 }
 
 function progressHtml(label, progress, id) {
@@ -3499,151 +3559,52 @@ const render = {
 
   async history() {
     const source = document.getElementById("filter-source").value;
-    const status = document.getElementById("filter-status").value;
     const q = document.getElementById("filter-query").value;
     const params = new URLSearchParams();
     if (source) params.set("source", source);
-    if (status) params.set("status", status);
     if (q) params.set("q", q);
 
     const tbody = document.getElementById("history-rows");
-    if (!historyLoaded) tbody.innerHTML = skeletonRows(6, 7);
+    if (!historyLoaded) tbody.innerHTML = skeletonRows(6, 5);
 
-    // Отказы по умолчанию скрыты — на виду живые отклики.
-    const showRejected = document.getElementById("filter-show-rejected").checked;
-    const entries = (await api(`/api/applications?${params}`)).filter(
-      (e) => showRejected || e.effective_stage !== "rejected"
-    );
+    const all = await api(`/api/applications?${params}`);
     historyLoaded = true;
+    if (!jobThresholds) {
+      api("/api/settings/limits")
+        .then((l) => (jobThresholds = { min: l.job_min_score, fit: l.job_suitability_score }))
+        .catch(() => {});
+    }
 
-    // ponytail: тот же фикс мерцания, что и на "Обзоре" — без этого
-    // таблица (и её fade-in анимация строк через observeReveal)
-    // пересобиралась с нуля на каждом опросе раз в 7с, даже если ни
-    // одной новой строки не появилось.
-    const historySnapshot = JSON.stringify({ params: params.toString(), entries });
+    const historySnapshot = JSON.stringify({ params: params.toString(), chip: historyChip, all });
     if (historySnapshot === lastHistorySnapshot) return;
     lastHistorySnapshot = historySnapshot;
 
+    renderHistoryChips(all);
+    const entries = all.filter(HISTORY_CHIPS[historyChip].test);
     lastHistoryEntries = entries;
+    const today = all.filter((e) => e.status === "applied" && (e.applied_at || "").slice(0, 10) === new Date().toISOString().slice(0, 10)).length;
+    document.getElementById("history-today").textContent = `сегодня ${today} ${plural(today, "отклик", "отклика", "откликов")}`;
+    document.getElementById("history-count").textContent = `показано ${entries.length}`;
     if (!entries.length) {
-      tbody.innerHTML = `<tr><td colspan="8">${emptyStateHtml("Ничего не найдено.")}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5">${emptyStateHtml("Ничего не нашлось. Сбросьте фильтр или поищите по другому слову.")}</td></tr>`;
       updateHistoryScrollHint();
       return;
     }
-    const reversed = entries.slice().reverse();
-    tbody.innerHTML = reversed
-      .map(
-        (e, i) => `
-      <tr class="reveal" style="transition-delay:${staggerDelay(i, 25)}">
-        <td>${fmtTime(e.applied_at)}</td>
-        <td>${sourceIconHtml(e.source)}${sourceLabel(e.source)}</td>
-        <td>${escapeHtml(e.company)}</td>
-        <td><a href="${escapeHtml(e.link)}" target="_blank" rel="noopener">${escapeHtml(e.title)}</a>${rowActionsHtml(e, i)}</td>
-        <td>${statusLabel(e.status)}${e.remote_region ? `<div class="muted small">${REGION_LABELS[e.remote_region] || ""}</div>` : ""}</td>
-        <td>${e.status === "applied" ? stageSelectHtml(e) : `<span class="muted small">—</span>`}</td>
-        <td title="${e.gaps && e.gaps.length ? escapeHtml(e.gaps.join("; ")) : ""}">
-          <span class="mono-cell">${e.score ?? ""}</span>
-          ${
-            e.gaps && e.gaps.length
-              ? `<div class="readiness-note">${escapeHtml(truncate(e.gaps[0], 70))}${e.gaps.length > 1 ? ` (+${e.gaps.length - 1})` : ""}</div>`
-              : ""
-          }
-        </td>
-        <td>
-          ${
-            e.cover_letter
-              ? `<button type="button" class="btn btn-secondary btn-small" data-cover-letter-btn data-row-index="${i}">📄 Читать письмо</button>`
-              : `<span class="muted small">—</span>`
-          }
-
-        </td>
-      </tr>`
-      )
+    historyRows = entries.slice().sort((a, b) => (b.applied_at || "").localeCompare(a.applied_at || ""));
+    tbody.innerHTML = historyRows
+      .map((e, i) => {
+        const stage = e.effective_stage ? STAGE_LABELS[e.effective_stage] : "";
+        const tone = e.status === "applied" ? (e.effective_stage === "rejected" ? "bad" : e.effective_stage ? "good" : "") : e.status === "dry_run" ? "" : "muted";
+        return `<tr class="job-row reveal" tabindex="0" data-row-index="${i}" style="transition-delay:${staggerDelay(i, 25)}">
+          <td class="mono small muted nowrap">${fmtDay(e.applied_at)}</td>
+          <td><div class="job-cell">${plogoHtml(e.source)}<span class="row-main"><span class="row-title">${escapeHtml(e.company || "—")}</span><span class="row-sub">${escapeHtml(e.title)}${e.remote_region ? ` · ${REGION_LABELS[e.remote_region] || ""}` : ""}</span></span></div></td>
+          <td class="small nowrap">${escapeHtml(e.salary || "—")}</td>
+          <td><span class="status-text ${tone}">${escapeHtml(statusLabel(e.status))}</span>${stage ? `<span class="stage-tag">${escapeHtml(stage)}</span>` : ""}</td>
+          <td class="num mono">${e.score ?? "—"}${e.score != null ? `<span class="muted"> / 10</span>` : ""}</td>
+        </tr>`;
+      })
       .join("");
     updateHistoryScrollHint();
-    tbody.querySelectorAll("[data-cover-letter-btn]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        openCoverLetterModal(reversed[parseInt(btn.dataset.rowIndex, 10)]);
-      });
-    });
-    tbody.querySelectorAll("[data-prep-btn]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const e = reversed[parseInt(btn.dataset.rowIndex, 10)];
-        btn.disabled = true;
-        btn.textContent = "Готовлю…";
-        try {
-          const { prep } = await api("/api/applications/prep", {
-            method: "POST",
-            body: JSON.stringify({ source: e.source, external_id: e.external_id }),
-          });
-          openTextModal(`Подготовка: ${e.company} — ${e.title}`, "Справка к интервью", prep.replace(/\*\*/g, ""));
-        } catch (err) {
-          showToast(err.message, "error");
-        } finally {
-          btn.disabled = false;
-          btn.textContent = "🎯 Подготовка";
-        }
-      });
-    });
-    tbody.querySelectorAll("[data-find-hr]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const e = reversed[parseInt(btn.dataset.rowIndex, 10)];
-        btn.disabled = true;
-        btn.textContent = "Ищу контакты…";
-        try {
-          const res = await api("/api/contacts/from-application", {
-            method: "POST",
-            body: JSON.stringify({ source: e.source, external_id: e.external_id }),
-          });
-          showToast(
-            res.message ||
-              (res.added ? `Найдено контактов: ${res.added}` : "Компания добавлена в «Контакты» — публичных контактов на сайте нет"),
-            res.added ? "success" : "info",
-            7000
-          );
-          focusContactKey = res.key;
-          switchTab("contacts");
-        } catch (err) {
-          showToast(err.message.replace(/^\d+: /, ""), "error");
-          btn.disabled = false;
-          btn.textContent = "👤 Найти HR этой компании";
-        }
-      });
-    });
-    tbody.querySelectorAll("[data-calendar-btn]").forEach((btn) => {
-      btn.addEventListener("click", () =>
-        openCalendarOverlay(reversed[parseInt(btn.dataset.rowIndex, 10)])
-      );
-    });
-    tbody.querySelectorAll("[data-trainer-btn]").forEach((btn) => {
-      btn.addEventListener("click", () =>
-        openTrainer(reversed[parseInt(btn.dataset.rowIndex, 10)])
-      );
-    });
-    tbody.querySelectorAll("[data-prefill-btn]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const e = reversed[parseInt(btn.dataset.rowIndex, 10)];
-        btn.disabled = true;
-        try {
-          const { filled } = await api("/api/direct/prefill", {
-            method: "POST",
-            body: JSON.stringify({ source: e.source, external_id: e.external_id }),
-          });
-          showToast(
-            filled.length
-              ? `Форма открыта в Chrome, заполнено: ${filled.join(", ")}. Ответьте на вопросы компании и нажмите Submit.`
-              : "Форма открыта в Chrome — эту разметку заполнить не удалось, заполните вручную.",
-            "success",
-            8000
-          );
-        } catch (err) {
-          showToast(err.message, "error");
-        } finally {
-          btn.disabled = false;
-        }
-      });
-    });
-    bindStageSelects(tbody);
     observeReveal(tbody);
   },
 
@@ -3653,6 +3614,7 @@ const render = {
 
     renderDraftsQueue();
     renderHhRemindersQueue();
+    render.telegram();
     const entries = await api("/api/inbox");
     // Конфетти — только на реально новый ответ, появившийся после
     // первой загрузки за сессию, не на каждое открытие вкладки с уже
@@ -3999,25 +3961,36 @@ function renderLogLines() {
 // сервер под каждую букву поиска.
 // Что произошло — человеческими словами, по этапу заявки.
 const INBOX_KIND = {
-  interview: { title: "🎉 Приглашение на интервью", group: "interview" },
-  test_task: { title: "📝 Тестовое задание", group: "interview" },
-  offer: { title: "💼 Оффер", group: "interview" },
-  replied: { title: "💬 Ответили", group: "replied" },
+  interview: { title: "Приглашение на интервью", group: "interview" },
+  test_task: { title: "Тестовое задание", group: "interview" },
+  offer: { title: "Оффер", group: "interview" },
+  replied: { title: "Ответили", group: "replied" },
   rejected: { title: "Отказ", group: "rejected" },
 };
 let repliesKind = "";
+
+let selectedInboxIndex = -1;
+let talkEntries = [];
 
 function renderRepliesRows() {
   const list = document.getElementById("replies-rows");
   const query = document.getElementById("replies-filter-query").value.trim().toLowerCase();
   const groupOf = (e) => (INBOX_KIND[e.stage] || INBOX_KIND.replied).group;
-  const counts = { interview: 0, replied: 0, rejected: 0 };
-  lastRepliesEntries.forEach((e) => counts[groupOf(e)]++);
-  // По умолчанию — «Главное»: отказы не заслоняют приглашения и вопросы HR.
-  const chips = [["", "Главное", counts.interview + counts.replied], ["interview", "Интервью и офферы", counts.interview], ["replied", "Ответили", counts.replied], ["rejected", "Отказы", counts.rejected]];
+  const counts = { interview: 0, replied: 0, rejected: 0, telegram: 0 };
+  lastRepliesEntries.forEach((e) => {
+    counts[groupOf(e)]++;
+    if (e.channel === "telegram_dm") counts.telegram++;
+  });
+  const chips = [
+    ["", "Главное", counts.interview + counts.replied],
+    ["interview", "Интервью и офферы", counts.interview],
+    ["replied", "Ответили", counts.replied],
+    ["telegram", "Telegram", counts.telegram],
+    ["rejected", "Отказы", counts.rejected],
+  ];
   const chipBox = document.getElementById("replies-kind");
   chipBox.innerHTML = chips
-    .map(([k, label, n]) => `<button type="button" class="chip${k === repliesKind ? " active" : ""}" data-kind="${k}">${label} <b>${n}</b></button>`)
+    .map(([k, label, n]) => `<button type="button" class="chip${k === repliesKind ? " active" : ""}" data-kind="${k}" aria-pressed="${k === repliesKind}">${label} <b>${n}</b></button>`)
     .join("");
   chipBox.querySelectorAll("[data-kind]").forEach((b) =>
     b.addEventListener("click", () => {
@@ -4027,78 +4000,131 @@ function renderRepliesRows() {
   );
 
   const entries = lastRepliesEntries.filter((e) => {
-    if (repliesKind ? groupOf(e) !== repliesKind : groupOf(e) === "rejected") return false;
+    if (repliesKind === "telegram") {
+      if (e.channel !== "telegram_dm") return false;
+    } else if (repliesKind ? groupOf(e) !== repliesKind : groupOf(e) === "rejected") return false;
     if (!query) return true;
     return [e.company, e.title, e.text, e.contact].filter(Boolean).some((v) => v.toLowerCase().includes(query));
   });
+  talkEntries = entries;
   if (!lastRepliesEntries.length) {
-    list.innerHTML = emptyStateHtml("Пока нет ответов. Как только работодатель ответит на отклик, в Telegram или на письмо — он появится здесь, а бот пришлёт уведомление.");
+    list.innerHTML = emptyStateHtml("Пока нет ответов. Как только работодатель ответит на отклик, в Telegram или на письмо — он появится здесь.");
     return;
   }
   if (!entries.length) {
-    list.innerHTML = emptyStateHtml(
-      query ? "Ничего не найдено." : repliesKind ? "Здесь пока пусто." : "Сейчас нет новых приглашений и вопросов — бот сообщит, как только появятся. Отказы — в фильтре «Отказы»."
-    );
+    list.innerHTML = emptyStateHtml(query ? "Ничего не найдено." : repliesKind ? "Здесь пока пусто." : "Сейчас нет новых приглашений и вопросов — бот сообщит, когда появятся.");
     return;
   }
   const where = (e) =>
-    e.channel === "telegram_dm" ? `${sourceIconHtml("telegram")}Telegram @${escapeHtml(e.contact)}`
-    : e.channel === "email" ? `✉️ Письмо · ${escapeHtml(e.contact)}`
-    : `${sourceIconHtml(e.source)}${escapeHtml(sourceLabel(e.source))}`;
+    e.channel === "telegram_dm" ? `Telegram @${escapeHtml(e.contact)}`
+    : e.channel === "email" ? `Письмо · ${escapeHtml(e.contact)}`
+    : escapeHtml(sourceLabel(e.source));
+  const logo = (e) => (e.channel === "telegram_dm" ? plogoHtml("telegram") : e.channel === "email" ? plogoHtml("mail") : plogoHtml(e.source));
   list.innerHTML = entries
-    .map((e) => {
+    .map((e, i) => {
       const kind = INBOX_KIND[e.stage] || INBOX_KIND.replied;
-      // Статус hh («Приглашение», «Отказ») уже сказан заголовком — не дублируем.
-      const text = e.channel === "telegram_dm" || e.channel === "email" ? e.text : "";
-      const who = [e.company, e.title].filter(Boolean).join(" — ");
-      return `
-      <div class="inbox-item inbox-${kind.group}${e.unread ? " is-unread" : ""}">
-        <div class="inbox-top">
-          <strong>${kind.title}</strong>
-          <span class="muted small">${fmtTime(e.at)}${e.unread ? ` <span class="tab-badge">новое</span>` : ""}</span>
-        </div>
-        <div class="inbox-who">${e.link ? `<a href="${escapeHtml(e.link)}" target="_blank" rel="noopener">${escapeHtml(who || "Открыть")}</a>` : escapeHtml(who)}</div>
-        <div class="muted small">${where(e)}${e.label ? ` · ${escapeHtml(e.label)}` : ""}</div>
-        ${text ? `<p class="inbox-text">${escapeHtml(truncate(text, 280))}</p>` : ""}
-        ${e.draft ? `<div class="ok-text small">✍️ Черновик ответа готов — вверху, в «Ждут вашего решения»</div>` : ""}
-        <div class="inbox-actions">
-          ${e.channel === "telegram_dm" ? `<button type="button" class="btn btn-secondary btn-small" data-open-dialog="${escapeHtml(e.contact)}">Открыть диалог</button>` : ""}
-          ${e.channel === "email" ? `<a class="btn btn-secondary btn-small" href="${escapeHtml(e.link)}" target="_blank" rel="noopener">Открыть в Gmail</a>` : ""}
-          ${kind.group === "interview" && e.external_id ? `<button type="button" class="btn btn-secondary btn-small" data-prep-source="${escapeHtml(e.source)}" data-prep-id="${escapeHtml(e.external_id)}" data-prep-title="${escapeHtml(who)}">🎯 Подготовиться к интервью</button>` : ""}
-          ${e.external_id ? `<label class="muted small inbox-stage">Этап ${stageSelectHtml({ ...e, effective_stage: e.stage })}</label>` : ""}
-        </div>
-      </div>`;
+      const preview = e.channel === "telegram_dm" || e.channel === "email" ? e.text : e.title;
+      return `<button type="button" class="row talk-row inbox-${kind.group}${e.unread ? " is-unread" : ""}${i === selectedInboxIndex ? " is-selected" : ""}" data-inbox-index="${i}">
+        ${logo(e)}
+        <span class="row-main">
+          <span class="talk-row-top"><span class="row-title">${escapeHtml(e.company || (e.contact ? "@" + e.contact : "—"))}</span><span class="muted small nowrap">${fmtDay(e.at)}</span></span>
+          <span class="row-sub"><span class="talk-kind kind-${kind.group}">${escapeHtml(kind.title)}</span>${e.unread ? `<span class="tab-badge">новое</span>` : ""}${e.draft ? `<span class="stage-tag">черновик готов</span>` : ""}</span>
+          <span class="talk-preview small muted">${escapeHtml(truncate(preview || where(e), 110))}</span>
+        </span>
+      </button>`;
     })
     .join("");
-  list.querySelectorAll("[data-open-dialog]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      switchTab("telegram");
-      openTelegramConversation(btn.dataset.openDialog);
-    });
-  });
-  list.querySelectorAll("[data-prep-id]").forEach((btn) =>
+  list.querySelectorAll("[data-inbox-index]").forEach((btn) =>
+    btn.addEventListener("click", () => selectInboxItem(Number(btn.dataset.inboxIndex)))
+  );
+}
+
+function talkContextHtml(e) {
+  const where = e.channel === "telegram_dm" ? `Telegram · @${escapeHtml(e.contact)}` : e.channel === "email" ? `Письмо · ${escapeHtml(e.contact)}` : escapeHtml(sourceLabel(e.source));
+  const stage = e.external_id ? `<div class="field-block"><div class="field-title">Этап</div><label class="inbox-stage">${stageSelectHtml({ ...e, effective_stage: e.stage })}</label><div class="field-hint">Ставится сам по ответу площадки; поправьте, если бот ошибся.</div></div>` : "";
+  const interview = (INBOX_KIND[e.stage] || {}).group === "interview" && e.external_id;
+  return `<div class="field-block"><div class="field-title">${escapeHtml(e.company || "—")}</div>
+      <div class="field-hint">${escapeHtml(e.title || "")}</div>
+      <div class="field-hint">${where}${e.label ? " · " + escapeHtml(e.label) : ""}</div></div>
+    ${stage}
+    <div class="talk-actions">
+      ${e.channel === "email" && e.link ? `<a class="btn btn-small" href="${escapeHtml(e.link)}" target="_blank" rel="noopener">Открыть в Gmail ↗</a>` : ""}
+      ${e.channel === "telegram_dm" ? `<a class="btn btn-small" href="https://t.me/${encodeURIComponent(e.contact)}" target="_blank" rel="noopener">Открыть в Telegram ↗</a>` : ""}
+      ${e.link && e.channel !== "email" ? `<a class="btn btn-small btn-ghost" href="${escapeHtml(e.link)}" target="_blank" rel="noopener">Открыть вакансию ↗</a>` : ""}
+      ${interview ? `<button type="button" class="btn btn-small" data-talk-action="prep">Подготовка к интервью</button>` : ""}
+      ${interview ? `<button type="button" class="btn btn-small btn-ghost" data-talk-action="calendar">Интервью в календарь</button>` : ""}
+    </div>`;
+}
+
+function showTalkContext(e) {
+  const body = document.getElementById("talk-context-body");
+  body.classList.remove("muted", "small");
+  body.innerHTML = e ? talkContextHtml(e) : "";
+  bindStageSelects(body);
+  body.querySelectorAll("[data-talk-action]").forEach((btn) =>
     btn.addEventListener("click", async () => {
+      if (btn.dataset.talkAction === "calendar") {
+        openCalendarOverlay({ ...e, title: e.title || "" });
+        return;
+      }
       btn.disabled = true;
       btn.textContent = "Готовлю справку…";
       try {
-        const { prep } = await api("/api/applications/prep", {
-          method: "POST",
-          body: JSON.stringify({ source: btn.dataset.prepSource, external_id: btn.dataset.prepId }),
-        });
-        openTextModal(`Подготовка: ${btn.dataset.prepTitle}`, "Справка к интервью", prep.replace(/\*\*/g, ""));
+        const { prep } = await api("/api/applications/prep", { method: "POST", body: JSON.stringify({ source: e.source, external_id: e.external_id }) });
+        const panel = document.getElementById("talk-item-panel");
+        document.getElementById("tg-chat-panel").style.display = "none";
+        document.getElementById("tg-chat-empty").style.display = "none";
+        panel.hidden = false;
+        panel.innerHTML = `<div class="thread-head"><h3 class="m0">Подготовка: ${escapeHtml(e.company)}</h3><span class="muted small">справка к интервью</span></div><div class="letter-text">${escapeHtml(prep.replace(/\*\*/g, ""))}</div>`;
       } catch (err) {
         showToast(err.message.replace(/^\d+: /, ""), "error");
       } finally {
         btn.disabled = false;
-        btn.textContent = "🎯 Подготовиться к интервью";
+        btn.textContent = "Подготовка к интервью";
       }
     })
   );
-  bindStageSelects(list);
+  document.getElementById("tg-chat-delete").hidden = !(e && e.channel === "telegram_dm") && !activeTelegramContact;
 }
 
-async function openTelegramConversation(contact) {
+function selectInboxItem(i) {
+  const e = talkEntries[i];
+  if (!e) return;
+  selectedInboxIndex = i;
+  document.querySelectorAll("#replies-rows .talk-row").forEach((r, n) => r.classList.toggle("is-selected", n === i));
+  showTalkContext(e);
+  if (e.channel === "telegram_dm") {
+    openTelegramConversation(e.contact, true);
+    return;
+  }
+  activeTelegramContact = null;
+  document.querySelectorAll("#tg-conv-list .conv-item").forEach((el) => el.classList.remove("active"));
+  document.getElementById("tg-chat-panel").style.display = "none";
+  document.getElementById("tg-chat-empty").style.display = "none";
+  document.getElementById("tg-chat-delete").hidden = true;
+  const kind = INBOX_KIND[e.stage] || INBOX_KIND.replied;
+  const panel = document.getElementById("talk-item-panel");
+  panel.hidden = false;
+  panel.innerHTML = `<div class="thread-head"><h3 class="m0">${escapeHtml(kind.title)}</h3><span class="muted small">${fmtTime(e.at)}</span></div>
+    <div class="field-hint">${escapeHtml([e.company, e.title].filter(Boolean).join(" — "))}</div>
+    ${e.text ? `<div class="chat-bubble in">${escapeHtml(e.text)}</div>` : `<div class="letter-text muted">Текст ответа — на сайте площадки. Этап выставлен по статусу отклика.</div>`}
+    ${e.draft ? `<div class="fix is-warn"><span class="dot warn"></span><div class="fix-body">Черновик ответа готов — вверху, в «Ждут вашего решения».</div></div>` : ""}`;
+}
+
+async function openTelegramConversation(contact, fromInbox = false) {
   activeTelegramContact = contact;
+  document.getElementById("talk-item-panel").hidden = true;
+  if (!fromInbox) {
+    selectedInboxIndex = -1;
+    document.querySelectorAll("#replies-rows .talk-row").forEach((r) => r.classList.remove("is-selected"));
+    const match = lastRepliesEntries.find((x) => x.channel === "telegram_dm" && x.contact === contact);
+    if (match) showTalkContext(match);
+    else {
+      const body = document.getElementById("talk-context-body");
+      body.innerHTML = `<div class="field-block"><div class="field-title">@${escapeHtml(contact)}</div><div class="field-hint">Telegram · ответов пока нет</div></div><div class="talk-actions"><a class="btn btn-small" href="https://t.me/${encodeURIComponent(contact)}" target="_blank" rel="noopener">Открыть в Telegram ↗</a></div>`;
+    }
+  }
+  document.getElementById("tg-chat-delete").hidden = false;
   document
     .querySelectorAll("#tg-conv-list .conv-item")
     .forEach((el) =>
@@ -4112,13 +4138,7 @@ async function openTelegramConversation(contact) {
 
   const messages = document.getElementById("tg-chat-messages");
   messages.innerHTML = conv.messages
-    .map(
-      (m) => `
-    <div class="chat-bubble ${m.direction}">
-      ${m.text.replace(/</g, "&lt;")}
-      <span class="chat-bubble-time">${formatChatTime(m.at)}</span>
-    </div>`
-    )
+    .map((m) => `<div class="chat-bubble ${m.direction}">${escapeHtml(m.text)}<span class="chat-bubble-time">${formatChatTime(m.at)}</span></div>`)
     .join("");
   messages.scrollTop = messages.scrollHeight;
 
@@ -5321,6 +5341,272 @@ function isPlatformDrawerOpen() {
   return document.getElementById("platform-drawer-overlay").style.display !== "none";
 }
 
+// ---------- Вакансии: чипы, шторка «Почему бот так решил», клавиши ----------
+
+let historyChip = "all";
+let historyRows = [];
+let historySelected = -1;
+let jobThresholds = null;
+const isSkipped = (e) => (e.status || "").startsWith("skipped");
+const HISTORY_CHIPS = {
+  all: { label: "Все", test: (e) => e.effective_stage !== "rejected" },
+  applied: { label: "Отправлено", test: (e) => e.status === "applied" && !e.effective_stage },
+  replied: { label: "Ответили", test: (e) => e.effective_stage === "replied" },
+  interview: { label: "Интервью", test: (e) => ["interview", "test_task", "offer"].includes(e.effective_stage) },
+  skipped: { label: "Пропущено", test: isSkipped },
+  dry_run: { label: "Тестовый прогон", test: (e) => e.status === "dry_run" },
+  rejected: { label: "Отказ", test: (e) => e.effective_stage === "rejected" },
+};
+
+function renderHistoryChips(all) {
+  const box = document.getElementById("history-chips");
+  box.innerHTML = Object.entries(HISTORY_CHIPS)
+    .map(([k, c]) => {
+      const n = all.filter(c.test).length;
+      if (!n && k !== "all" && k !== historyChip) return "";
+      return `<button type="button" class="chip${k === historyChip ? " active" : ""}" data-chip="${k}" aria-pressed="${k === historyChip}">${c.label} <b>${n}</b></button>`;
+    })
+    .join("");
+  box.querySelectorAll("[data-chip]").forEach((b) =>
+    b.addEventListener("click", () => {
+      historyChip = b.dataset.chip;
+      // Старые фильтры — для совместимости со ссылками на «Вакансии».
+      document.getElementById("filter-show-rejected").checked = historyChip === "rejected";
+      lastHistorySnapshot = "";
+      render.history();
+    })
+  );
+}
+
+function jobVerdict(e) {
+  if (e.score == null) return { tone: "flat", text: "Оценки нет — площадка не отдала описание или ИИ был недоступен" };
+  const t = jobThresholds || { min: 4, fit: 7 };
+  if (e.score >= t.fit) return { tone: "good", text: "Уверенное совпадение — отклик с письмом" };
+  if (e.score >= t.min) return { tone: "warn", text: "Среднее совпадение — отклик помечен как слабый" };
+  return { tone: "bad", text: "Слабое совпадение — бот не откликался" };
+}
+
+function jobStageButtons(e) {
+  if (!e.external_id || e.status !== "applied") return "";
+  const current = e.effective_stage ?? "";
+  const opts = [["", "Без ответа"], ...Object.entries(STAGE_LABELS)];
+  return `<div class="field-block" data-ui="jobs.stage"><div class="field-title">Этап</div>
+    <div class="stage-buttons" role="radiogroup" aria-label="Этап">${opts
+      .map(([v, l]) => `<button type="button" class="chip${v === current ? " active" : ""}" role="radio" aria-checked="${v === current}" data-set-stage="${v}">${l[0].toUpperCase() + l.slice(1)}</button>`)
+      .join("")}</div>
+    <div class="field-hint">Ставится сам по ответу площадки. Поправьте, если бот ошибся; «Без ответа» снимает ручную отметку.</div></div>`;
+}
+
+function jobDrawerBody(e, tab) {
+  const v = jobVerdict(e);
+  const t = jobThresholds || { min: 4, fit: 7 };
+  if (tab === "letter") {
+    return `<div class="field-block" data-ui="jobs.letter">
+      <div class="field-hint">${e.status === "applied" ? `Это письмо ушло вместе с откликом ${fmtTime(e.applied_at)}.` : "Письмо не отправлялось — так бы оно выглядело."}</div>
+      <div class="letter-text">${e.cover_letter ? escapeHtml(e.cover_letter) : `<span class="muted">Письма нет: отклик без письма или запись старше срока хранения.</span>`}</div>
+      ${e.cover_letter ? `<div class="fix-actions"><button type="button" class="btn btn-small" data-job-action="copy-letter">Скопировать</button></div>` : ""}
+    </div>`;
+  }
+  if (tab === "prep") {
+    const prefill = e.source === "direct" && e.status === "dry_run" && /greenhouse\.io|lever\.co/.test(e.link);
+    return `<div class="field-stack">
+      ${e.external_id ? `<button type="button" class="btn" data-job-action="prep" data-ui="jobs.prep">Справка к интервью: что спросят и что подтянуть</button>` : ""}
+      <div id="job-prep-body" class="letter-text" hidden></div>
+      ${e.external_id ? `<div class="fix-actions">
+        <button type="button" class="btn btn-small" data-job-action="trainer" data-ui="jobs.trainer">Тренажёр вопросов</button>
+        <button type="button" class="btn btn-small" data-job-action="calendar" data-ui="jobs.calendar">Интервью в календарь</button>
+      </div>` : ""}
+      ${prefill ? `<button type="button" class="btn btn-small" data-job-action="prefill" data-ui="jobs.prefill">Заполнить форму отклика</button>` : ""}
+      ${e.gaps && e.gaps.length ? `<div class="field-block"><div class="field-title">Что подтянуть</div><div class="field-hint">То, чего нет в резюме, но есть в вакансии:</div><ul class="plain-list">${e.gaps.map((g) => `<li>${escapeHtml(g)}</li>`).join("")}</ul></div>` : ""}
+    </div>`;
+  }
+  return `<div class="verdict" data-ui="jobs.score">
+      <div class="verdict-score"><span class="mono">${e.score ?? "—"}</span><span class="muted"> / 10</span></div>
+      <div class="verdict-text"><span class="dot ${v.tone === "good" ? "ok" : v.tone === "warn" ? "warn" : v.tone === "bad" ? "error" : "idle"}"></span>${escapeHtml(v.text)}</div>
+      <div class="field-hint">ниже ${t.min} — пропуск · от ${t.fit} — уверенное совпадение (Настройки → Лимиты и оценка)</div>
+    </div>
+    ${e.skills && e.skills.length ? `<div class="field-block"><div class="field-title">Навыки из вакансии</div><div class="tag-row">${e.skills.map((x) => `<span class="tag">${escapeHtml(x)}</span>`).join("")}</div></div>` : ""}
+    <div class="field-block"><div class="field-title">Не хватает</div>${e.gaps && e.gaps.length ? `<ul class="plain-list">${e.gaps.map((g) => `<li>${escapeHtml(g)}</li>`).join("")}</ul>` : `<div class="field-hint">всё основное в резюме есть</div>`}</div>
+    ${jobStageButtons(e)}
+    ${e.contacts && e.contacts.length ? `<div class="field-block" data-ui="jobs.contacts"><div class="field-title">Контакты из вакансии</div>${e.contacts.map((c) => `<a href="mailto:${escapeHtml(c)}">${escapeHtml(c)}</a>`).join("<br>")}</div>` : ""}`;
+}
+
+function openJobDrawer(e, tab = "decision") {
+  const site = (() => {
+    try {
+      return new URL(e.link).hostname.replace(/^www\./, "");
+    } catch (err) {
+      return "сайте";
+    }
+  })();
+  const tabs = [["decision", "Решение"], ["letter", "Письмо"], ["prep", "Подготовка"]];
+  const body = openSideDrawer({
+    title: `${plogoHtml(e.source)}<span>${escapeHtml(e.company || "—")}</span>`,
+    sub: `<span>${escapeHtml(e.title)}${e.salary ? " · " + escapeHtml(e.salary) : ""} · ${escapeHtml(statusLabel(e.status))}</span>`,
+    body: `<div class="segmented drawer-tabs" role="tablist" data-ui="jobs.drawer"><span class="segmented-ind" aria-hidden="true"></span>${tabs
+      .map(([k, l]) => `<button type="button" role="tab" class="${k === tab ? "on" : ""}" aria-selected="${k === tab}" data-job-tab="${k}">${l}</button>`)
+      .join("")}</div><div id="job-tab-body" class="field-stack">${jobDrawerBody(e, tab)}</div>`,
+    foot: `${e.link ? `<a class="btn btn-primary" href="${escapeHtml(e.link)}" target="_blank" rel="noopener" data-ui="jobs.open">Открыть на ${escapeHtml(site)} ↗</a>` : ""}
+      ${e.company ? `<button type="button" class="btn btn-ghost" data-job-action="find-hr" data-ui="jobs.find-hr">Найти HR компании</button>` : ""}`,
+  });
+  openDrawerSource = null;
+  const seg = body.querySelector(".drawer-tabs");
+  requestAnimationFrame(() => positionSegmented(seg));
+  seg.querySelectorAll("[data-job-tab]").forEach((b) =>
+    b.addEventListener("click", () => {
+      seg.querySelectorAll("[data-job-tab]").forEach((x) => {
+        x.classList.toggle("on", x === b);
+        x.setAttribute("aria-selected", x === b ? "true" : "false");
+      });
+      positionSegmented(seg);
+      body.querySelector("#job-tab-body").innerHTML = jobDrawerBody(e, b.dataset.jobTab);
+      bindJobDrawer(body, e);
+    })
+  );
+  bindJobDrawer(body, e);
+  const drawer = document.getElementById("platform-drawer");
+  drawer.onclick = null;
+  drawer.querySelectorAll("[data-job-action]").forEach(() => {});
+  currentJobEntry = e;
+}
+
+let currentJobEntry = null;
+
+function bindJobDrawer(root, e) {
+  root.querySelectorAll("[data-set-stage]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      try {
+        await api("/api/applications/stage", {
+          method: "POST",
+          body: JSON.stringify({ source: e.source, external_id: e.external_id, stage: b.dataset.setStage }),
+        });
+        const prev = e.effective_stage;
+        e.effective_stage = b.dataset.setStage || null;
+        root.querySelectorAll("[data-set-stage]").forEach((x) => {
+          x.classList.toggle("active", x === b);
+          x.setAttribute("aria-checked", x === b ? "true" : "false");
+        });
+        showSavedToast(`Этап: ${b.textContent}`, async () => {
+          await api("/api/applications/stage", { method: "POST", body: JSON.stringify({ source: e.source, external_id: e.external_id, stage: prev || "" }) });
+          e.effective_stage = prev;
+          lastHistorySnapshot = "";
+          render.history();
+        });
+        lastHistorySnapshot = "";
+        render.history();
+      } catch (err) {
+        showToast(`Не удалось сохранить этап: ${err.message}`, "error");
+      }
+    })
+  );
+}
+
+async function handleJobAction(btn) {
+  const e = currentJobEntry;
+  if (!e) return;
+  const action = btn.dataset.jobAction;
+  if (action === "copy-letter") {
+    copyToClipboard(e.cover_letter || "", btn);
+    showToast("Письмо скопировано", "success");
+  } else if (action === "prep") {
+    btn.disabled = true;
+    btn.textContent = "Готовлю справку…";
+    try {
+      const { prep } = await api("/api/applications/prep", { method: "POST", body: JSON.stringify({ source: e.source, external_id: e.external_id }) });
+      const box = document.getElementById("job-prep-body");
+      box.hidden = false;
+      box.textContent = prep.replace(/\*\*/g, "");
+      btn.remove();
+    } catch (err) {
+      showToast(err.message.replace(/^\d+: /, ""), "error");
+      btn.disabled = false;
+      btn.textContent = "Справка к интервью: что спросят и что подтянуть";
+    }
+  } else if (action === "trainer") {
+    openTrainer(e);
+  } else if (action === "calendar") {
+    openCalendarOverlay(e);
+  } else if (action === "prefill") {
+    btn.disabled = true;
+    try {
+      const { filled } = await api("/api/direct/prefill", { method: "POST", body: JSON.stringify({ source: e.source, external_id: e.external_id }) });
+      showToast(filled.length ? `Форма открыта в Chrome, заполнено: ${filled.join(", ")}. Ответьте на вопросы компании и нажмите Submit.` : "Форма открыта в Chrome — эту разметку заполнить не удалось, заполните вручную.", "success", 8000);
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      btn.disabled = false;
+    }
+  } else if (action === "find-hr") {
+    btn.disabled = true;
+    btn.textContent = "Ищу контакты…";
+    try {
+      const res = await api("/api/contacts/from-application", { method: "POST", body: JSON.stringify({ source: e.source, external_id: e.external_id }) });
+      showToast(res.message || (res.added ? `Найдено контактов: ${res.added}` : "Компания добавлена в Базу — публичных контактов на сайте нет"), res.added ? "success" : "info", 7000);
+      focusContactKey = res.key;
+      closePlatformDrawer();
+      switchTab("contacts");
+    } catch (err) {
+      showToast(err.message.replace(/^\d+: /, ""), "error");
+      btn.disabled = false;
+      btn.textContent = "Найти HR компании";
+    }
+  }
+}
+
+function selectHistoryRow(i, open = false) {
+  const rows = document.querySelectorAll("#history-rows .job-row");
+  if (!rows.length) return;
+  historySelected = Math.max(0, Math.min(rows.length - 1, i));
+  rows.forEach((r, n) => r.classList.toggle("is-selected", n === historySelected));
+  rows[historySelected].focus({ preventScroll: false });
+  if (open) openJobDrawer(historyRows[historySelected]);
+}
+
+function initJobsView() {
+  const tbody = document.getElementById("history-rows");
+  tbody.addEventListener("click", (ev) => {
+    const row = ev.target.closest(".job-row");
+    if (!row || ev.target.closest("a")) return;
+    selectHistoryRow(Number(row.dataset.rowIndex), true);
+  });
+  tbody.addEventListener("keydown", (ev) => {
+    const row = ev.target.closest(".job-row");
+    if (!row) return;
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      selectHistoryRow(Number(row.dataset.rowIndex), true);
+    }
+  });
+  document.getElementById("platform-drawer").addEventListener("click", (ev) => {
+    const btn = ev.target.closest("[data-job-action]");
+    if (btn) handleJobAction(btn);
+  });
+  // j/k — по строкам, пока открыт раздел «Вакансии» и курсор не в поле.
+  document.addEventListener("keydown", (ev) => {
+    if (currentView !== "history" || isCommandPaletteOpen()) return;
+    const tag = (ev.target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return;
+    if (ev.key === "j" || ev.key === "k") {
+      ev.preventDefault();
+      selectHistoryRow(historySelected + (ev.key === "j" ? 1 : -1), isPlatformDrawerOpen());
+    }
+  });
+  ["filter-source"].forEach((id) =>
+    document.getElementById(id).addEventListener("change", () => {
+      lastHistorySnapshot = "";
+      render.history();
+    })
+  );
+  let qTimer = null;
+  document.getElementById("filter-query").addEventListener("input", () => {
+    clearTimeout(qTimer);
+    qTimer = setTimeout(() => {
+      lastHistorySnapshot = "";
+      render.history();
+    }, 250);
+  });
+}
+
 // Дополнительные действия строки "Истории" — в одном выпадающем меню,
 // а не 4-5 кнопок в ячейке.
 function rowActionsHtml(e, i) {
@@ -5433,7 +5719,7 @@ async function renderDraftsQueue() {
     text: d.text,
     rows: 4,
     sendLabel: "Отправить",
-    headlineHtml: `${d.channel === "email" ? "✉️" : "✈️"} ${KIND[d.kind] || "Сообщение"} →
+    headlineHtml: `${KIND[d.kind] || "Сообщение"} ${d.channel === "email" ? "по почте" : "в Telegram"} →
       ${d.channel === "email" ? escapeHtml(d.contact) : "@" + escapeHtml(d.contact)}
       ${d.company ? ` · ${escapeHtml(d.company)}${d.title ? " — " + escapeHtml(d.title) : ""}` : ""}
       ${d.job_link ? ` · <a href="${escapeHtml(d.job_link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">вакансия</a>` : ""}`,
@@ -5457,7 +5743,7 @@ async function renderDraftsQueue() {
   }));
   el.innerHTML = `
     <div class="hr-draft-queue-head">
-      <h3 style="margin:0">Ждут вашего решения · ${drafts.length}</h3>
+      <h3 class="m0"><span class="dot warn"></span> Ждут вашего «Отправить» · ${drafts.length}</h3>
       <button type="button" class="btn btn-secondary btn-small" id="drafts-send-all">Отправить все как есть</button>
     </div>
     <p class="muted small" id="drafts-send-all-status" role="status"></p>
@@ -5490,12 +5776,13 @@ async function renderHhRemindersQueue() {
     return;
   }
   el.style.display = "";
+  document.getElementById("hh-reminders-count").textContent = `· ${reminders.length} ${plural(reminders.length, "отклик", "отклика", "откликов")}`;
   const items = reminders.map((r) => ({
     code: r.external_id,
     text: r.text,
     rows: 3,
-    sendLabel: "🔔 Напомнить",
-    headlineHtml: `🔔 ${escapeHtml(r.company)}${r.title ? " — " + escapeHtml(r.title) : ""} · откликнулись ${fmtDay(r.applied_at)}
+    sendLabel: "Напомнить",
+    headlineHtml: `${escapeHtml(r.company)}${r.title ? " — " + escapeHtml(r.title) : ""} · откликнулись ${fmtDay(r.applied_at)}
       · <a href="${escapeHtml(r.link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">вакансия</a>`,
     detailHtml: "",
     send: async (text) => {
@@ -6552,6 +6839,7 @@ function initDashboard() {
   initAutoPane();
   initLookPane();
   initSettingsSearch();
+  initJobsView();
   document.querySelectorAll("#stats-period [data-days]").forEach((b) =>
     b.addEventListener("click", () => {
       statsPeriodDays = Number(b.dataset.days);
@@ -6840,22 +7128,11 @@ function initDashboard() {
   );
   window.addEventListener("resize", updateAllTableScrollHints);
 
+  // Фильтры «Вакансий» применяются сразу (initJobsView); скрытая кнопка
+  // «Применить» осталась для старых ссылок.
   document
     .getElementById("history-apply-filters")
     .addEventListener("click", () => render.history());
-  // Согласовано с "Логи" ниже: смена площадки/статуса фильтрует
-  // сразу, а не только по клику "Применить" — раньше эти два похожих
-  // выпадающих списка в одном приложении вели себя по-разному.
-  document
-    .getElementById("filter-source")
-    .addEventListener("change", () => render.history());
-  document
-    .getElementById("filter-status")
-    .addEventListener("change", () => render.history());
-  document.getElementById("filter-show-rejected").addEventListener("change", () => render.history());
-  document.getElementById("filter-query").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") render.history();
-  });
   document
     .getElementById("log-source")
     .addEventListener("change", () => render.logs());
@@ -7344,7 +7621,7 @@ function initDashboard() {
       );
       input.value = "";
       status.textContent = "";
-      await openTelegramConversation(activeTelegramContact);
+      await openTelegramConversation(activeTelegramContact, true);
     } catch (e) {
       status.textContent = `Ошибка: ${e.message}`;
     }
@@ -7369,7 +7646,7 @@ function initDashboard() {
           { method: "POST" }
         );
         status.textContent = "";
-        await openTelegramConversation(activeTelegramContact);
+        await openTelegramConversation(activeTelegramContact, true);
       } catch (e) {
         status.textContent = `Ошибка: ${e.message}`;
       }
@@ -7390,6 +7667,9 @@ function initDashboard() {
         activeTelegramContact = null;
         document.getElementById("tg-chat-panel").style.display = "none";
         document.getElementById("tg-chat-empty").style.display = "";
+        document.getElementById("tg-chat-delete").hidden = true;
+        document.getElementById("talk-context-body").innerHTML = "";
+        showToast("Диалог удалён", "info");
         await render.telegram();
       } catch (e) {
         document.getElementById("tg-chat-status").textContent = `Ошибка: ${e.message}`;
@@ -7510,7 +7790,15 @@ function initDashboard() {
 
   const knownTabs = new Set(Object.keys(VIEW_GROUP));
   const initialTab = location.hash.replace("#", "");
-  switchTab(knownTabs.has(initialTab) ? initialTab : "overview");
+  switchTab(knownTabs.has(initialTab) || initialTab === "telegram" ? initialTab : "overview");
+  // Ссылка вида #outreach из другого места (закладка, назад/вперёд).
+  window.addEventListener("hashchange", () => {
+    const tab = location.hash.replace("#", "");
+    if ((knownTabs.has(tab) || tab === "telegram") && tab !== currentView) {
+      closePlatformDrawer();
+      switchTab(tab);
+    }
+  });
   // ponytail: раньше опрос гонял только вкладку "Обзор" — история
   // откликов/ответы/логи обновлялись только вручную (кнопка "Применить"
   // или смена вкладки), из-за чего прогресс запущенного отклика был не
@@ -7590,6 +7878,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     .addEventListener("click", addDirectCompany);
   document.getElementById("settings-direct").addEventListener("change", saveDirectSetting);
   document.getElementById("offer-add").addEventListener("click", addOffer);
+  document.getElementById("ai-prompt-open").addEventListener("click", openPromptDrawer);
   document.getElementById("ai-prompt-copy").addEventListener("click", async (e) => {
     try {
       await navigator.clipboard.writeText(document.getElementById("ai-prompt").value);
@@ -7624,7 +7913,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   document
     .querySelector('[data-settings-tab="settings-tg-quick"]')
     .addEventListener("click", loadTelegramWatch);
-  bindGotoSettings(document.getElementById("view-telegram"));
+  bindGotoSettings(document.getElementById("view-replies"));
   document.querySelectorAll("[data-goto-view]").forEach((a) =>
     a.addEventListener("click", (e) => {
       e.preventDefault();
