@@ -168,3 +168,84 @@ def message_needs_reply(message_text: str, llm_api_key: str) -> bool:
         ),
     )
     return result.needs_reply
+
+
+# --- «Ответ от ИИ» под разговором в «Общении» ---------------------------
+
+_SUGGEST_PROMPT = ChatPromptTemplate.from_template(
+    """
+    Ты помогаешь кандидату ответить работодателю в личной переписке в
+    Telegram. Предложи 2-3 разных коротких варианта ответа на последнее
+    сообщение работодателя: например, согласиться и предложить время,
+    прислать резюме, уточнить условия. Только факты из резюме и пожеланий
+    ниже — ничего не выдумывай (особенно зарплату и опыт).
+
+    У каждого варианта: label — метка для кнопки, 2-4 слова; text — сам
+    ответ, 1-3 предложения, как живой человек в чате, без приветствия и
+    подписи (диалог уже идёт), на языке переписки; attach_resume — true,
+    только если в ответе уместно приложить резюме файлом.
+    """
+    + ANTI_AI_STRUCTURE_RU
+    + """
+    Резюме:
+    {resume_text}
+
+    Пожелания кандидата:
+    {preferences_summary}
+
+    Вакансия: {job}
+
+    Переписка (старые сообщения сверху):
+    {dialog}
+    """
+)
+
+
+class _ReplySuggestion(BaseModel):
+    label: str = Field(description="Метка кнопки, 2-4 слова")
+    text: str = Field(description="Текст ответа")
+    attach_resume: bool = Field(
+        default=False, description="Приложить резюме файлом"
+    )
+
+
+class _ReplySuggestions(BaseModel):
+    replies: list[_ReplySuggestion]
+
+
+def suggest_replies(
+    resume_pdf_path: Path,
+    messages: list[dict],
+    job: str,
+    preferences_summary: str,
+    llm_api_key: str,
+) -> list[dict]:
+    """До трёх вариантов ответа на последнее сообщение HR: метка, текст и
+    нужно ли резюме. Ничего не отправляет — вариант попадает в поле ввода."""
+    dialog = "\n".join(
+        ("Работодатель: " if m.get("direction") == "in" else "Я: ")
+        + str(m.get("text") or "")[:800]
+        for m in messages[-12:]
+    )
+    llm = cast(BaseChatModel, get_chat_llm(llm_api_key, temperature=0.5))
+    chain = _SUGGEST_PROMPT | llm.with_structured_output(_ReplySuggestions)
+    result = cast(
+        _ReplySuggestions,
+        chain.invoke(
+            {
+                "resume_text": extract_text(str(resume_pdf_path)),
+                "preferences_summary": preferences_summary,
+                "job": job or "не указана",
+                "dialog": dialog or "(пусто)",
+            }
+        ),
+    )
+    return [
+        {
+            "label": r.label.strip()[:40],
+            "text": r.text.strip(),
+            "attach_resume": bool(r.attach_resume),
+        }
+        for r in result.replies[:3]
+        if r.text.strip()
+    ]

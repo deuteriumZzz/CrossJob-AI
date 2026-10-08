@@ -235,7 +235,9 @@ from src.job_sources.telegram.watcher import (
     RATE_LIMIT_RETRY_DELAYS_SECONDS,
     _llm_check_post,
     active_watcher,
+    flush_pending_telegram_sends,
     get_watch_post,
+    pending_telegram_sends,
     remember_telegram_post_contact,
     save_telegram_letter,
     telegram_resumes,
@@ -6551,6 +6553,7 @@ def check_telegram_replies(parameters: dict, llm_api_key: str) -> None:
     где есть чат с явной кнопкой "ответить" на площадке — здесь это
     личный диалог самого пользователя, автоматически отвечать в него
     от его имени не тот случай)."""
+    flush_telegram_scheduled(parameters)
     if active_watcher() is not None:
         return  # ответы HR шлюз ловит сам, в момент прихода
     secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
@@ -6593,6 +6596,47 @@ def check_telegram_replies(parameters: dict, llm_api_key: str) -> None:
 
 
 HR_DRAFTS_FILE = ".hr_reply_drafts.json"
+
+
+def flush_telegram_scheduled(parameters: dict) -> None:
+    """Отложенные сообщения Telegram («Утром, в 10:00» из «Общения»,
+    автоотправка), когда шлюза нет: он, если работает, отправляет их сам.
+    Зовётся из проверки ответов Telegram и из тикера окна."""
+    output_folder: Path = parameters["outputFileDirectory"]
+    if active_watcher() is not None or is_paused(output_folder):
+        return
+    now = datetime.now().astimezone()
+
+    def due(entry: dict) -> bool:
+        try:
+            return datetime.fromisoformat(entry["send_after"]) <= now
+        except (KeyError, ValueError):
+            return True
+
+    if not any(due(e) for e in pending_telegram_sends(output_folder).values()):
+        return
+    tg = (
+        ConfigValidator.load_yaml(parameters["secretsFile"]).get("telegram")
+        or {}
+    )
+    if not tg.get("api_id") or not tg.get("api_hash"):
+        return
+    tg_prefs = parameters.get("telegram") or {}
+    start, end = tg_prefs.get("active_hours_start"), tg_prefs.get(
+        "active_hours_end"
+    )
+    with _telegram_client(parameters) as client:
+        flush_pending_telegram_sends(
+            client.send_message,
+            output_folder,
+            (start, end) if start is not None and end is not None else None,
+            send_file_fn=client.send_file,
+            on_sent=lambda entry: remember_telegram_post_contact(
+                output_folder,
+                [{"kind": "telegram", "value": entry["contact"]}],
+                entry.get("post") or {"link": entry.get("job_link", "")},
+            ),
+        )
 
 
 def _telegram_client(parameters: dict) -> TelegramSourceClient:

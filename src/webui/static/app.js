@@ -2596,6 +2596,8 @@ async function loadTelegramWatch() {
   greeting.value = w.greeting;
   updateGreetingPreview();
   document.getElementById("tgq-auto-message").checked = w.auto_message;
+  document.getElementById("tgq-preview").checked = !!w.preview_before_send;
+  document.getElementById("tgq-night").checked = !!w.night_to_morning;
   document.getElementById("tgq-smart-greeting").checked = w.smart_greeting;
   document.getElementById("tgq-llm-vacancy-filter").checked =
     w.llm_vacancy_filter;
@@ -2751,6 +2753,8 @@ async function saveTelegramWatch() {
         stop_words: tagItemsOf(document.getElementById("tgq-stop")),
         greeting: document.getElementById("tgq-greeting").value,
         auto_message: document.getElementById("tgq-auto-message").checked,
+        preview_before_send: document.getElementById("tgq-preview").checked,
+        night_to_morning: document.getElementById("tgq-night").checked,
         smart_greeting: document.getElementById("tgq-smart-greeting").checked,
         llm_vacancy_filter: document.getElementById("tgq-llm-vacancy-filter")
           .checked,
@@ -3633,6 +3637,7 @@ const render = {
     lastRepliesSnapshot = repliesSnapshot;
     lastRepliesEntries = entries;
     renderRepliesRows();
+    renderTelegramPosts();
   },
 
   async analytics() {
@@ -3999,6 +4004,8 @@ function renderRepliesRows() {
     b.addEventListener("click", () => {
       repliesKind = b.dataset.kind;
       renderRepliesRows();
+      lastTgPostsSnapshot = "";
+      renderTelegramPosts();
     })
   );
 
@@ -4056,6 +4063,7 @@ function talkContextHtml(e) {
       ${e.link && e.channel !== "email" ? `<a class="btn btn-small btn-ghost" href="${escapeHtml(e.link)}" target="_blank" rel="noopener">Открыть вакансию ↗</a>` : ""}
       ${interview ? `<button type="button" class="btn btn-small" data-talk-action="prep">Подготовка к интервью</button>` : ""}
       ${interview ? `<button type="button" class="btn btn-small btn-ghost" data-talk-action="calendar">Интервью в календарь</button>` : ""}
+      ${e.contact ? blockContactButtonHtml(e.contact) : ""}
     </div>`;
 }
 
@@ -4066,6 +4074,7 @@ function showTalkContext(e) {
   bindStageSelects(body);
   body.querySelectorAll("[data-talk-action]").forEach((btn) =>
     btn.addEventListener("click", async () => {
+      if (btn.dataset.talkAction === "block") return; // см. initTalkExtras
       if (btn.dataset.talkAction === "calendar") {
         openCalendarOverlay({ ...e, title: e.title || "" });
         return;
@@ -4101,6 +4110,7 @@ function selectInboxItem(i) {
     return;
   }
   activeTelegramContact = null;
+  closeTelegramPost();
   document.querySelectorAll("#tg-conv-list .conv-item").forEach((el) => el.classList.remove("active"));
   document.getElementById("tg-chat-panel").style.display = "none";
   document.getElementById("tg-chat-empty").style.display = "none";
@@ -4115,7 +4125,12 @@ function selectInboxItem(i) {
 }
 
 async function openTelegramConversation(contact, fromInbox = false) {
+  if (activeTelegramContact !== contact) {
+    document.getElementById("tg-chat-suggestions").innerHTML = "";
+    document.getElementById("tg-chat-input").value = "";
+  }
   activeTelegramContact = contact;
+  closeTelegramPost();
   document.getElementById("talk-item-panel").hidden = true;
   if (!fromInbox) {
     selectedInboxIndex = -1;
@@ -4124,7 +4139,7 @@ async function openTelegramConversation(contact, fromInbox = false) {
     if (match) showTalkContext(match);
     else {
       const body = document.getElementById("talk-context-body");
-      body.innerHTML = `<div class="field-block"><div class="field-title">@${escapeHtml(contact)}</div><div class="field-hint">Telegram · ответов пока нет</div></div><div class="talk-actions"><a class="btn btn-small" href="https://t.me/${encodeURIComponent(contact)}" target="_blank" rel="noopener">Открыть в Telegram ↗</a></div>`;
+      body.innerHTML = `<div class="field-block"><div class="field-title">@${escapeHtml(contact)}</div><div class="field-hint">Telegram · ответов пока нет</div></div><div class="talk-actions"><a class="btn btn-small" href="https://t.me/${encodeURIComponent(contact)}" target="_blank" rel="noopener">Открыть в Telegram ↗</a>${blockContactButtonHtml(contact)}</div>`;
     }
   }
   document.getElementById("tg-chat-delete").hidden = false;
@@ -7772,6 +7787,8 @@ function initDashboard() {
   document.getElementById("tg-chat-input").addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") sendTelegramMessage();
   });
+  document.getElementById("tg-chat-later").addEventListener("click", sendTelegramMessageLater);
+  document.getElementById("tg-chat-suggest").addEventListener("click", suggestTelegramReplies);
 
   document
     .getElementById("tg-chat-attach-resume")
@@ -8127,6 +8144,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   initSettingsExtras();
   initNotifications();
+  initTalkExtras();
 });
 
 
@@ -8364,4 +8382,348 @@ async function setPauseAll(paused) {
   } catch (err) {
     showToast(err.message.replace(/^\d+: /, ""), "error");
   }
+}
+
+
+// --- Общение: вакансии из Telegram с черновиком от ИИ (talk.tg.posts) ------
+
+let tgPostsData = { posts: [], resumes: [], sent_today: 0, daily_limit: 15 };
+let activeTgPostId = null;
+let lastTgPostsSnapshot = "";
+const tgPostResume = {}; // выбор «Резюме:» по посту, пока не отправили
+
+// Время в будущем: «сегодня в 10:00», «завтра в 10:00», «9 окт. в 10:00».
+function fmtWhen(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const days = Math.round((new Date(d).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 864e5);
+  const time = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  if (days === 0) return `сегодня в ${time}`;
+  if (days === 1) return `завтра в ${time}`;
+  return `${d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })} в ${time}`;
+}
+
+function tgPostBadge(post) {
+  if (post.scheduled) return { dot: "idle", text: `уйдёт ${fmtWhen(post.scheduled.send_after)}` };
+  if (!post.contacts.length) return { dot: "idle", text: "контакта нет" };
+  if (post.contacts.some((c) => (c.note || "").startsWith("писали"))) return { dot: "warn", text: "уже писали" };
+  if (post.draft) return { dot: "ok", text: "черновик готов" };
+  return { dot: "", text: "новая" };
+}
+
+async function renderTelegramPosts() {
+  const block = document.getElementById("tg-posts-block");
+  if (!block) return;
+  let data;
+  try {
+    data = await api("/api/telegram/posts?limit=50");
+  } catch (e) {
+    return;
+  }
+  tgPostsData = data;
+  const showAll = !repliesKind || repliesKind === "telegram";
+  block.hidden = !data.posts.length || !showAll;
+  const snapshot = JSON.stringify([data.posts.map((p) => [p.id, p.draft?.code, p.scheduled?.id, p.contacts.map((c) => c.note)]), activeTgPostId, showAll]);
+  if (snapshot === lastTgPostsSnapshot) return;
+  lastTgPostsSnapshot = snapshot;
+  document.getElementById("tg-posts-count").textContent = `· ${data.posts.length}`;
+  document.getElementById("tg-posts-list").innerHTML = data.posts
+    .slice(0, 30)
+    .map((p) => {
+      const b = tgPostBadge(p);
+      return `<button type="button" class="row talk-row${p.id === activeTgPostId ? " is-selected" : ""}" data-tg-post="${escapeHtml(p.id)}">
+        ${plogoHtml("telegram")}
+        <span class="row-main">
+          <span class="talk-row-top"><span class="row-title">@${escapeHtml(p.channel)}</span><span class="muted small nowrap">${p.saved_at ? fmtDay(p.saved_at) : ""}</span></span>
+          <span class="talk-preview small">${escapeHtml(truncate(p.title, 90))}</span>
+          <span class="row-sub small muted">${b.dot ? `<span class="dot ${b.dot}" aria-hidden="true"></span>` : ""}${escapeHtml(b.text)}</span>
+        </span>
+      </button>`;
+    })
+    .join("");
+}
+
+function closeTelegramPost() {
+  activeTgPostId = null;
+  const panel = document.getElementById("tg-post-panel");
+  if (panel) {
+    panel.hidden = true;
+    panel.innerHTML = "";
+  }
+  document.querySelectorAll("#tg-posts-list .talk-row").forEach((r) => r.classList.remove("is-selected"));
+}
+
+function tgPostContact(post) {
+  return post.draft
+    ? post.contacts.find((c) => c.value === post.draft.contact) || post.contacts[0]
+    : post.contacts.find((c) => c.kind === "telegram") || post.contacts[0];
+}
+
+function tgPostResumeChoice(post) {
+  if (post.id in tgPostResume) return tgPostResume[post.id];
+  const fit = tgPostsData.resumes.find((r) => r.russian === post.russian || r.russian === null);
+  return fit ? fit.name : "";
+}
+
+function tgPostPanelHtml(post) {
+  const contact = tgPostContact(post);
+  const isEmail = contact?.kind === "email";
+  const resume = tgPostResumeChoice(post);
+  const full = !isEmail && tgPostsData.sent_today >= tgPostsData.daily_limit;
+  const head = `<div class="thread-head"><h3 class="m0">${escapeHtml(truncate(post.title, 80))}</h3>
+    <span class="muted small">@${escapeHtml(post.channel)}${post.saved_at ? " · " + escapeHtml(fmtDay(post.saved_at)) : ""}</span></div>
+    <details class="post-text"><summary>Текст поста</summary><div class="letter-text">${escapeHtml(post.text)}</div></details>`;
+  if (!contact) {
+    return `${head}<div class="composer-empty"><span>В посте нет контакта — отклик, скорее всего, через форму на сайте.</span>
+      <a class="btn btn-small" href="${escapeHtml(post.link)}" target="_blank" rel="noopener">Открыть пост ↗</a></div>`;
+  }
+  const notes = post.contacts.filter((c) => c.note).map((c) => `${c.kind === "telegram" ? "@" : ""}${c.value}: ${c.note}`);
+  const contactChips = post.contacts.length > 1
+    ? `<div class="chip-row" role="radiogroup" aria-label="Кому писать">${post.contacts
+        .map((c) => `<button type="button" class="chip${c.value === contact.value ? " active" : ""}" role="radio" aria-checked="${c.value === contact.value}" data-post-contact="${escapeHtml(c.value)}">${c.kind === "telegram" ? "@" : ""}${escapeHtml(c.value)}</button>`)
+        .join("")}</div>`
+    : "";
+  const scheduled = post.scheduled
+    ? `<div class="fix is-info"><span class="dot idle"></span><div class="fix-body">Сообщение уйдёт ${escapeHtml(fmtWhen(post.scheduled.send_after))} — ночью HR не беспокоим.</div><button type="button" class="btn btn-small" data-post-action="unschedule">Отменить</button></div>`
+    : "";
+  if (post.scheduled && !post.draft) return `${head}${contactChips}${scheduled}`;
+  const draftBlock = post.draft
+    ? `<div class="draft-note"><span class="small">Черновик от ИИ под эту вакансию — можно править</span><button type="button" class="btn btn-ghost btn-small" data-post-action="rewrite">Переписать</button></div>
+       <textarea id="tg-post-text" rows="7" aria-label="Текст сообщения">${escapeHtml(post.draft.text)}</textarea>`
+    : `<div class="composer-empty"><span>Черновика пока нет. ИИ напишет его под эту вакансию и ваше резюме — ничего не уйдёт без вашего «Отправить».</span>
+       <button type="button" class="btn btn-primary btn-small" data-post-action="draft">Написать черновик</button></div>`;
+  const resumes = [{ name: "", label: "без резюме" }, ...tgPostsData.resumes];
+  const resumeRow = post.draft
+    ? `<div class="composer-row"><span class="muted small">Резюме:</span><div class="chip-row" role="radiogroup" aria-label="Резюме">${resumes
+        .map((r) => `<button type="button" class="chip${r.name === resume ? " active" : ""}" role="radio" aria-checked="${r.name === resume}" data-post-resume="${escapeHtml(r.name)}">${escapeHtml(r.label)}</button>`)
+        .join("")}</div>
+       <span class="composer-actions">${!isEmail && !post.scheduled ? `<button type="button" class="btn btn-small" data-post-action="later">Утром, в 10:00</button>` : ""}
+       <button type="button" class="btn btn-primary btn-small" data-post-action="send" ${full ? "disabled" : ""}>${full ? "Лимит на сегодня" : resume ? "Отправить с резюме" : "Отправить"}</button></span></div>
+       <span class="muted small">${isEmail ? "Уйдёт письмом через ваш Gmail" : `Уйдёт с вашего личного аккаунта Telegram · сегодня ${tgPostsData.sent_today} из ${tgPostsData.daily_limit}`} · Ctrl/⌘ + Enter — отправить</span>`
+    : "";
+  return `${head}${notes.length ? `<div class="fix is-warn"><span class="dot warn"></span><div class="fix-body">${escapeHtml(notes.join(" · "))}</div></div>` : ""}
+    ${contactChips}${scheduled}<div class="post-composer">${draftBlock}${resumeRow}</div>`;
+}
+
+function tgPostContextHtml(post) {
+  const contact = tgPostContact(post);
+  return `<div class="field-block"><div class="field-title">Вакансия из @${escapeHtml(post.channel)}</div>
+      <div class="field-hint">${escapeHtml(post.title)}</div>
+      ${post.unverified ? `<div class="field-hint">ИИ не проверил, вакансия ли это — автоотправки не было</div>` : ""}</div>
+    <div class="field-block"><div class="field-title">Контакт</div><div class="field-hint">${contact ? `${contact.kind === "telegram" ? "@" : ""}${escapeHtml(contact.value)}` : "не найден"}</div></div>
+    <div class="talk-actions">
+      <a class="btn btn-small" href="${escapeHtml(post.link)}" target="_blank" rel="noopener">Открыть пост ↗</a>
+      <button type="button" class="btn btn-small btn-ghost" data-post-action="hide">Скрыть вакансию</button>
+      ${contact ? blockContactButtonHtml(contact.value, post.id) : ""}
+    </div>`;
+}
+
+function openTelegramPost(postId) {
+  const post = tgPostsData.posts.find((p) => p.id === postId);
+  if (!post) return;
+  activeTgPostId = postId;
+  activeTelegramContact = null;
+  selectedInboxIndex = -1;
+  document.querySelectorAll("#replies-rows .talk-row, #tg-conv-list .conv-item").forEach((r) => r.classList.remove("is-selected", "active"));
+  document.querySelectorAll("#tg-posts-list .talk-row").forEach((r) => r.classList.toggle("is-selected", r.dataset.tgPost === postId));
+  document.getElementById("tg-chat-panel").style.display = "none";
+  document.getElementById("tg-chat-empty").style.display = "none";
+  document.getElementById("talk-item-panel").hidden = true;
+  document.getElementById("tg-chat-delete").hidden = true;
+  const panel = document.getElementById("tg-post-panel");
+  panel.hidden = false;
+  panel.innerHTML = tgPostPanelHtml(post);
+  const ctxBody = document.getElementById("talk-context-body");
+  ctxBody.classList.remove("muted", "small");
+  ctxBody.innerHTML = tgPostContextHtml(post);
+}
+
+async function refreshTelegramPost(postId = activeTgPostId) {
+  lastTgPostsSnapshot = "";
+  await renderTelegramPosts();
+  if (postId && tgPostsData.posts.some((p) => p.id === postId)) openTelegramPost(postId);
+  else closeTelegramPost();
+}
+
+async function tgPostAction(action, btn) {
+  const post = tgPostsData.posts.find((p) => p.id === activeTgPostId);
+  if (!post) return;
+  const textEl = document.getElementById("tg-post-text");
+  const text = textEl ? textEl.value.trim() : "";
+  const resume = tgPostResumeChoice(post);
+  const busy = (label) => {
+    btn.disabled = true;
+    btn.textContent = label;
+  };
+  try {
+    if (action === "draft" || action === "rewrite") {
+      busy(action === "draft" ? "Пишу черновик…" : "Переписываю…");
+      const contact = tgPostContact(post);
+      await api(`/api/telegram/posts/${post.id}/draft`, { method: "POST", body: JSON.stringify({ contact: contact?.value || "" }) });
+      await refreshTelegramPost(post.id);
+    } else if (action === "send") {
+      if (!text) return;
+      busy("Отправляю…");
+      const res = await api(`/api/hr-drafts/${post.draft.code}/send`, { method: "POST", body: JSON.stringify({ text, resume }) });
+      showToast(res.message, "success");
+      delete tgPostResume[post.id];
+      await refreshTelegramPost(post.id);
+      render.telegram();
+    } else if (action === "later") {
+      if (!text) return;
+      busy("Ставлю на утро…");
+      const res = await api(`/api/hr-drafts/${post.draft.code}/later`, { method: "POST", body: JSON.stringify({ text, resume }) });
+      await refreshTelegramPost(post.id);
+      showSavedToast(`Уйдёт ${fmtWhen(res.send_after)} — ночью HR не беспокоим`, async () => {
+        await api(`/api/telegram/scheduled/${res.id}`, { method: "DELETE" });
+        await refreshTelegramPost(post.id);
+      });
+    } else if (action === "unschedule") {
+      busy("Отменяю…");
+      await api(`/api/telegram/scheduled/${post.scheduled.id}`, { method: "DELETE" });
+      showToast("Отправка отменена — черновик снова здесь", "success");
+      await refreshTelegramPost(post.id);
+    } else if (action === "hide") {
+      await api(`/api/telegram/posts/${post.id}/hide`, { method: "POST", body: JSON.stringify({ hidden: true }) });
+      closeTelegramPost();
+      document.getElementById("tg-chat-empty").style.display = "";
+      document.getElementById("talk-context-body").innerHTML = "";
+      lastTgPostsSnapshot = "";
+      await renderTelegramPosts();
+      showSavedToast("Вакансия скрыта", async () => {
+        await api(`/api/telegram/posts/${post.id}/hide`, { method: "POST", body: JSON.stringify({ hidden: false }) });
+        await refreshTelegramPost(post.id);
+      });
+    }
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+    if (document.body.contains(btn)) await refreshTelegramPost(post.id);
+  }
+}
+
+// «Не писать компании» из разговора или вакансии: в Базе — «не писать».
+function blockContactButtonHtml(value, postId = "") {
+  return `<button type="button" class="btn btn-small btn-ghost is-danger" data-talk-action="block" data-block-contact="${escapeHtml(value)}" data-block-post="${escapeHtml(postId)}" data-ui="talk.block-company">Не писать компании</button>`;
+}
+
+async function blockContact(value, postId) {
+  const post = (on) => api("/api/contacts/do-not-contact", { method: "POST", body: JSON.stringify({ value, on, post_id: postId || "" }) });
+  try {
+    await post(true);
+    showSavedToast("Больше не пишем этой компании — отмечено в Базе", () => post(false));
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  }
+}
+
+// «Ответ от ИИ» под перепиской Telegram: варианты подставляются в поле.
+async function suggestTelegramReplies() {
+  if (!activeTelegramContact) return;
+  const btn = document.getElementById("tg-chat-suggest");
+  const box = document.getElementById("tg-chat-suggestions");
+  btn.disabled = true;
+  btn.textContent = "Думаю…";
+  try {
+    const { suggestions } = await api(`/api/telegram/conversations/${activeTelegramContact}/suggest`, { method: "POST" });
+    box.innerHTML = suggestions.length
+      ? suggestions
+          .map((x, i) => `<button type="button" class="chip" data-suggestion="${i}" title="${escapeHtml(x.text)}">${escapeHtml(x.label)}</button>`)
+          .join("")
+      : `<span class="muted small">ИИ не предложил вариантов — ответьте сами.</span>`;
+    box.querySelectorAll("[data-suggestion]").forEach((chip) =>
+      chip.addEventListener("click", () => {
+        const x = suggestions[Number(chip.dataset.suggestion)];
+        const input = document.getElementById("tg-chat-input");
+        input.value = x.text;
+        input.focus();
+        document.getElementById("tg-chat-attach-resume").classList.toggle("is-suggested", !!x.attach_resume);
+        if (x.attach_resume) document.getElementById("tg-chat-status").textContent = "К этому ответу уместно приложить резюме — кнопка «Резюме».";
+      })
+    );
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Ещё варианты";
+  }
+}
+
+async function sendTelegramMessageLater() {
+  if (!activeTelegramContact) return;
+  const input = document.getElementById("tg-chat-input");
+  const text = input.value.trim();
+  if (!text) {
+    input.focus();
+    return;
+  }
+  const contact = activeTelegramContact;
+  try {
+    const res = await api(`/api/telegram/conversations/${contact}/later`, { method: "POST", body: JSON.stringify({ text }) });
+    input.value = "";
+    showSavedToast(`Уйдёт @${contact} ${fmtWhen(res.send_after)}`, async () => {
+      await api(`/api/telegram/scheduled/${res.id}`, { method: "DELETE" });
+      if (activeTelegramContact === contact) input.value = text;
+    });
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  }
+}
+
+function initTalkExtras() {
+  document.getElementById("tg-posts-list")?.addEventListener("click", (e) => {
+    const row = e.target.closest("[data-tg-post]");
+    if (row) openTelegramPost(row.dataset.tgPost);
+  });
+  const panel = document.getElementById("tg-post-panel");
+  panel?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-post-action]");
+    if (btn) {
+      tgPostAction(btn.dataset.postAction, btn);
+      return;
+    }
+    const chip = e.target.closest("[data-post-resume]");
+    if (chip && activeTgPostId) {
+      tgPostResume[activeTgPostId] = chip.dataset.postResume;
+      const keep = document.getElementById("tg-post-text")?.value;
+      openTelegramPost(activeTgPostId);
+      if (keep != null) document.getElementById("tg-post-text").value = keep;
+      return;
+    }
+    const who = e.target.closest("[data-post-contact]");
+    if (who && activeTgPostId) {
+      const post = tgPostsData.posts.find((p) => p.id === activeTgPostId);
+      if (post && post.draft?.contact !== who.dataset.postContact) {
+        post.draft = null;
+        post.contacts = [...post.contacts].sort((a, b) => (a.value === who.dataset.postContact ? -1 : b.value === who.dataset.postContact ? 1 : 0));
+        openTelegramPost(activeTgPostId);
+      }
+    }
+  });
+  // Правка черновика сохраняется, когда уходите из поля.
+  panel?.addEventListener("change", async (e) => {
+    if (e.target.id !== "tg-post-text") return;
+    const post = tgPostsData.posts.find((p) => p.id === activeTgPostId);
+    if (!post?.draft || !e.target.value.trim()) return;
+    try {
+      await api(`/api/hr-drafts/${post.draft.code}`, { method: "PUT", body: JSON.stringify({ text: e.target.value }) });
+      post.draft.text = e.target.value;
+    } catch (err) {
+      showToast(err.message.replace(/^\d+: /, ""), "error");
+    }
+  });
+  panel?.addEventListener("keydown", (e) => {
+    if (e.target.id === "tg-post-text" && e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      panel.querySelector('[data-post-action="send"]')?.click();
+    }
+  });
+  document.getElementById("talk-context-body")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-block-contact]");
+    if (btn) {
+      blockContact(btn.dataset.blockContact, btn.dataset.blockPost);
+      return;
+    }
+    const hide = e.target.closest('[data-post-action="hide"]');
+    if (hide) tgPostAction("hide", hide);
+  });
 }

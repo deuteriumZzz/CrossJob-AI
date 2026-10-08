@@ -8231,3 +8231,108 @@ a.btn-primary:hover {
 .dot.warn {
   background: var(--warn);
 }
+
+/* Общение: вакансии из Telegram с черновиком от ИИ */
+.talk-posts {
+  display: flex;
+  flex-direction: column;
+}
+.talk-posts .row-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.talk-post-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.talk-post-panel[hidden] {
+  display: none;
+}
+.post-text summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.post-text .letter-text {
+  margin-top: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.post-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+.post-composer textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 140px;
+}
+.draft-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+}
+.draft-note .btn {
+  margin-left: auto;
+}
+.composer-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.composer-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+.composer-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 13px;
+}
+.composer-empty > span {
+  flex: 1;
+  min-width: 220px;
+}
+.fix.is-info .btn {
+  margin-left: auto;
+}
+.ai-replies {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-top: 10px;
+}
+.ai-replies .chip-row {
+  display: contents;
+}
+.btn.is-danger {
+  color: var(--bad);
+}
+.btn.is-suggested {
+  border-color: var(--border-hover);
+  color: var(--text);
+}
+#tg-chat-panel .chat-composer {
+  flex-wrap: wrap;
+}
+#tg-chat-panel .chat-composer input {
+  flex: 1 1 100%;
+}
+#tg-chat-panel .chat-composer .btn:first-of-type {
+  margin-left: auto;
+}
