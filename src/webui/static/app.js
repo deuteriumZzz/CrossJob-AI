@@ -1165,43 +1165,111 @@ function showUndo(text, undo) {
 // счётчики в строку подразделов «Общения».
 let lastTodoBadges = {};
 
-// Главная цифра — ответы и интервью за 7 дней, откуда они пришли.
+// Аналитика: итоги за выбранный период (неделя, месяц, всё время) и
+// таблица по источникам — что приносит ответы.
+let statsPeriodDays = 7;
 async function renderResults() {
   const el = document.getElementById("results-panel");
   let r;
   try {
-    r = await api("/api/results");
+    r = await api(`/api/results?days=${statsPeriodDays}`);
   } catch (e) {
     return;
   }
   const w = r.week;
-  const delta = w.replies - r.prev.replies;
-  const deltaHtml = delta
-    ? `<span class="${delta > 0 ? "ok-text" : "err-text"}">${delta > 0 ? "↑" : "↓"} ${Math.abs(delta)} к прошлой неделе</span>`
-    : `<span class="muted">как на прошлой неделе</span>`;
-  const label = (s) => (s === "email_campaign" ? "✉️ Рассылка по почте" : `${sourceIconHtml(s)}${escapeHtml(sourceLabel(s))}`);
-  const rate = (row) => (row.applied ? `${Math.round((100 * row.replies) / row.applied)}%` : "—");
+  const p = r.prev;
+  const all = statsPeriodDays >= 3650;
+  const prevLabel = statsPeriodDays === 7 ? "прошлой неделей" : statsPeriodDays === 30 ? "прошлым месяцем" : "";
+  const rate = (x) => (x.applied ? Math.round((100 * x.replies) / x.applied) : 0);
+  const card = (label, help, value, prevValue, suffix = "", i = 0) => {
+    const delta = value - prevValue;
+    const tone = delta > 0 ? "good" : delta < 0 ? "bad" : "flat";
+    const deltaText = all ? "за всё время" : delta === 0 ? `как за ${prevLabel.replace("прошлой неделей", "прошлую неделю").replace("прошлым месяцем", "прошлый месяц")}` : `на ${Math.abs(delta)}${suffix} ${delta > 0 ? "больше" : "меньше"}, чем ${prevLabel}`;
+    return `<div class="card kpi-card stagger-item" style="animation-delay:${staggerDelay(i, 40)}">
+      <div class="kpi-label tip" tabindex="0">${escapeHtml(label)}<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 7v4M8 5h.01" stroke-linecap="round"/></svg><span class="tiptext" role="tooltip">${escapeHtml(help)}</span></div>
+      <div class="kpi-main"><span class="kpi-value mono">${value}${suffix}</span></div>
+      <div class="kpi-delta">${all ? "" : `<span class="trend-${tone}">${delta > 0 ? "↑" : delta < 0 ? "↓" : "·"}</span>`}${escapeHtml(deltaText)}</div>
+    </div>`;
+  };
+  const label = (src) => (src === "email_campaign" ? `${plogoHtml("mail")}Рассылка по почте` : `${plogoHtml(src)}${escapeHtml(sourceLabel(src))}`);
   el.innerHTML = `
-    <div class="results-head">
-      <h3>Результат за 7 дней</h3>
-      <span class="muted small">${deltaHtml}</span>
+    <div class="kpi-grid">
+      ${card("Отправлено откликов", "Реальные отклики на площадках и письма рассылки за период.", w.applied, p.applied, "", 0)}
+      ${card("Ответов", "Ответы, приглашения и офферы — по времени ответа.", w.replies, p.replies, "", 1)}
+      ${card("Доля ответов", "Ответы ÷ отклики за период.", rate(w), rate(p), "%", 2)}
+      ${card("Интервью", "Приглашения на интервью и офферы за период.", w.interviews, p.interviews, "", 3)}
     </div>
-    <div class="results-numbers">
-      <div><span class="results-big">${w.replies}</span><span class="muted">ответов</span></div>
-      <div><span class="results-big accent">${w.interviews}</span><span class="muted">интервью</span></div>
-      <div><span class="results-big muted">${w.applied}</span><span class="muted">отправлено</span></div>
-    </div>
-    ${
-      r.by_source.length
+    <section class="card pad-card" aria-labelledby="by-source-h">
+      <div class="card-head flat between"><h3 id="by-source-h">Что приносит ответы</h3><span class="muted small">источники с низким откликом можно выключить — лимиты уйдут на те, что отвечают</span></div>
+      ${r.by_source.length
         ? `<div class="table-wrap"><table class="results-table">
-            <thead><tr><th>Откуда</th><th>Отправлено</th><th>Ответы</th><th>Интервью</th><th title="Доля ответов от отправленного">Отклик</th></tr></thead>
+            <thead><tr><th>Откуда</th><th>Отправлено</th><th>Ответы</th><th>Интервью</th><th title="Доля ответов от отправленного">Доля ответов</th></tr></thead>
             <tbody>${r.by_source
-              .map((row) => `<tr><td>${label(row.source)}</td><td>${row.applied}</td><td><b>${row.replies}</b></td><td>${row.interviews}</td><td>${rate(row)}</td></tr>`)
-              .join("")}</tbody></table></div>
-          <p class="muted small">Источники с низким откликом можно выключить — бот потратит лимиты на те, что приносят ответы.</p>`
-        : `<p class="muted small">За неделю пока ничего не отправлено — запустите бота или рассылку.</p>`
-    }`;
+              .map((row) => `<tr><td><span class="src-cell">${label(row.source)}</span></td><td class="mono">${row.applied}</td><td class="mono"><b>${row.replies}</b></td><td class="mono">${row.interviews}</td><td class="mono">${row.applied ? rate(row) + "%" : "—"}</td></tr>`)
+              .join("")}</tbody></table></div>`
+        : `<p class="muted small">За период пока ничего не отправлено — запустите бота или рассылку.</p>`}
+    </section>`;
   updateAllTableScrollHints();
+}
+
+// «Отклики по неделям»: 13 недель, площадной график с перекрестием.
+function renderWeeklyChart(entries) {
+  const el = document.getElementById("weekly-chart");
+  const readout = document.getElementById("weekly-readout");
+  if (!el) return;
+  const weeks = 13;
+  const now = new Date();
+  now.setHours(23, 59, 59, 999);
+  const counts = new Array(weeks).fill(0);
+  entries.forEach((e) => {
+    if (e.status !== "applied" || !e.applied_at) return;
+    const ago = Math.floor((now - new Date(e.applied_at)) / (7 * 86400000));
+    if (ago >= 0 && ago < weeks) counts[weeks - 1 - ago] += 1;
+  });
+  const W = 640;
+  const H = 180;
+  const pad = { l: 28, r: 8, t: 10, b: 22 };
+  const max = Math.max(4, ...counts);
+  const x = (i) => pad.l + (i * (W - pad.l - pad.r)) / (weeks - 1);
+  const y = (v) => H - pad.b - (v / max) * (H - pad.t - pad.b);
+  const line = counts.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(" ");
+  const area = `${line} L${x(weeks - 1).toFixed(1)} ${H - pad.b} L${x(0).toFixed(1)} ${H - pad.b} Z`;
+  const ticks = [0, Math.round(max / 2), max];
+  const label = (i) => (i === weeks - 1 ? "эта неделя" : `${weeks - 1 - i} нед. назад`);
+  // Линии и заливка тянутся по ширине карточки (preserveAspectRatio=none,
+  // толщина штриха от этого не меняется); подписи и точка — обычным HTML
+  // поверх, чтобы не растягивались вместе с SVG.
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="area-svg" aria-hidden="true">
+      ${ticks.map((t) => `<line x1="${pad.l}" x2="${W - pad.r}" y1="${y(t)}" y2="${y(t)}" class="grid-line" vector-effect="non-scaling-stroke"/>`).join("")}
+      <path d="${area}" class="chart-area"/>
+      <path d="${line}" class="chart-line" vector-effect="non-scaling-stroke"/>
+      <line class="crosshair" x1="0" x2="0" y1="${pad.t}" y2="${H - pad.b}" visibility="hidden" vector-effect="non-scaling-stroke"/>
+    </svg>
+    ${ticks.map((t) => `<span class="axis-label" style="top:${(y(t) / H) * 100}%">${t}</span>`).join("")}
+    <span class="chart-dot" hidden></span>
+    <div class="area-axis small muted"><span>13 нед. назад</span><span>8 нед.</span><span>4 нед.</span><span>эта неделя</span></div>`;
+  const svg = el.querySelector("svg");
+  const cross = svg.querySelector(".crosshair");
+  const dot = el.querySelector(".chart-dot");
+  const show = (clientX) => {
+    const rect = svg.getBoundingClientRect();
+    const rel = ((clientX - rect.left) / rect.width) * W;
+    const i = Math.max(0, Math.min(weeks - 1, Math.round(((rel - pad.l) / (W - pad.l - pad.r)) * (weeks - 1))));
+    cross.setAttribute("x1", x(i));
+    cross.setAttribute("x2", x(i));
+    cross.setAttribute("visibility", "visible");
+    dot.hidden = false;
+    dot.style.left = `${(x(i) / W) * 100}%`;
+    dot.style.top = `${(y(counts[i]) / H) * rect.height}px`;
+    readout.textContent = `${label(i)} · ${counts[i]} ${plural(counts[i], "отклик", "отклика", "откликов")}`;
+  };
+  svg.addEventListener("pointermove", (e) => show(e.clientX));
+  svg.addEventListener("pointerleave", () => {
+    cross.setAttribute("visibility", "hidden");
+    dot.hidden = true;
+    readout.textContent = `всего за 13 недель: ${counts.reduce((a, b) => a + b, 0)}`;
+  });
+  readout.textContent = `всего за 13 недель: ${counts.reduce((a, b) => a + b, 0)}`;
 }
 
 // 1 письмо, 2 письма, 5 писем.
@@ -3605,6 +3673,7 @@ const render = {
 
   async analytics() {
     renderResults();
+    requestAnimationFrame(() => positionSegmented(document.getElementById("stats-period")));
     renderActivityHeatmap();
     const gapsEl = document.getElementById("gaps-list");
     const candidatesEl = document.getElementById("blacklist-candidates");
@@ -3621,14 +3690,16 @@ const render = {
     renderMarket(market);
     renderOffers();
 
+    const gapMax = gaps.length ? Math.max(...gaps.map(([, c]) => c)) : 1;
     gapsEl.innerHTML = gaps.length
       ? gaps
           .map(
             ([gap, count], i) =>
-              `<li class="stagger-item" style="animation-delay:${staggerDelay(i)}">${escapeHtml(gap)} — ${count}</li>`
+              `<li class="funnel-row stagger-item" style="animation-delay:${staggerDelay(i, 40)}"><span class="funnel-label">${escapeHtml(gap)}</span><span class="funnel-track"><span class="funnel-bar" style="width:${Math.round((count / gapMax) * 100)}%"></span></span><span class="funnel-value">${count}</span></li>`
           )
           .join("")
       : `<li>${emptyStateHtml("Пока нет данных.")}</li>`;
+    growFunnelBars(gapsEl);
 
     if (!candidates.length) {
       candidatesEl.innerHTML = emptyStateHtml("Нет кандидатов на чёрный список.");
@@ -3640,7 +3711,7 @@ const render = {
       <div class="candidate-row stagger-item" style="animation-delay:${staggerDelay(i)}">
         <input type="checkbox" value="${escapeHtml(c)}" class="blacklist-check" />
         <span>${escapeHtml(c)}</span>
-        <button class="btn btn-secondary btn-small block-hh-employer" data-company="${escapeHtml(c)}" title="Заблокировать работодателя на hh.ru (серверный бан, только для HeadHunter)">🔒 hh.ru</button>
+        <button class="btn btn-secondary btn-small block-hh-employer" data-company="${escapeHtml(c)}" title="Заблокировать работодателя на hh.ru (серверный бан, только для HeadHunter)">Скрыть на hh.ru</button>
       </div>`
       )
       .join("");
@@ -6228,7 +6299,7 @@ function renderMarket(market) {
       <div class="funnel-row" title="${escapeHtml(s.skill)}: ${s.count} вакансий, ${s.share}%${s.in_resume ? "" : " — нет в резюме"}">
         <span class="funnel-label">${escapeHtml(s.skill)}</span>
         <span class="funnel-track"><span class="funnel-bar" style="width:${s.share}%"></span></span>
-        <span class="funnel-value">${s.share}% ${s.in_resume ? "✓" : "✗"}</span>
+        <span class="funnel-value">${s.share}%${s.in_resume ? "" : ` <span class="tag-miss">нет в резюме</span>`}</span>
       </div>`
         )
         .join("")
@@ -6271,8 +6342,10 @@ async function renderActivityHeatmap() {
   const el = document.getElementById("activity-heatmap");
   if (!el) return;
   const entries = await api("/api/applications");
+  renderWeeklyChart(entries);
   const counts = new Map();
   entries.forEach((e) => {
+    if (e.status !== "applied") return;
     const day = (e.applied_at || "").slice(0, 10);
     if (day) counts.set(day, (counts.get(day) || 0) + 1);
   });
@@ -6286,11 +6359,16 @@ async function renderActivityHeatmap() {
     const key = d.toISOString().slice(0, 10);
     const count = counts.get(key) || 0;
     const level = count === 0 ? 0 : count >= 5 ? 3 : count >= 2 ? 2 : 1;
-    cells.push(
-      `<div class="heatmap-cell" data-level="${level}" title="${key}: ${count} откл."></div>`
-    );
+    const human = d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", weekday: "short" });
+    cells.push(`<div class="heatmap-cell" data-level="${level}" data-label="${human}: ${count} ${plural(count, "отклик", "отклика", "откликов")}" title="${human}: ${count}"></div>`);
   }
   el.innerHTML = cells.join("");
+  const readout = document.getElementById("heatmap-readout");
+  el.onmouseover = (e) => {
+    const c = e.target.closest(".heatmap-cell");
+    if (c && readout) readout.textContent = c.dataset.label;
+  };
+  el.onmouseleave = () => readout && (readout.textContent = "отклики за 13 недель");
 }
 
 function copyToClipboard(text, btn) {
@@ -6474,6 +6552,17 @@ function initDashboard() {
   initAutoPane();
   initLookPane();
   initSettingsSearch();
+  document.querySelectorAll("#stats-period [data-days]").forEach((b) =>
+    b.addEventListener("click", () => {
+      statsPeriodDays = Number(b.dataset.days);
+      document.querySelectorAll("#stats-period [data-days]").forEach((x) => {
+        x.classList.toggle("on", x === b);
+        x.setAttribute("aria-checked", x === b ? "true" : "false");
+      });
+      positionSegmented(document.getElementById("stats-period"));
+      renderResults();
+    })
+  );
   initCommandPalette();
   initKeyboardShortcuts();
 

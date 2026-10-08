@@ -6,7 +6,7 @@
 <title>CrossJob-AI</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%278%27 fill=%27%23121417%27/%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%275%27 fill=%27%232fb36b%27/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="/vendor/fonts/fonts.css" />
-<link rel="stylesheet" href="/style.css?v=47" />
+<link rel="stylesheet" href="/style.css?v=49" />
 </head>
 <body>
 <div id="setup-screen" class="setup-screen" style="display:none" data-ui="shell.first-run">
@@ -558,64 +558,81 @@
     </section>
 
     <section id="view-analytics" class="view">
-      <div class="view-header">
-        <div>
+      <header class="page-head">
+        <div class="page-title">
           <h2>Аналитика</h2>
           <p class="muted">Что приносит ответы, что мешает и кого стоит вычеркнуть</p>
         </div>
+        <div class="segmented" id="stats-period" role="radiogroup" aria-label="Период" data-ui="stats.period">
+          <span class="segmented-ind" aria-hidden="true"></span>
+          <button type="button" role="radio" aria-checked="true" class="on" data-days="7">Неделя</button>
+          <button type="button" role="radio" aria-checked="false" data-days="30">Месяц</button>
+          <button type="button" role="radio" aria-checked="false" data-days="3650">Всё время</button>
+        </div>
+      </header>
+
+      <div id="results-panel" class="results-panel" data-ui="stats.results"></div>
+
+      <div class="analytics-grid two">
+        <section class="card pad-card" aria-labelledby="weekly-h" data-ui="stats.weekly">
+          <div class="card-head flat between">
+            <h3 id="weekly-h">Отклики по неделям</h3>
+            <span id="weekly-readout" class="small muted mono">наведите на график</span>
+          </div>
+          <div id="weekly-chart" class="area-chart" role="img" aria-label="Отклики по неделям за 13 недель"></div>
+        </section>
+        <section class="card pad-card" aria-labelledby="funnel-h" data-ui="stats.funnel">
+          <div class="card-head flat"><h3 id="funnel-h">Воронка после отклика</h3></div>
+          <div id="funnel" class="funnel"></div>
+          <p class="field-hint">У каждого отклика один текущий этап, поэтому «интервью» и «отказ» не входят в «ответили». Этап ставится сам по ответу площадки или вручную в «Вакансиях» и «Общении».</p>
+        </section>
       </div>
-      <div id="results-panel" class="panel results-panel"></div>
-      <details class="panel more">
-        <summary><strong>Активность по дням</strong> <span class="muted small">— отклики за 13 недель</span></summary>
-        <div id="activity-heatmap" class="heatmap"></div>
-      </details>
-      <div class="panel">
-        <h3>Воронка после отклика</h3>
-        <p class="muted small">Сколько реальных откликов сейчас на каждом этапе — у каждой заявки только один текущий этап, поэтому «интервью» и «отказ» не входят в «ответили». Этап ставится сам по ответу hh или вручную в «Истории» и «Входящих»</p>
-        <div id="funnel" class="funnel"></div>
-      </div>
-      <div class="analytics-grid">
-        <div class="panel">
-          <h3>Спрос на навыки</h3>
-          <p class="muted small">Доля вакансий, где навык упоминается (по откликам, собранным после обновления). ✗ — в резюме не найден</p>
+
+      <div class="analytics-grid three">
+        <section class="card pad-card" aria-labelledby="skills-h" data-ui="stats.skills">
+          <div class="card-head flat"><h3 id="skills-h">Спрос на навыки</h3><span class="muted small">доля вакансий, где навык упоминается</span></div>
           <div id="skill-demand" class="funnel"></div>
-        </div>
-        <div class="panel">
-          <h3>Зарплаты на рынке</h3>
-          <p class="muted small">Медиана «от» и «до» в месяц по всем собранным вакансиям с указанной зарплатой</p>
+        </section>
+        <section class="card pad-card" aria-labelledby="salary-h" data-ui="stats.salary">
+          <div class="card-head flat"><h3 id="salary-h">Зарплаты на рынке</h3><span class="muted small">медиана «от» и «до» в месяц</span></div>
           <div id="salary-stats"></div>
-        </div>
-        <div class="panel">
-          <h3>Откуда вакансии</h3>
-          <p class="muted small">Сколько вакансий собрано с каждой площадки. Talanto — источник вакансий и контактов HR, откликов там нет.</p>
+        </section>
+        <section class="card pad-card" aria-labelledby="sources-h" data-ui="stats.sources">
+          <div class="card-head flat"><h3 id="sources-h">Откуда вакансии</h3><span class="muted small">Talanto и Hirify дают вакансии и контакты, откликов там нет</span></div>
           <div id="vacancy-sources"></div>
-        </div>
+        </section>
       </div>
-      <details class="panel more">
-        <summary><strong>Сравнение офферов</strong> <span class="muted small">— когда придут предложения</span></summary>
-        <p class="muted small">Сумма в месяц. «К рынку» — насколько оффер выше или ниже медианы «до» по собранным вакансиям в той же валюте (без пересчёта валют и налогов)</p>
-        <div class="filters">
+
+      <div class="analytics-grid two">
+        <section class="card pad-card" aria-labelledby="gaps-h" data-ui="stats.gaps">
+          <div class="card-head flat"><h3 id="gaps-h">Чаще всего не хватает</h3><span class="muted small">из оценок вакансий: что мешало совпадению</span></div>
+          <ul id="gaps-list" class="gaps-list"></ul>
+        </section>
+        <section class="card pad-card" aria-labelledby="blacklist-h" data-ui="stats.blacklist stats.hh-block">
+          <div class="card-head flat"><h3 id="blacklist-h">Кандидаты на чёрный список</h3><span class="muted small">3 и больше откликов без единого ответа</span></div>
+          <div id="blacklist-candidates" class="candidate-list"></div>
+          <button id="blacklist-add" class="btn btn-small" type="button">Добавить отмеченные</button>
+        </section>
+      </div>
+
+      <section class="card pad-card" aria-labelledby="heatmap-h" data-ui="stats.heatmap">
+        <div class="card-head flat between"><h3 id="heatmap-h">Активность по дням</h3><span id="heatmap-readout" class="small muted">отклики за 13 недель</span></div>
+        <div id="activity-heatmap" class="heatmap"></div>
+        <div class="heatmap-legend small muted" aria-hidden="true">меньше <span class="heatmap-cell" data-level="0"></span><span class="heatmap-cell" data-level="1"></span><span class="heatmap-cell" data-level="2"></span><span class="heatmap-cell" data-level="3"></span> больше</div>
+      </section>
+
+      <section class="card pad-card" aria-labelledby="offers-h" data-ui="stats.offers">
+        <div class="card-head flat"><h3 id="offers-h">Сравнение офферов</h3><span class="muted small">сумма в месяц; «к рынку» — выше или ниже медианы «до» в той же валюте, без пересчёта валют и налогов</span></div>
+        <div class="field-row-inline offers-form">
           <input id="offer-company" type="text" placeholder="Компания" aria-label="Компания" />
           <input id="offer-amount" type="number" min="0" placeholder="Сумма в месяц" aria-label="Сумма в месяц" />
           <select id="offer-currency" aria-label="Валюта"><option>RUB</option><option>USD</option><option>EUR</option><option>KZT</option></select>
-          <label class="muted small"><input id="offer-remote" type="checkbox" checked /> удалённо</label>
+          <label class="check-chip"><input id="offer-remote" type="checkbox" checked /> удалённо</label>
           <input id="offer-notes" type="text" placeholder="Заметки: бонусы, ДМС, оформление" aria-label="Заметки" />
-          <button id="offer-add" class="btn btn-primary" type="button">Добавить</button>
+          <button id="offer-add" class="btn btn-primary btn-small" type="button">Добавить</button>
         </div>
         <div id="offers"></div>
-      </details>
-      <div class="analytics-grid">
-        <div class="panel">
-          <h3>Чаще всего не хватает</h3>
-          <ul id="gaps-list" class="gaps-list"></ul>
-        </div>
-        <div class="panel">
-          <h3>Кандидаты на чёрный список</h3>
-          <p class="muted small">3+ отклика без единого ответа</p>
-          <div id="blacklist-candidates" class="candidate-list"></div>
-          <button id="blacklist-add" class="btn btn-secondary">Добавить отмеченные</button>
-        </div>
-      </div>
+      </section>
     </section>
 
     <section id="view-settings" class="view">
@@ -959,6 +976,6 @@
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=67"></script>
+<script src="/app.js?v=69"></script>
 </body>
 </html>
