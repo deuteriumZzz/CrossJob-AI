@@ -277,9 +277,19 @@ function fmtTime(iso) {
   return d.toLocaleString();
 }
 
-const REDUCE_MOTION = window.matchMedia(
-  "(prefers-reduced-motion: reduce)"
-).matches;
+// «Уменьшить движение»: из системы или Настройки → Вид → «Анимации: выключить».
+let REDUCE_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+(function applyLookPrefs() {
+  try {
+    const density = localStorage.getItem("cj-density");
+    const motion = localStorage.getItem("cj-motion");
+    if (density === "compact") document.documentElement.dataset.density = "compact";
+    if (motion === "reduce") {
+      document.documentElement.dataset.motion = "reduce";
+      REDUCE_MOTION = true;
+    }
+  } catch (e) {}
+})();
 
 function countUp(el, target, duration = 700, start = 0) {
   if (REDUCE_MOTION) {
@@ -2425,6 +2435,7 @@ function fillTelegramRules(settings) {
   document.getElementById("tg-hours-start").value = settings.active_hours_start ?? "";
   document.getElementById("tg-hours-end").value = settings.active_hours_end ?? "";
   document.getElementById("tg-rules-panel").dataset.loaded = "1";
+  document.getElementById("tg-source-auto").dataset.loaded = "1";
 }
 
 async function loadTelegramWatch() {
@@ -2521,7 +2532,7 @@ async function renderResumes() {
   }
   const fileCell = (f, missing) =>
     f.exists
-      ? `<span class="resume-file" title="${escapeHtml(f.name)}">📄 <span class="resume-name">${escapeHtml(f.name)}</span></span>
+      ? `<span class="resume-file" title="${escapeHtml(f.name)}"><span class="pdf-badge" aria-hidden="true">PDF</span><span class="resume-name">${escapeHtml(f.name)}</span></span>
          <span class="muted small">${Math.max(1, Math.round(f.size / 1024))} КБ · ${fmtDay(f.updated_at)}</span>`
       : `<span class="${missing === "err" ? "err-text" : "muted"} small">${missing === "err" ? "не загружено" : "не загружено — берётся основное"}</span>`;
   const row = (title, where, file, action) => `
@@ -2543,12 +2554,12 @@ async function renderResumes() {
       `<button type="button" class="btn btn-ghost btn-small" data-upload="linkedin">${r.linkedin.exists ? "Заменить" : "Загрузить"}</button>`)}
     ${r.extra
       .map((f) =>
-        row("Дополнительное", "своя кнопка «+ 📎» под вакансией в Telegram; можно выбрать в рассылке",
+        row("Дополнительное", "своя кнопка «+ резюме» под вакансией в Telegram; можно выбрать в рассылке",
           fileCell(f),
           `<button type="button" class="btn btn-ghost btn-small" data-delete-extra="${escapeHtml(f.name)}" aria-label="Удалить ${escapeHtml(f.name)}">Удалить</button>`)
       )
       .join("")}
-    ${r.extra.length ? "" : `<div class="resume-row resume-empty"><div class="muted small">Дополнительных пока нет — например, резюме под другую роль. Кнопка «📎 Добавить дополнительное» выше.</div></div>`}`;
+    ${r.extra.length ? "" : `<div class="resume-row resume-empty"><div class="muted small">Дополнительных пока нет — например, резюме под другую роль. Кнопка «Добавить резюме» выше.</div></div>`}`;
   el.querySelectorAll("[data-upload]").forEach((b) =>
     b.addEventListener("click", () => document.getElementById(`resume-upload-${b.dataset.upload}`).click())
   );
@@ -3300,6 +3311,53 @@ async function renderHomeSplit() {
   });
 }
 
+// Вход в аккаунт Telegram (Настройки → Подключения) и значок
+// состояния в «Общении» — по /api/telegram/status.
+function applyTelegramAccountStatus(status) {
+  const badge = document.getElementById("telegram-status-badge");
+  const note = document.getElementById("telegram-status-note");
+  // Ключи уже есть — поля не показываем, чтобы не путали.
+  if (status.configured) {
+    document.getElementById("tg-keys-row").outerHTML = `<div id="tg-keys-row" class="ok-text small">✓ Ключи сохранены</div>`;
+  }
+  if (!status.configured) {
+    badge.className = "badge off";
+    badge.innerHTML = '<span class="badge-dot"></span>не настроено';
+    note.textContent =
+      "Сначала вставьте api_id и api_hash ниже.";
+  } else if (status.connected) {
+    // Вход нужен один раз — дальше блок подключения свёрнут.
+    document.getElementById("tg-connect-panel").open = false;
+    badge.className = "badge on";
+    badge.innerHTML = '<span class="badge-dot"></span>подключено';
+    note.textContent = "";
+  } else {
+    badge.className = "badge off";
+    badge.innerHTML = '<span class="badge-dot"></span>не авторизовано';
+    note.textContent = "Введите номер телефона и код ниже.";
+  }
+  // Форма входа (телефон/код/пароль) нужна только пока не
+  // подключено — если уже авторизовано, незачем занимать место и
+  // сбивать с толку полем для повторного ввода номера.
+  document.getElementById("telegram-login-row").style.display =
+    status.connected ? "none" : "";
+  if (status.connected) {
+    document.getElementById("telegram-login-code-row").style.display =
+      "none";
+    document.getElementById("telegram-login-password-row").style.display =
+      "none";
+    document.getElementById("telegram-login-status").textContent = "";
+  }
+}
+
+async function refreshTelegramAccount() {
+  try {
+    applyTelegramAccountStatus(await api("/api/telegram/status"));
+  } catch (e) {
+    /* не критично */
+  }
+}
+
 const render = {
   async contacts() {
     lastContacts = await api("/api/contacts");
@@ -3591,6 +3649,7 @@ const render = {
   async settings() {
     loadOutreachSettings(); // заполняет и сводку, и фильтры удалёнки на других вкладках
     loadAccounts();
+    refreshTelegramAccount();
     const [status, salary, limits] = await Promise.all([
       api("/api/status"),
       api("/api/settings/salary"),
@@ -3710,64 +3769,33 @@ const render = {
         : "none";
     });
 
-    // Карточка на площадку (тот же язык, что у "Обзора") + клик на
-    // "Настроить" открывает боковую панель со всеми полями — вместо
-    // одной широкой таблицы на 9 колонок, которая на узком окне не
-    // читалась (см. Stripe/Linear/Vercel: список карточек со статусом
-    // и быстрым тумблером снаружи, drawer с деталями по клику).
+    // Площадки — тем же списком, что на Главной; строка открывает ту же
+    // шторку. Готовность (чего не хватает) — в тексте строки.
+    lastStatus = status;
     const platformCards = document.getElementById("platform-cards");
-    // Telegram и «Сайты компаний» не откликаются как обычные площадки —
-    // у них уже есть свои полноценные вкладки (settings-tg-quick,
-    // settings-direct), дублировать их здесь карточкой с чужими для них
-    // ярлыками "Расписание"/"Автоотклик" только путает.
-    platformCards.innerHTML = status.sources
-      .filter((s) => !OWN_CHANNELS.has(s.name))
-      .map((s, i) => {
-        const missing = (s.readiness && s.readiness.missing) || [];
-        const ready = s.readiness && s.readiness.ready;
-        const readinessTitle = missing.length
-          ? "Не хватает: " + missing.join(", ")
-          : s.readiness && s.readiness.resume && s.readiness.resume.warning
-            ? s.readiness.resume.warning
-            : "Данных для подключения достаточно";
-        return `
-      <div class="source-card stagger-item" data-source="${s.name}" style="animation-delay:${staggerDelay(i, 25)}">
-        <h3 title="${readinessTitle}">${ready ? "✅" : "⚠️"} ${sourceIconHtml(s.name)}${sourceLabel(s.name)}</h3>
-        ${missing.length ? `<p class="muted small" style="margin:-6px 0 8px">${missing.join(", ")}</p>` : ""}
-        <div class="row"><span>Проверяю</span><span>${s.schedule_enabled ? intervalLabel(s.interval_hours) : "выключено"}</span></div>
-        <div class="row"><span>Автоотклик</span><span>${s.auto_apply ? "включён" : "выключен"}</span></div>
-        ${s.name === "headhunter" ? `<div class="row"><span>Автоответ в чате</span><span>${s.auto_reply ? "включён" : "выключен"}</span></div><div class="row"><span>Бамп резюме</span><span>${s.auto_bump_resume ? "включён" : "выключен"}</span></div>` : ""}
-        ${s.name === "djinni" ? `<div class="row"><span>Поднятие профиля</span><span>${s.auto_bump_resume ? "включено" : "выключено"}</span></div>` : ""}
-        <div class="platform-card-quick">
-          <label title="Бот проверяет по расписанию"><input type="checkbox" class="p-schedule-quick switch" data-source="${s.name}" ${s.schedule_enabled ? "checked" : ""} /> в расписании</label>
-          <button type="button" class="btn btn-secondary btn-small p-open-drawer" data-source="${s.name}">⚙ Настроить</button>
-        </div>
-      </div>`;
-      })
+    const rowFor = (src) => {
+      const m = sourceRowModel(src, lastRunNow);
+      const missing = (src.readiness && src.readiness.missing) || [];
+      if (missing.length) {
+        m.dot = "warn";
+        m.statusText = `не хватает: ${missing.join(", ")}`;
+      }
+      if (src.name === "direct") m.name = "Сайты компаний";
+      return m;
+    };
+    const groups = [
+      ["Свои каналы", status.sources.filter((x) => OWN_CHANNELS.has(x.name) && x.name !== "telegram")],
+      ["Русские площадки", status.sources.filter((x) => !INTL_SOURCES.has(x.name) && !OWN_CHANNELS.has(x.name))],
+      ["Зарубежные площадки", status.sources.filter((x) => INTL_SOURCES.has(x.name))],
+    ];
+    platformCards.innerHTML = groups
+      .map(([title, list]) => `<div class="grp">${title}</div>${list.map((x, i) => platformRowHtml(rowFor(x), i)).join("")}`)
       .join("");
+    platformCards.querySelectorAll(".platform-row-wrap").forEach((w) => w.setAttribute("draggable", "false"));
+    platformCards.querySelectorAll("[data-open-source]").forEach((btn) =>
+      btn.addEventListener("click", () => openPlatform(btn.dataset.openSource))
+    );
 
-    platformCards.querySelectorAll(".p-schedule-quick").forEach((box) => {
-      box.addEventListener("change", async () => {
-        box.disabled = true;
-        try {
-          await api("/api/settings", {
-            method: "POST",
-            body: JSON.stringify({
-              source: box.dataset.source,
-              schedule_enabled: box.checked,
-            }),
-          });
-          flashSaved(document.getElementById("settings-table"), null);
-        } finally {
-          box.disabled = false;
-        }
-      });
-    });
-
-    // «Настроить» открывает ту же шторку площадки, что и строка на Главной.
-    platformCards.querySelectorAll(".p-open-drawer").forEach((btn) => {
-      btn.addEventListener("click", () => openPlatform(btn.dataset.source));
-    });
   },
 
   async telegram() {
@@ -3777,42 +3805,7 @@ const render = {
       api("/api/settings/telegram"),
       api("/api/telegram/conversations"),
     ]);
-
-    const badge = document.getElementById("telegram-status-badge");
-    const note = document.getElementById("telegram-status-note");
-    // Ключи уже есть — поля не показываем, чтобы не путали.
-    if (status.configured) {
-      document.getElementById("tg-keys-row").outerHTML = `<div id="tg-keys-row" class="ok-text small">✓ Ключи сохранены</div>`;
-    }
-    if (!status.configured) {
-      badge.className = "badge off";
-      badge.innerHTML = '<span class="badge-dot"></span>не настроено';
-      note.textContent =
-        "Сначала шаг 1: вставьте api_id и api_hash ниже.";
-    } else if (status.connected) {
-      // Вход нужен один раз — дальше блок подключения свёрнут.
-      document.getElementById("tg-connect-panel").open = false;
-      badge.className = "badge on";
-      badge.innerHTML = '<span class="badge-dot"></span>подключено';
-      note.textContent = "";
-    } else {
-      badge.className = "badge off";
-      badge.innerHTML = '<span class="badge-dot"></span>не авторизовано';
-      note.textContent = "Введите номер телефона и код ниже.";
-    }
-    // Форма входа (телефон/код/пароль) нужна только пока не
-    // подключено — если уже авторизовано, незачем занимать место и
-    // сбивать с толку полем для повторного ввода номера.
-    document.getElementById("telegram-login-row").style.display =
-      status.connected ? "none" : "";
-    if (status.connected) {
-      document.getElementById("telegram-login-code-row").style.display =
-        "none";
-      document.getElementById("telegram-login-password-row").style.display =
-        "none";
-      document.getElementById("telegram-login-status").textContent = "";
-    }
-
+    applyTelegramAccountStatus(status);
     fillTelegramRules(settings);
 
     const unreadCount = conversations.filter((c) => c.unread).length;
@@ -4265,17 +4258,18 @@ function openResumeAuditModal(result) {
   document.getElementById("resume-audit-rewrite-body").textContent =
     result.rewritten_experience || "";
 
-  const overlay = document.getElementById("resume-audit-overlay");
-  overlay.style.display = "flex";
-  trapFocus(overlay);
+  // Разбор — на самой странице «Мои резюме», под кнопками, а не окном.
+  const panel = document.getElementById("resume-audit-overlay");
+  panel.hidden = false;
+  panel.scrollIntoView({ block: "start", behavior: REDUCE_MOTION ? "auto" : "smooth" });
 }
 
 function closeResumeAuditModal() {
-  hideOverlay(document.getElementById("resume-audit-overlay"));
+  document.getElementById("resume-audit-overlay").hidden = true;
 }
 
 function isResumeAuditModalOpen() {
-  return document.getElementById("resume-audit-overlay").style.display !== "none";
+  return false;
 }
 
 // Настройки → «Сайты компаний»: переключатели и список компаний.
@@ -4391,8 +4385,14 @@ async function addDirectCompany() {
 }
 
 function switchSettingsTab(paneId) {
+  if (!document.getElementById(paneId)) paneId = "settings-search";
   if (paneId === "settings-direct") loadDirectSettings().catch(() => {});
   if (paneId === "settings-backups") loadBackups().catch(() => {});
+  if (paneId === "settings-auto") loadAutoPane().catch(() => {});
+  if (paneId === "settings-resume-short") renderSettingsResumeSummary().catch(() => {});
+  if (paneId === "settings-look") fillLookPane();
+  if (paneId === "settings-tg-quick") loadTelegramWatch();
+  hideSettingsSearch();
   document.querySelectorAll("#settings-jump button").forEach((b) => {
     const isTarget = b.dataset.settingsTab === paneId;
     b.classList.toggle("active", isTarget);
@@ -4582,44 +4582,291 @@ function flashSaved(pane, btn) {
 // Автосохранение: любое изменение в разделе сохраняется само через
 // секунду — кнопкой «Сохранить» этого раздела. Ключи и пароли (ИИ,
 // Telegram) — с явной кнопкой, их вводят один раз и ждут подтверждения.
+// Разделы, которые сохраняются сами: [контейнер, скрытая кнопка
+// «Сохранить», которую нажимает автосохранение]. Кнопки читают значения
+// полей по id, поэтому «Отменить» просто возвращает полям прежние
+// значения и сохраняет ещё раз.
 const AUTOSAVE = [
   ["settings-search", "search-save"],
+  ["settings-exclude", "search-save"],
   ["settings-limits", "limits-save"],
+  ["settings-llm-costs", "limits-save"],
   ["settings-tg-quick", "tgq-save"],
   ["settings-outreach", "outreach-save"],
   ["tg-rules-panel", "tg-settings-save"],
+  ["tg-source-auto", "tg-settings-save"],
+  ["settings-llm-provider-block", "llm-provider-save"],
 ];
+
+function snapshotFields(container) {
+  const snap = {};
+  container.querySelectorAll("input[id], select[id], textarea[id]").forEach((el) => {
+    if (el.type === "file" || el.type === "password") return;
+    if (el.type === "checkbox" || el.type === "radio") snap[el.id] = el.checked;
+    else if (el.multiple) snap[el.id] = Array.from(el.selectedOptions).map((o) => o.value);
+    else snap[el.id] = el.value;
+  });
+  const active = container.querySelector("#provider-grid .provider-card.active");
+  if (active) snap.__provider = active.dataset.provider;
+  return snap;
+}
+
+function restoreFields(container, snap) {
+  if (snap.__provider) applyLLMSelection(snap.__provider, snap["llm-model"]);
+  Object.entries(snap).forEach(([id, value]) => {
+    const el = document.getElementById(id);
+    if (!el || id.startsWith("__")) return;
+    if (el.type === "checkbox" || el.type === "radio") el.checked = value;
+    else if (el.multiple) Array.from(el.options).forEach((o) => (o.selected = value.includes(o.value)));
+    else el.value = value;
+    if (el.tagName === "TEXTAREA" && el.dataset.tagInputInit) renderTagChips(el);
+  });
+}
 
 function initAutosave() {
   AUTOSAVE.forEach(([paneId, btnId]) => {
     const pane = document.getElementById(paneId);
     const btn = document.getElementById(btnId);
     if (!pane || !btn) return;
-    btn.hidden = true;
-    const note = document.createElement("span");
-    note.className = "muted small autosave-note";
-    note.textContent = "Изменения сохраняются сами";
-    btn.after(note);
+    let before = null;
     let timer = null;
+    const loaded = () => !pane.dataset.needsLoad || pane.dataset.loaded === "1";
+    // Снимок «как было» — до первой правки: фокус или нажатие в разделе.
+    const remember = () => {
+      if (!before && loaded()) before = snapshotFields(pane);
+    };
+    pane.addEventListener("focusin", remember);
+    pane.addEventListener("pointerdown", remember);
     pane.addEventListener("change", (e) => {
-      if (e.target.type === "file") return;
-      if (pane.dataset.needsLoad && pane.dataset.loaded !== "1") return; // ещё не загрузили
+      if (e.target.type === "file" || e.target.type === "password") return;
+      if (!loaded()) return; // ещё не загрузили — не затираем пустым
+      if (e.target.closest(".no-autosave")) return;
       clearTimeout(timer);
-      note.textContent = "Сохраняю…";
       const field = e.target;
-      timer = setTimeout(() => {
+      const prev = before;
+      timer = setTimeout(async () => {
         btn.click();
-        setTimeout(() => {
-          note.textContent = "✓ Сохранено";
-          // Раньше "сохранено" было видно только далёкой надписью у
-          // кнопки — само поле, которое человек только что поправил,
-          // никак не подтверждало это на месте.
+        await new Promise((r) => setTimeout(r, 700));
+        const statusEl = btn.parentElement.querySelector('[id$="-status"]');
+        if (statusEl && /ошибка/i.test(statusEl.textContent || "")) {
+          showToast(statusEl.textContent, "error", 6000);
+          return;
+        }
+        before = snapshotFields(pane);
+        showSavedToast("Сохранено", prev
+          ? async () => {
+              restoreFields(pane, prev);
+              btn.click();
+              before = prev;
+              showToast("Вернул как было", "info");
+            }
+          : null);
+        if (field.classList) {
           field.classList.remove("save-flash");
           void field.offsetWidth;
           field.classList.add("save-flash");
-        }, 700);
-      }, 900);
+        }
+      }, 700);
     });
+  });
+}
+
+// ---------- Настройки: «Отклики и переписка», «Мои резюме», «Вид» ----------
+
+async function loadAutoPane() {
+  const [status, salary, search] = await Promise.all([
+    api("/api/status"),
+    api("/api/settings/salary"),
+    api("/api/settings/search"),
+  ]);
+  lastStatus = status;
+  renderAutoAll(status);
+  renderAutoChat(status);
+  const hh = status.sources.find((x) => x.name === "headhunter") || {};
+  const set = (id, prop, value) => {
+    const el = document.getElementById(id);
+    if (el) el[prop] = value;
+  };
+  set("hh-auto-reply", "checked", !!hh.auto_reply);
+  set("hh-cover-to-chat", "checked", !!hh.chat_cover_letter_followup);
+  set("hh-auto-bump", "checked", !!hh.auto_bump_resume);
+  set("hh-auto-reminder", "checked", !!hh.auto_reminder);
+  set("hh-reminder-days", "value", hh.reminder_follow_up_days ?? 7);
+  set("hh-salary-expectations", "value", salary.hh_salary_expectations || "");
+  set("search-once-per-company", "checked", !!search.apply_once_at_company);
+}
+
+function initAutoPane() {
+  const hhSwitch = (id, field, on, off) => {
+    const box = document.getElementById(id);
+    box?.addEventListener("change", async () => {
+      const v = box.checked;
+      await saveSourceSettings("headhunter", { [field]: v }, v ? on : off, { [field]: !v });
+      loadAutoPane();
+    });
+  };
+  hhSwitch("hh-auto-reply", "auto_reply", "автоответ в чате включён", "автоответ в чате выключен");
+  hhSwitch("hh-cover-to-chat", "chat_cover_letter_followup", "письмо в чат после отклика включено", "письмо в чат после отклика выключено");
+  hhSwitch("hh-auto-bump", "auto_bump_resume", "поднимать резюме", "не поднимать резюме");
+  hhSwitch("hh-auto-reminder", "auto_reminder", "напоминания уходят сами", "напоминания ждут вашего «Отправить»");
+  document.getElementById("hh-reminder-days")?.addEventListener("change", (e) => {
+    saveSourceSettings("headhunter", { reminder_follow_up_days: Math.max(0, parseInt(e.target.value, 10) || 0) }, "напоминание · сохранено");
+  });
+  const salary = document.getElementById("hh-salary-expectations");
+  salary?.addEventListener("change", async () => {
+    try {
+      await api("/api/settings/salary", { method: "POST", body: JSON.stringify({ hh_salary_expectations: salary.value.trim() }) });
+      showSavedToast("Зарплата для ответов HR · сохранено");
+    } catch (err) {
+      showToast(err.message.replace(/^\d+: /, ""), "error");
+    }
+  });
+  const once = document.getElementById("search-once-per-company");
+  once?.addEventListener("change", async () => {
+    const v = once.checked;
+    const post = (value) => api("/api/settings/search", { method: "POST", body: JSON.stringify({ apply_once_at_company: value }) });
+    try {
+      await post(v);
+      showSavedToast(v ? "Один отклик в одну компанию" : "Можно несколько откликов в одну компанию", async () => {
+        await post(!v);
+        once.checked = !v;
+      });
+    } catch (err) {
+      showToast(err.message.replace(/^\d+: /, ""), "error");
+      once.checked = !v;
+    }
+  });
+}
+
+async function renderSettingsResumeSummary() {
+  const el = document.getElementById("settings-resume-summary");
+  if (!el) return;
+  const r = await api("/api/resumes");
+  const file = (f, fallback) => (f.exists ? `<span class="mono small">${escapeHtml(f.name)}</span>` : `<span class="${fallback ? "muted" : "err-text"} small">${fallback || "не загружено"}</span>`);
+  el.innerHTML = `
+    <div class="kv"><span>Резюме на русском — HH, GetMatch, Habr, Telegram</span>${file(r.primary)}</div>
+    <div class="kv"><span>Резюме на английском — LinkedIn и зарубежные</span>${file(r.linkedin, "берётся основное")}</div>
+    <div class="kv"><span>Дополнительные — выбор в чате и рассылке</span><span class="mono small">${r.extra.length || "нет"}</span></div>`;
+}
+
+function fillLookPane() {
+  let theme = "system";
+  let density = "comfortable";
+  let motion = "system";
+  try {
+    theme = localStorage.getItem("cj-theme") || "system";
+    density = localStorage.getItem("cj-density") || "comfortable";
+    motion = localStorage.getItem("cj-motion") || "system";
+  } catch (e) {}
+  document.getElementById("look-theme").value = theme;
+  document.getElementById("look-density").value = density;
+  document.getElementById("look-motion").value = motion;
+}
+
+function initLookPane() {
+  document.getElementById("look-theme").addEventListener("change", (e) => {
+    setTheme(e.target.value, e.target);
+    showSavedToast("Тема сохранена");
+  });
+  document.getElementById("look-density").addEventListener("change", (e) => {
+    const compact = e.target.value === "compact";
+    if (compact) document.documentElement.dataset.density = "compact";
+    else delete document.documentElement.dataset.density;
+    try {
+      localStorage.setItem("cj-density", e.target.value);
+    } catch (err) {}
+    showSavedToast(compact ? "Компактная плотность" : "Обычная плотность");
+  });
+  document.getElementById("look-motion").addEventListener("change", (e) => {
+    const reduce = e.target.value === "reduce";
+    if (reduce) document.documentElement.dataset.motion = "reduce";
+    else delete document.documentElement.dataset.motion;
+    REDUCE_MOTION = reduce || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    try {
+      localStorage.setItem("cj-motion", e.target.value);
+    } catch (err) {}
+    showSavedToast(reduce ? "Анимации выключены" : "Анимации как в системе");
+  });
+}
+
+// ---------- Поиск по настройкам ----------
+
+function settingsSearchIndex() {
+  const items = [];
+  let group = "";
+  const groupOf = {};
+  document.querySelectorAll("#settings-jump > *").forEach((el) => {
+    if (el.classList.contains("settings-jump-label")) group = el.textContent.trim();
+    else if (el.dataset.settingsTab) groupOf[el.dataset.settingsTab] = { group, name: el.textContent.trim() };
+  });
+  document.querySelectorAll(".settings-pane").forEach((pane) => {
+    const where = groupOf[pane.id] || { group: "", name: pane.querySelector("h3")?.textContent || "" };
+    pane.querySelectorAll(".field-row, .field-block").forEach((field, i) => {
+      const title = field.querySelector(".field-title")?.textContent.trim();
+      if (!title) return;
+      const hint = field.querySelector(".field-hint")?.textContent.trim() || "";
+      items.push({ pane: pane.id, field, title, hint, path: `${where.group} → ${where.name}`, key: `${pane.id}:${i}` });
+    });
+  });
+  return items;
+}
+
+function hideSettingsSearch() {
+  const box = document.getElementById("settings-search-results");
+  if (!box || box.hidden) return;
+  box.hidden = true;
+  document.querySelector(".settings-content")?.classList.remove("is-searching");
+}
+
+function renderSettingsSearch(query) {
+  const box = document.getElementById("settings-search-results");
+  const q = query.trim().toLowerCase();
+  if (!q) {
+    hideSettingsSearch();
+    return;
+  }
+  const words = q.split(/\s+/);
+  const found = settingsSearchIndex().filter((it) => {
+    const text = `${it.title} ${it.hint} ${it.path}`.toLowerCase();
+    return words.every((w) => text.includes(w));
+  });
+  box.hidden = false;
+  document.querySelector(".settings-content").classList.add("is-searching");
+  box.innerHTML = `<div class="card-head"><h3>${found.length ? `Найдено настроек: ${found.length}` : "Ничего не нашлось"}</h3><span class="muted small">${found.length ? "нажмите — откроется раздел, и поле подсветится" : "попробуйте «лимит», «резюме» или «Telegram»"}</span></div>
+    <div class="settings-hits">${found
+      .slice(0, 40)
+      .map((it, i) => `<button type="button" class="row settings-hit" data-hit="${i}"><span class="row-main"><span class="row-title">${escapeHtml(it.title)}</span><span class="row-sub">${escapeHtml(it.path)}${it.hint ? " · " + escapeHtml(truncate(it.hint, 90)) : ""}</span></span>${CHEVRON_SVG}</button>`)
+      .join("")}</div>`;
+  box.querySelectorAll("[data-hit]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const it = found[Number(b.dataset.hit)];
+      document.getElementById("settings-find-input").value = "";
+      switchSettingsTab(it.pane);
+      let parent = it.field.parentElement;
+      while (parent) {
+        if (parent.tagName === "DETAILS") parent.open = true;
+        parent = parent.parentElement;
+      }
+      it.field.scrollIntoView({ block: "center", behavior: REDUCE_MOTION ? "auto" : "smooth" });
+      it.field.classList.remove("field-found");
+      void it.field.offsetWidth;
+      it.field.classList.add("field-found");
+      it.field.querySelector("input, select, textarea, button")?.focus({ preventScroll: true });
+    })
+  );
+}
+
+function initSettingsSearch() {
+  const input = document.getElementById("settings-find-input");
+  if (!input) return;
+  input.addEventListener("input", () => renderSettingsSearch(input.value));
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      input.value = "";
+      hideSettingsSearch();
+    } else if (e.key === "Enter") {
+      document.querySelector("#settings-search-results [data-hit]")?.click();
+    }
   });
 }
 
@@ -4971,10 +5218,6 @@ function initCommandPalette() {
     .getElementById("cover-letter-close")
     .addEventListener("click", closeCoverLetterModal);
 
-  const resumeAuditOverlay = document.getElementById("resume-audit-overlay");
-  resumeAuditOverlay.addEventListener("click", (e) => {
-    if (e.target === resumeAuditOverlay) closeResumeAuditModal();
-  });
   document
     .getElementById("resume-audit-close")
     .addEventListener("click", closeResumeAuditModal);
@@ -5496,7 +5739,13 @@ async function loadAccounts() {
       const goto = b.dataset.accountGoto;
       if (goto.startsWith("settings-")) {
         switchSettingsTab(goto);
-        if (b.dataset.anchor) document.getElementById(b.dataset.anchor)?.scrollIntoView({ block: "center" });
+        // «Вход в Telegram» — блок входа здесь же, в Подключениях.
+        const anchor = b.dataset.anchor || (goto === "settings-accounts" ? "tg-connect-panel" : "");
+        const target = anchor && document.getElementById(anchor);
+        if (target) {
+          if (target.tagName === "DETAILS") target.open = true;
+          target.scrollIntoView({ block: "center", behavior: REDUCE_MOTION ? "auto" : "smooth" });
+        }
         if (goto === "settings-tg-quick") loadTelegramWatch();
       } else {
         switchTab(goto);
@@ -6222,6 +6471,9 @@ function initDashboard() {
   setInterval(updateActivity, 4000);
   initSettingsDirtyTracking();
   initAutosave();
+  initAutoPane();
+  initLookPane();
+  initSettingsSearch();
   initCommandPalette();
   initKeyboardShortcuts();
 
@@ -6809,6 +7061,7 @@ function initDashboard() {
       // провайдера, а не оставляет значения от предыдущего (иначе,
       // например, gpt-4o-mini тихо отправился бы в запрос к Groq).
       applyLLMSelection(card.dataset.provider, null);
+      card.dispatchEvent(new Event("change", { bubbles: true }));
     });
   });
 

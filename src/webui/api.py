@@ -1960,7 +1960,8 @@ def _setup_checklist(ctx: AppContext) -> list[dict]:
             "Вход в Telegram",
             tg_logged_in,
             "чтобы читать каналы с вакансиями",
-            "telegram",
+            # Вход — в Настройки → Подключения (раньше — в «Общении»).
+            "settings-accounts",
         ),
     ]
     if tg_logged_in:
@@ -2096,7 +2097,7 @@ def _broken_later(ctx: AppContext) -> list[dict]:
             {
                 "id": "tg_login",
                 "count": "!",
-                "view": "telegram",
+                "view": "settings-accounts",
                 "text": "Telegram-парсер включён, но вход в Telegram слетел "
                 "— войдите снова",
             }
@@ -3774,7 +3775,15 @@ _SEARCH_LIST_FIELDS = (
 # "Формат работы" hh.ru (см. HeadHunterSource/HeadHunterBrowserSource) —
 # top-level булевы флаги, а не список, поэтому отдельный кортеж со своей
 # ветвью сохранения ниже (set_top_level_bool_field, не set_list_field).
-_SEARCH_BOOL_FIELDS = ("remote", "hybrid", "onsite", "only_with_salary")
+_SEARCH_BOOL_FIELDS = (
+    "remote",
+    "hybrid",
+    "onsite",
+    "only_with_salary",
+    # «Один отклик в одну компанию»: остальные вакансии компании, куда
+    # уже откликнулись, пропускаются (main.py, apply_once_at_company).
+    "apply_once_at_company",
+)
 
 
 class SearchSettingsUpdate(BaseModel):
@@ -3787,6 +3796,7 @@ class SearchSettingsUpdate(BaseModel):
     hybrid: Optional[bool] = None
     onsite: Optional[bool] = None
     only_with_salary: Optional[bool] = None
+    apply_once_at_company: Optional[bool] = None
     levels: Optional[list[str]] = None
     employment_types: Optional[list[str]] = None
     posted_within_days: Optional[int] = None

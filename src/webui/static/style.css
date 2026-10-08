@@ -6187,3 +6187,754 @@ input.num-input {
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
 }
+
+/* =====================================================================
+   Настройки одним списком (этап 4).
+   ===================================================================== */
+
+.settings-find {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: min(380px, 100%);
+}
+
+.settings-find svg {
+  position: absolute;
+  left: 11px;
+  width: 15px;
+  height: 15px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+
+.settings-find input {
+  width: 100%;
+  padding-left: 34px;
+}
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+#settings-jump.settings-nav {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+}
+
+#settings-jump.settings-nav button {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font: 500 13.5px/1 var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--t-hover) var(--ease);
+}
+
+#settings-jump.settings-nav button:hover,
+#settings-jump.settings-nav button.active {
+  color: var(--text);
+  background: transparent;
+}
+
+#settings-jump.settings-nav .settings-jump-label {
+  padding: 14px 10px 4px;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+#settings-jump.settings-nav .settings-jump-label:first-of-type {
+  padding-top: 0;
+}
+
+#settings-jump.settings-nav .tab-indicator {
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+}
+
+.settings-content {
+  min-width: 0;
+}
+
+.settings-pane {
+  max-width: 780px;
+  padding: 20px 24px 8px;
+}
+
+.settings-content.is-searching .settings-pane {
+  display: none !important;
+}
+
+.pane-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 16px;
+}
+
+.pane-head h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.pane-lead {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.settings-pane > h4,
+.pane-group h4 {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.settings-pane > h4 {
+  margin: 16px 0 8px;
+}
+
+.pane-group {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 0;
+  border-top: 1px solid var(--border-soft);
+}
+
+.pane-group.is-risk > .field-hint:first-of-type {
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--warn-bg);
+  color: var(--text);
+}
+
+.pane-toggle {
+  padding-bottom: 12px;
+}
+
+.pane-more > summary {
+  cursor: pointer;
+  width: fit-content;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.pane-more > summary:hover {
+  color: var(--text);
+}
+
+.pane-more-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.pane-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 16px 0;
+}
+
+.field-row-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.field-row-inline > input[type="text"],
+.field-row-inline > input[type="email"],
+.field-row-inline > input[type="password"] {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.field-row-inline .field-hint input.num-input {
+  margin: 0 4px;
+}
+
+.sub-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.secret-field {
+  position: relative;
+  display: inline-flex;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.secret-field input {
+  width: 100%;
+  padding-right: 36px;
+}
+
+.secret-field .copy-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.check-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.check-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-2);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color var(--t-hover) var(--ease),
+    background-color var(--t-hover) var(--ease);
+}
+
+.check-chip:hover {
+  border-color: var(--border-hover);
+}
+
+.check-chip:has(input:checked) {
+  background: var(--surface-3);
+  border-color: var(--border-hover);
+  color: var(--text);
+}
+
+.check-chip input {
+  margin: 0;
+}
+
+.btn-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.inline-help {
+  display: inline;
+}
+
+.inline-help > summary {
+  display: inline;
+  cursor: pointer;
+  color: var(--link);
+  list-style: none;
+}
+
+.inline-help[open] > summary {
+  margin-bottom: 4px;
+}
+
+.inline-help ol,
+.inline-help p {
+  margin: 6px 0 0;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.risk-note > summary {
+  cursor: pointer;
+  width: fit-content;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.risk-note p {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.filter-coverage:empty {
+  display: none;
+}
+
+.settings-results {
+  padding: 8px;
+  max-width: 780px;
+}
+
+.settings-hit .row-sub {
+  white-space: normal;
+}
+
+.field-found {
+  animation: field-found 1.6s var(--ease);
+  border-radius: var(--radius-sm);
+}
+
+@keyframes field-found {
+  0%,
+  40% {
+    background: var(--surface-3);
+    box-shadow: 0 0 0 6px var(--surface-3);
+  }
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+.kv-list.flat {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.platform-settings-list .grp:first-child {
+  padding-top: 0;
+}
+
+/* Провайдеры ИИ: компактная плитка — у кого ключ (точка), кто отвечает
+   сейчас (рамка), выбранный — светлая рамка. */
+.provider-grid {
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.provider-card {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: 500 12.5px/1.2 var(--font-sans);
+}
+
+.provider-card::before {
+  display: none;
+}
+
+.provider-card svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.provider-card:hover {
+  transform: none;
+  border-color: var(--border-hover);
+  color: var(--text);
+}
+
+.provider-card.active {
+  border-color: var(--text);
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.provider-card.has-key::after {
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  background: var(--good);
+}
+
+.provider-card.llm-live {
+  border-color: var(--good);
+  box-shadow: none;
+}
+
+#provider-grid-toggle {
+  align-self: flex-start;
+}
+
+/* Плотность «компактно»: меньше вертикальных отступов в списках и таблицах. */
+:root[data-density="compact"] .row,
+:root[data-density="compact"] .todo-row {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+:root[data-density="compact"] td,
+:root[data-density="compact"] th {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+:root[data-density="compact"] .pane-group {
+  gap: 10px;
+  padding: 12px 0;
+}
+
+/* «Анимации: выключить» в Настройки → Вид — как системное «уменьшить
+   движение». */
+:root[data-motion="reduce"] *,
+:root[data-motion="reduce"] *::before,
+:root[data-motion="reduce"] *::after {
+  animation-duration: 1ms !important;
+  animation-delay: 0ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 1ms !important;
+  scroll-behavior: auto !important;
+}
+
+@media (max-width: 900px) {
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #settings-jump.settings-nav {
+    position: static;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 4px;
+    padding-bottom: 4px;
+  }
+
+  #settings-jump.settings-nav button {
+    width: auto;
+    flex: none;
+    white-space: nowrap;
+  }
+
+  #settings-jump.settings-nav .settings-jump-label {
+    display: none;
+  }
+
+  #settings-jump.settings-nav .tab-indicator {
+    display: none;
+  }
+
+  #settings-jump.settings-nav button.active {
+    background: var(--surface-2);
+    border-color: var(--border-soft);
+  }
+}
+
+/* «Что нового» — небольшая карточка в углу, не поверх главного блока. */
+.changelog-popover {
+  left: auto;
+  right: 24px;
+  bottom: 24px;
+  transform: none;
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(60vh, 460px);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  animation: toast-in 280ms var(--spring) both;
+}
+
+.changelog-popover ul {
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.changelog-popover li + li {
+  margin-top: 6px;
+}
+
+.tgq-status:empty {
+  display: none;
+}
+
+#usage-note:empty {
+  display: none;
+}
+
+#settings-llm-costs .field-block p {
+  margin: 0;
+}
+
+/* ---------- Мои резюме ---------- */
+
+#view-resume .card + .card {
+  margin-top: 16px;
+}
+
+.resume-table {
+  margin-top: 0;
+  border-color: var(--border-soft);
+}
+
+.resume-head {
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  font-size: 12px;
+}
+
+.pdf-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-width: 30px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font: 600 9.5px/1 var(--font-mono);
+  margin-right: 4px;
+}
+
+.resume-routing {
+  margin-top: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.wide-input {
+  width: 100%;
+}
+
+.resume-action-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.resume-action-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--border-soft);
+  border-left: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.resume-action-card h4 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.resume-action-card p {
+  margin: 0 0 6px;
+  flex: 1;
+}
+
+.resume-action-card .btn {
+  align-self: flex-start;
+}
+
+.resume-action-card.is-review {
+  border-color: var(--border-soft);
+}
+
+.gen-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  min-height: 28px;
+}
+
+.gen-progress {
+  background: var(--surface-3);
+}
+
+.gen-progress-bar {
+  background: var(--text-2);
+}
+
+.resume-audit-panel h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.resume-audit-score-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 8px 0 12px;
+}
+
+.resume-audit-score .hero-figure {
+  font-size: 40px;
+  font-weight: 500;
+}
+
+.resume-audit-meter-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.meter {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--text-2);
+}
+
+.meter-fill.ok {
+  background: var(--good);
+}
+
+.meter-fill.warn {
+  background: var(--warn);
+}
+
+.meter-fill.err {
+  background: var(--bad);
+}
+
+.resume-audit-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.badge.ok {
+  color: var(--good);
+  background: var(--good-bg);
+  border-color: transparent;
+}
+
+.badge.warn {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: transparent;
+}
+
+.badge.err {
+  color: var(--bad);
+  background: var(--bad-bg);
+  border-color: transparent;
+}
+
+.resume-audit-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.resume-audit-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.resume-audit-panel details {
+  margin-top: 16px;
+}
+
+.resume-audit-panel details > summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+#resume-audit-rewrite-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  margin-top: 10px;
+  color: var(--text-2);
+}
+
+@media (max-width: 640px) {
+  .resume-audit-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.resume-audit-columns + div {
+  margin-top: 16px;
+}
+
+.tg-account .inline-panel > summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.tg-account .filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.tg-account .filters input {
+  flex: 1 1 200px;
+}
+
+.tg-account ol {
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.accounts-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.account-row {
+  border-top: 1px solid var(--border-soft);
+}
+
+.account-row:first-child {
+  border-top: 0;
+}

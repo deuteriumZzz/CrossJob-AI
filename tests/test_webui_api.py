@@ -849,6 +849,18 @@ def test_post_search_settings_partial_update_leaves_others(client):
     assert body["locations"] == ["Berlin"]
 
 
+def test_search_settings_apply_once_at_company_round_trip(client):
+    assert (
+        client.get("/api/settings/search").json()["apply_once_at_company"]
+        is False
+    )
+    body = client.post(
+        "/api/settings/search", json={"apply_once_at_company": True}
+    ).json()
+    assert body["apply_once_at_company"] is True
+    assert api.get_ctx().config["apply_once_at_company"] is True
+
+
 def test_post_telegram_settings_updates_channels(client):
     unset = client.get("/api/settings/telegram").json()
     assert unset["channels"] == []
