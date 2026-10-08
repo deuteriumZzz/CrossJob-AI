@@ -5614,6 +5614,22 @@ def _edit_form_answer(
     )
 
 
+def _is_own_hh_message(entry: dict, text: str) -> bool:
+    """fetch_new_employer_messages берёт последний элемент чата с
+    data-qa*="chat-message" — им бывает кусок нашего же письма (8.10, ТД
+    ГраСС: бот собрался «ответить» на своё сопроводительное). Своё
+    узнаём по тексту. ponytail: письма старше cover_letter_retention_days
+    вычищаются — тогда страхует только классификатор ниже; точнее —
+    различать автора по разметке чата, когда её проверят вживую."""
+    sample = " ".join(text.split())[:80]
+    ours = [entry.get("cover_letter") or ""]
+    if entry.get("reminder_sent_at"):
+        ours.append(hh_reminder_text(entry))
+    return bool(sample) and any(
+        sample in " ".join(own.split()) for own in ours if own
+    )
+
+
 def _answer_headhunter_messages(
     parameters: dict,
     driver,
@@ -5682,6 +5698,10 @@ def _answer_headhunter_messages(
         if entry is None or entry["status"] != "applied":
             continue
         if message_id == entry.get("last_replied_message_id"):
+            continue
+        if _is_own_hh_message(entry, message["text"]):
+            # Своё же письмо/напоминание, а не ответ работодателя.
+            applied_log.mark_replied("headhunter", external_id, message_id)
             continue
 
         external_link = find_external_link(message["text"])

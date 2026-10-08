@@ -711,3 +711,20 @@ def test_captcha_during_hh_chat_check_is_reported_to_telegram(monkeypatch):
         )
     assert len(sent) == 1 and "капчу" in sent[0]
     driver.quit.assert_called_once()
+
+
+def test_own_cover_letter_fragment_is_not_an_employer_message():
+    """8.10, ТД ГраСС: последним «сообщением» чата оказался кусок нашего
+    же письма, и бот собрался на него отвечать."""
+    entry = {
+        "cover_letter": "Здравствуйте!\n\nУ меня пока нет опыта управления "
+        "кластерами Kubernetes,\nно я строил Helm-чарты.",
+        "reminder_sent_at": None,
+    }
+    assert main._is_own_hh_message(
+        entry, "У меня пока нет опыта управления кластерами Kubernetes, но я"
+    )
+    assert not main._is_own_hh_message(
+        entry, "Добрый день! Когда вам удобно созвониться?"
+    )
+    assert not main._is_own_hh_message({"cover_letter": ""}, "Добрый день!")

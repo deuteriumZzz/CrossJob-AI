@@ -1252,3 +1252,35 @@ def test_pending_telegram_send_attaches_resume_file_after_text():
         )
         assert sent_files == [("hr_user", "/tmp/resume.pdf")]
         assert w.pending_telegram_sends_count(out) == 0
+
+
+def test_call_runs_sync_style_client_method_inside_gateway_loop():
+    """8.10: telethon.sync делает методы клиента синхронными вне
+    запущенного loop — вызванный в потоке вызывающего, c.get_entity()
+    шёл в чужой loop («event loop must not change after connection»).
+    call() должен вызывать его уже внутри loop шлюза."""
+    import asyncio
+    import threading
+
+    from telethon import helpers
+
+    from src.job_sources.telegram.watcher import TelegramWatcher
+
+    class FakeClient:
+        async def _get(self, name):
+            return name, asyncio.get_running_loop()
+
+        def get_entity(self, name):  # как у telethon.sync
+            coro = self._get(name)
+            loop = helpers.get_running_loop()
+            return coro if loop.is_running() else loop.run_until_complete(coro)
+
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    try:
+        watcher = TelegramWatcher.__new__(TelegramWatcher)
+        watcher.loop, watcher.client = loop, FakeClient()
+        name, used_loop = watcher.call(lambda c: c.get_entity("chan"))
+        assert name == "chan" and used_loop is loop
+    finally:
+        loop.call_soon_threadsafe(loop.stop)

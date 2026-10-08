@@ -2,10 +2,12 @@ import time
 from typing import Optional
 from urllib.parse import urlencode
 
+import httpx
 from bs4 import BeautifulSoup
 
 from src.job import Job
 from src.job_sources.filters import linkedin_search_params
+from src.job_sources.user_agents import random_user_agent
 
 SEARCH_URL = "https://www.linkedin.com/jobs/search/"
 SCROLL_PAUSE_SECONDS = 1.5
@@ -131,7 +133,39 @@ def _read_description(driver) -> str:
     )
 
 
+# Публичная (без входа) страница вакансии. С 8.10 залогиненная страница
+# LinkedIn не отдаёт блок «About the job» вовсе (шапка есть, описания нет
+# даже через 12 с) — гостевая отдаёт полный текст. Плюс: вакансию не
+# открываем в аккаунте лишний раз, Easy Apply откроет её сам.
+_GUEST_POSTING_URL = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{}"
+_GUEST_DESCRIPTION_SELECTOR = ".show-more-less-html__markup, .description__text"
+
+
+def _guest_description(job_id: str) -> str:
+    if not job_id:
+        return ""
+    try:
+        response = httpx.get(
+            _GUEST_POSTING_URL.format(job_id),
+            headers={"User-Agent": random_user_agent()},
+            timeout=20,
+            follow_redirects=True,
+        )
+    except httpx.HTTPError:
+        return ""
+    if response.status_code != 200:
+        return ""
+    node = BeautifulSoup(response.text, "html.parser").select_one(
+        _GUEST_DESCRIPTION_SELECTOR
+    )
+    return node.get_text("\n", strip=True) if node else ""
+
+
 def load_job_description(driver, job: Job) -> Job:
+    text = _guest_description(job.external_id)
+    if text:
+        job.description = text
+        return job
     driver.get(job.link)
     deadline = time.monotonic() + _DESCRIPTION_WAIT_SECONDS
     while True:

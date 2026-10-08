@@ -38,3 +38,32 @@ def test_empty_description_when_page_never_hydrates():
     ):
         search.load_job_description(driver, job)
     assert job.description == ""
+
+
+def test_description_from_guest_page_without_opening_it_in_account():
+    """8.10: залогиненная страница перестала отдавать «About the job» —
+    описание берём с публичной гостевой страницы, вакансию в аккаунте
+    не открываем."""
+    job = Job(link="https://www.linkedin.com/jobs/view/42/", external_id="42")
+    driver = _driver("<div></div>")
+    response = MagicMock(
+        status_code=200,
+        text='<div class="show-more-less-html__markup">Build APIs</div>',
+    )
+    with patch.object(search.httpx, "get", return_value=response) as get:
+        search.load_job_description(driver, job)
+    assert job.description == "Build APIs"
+    assert get.call_args.args[0].endswith("/jobPosting/42")
+    driver.get.assert_not_called()
+
+
+def test_falls_back_to_account_page_when_guest_fails():
+    job = Job(link="https://www.linkedin.com/jobs/view/42/", external_id="42")
+    driver = _driver(
+        '<div class="jobs-description__content">Python role</div>'
+    )
+    with patch.object(
+        search.httpx, "get", return_value=MagicMock(status_code=429)
+    ), patch.object(search.time, "sleep"):
+        search.load_job_description(driver, job)
+    assert job.description == "Python role"

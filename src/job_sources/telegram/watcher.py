@@ -378,11 +378,18 @@ class TelegramWatcher(threading.Thread):
         factory: Callable[[Any], Coroutine[Any, Any, Any]],
         timeout: float = 60,
     ) -> Any:
-        """Выполнить действие через подключение шлюза из другого потока."""
+        """Выполнить действие через подключение шлюза из другого потока.
+        factory вызывается уже внутри loop шлюза: telethon.sync (его
+        импортирует telegram/client.py) делает методы клиента синхронными
+        вне запущенного loop — вызванный здесь же, в потоке вызывающего,
+        c.get_entity() сразу шёл в чужой loop и падал «The asyncio event
+        loop must not change after connection» (8.10, Talanto)."""
         assert self.loop is not None, "шлюз ещё не запущен"
-        future = asyncio.run_coroutine_threadsafe(
-            factory(self.client), self.loop
-        )
+
+        async def run() -> Any:
+            return await factory(self.client)
+
+        future = asyncio.run_coroutine_threadsafe(run(), self.loop)
         return future.result(timeout)
 
     # --- работа ---------------------------------------------------------
