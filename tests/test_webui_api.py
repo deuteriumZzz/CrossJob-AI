@@ -1226,3 +1226,15 @@ def test_telegram_send_resume_404s_with_clear_message_when_no_resume(
     assert res.status_code == 400
     assert "резюме" in res.json()["detail"].lower()
     assert _FakeTelegramClient.sent == []
+
+
+def test_direct_settings_toggles_talanto_schedule(client):
+    """Talanto включается галочкой в «Сайтах компаний»: пишет
+    talanto.schedule_enabled, остальные источники не трогает."""
+    assert client.get("/api/direct/summary").json()["talanto"] is False
+    response = client.post("/api/direct/settings", json={"talanto": True})
+    assert response.status_code == 200
+    assert response.json()["talanto"] is True
+    assert client.get("/api/direct/summary").json()["talanto"] is True
+    off = client.post("/api/direct/settings", json={"talanto": False})
+    assert off.json()["talanto"] is False

@@ -4105,6 +4105,7 @@ async function loadDirectSettings() {
   const d = await api("/api/direct/summary");
   document.getElementById("direct-wwr").checked = d.wwr;
   document.getElementById("direct-hn").checked = d.hn;
+  document.getElementById("direct-talanto").checked = d.talanto;
   loadDirectCompanies();
 }
 
@@ -4112,6 +4113,7 @@ async function saveDirectSetting(e) {
   const field = {
     "direct-wwr": "wwr",
     "direct-hn": "hn",
+    "direct-talanto": "talanto",
   }[e.target.id];
   if (!field) return;
   try {

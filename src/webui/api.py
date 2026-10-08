@@ -2987,6 +2987,9 @@ def get_direct_summary(ctx: AppContext = Depends(get_ctx)) -> dict:
         "companies": len(all_companies(ctx.config)),
         "wwr": direct.get("wwr", True) is not False,
         "hn": direct.get("hn", True) is not False,
+        "talanto": bool(
+            (ctx.config.get("talanto") or {}).get("schedule_enabled")
+        ),
         "in_base": len(cards),
         "added_week": sum(
             1 for c in cards if c.get("created_at", "") >= week_ago
@@ -3006,18 +3009,23 @@ def get_direct_summary(ctx: AppContext = Depends(get_ctx)) -> dict:
 class DirectSettings(BaseModel):
     wwr: Optional[bool] = None
     hn: Optional[bool] = None
+    talanto: Optional[bool] = None
 
 
 @app.post("/api/direct/settings")
 def post_direct_settings(
     body: DirectSettings, ctx: AppContext = Depends(get_ctx)
 ) -> dict:
-    """Доски удалёнки «Сайтов компаний»: We Work Remotely,
-    HN «Who is hiring»."""
+    """Источники «Сайтов компаний»: We Work Remotely, HN «Who is hiring»
+    и Talanto (вакансии и контакты HR в Базу, по своему расписанию)."""
     for field in ("wwr", "hn"):
         value = getattr(body, field)
         if value is not None:
             set_source_field(ctx.config_file, "direct", field, value)
+    if body.talanto is not None:
+        set_source_field(
+            ctx.config_file, "talanto", "schedule_enabled", body.talanto
+        )
     ctx.reload_config()
     return get_direct_summary(ctx)
 
