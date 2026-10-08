@@ -9,6 +9,7 @@ from typing import Callable, Literal
 
 from src.job import Job
 from src.job_sources.html_report import render_applications_html
+from src.job_sources.job_fit import SCORING_UNAVAILABLE_GAP
 from src.job_sources.market_stats import extract_skills, remote_region
 from src.utils.file_lock import atomic_write_text, state_file_lock
 
@@ -116,6 +117,12 @@ class AppliedLog:
         """Сломанная форма Easy Apply — не приговор вакансии: пробуем ещё
         EASY_APPLY_MAX_ATTEMPTS раз с паузой. Записи старого формата (без
         retry_after) считаются готовыми к повтору."""
+        if entry.get(
+            "status"
+        ) == "skipped_low_fit" and SCORING_UNAVAILABLE_GAP in (
+            entry.get("gaps") or []
+        ):
+            return True  # оценку не получили (сбой ИИ) — оценим заново
         if entry.get("status") != "skipped_easy_apply_failed":
             return False
         if entry.get("retry_count", 1) >= EASY_APPLY_MAX_ATTEMPTS:
@@ -494,6 +501,16 @@ class AppliedLog:
             entry["contacts"] = contacts
 
         def _mutate(data: dict) -> None:
+            # Прежняя запись «оценка недоступна» заменяется новой оценкой.
+            data["applications"][:] = [
+                e
+                for e in data["applications"]
+                if not (
+                    (e["source"], e["external_id"]) == self._key(job)
+                    and e["status"] == "skipped_low_fit"
+                    and SCORING_UNAVAILABLE_GAP in (e.get("gaps") or [])
+                )
+            ]
             if status in ("applied", "dry_run"):
                 # Повтор после сломанной формы удался — старую запись о
                 # сбое убираем, чтобы она не раздувала статистику сбоев.

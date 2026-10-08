@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from typing import Literal, cast
 
@@ -8,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from src.job import Job
 from src.job_sources.llm_provider import get_chat_llm
+from src.logging import logger
 
 _SCORE_PROMPT = ChatPromptTemplate.from_template(
     """
@@ -39,6 +41,11 @@ _SCORE_PROMPT = ChatPromptTemplate.from_template(
 )
 
 FitTier = Literal["good", "weak", "skip"]
+
+# Метка в gaps: оценку получить не удалось (сбой/лимит ИИ). Вакансия такой
+# записью не «закрывается» — журнал считает её готовой к повторной оценке.
+SCORING_UNAVAILABLE_GAP = "оценка недоступна (сбой ИИ)"
+SCORE_RETRY_PAUSES = (3.0, 10.0)
 
 
 class FitAssessment(BaseModel):
@@ -74,9 +81,9 @@ def score_job_fit(
     уже вписано в настройках (hh_salary_expectations/
     linkedin_salary_range_usd), просто теперь ещё и участвует в оценке,
     а не только уходит в текст отклика/письма (см. reply_answerer.py).
-    При сбое LLM (сеть, невалидный ответ) — fail open: считаем матч
-    хорошим и без пробелов, чтобы кривой ответ модели не заблокировал
-    молча все отклики."""
+    При сбое LLM (сеть, лимит, невалидный ответ) — две повторные
+    попытки, затем fail closed: оценка 1 с меткой SCORING_UNAVAILABLE_GAP,
+    отклик не уходит, а вакансия оценивается заново в следующий раз."""
     resume_text = extract_text(str(resume_pdf_path))
     llm = cast(
         BaseChatModel,
@@ -86,19 +93,26 @@ def score_job_fit(
         ),
     )
     chain = _SCORE_PROMPT | llm.with_structured_output(FitAssessment)
-    try:
-        result = chain.invoke(
-            {
-                "resume_text": resume_text,
-                "job_title": job.role,
-                "job_company": job.company,
-                "job_description": job.description,
-                "job_salary": job.salary or "не указана",
-                "salary_expectations": salary_expectations or "не указаны",
-            }
-        )
-        if result is None:
-            return FitAssessment(score=10, gaps=[])
-        return cast(FitAssessment, result)
-    except Exception:
-        return FitAssessment(score=10, gaps=[])
+    inputs = {
+        "resume_text": resume_text,
+        "job_title": job.role,
+        "job_company": job.company,
+        "job_description": job.description,
+        "job_salary": job.salary or "не указана",
+        "salary_expectations": salary_expectations or "не указаны",
+    }
+    for pause in (*SCORE_RETRY_PAUSES, None):
+        try:
+            result = chain.invoke(inputs)
+            if result is not None:
+                return cast(FitAssessment, result)
+        except Exception as e:
+            logger.warning(
+                f"Оценка вакансии «{job.role}» не получена от ИИ: {e}"
+            )
+        if pause is not None:
+            time.sleep(pause)
+    # Fail closed: раньше при сбое возвращалось 10/10 («fail open»), и при
+    # лимите ИИ отклики уходили на любые вакансии (живьём 2026-10-08:
+    # «Программист 1С» и «Продуктовый аналитик» получили 10/10).
+    return FitAssessment(score=1, gaps=[SCORING_UNAVAILABLE_GAP])
