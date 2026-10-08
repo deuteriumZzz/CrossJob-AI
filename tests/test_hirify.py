@@ -3,7 +3,7 @@
 import json
 
 from src.job_sources.hirify.mapping import (
-    channel_from_text,
+    channels_from_links,
     contacts_block,
     parse_job,
     parse_list,
@@ -56,15 +56,22 @@ def test_parse_job_reads_markup():
     assert parse_job("<html></html>", "1") is None
 
 
-def test_channel_and_contacts_block():
-    assert channel_from_text("Вакансия из Telegram канала @jobs_py_ru") == (
-        "jobs_py_ru"
+def test_channels_from_links_and_contacts_block():
+    hrefs = [
+        "https://t.me/job_python/8014",
+        "https://t.me/job_python/8014",
+        "https://t.me/hirify_support_bot",
+        "https://t.me/c/12345/9",
+        "https://t.me/other_jobs",
+        "https://hirify.me/jobs/1",
+    ]
+    assert channels_from_links(hrefs) == ["job_python", "other_jobs"]
+    page = (
+        "Описание ... Ссылки для отклика: email: hr@alfa.ru "
+        "Не входите под своими аккаунтами ... @hirify_support"
     )
-    # название скрыто до входа — канала нет
-    assert channel_from_text("Вакансия из Telegram канала - Название") == ""
-    assert contacts_block(
-        "Контакты: @hr_anna Будьте осторожны @hirify_bot"
-    ) == ("@hr_anna")
+    assert contacts_block(page) == "email: hr@alfa.ru"
+    assert contacts_block("нет окна") == ""
 
 
 def test_matches_filters_by_format_employment_and_period():

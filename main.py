@@ -3993,7 +3993,7 @@ def search_hirify(
                     job.description, bare_mentions=False
                 )
             ]
-            channel = ""
+            channels: list[str] = []
             if (
                 not needs_login
                 and _daily_count(output_folder, HIRIFY_CONTACTS_FILE)
@@ -4012,10 +4012,10 @@ def search_hirify(
                     break
                 except Exception as e:
                     logger.warning(f"Hirify: контакты {job.role}: {e}")
-                    info = {"text": "", "channel": "", "needs_login": False}
+                    info = {"text": "", "channels": [], "needs_login": False}
                 _daily_count_add(output_folder, HIRIFY_CONTACTS_FILE)
                 needs_login = bool(info.get("needs_login"))
-                channel = info.get("channel", "")
+                channels = list(info.get("channels") or [])
                 contacts += [
                     {
                         **c,
@@ -4027,8 +4027,7 @@ def search_hirify(
                     )
                 ]
 
-            if channel:
-                tg_handles.append(channel)
+            tg_handles += channels
             if not job.company and not contacts:
                 applied_log.record(
                     job, "", "", "skipped_requirements", fit.score, fit.gaps

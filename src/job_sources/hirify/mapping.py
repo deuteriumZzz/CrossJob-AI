@@ -20,10 +20,10 @@ _JOB_LINK = re.compile(r'href="/jobs/(\d+)-([^"?#]*)[^"]*"')
 _LD_JSON = re.compile(
     r'<script type="application/ld\+json">(.*?)</script>', re.S
 )
-_CHANNEL = re.compile(
-    r"Вакансия из Telegram канала\s*[-–—:]?\s*(?:https?://t\.me/|@)?"
-    r"([A-Za-z][A-Za-z0-9_]{4,31})"
+_TME_LINK = re.compile(
+    r"https?://t\.me/([A-Za-z][A-Za-z0-9_]{4,31})(?:/\d+)?(?:[/?#]|$)"
 )
+_NOT_CHANNELS = {"hirify_support_bot", "hirify"}
 
 
 def parse_list(html: str) -> list[dict]:
@@ -84,19 +84,29 @@ def parse_job(html: str, job_id: str) -> Optional[tuple[Job, dict]]:
     return job, meta
 
 
-def channel_from_text(text: str) -> str:
-    """Telegram-канал, из которого взята вакансия (виден после входа)."""
-    match = _CHANNEL.search(text or "")
-    return match.group(1) if match else ""
+def channels_from_links(hrefs: list[str]) -> list[str]:
+    """Telegram-каналы, из которых взята вакансия: ссылки вида
+    t.me/<канал>/<id поста> на странице (видны после входа). Служебные
+    адреса hirify не берём."""
+    found: list[str] = []
+    for href in hrefs:
+        match = _TME_LINK.match(href or "")
+        if match:
+            name = match.group(1)
+            if name.lower() not in _NOT_CHANNELS and name not in found:
+                found.append(name)
+    return found
 
 
-_CONTACTS_BLOCK = re.compile(
-    r"Контакты:?(.*?)(?:Будьте осторожны|Текст вакансии|Пожаловаться|$)",
+_CONTACTS_MODAL = re.compile(
+    r"Ссылки для отклика:?(.*?)"
+    r"(?:Не входите|Не забудьте|Ссылки не работают|$)",
     re.S,
 )
 
 
 def contacts_block(page_text: str) -> str:
-    """Текст блока «Контакты» (без подвала и ссылок самого сайта)."""
-    blocks = _CONTACTS_BLOCK.findall(page_text or "")
-    return " ".join(b.strip() for b in blocks if b.strip())
+    """Текст окна «Ссылки для отклика» (после «Показать контакты»):
+    email и ссылки HR, без подвала и ссылок самого сайта."""
+    match = _CONTACTS_MODAL.search(page_text or "")
+    return match.group(1).strip() if match else ""

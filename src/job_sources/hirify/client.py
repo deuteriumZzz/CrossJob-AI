@@ -18,10 +18,11 @@ from selenium.webdriver.common.by import By
 from src.job_sources.block_detection import raise_if_blocked, visible_text
 from src.job_sources.hirify.mapping import (
     BASE_URL,
-    channel_from_text,
+    channels_from_links,
     contacts_block,
 )
 from src.job_sources.user_agents import random_user_agent
+from src.logging import logger
 from src.utils.chrome_utils import init_browser, is_driver_dead
 
 PAGE_WAIT_SECONDS = 4
@@ -87,29 +88,66 @@ class HirifyClient:
         return self._driver
 
     def show_contacts(self, job_id: str, slug: str) -> dict:
-        """{text, channel, needs_login}: нажимает «Показать контакты» в окне
-        с вашим входом; text — блок «Контакты», channel — Telegram-канал,
-        из которого взята вакансия. needs_login — сайт просит войти (вы
-        не вошли в профиль бота)."""
+        """{text, channels, needs_login}: нажимает «Показать контакты» в
+        окне с вашим входом и читает окно «Ссылки для отклика» (email, ссылки
+        HR); channels — Telegram-каналы, из которых взята вакансия (ссылки
+        t.me/<канал>/<пост> на странице). needs_login — сайт просит войти
+        (вы не вошли в профиль бота)."""
         driver = self._acquire_driver()
+        # В свёрнутом окне страница считает себя скрытой и окно контактов не
+        # открывает (проверено вживую 2026-10-08). Сдвигаем окно за левый
+        # край экрана: страница «видна», пользователю окно почти не видно.
+        try:
+            driver.set_window_rect(x=-3000, y=0, width=1280, height=900)
+        except Exception as e:
+            logger.debug(f"Hirify: окно не сдвинулось: {e}")
+        try:
+            return self._read_contacts(driver, job_id, slug)
+        finally:
+            try:
+                driver.minimize_window()
+            except Exception:
+                pass
+
+    def _read_contacts(self, driver, job_id: str, slug: str) -> dict:
         driver.get(f"{BASE_URL}/jobs/{job_id}-{slug}")
         time.sleep(PAGE_WAIT_SECONDS)
         raise_if_blocked(visible_text(driver))
+        # Дополнительные источники скрыты за «· ещё N источник» — раскрываем.
+        driver.execute_script(
+            "const b=[...document.querySelectorAll('button')].find(b=>"
+            "/ещё \\d+ источник/i.test(b.innerText||''));if(b)b.click();"
+        )
+        hrefs = driver.execute_script(
+            "return [...document.querySelectorAll('a[href]')].map(a=>a.href)"
+        )
         buttons = [
             b
             for b in driver.find_elements(By.CSS_SELECTOR, "button")
             if b.is_displayed()
-            and (b.text or "").strip().lower()
-            in ("контакты", "показать контакты")
+            and (b.text or "").strip().lower().startswith("показать контакты")
         ]
+        text = ""
+        needs_login = False
         for button in buttons[:1]:
             driver.execute_script("arguments[0].click();", button)
-            time.sleep(2.5)
-        page_text = visible_text(driver)
-        lowered = page_text.lower()
-        needs_login = any(marker in lowered for marker in _LOGIN_MARKERS)
+            for _ in range(10):  # окно с контактами подгружается
+                time.sleep(1)
+                page_text = visible_text(driver)
+                lowered = page_text.lower()
+                if any(m in lowered for m in _LOGIN_MARKERS):
+                    needs_login = True
+                    break
+                text = contacts_block(page_text)
+                if text and "загружаем" not in text.lower():
+                    break
+                text = ""
+            driver.execute_script(
+                "document.dispatchEvent(new KeyboardEvent('keydown',"
+                "{key:'Escape'}));"
+            )
         return {
-            "text": "" if needs_login else contacts_block(page_text),
-            "channel": "" if needs_login else channel_from_text(page_text),
+            "text": text,
+            "channels": channels_from_links(hrefs),
             "needs_login": needs_login,
         }
