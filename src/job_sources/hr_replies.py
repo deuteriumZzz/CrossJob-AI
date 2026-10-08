@@ -528,8 +528,10 @@ _COMPANY_EMAIL_PROMPT = ChatPromptTemplate.from_template(
       деятельности или на вакансию, если она указана. Не выдумывай факты
       о компании, которых нет в данных ниже.
     - Дальше — список из 2-3 пунктов (каждый с "* " в начале строки):
-      самые релевантные достижения из резюме под профиль компании, с
-      цифрами и масштабом, а не общими словами. Это единственное
+      самые релевантные достижения из резюме под требования вакансии
+      (её текст ниже, если есть; иначе — под профиль компании), с
+      цифрами и масштабом, а не общими словами. Ссылку на вакансию в
+      письмо не пиши — она добавится отдельно. Это единственное
       исключение из общего правила "без списков с метками" ниже — только
       для этого блока.
     - Завершение: одна фраза, что готов обсудить на звонке. Про контакты
@@ -548,6 +550,9 @@ _COMPANY_EMAIL_PROMPT = ChatPromptTemplate.from_template(
     Сайт: {website}
     Вакансия: {vacancy}
     На что сделать упор: {emphasis}
+
+    Текст вакансии:
+    {vacancy_text}
 
     Резюме:
     {resume_text}
@@ -744,6 +749,7 @@ def generate_company_email(
                 "company": card.get("company") or "не указана",
                 "website": card.get("website") or "не указан",
                 "vacancy": vacancy.get("title") or "не указана",
+                "vacancy_text": vacancy.get("text") or "не указан",
                 "emphasis": card.get("emphasis") or "не указано",
                 "resume_text": extract_text(str(resume_pdf_path)),
             }
@@ -765,6 +771,11 @@ def generate_company_email(
     text = _strip_model_signoff(text, _candidate_own_contacts(parameters))
     # Вторая проверка по скиллу humanizer: остались признаки — одна правка.
     text = humanize(text, llm_api_key)
+    # Ссылка на вакансию — кодом, после humanize(): модель не потеряет и
+    # не исказит её, и она не съедает лимит слов письма.
+    link = vacancy.get("link") or ""
+    if link:
+        text += f"\n\n{'Вакансия' if russian else 'Job posting'}: {link}"
     footer = build_contact_footer(parameters, resume_pdf_path)
     # Холодное письмо тысячам компаний — без явной опции "не писать
     # больше" получатель может только молча пожаловаться на спам (бьёт

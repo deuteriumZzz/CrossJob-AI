@@ -521,3 +521,60 @@ def test_fit_telegram_length_cuts_at_sentence_boundary():
     fitted = _fit_telegram_length(long_text)
     assert len(fitted) <= _TELEGRAM_MESSAGE_LIMIT
     assert fitted.endswith((".", "!", "?"))
+
+
+def test_company_email_uses_vacancy_text_and_adds_link(monkeypatch):
+    """ИИ видит текст вакансии; ссылка на неё вставляется кодом перед
+    подписью, а без ссылки письмо такое же, как раньше."""
+    import pdfminer.high_level
+    from langchain_core.runnables import RunnableLambda
+
+    from src.job_sources import hr_replies
+
+    prompts: list[str] = []
+
+    class FakeLLM:
+        def with_structured_output(self, schema):
+            def answer(prompt):
+                prompts.append(prompt.to_string())
+                return schema(
+                    letter="Hello team.", role_in_letter_language="Python Dev"
+                )
+
+            return RunnableLambda(answer)
+
+    monkeypatch.setattr(hr_replies, "get_chat_llm", lambda *a, **k: FakeLLM())
+    monkeypatch.setattr(hr_replies, "humanize", lambda text, key: text)
+    monkeypatch.setattr(
+        hr_replies, "build_contact_footer", lambda *a: "me@gmail.com"
+    )
+    monkeypatch.setattr(hr_replies, "_candidate_own_contacts", lambda p: [])
+    monkeypatch.setattr(pdfminer.high_level, "extract_text", lambda p: "CV")
+
+    card = {
+        "company": "Acme",
+        "website": "acme.com",
+        "contacts": [],
+        "vacancies": [
+            {
+                "title": "Python Developer",
+                "link": "https://t.me/job_python/8007",
+                "text": "Need FastAPI and {Kafka}",
+            }
+        ],
+    }
+    letter = hr_replies.generate_company_email(
+        Path("cv.pdf"), "Dmitry", "Python Developer", card, "", "key", {}
+    )
+    assert "Need FastAPI and {Kafka}" in prompts[0]
+    assert letter["text"].startswith(
+        "Hello team.\n\nJob posting: https://t.me/job_python/8007\n\n"
+        "Dmitry\nme@gmail.com"
+    )
+
+    del card["vacancies"][0]["link"]
+    letter = hr_replies.generate_company_email(
+        Path("cv.pdf"), "Dmitry", "Python Developer", card, "", "key", {}
+    )
+    assert "Job posting" not in letter["text"]
+    assert letter["text"].startswith("Hello team.\n\nDmitry\nme@gmail.com")
