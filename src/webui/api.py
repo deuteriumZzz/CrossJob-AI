@@ -1414,12 +1414,13 @@ def _contact_events(
 
 
 def _source_kind(source: str) -> str:
-    """Для фильтра и значка в базе: file / telegram / sites / dossier /
-    vacancy."""
+    """Для фильтра и значка в базе: file / telegram / sites / talanto /
+    dossier / vacancy."""
     group = _source_group(source)
     return {
         "Telegram-каналы": "telegram",
         "Сайты компаний": "sites",
+        "Talanto": "talanto",
         "Досье компаний": "dossier",
         "Тексты вакансий": "vacancy",
     }.get(group, "file")
@@ -2478,6 +2479,8 @@ def _source_group(source: str) -> str:
     """Группа источника для фильтра рассылки."""
     if source.startswith("Сайты компаний"):
         return "Сайты компаний"
+    if source.startswith("Talanto"):
+        return "Talanto"
     if source.startswith("файл "):
         return source.split(",")[0]
     # «пост в @канал» — найден в посте (email для отклика, «не писать»),

@@ -1,6 +1,7 @@
 import asyncio
 import threading
 from pathlib import Path
+from typing import Optional
 
 # telethon.sync (не просто telethon!) — иначе TelegramClient остаётся
 # чисто async, и любой синхронный вызов метода (is_user_authorized(),
@@ -105,6 +106,29 @@ class TelegramSourceClient:
                 )
             )
         return list(self._client.iter_messages(channel, limit=limit))
+
+    def entity_kind(self, username: str) -> Optional[str]:
+        """«channel» — канал-рассылка (его посты можно слушать), «group» —
+        группа, «person» — человек или бот, «missing» — такого адреса нет;
+        None — не удалось узнать (сеть, флуд-лимит), спросить позже."""
+        from telethon.errors import (
+            UsernameInvalidError,
+            UsernameNotOccupiedError,
+        )
+        from telethon.tl.types import Channel, User
+
+        try:
+            if self._watcher is not None:
+                entity = self._watcher.call(lambda c: c.get_entity(username))
+            else:
+                entity = self._client.get_entity(username)
+        except (UsernameNotOccupiedError, UsernameInvalidError, ValueError):
+            return "missing"
+        if isinstance(entity, Channel):
+            return "channel" if entity.broadcast else "group"
+        if isinstance(entity, User):
+            return "person"
+        return "missing"
 
     def send_message(self, contact: str, text: str) -> Message:
         if self._watcher is not None:

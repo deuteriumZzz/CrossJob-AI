@@ -787,6 +787,7 @@ const SOURCE_KIND = {
   file: "📄 мой файл",
   telegram: "✈️ Telegram",
   sites: "🏢 сайты компаний",
+  talanto: "🔎 Talanto",
   dossier: "🔎 найден кнопкой",
   vacancy: "💼 вакансия",
 };
