@@ -444,6 +444,21 @@ class AppliedLog:
             and datetime.fromisoformat(e["applied_at"]) >= since
         )
 
+    def daily_counts(self, days: int) -> list[int]:
+        """Реальные (status=applied) отклики по дням за последние days
+        дней, от самого старого к сегодняшнему — для мини-графиков в
+        карточках Главной."""
+        today = datetime.now().astimezone().date()
+        counts = [0] * days
+        for e in self._data["applications"]:
+            if e["status"] != "applied":
+                continue
+            day = datetime.fromisoformat(e["applied_at"]).astimezone().date()
+            index = days - 1 - (today - day).days
+            if 0 <= index < days:
+                counts[index] += 1
+        return counts
+
     def count_in_previous_period(self, period: Period) -> int:
         """То же скользящее окно, что у count_in_period(), но сдвинутое
         на один период назад — для тренда "больше/меньше, чем в

@@ -48,7 +48,8 @@ const SOURCE_ICON = {
   himalayas: { text: "HM", color: "#476fd1" },
   djinni: { text: "DJ", color: "#27825b" },
   avito: { text: "AV", color: "#6b4c9a" },
-  direct: { text: "→", color: "#407e73" },
+  direct: { text: "WW", color: "#407e73" },
+  mail: { text: "@", color: "#5b6068" },
   talanto: { text: "TL", color: "#b4541f" },
   hirify: { text: "HF", color: "#2f6f5e" },
 };
@@ -499,7 +500,6 @@ function switchTab(name) {
 
 let overviewLoaded = false;
 let lastOverviewSnapshot = null;
-let pendingPlatformDrawer = null;
 let historyLoaded = false;
 let lastHistorySnapshot = null;
 let lastHistoryEntries = [];
@@ -1201,8 +1201,121 @@ function plural(n, one, few, many) {
   return m % 10 === 1 ? one : m % 10 >= 2 && m % 10 <= 4 ? few : many;
 }
 
-// «Свои каналы» на Главной: Telegram-парсер и рассылка по почте —
-// не площадки с откликами, а свои способы выйти на работодателя.
+// ---------- Главная: строки площадок и шторка ----------
+
+let lastStatus = null;
+let lastRunNow = null;
+let lastOutreach = null;
+let lastTelegramWatch = null;
+// Площадка, чья шторка открыта сейчас: опрос Главной обновляет её
+// шапку (состояние, счётчик), пока человек ничего в ней не правит.
+let openDrawerSource = null;
+let drawerDirty = false;
+
+const CHEVRON_SVG = `<svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg>`;
+
+// Эмодзи в начале серверных фраз («⛔ …», «🔄 …») — в новом виде их
+// заменяет цветная точка состояния.
+function stripLeadingEmoji(text) {
+  return String(text || "").replace(/^[\p{Extended_Pictographic}️‍\s]+/u, "");
+}
+
+function plogoHtml(name) {
+  const icon = SOURCE_ICON[name] || { text: name.slice(0, 2).toUpperCase(), color: "#5b6068" };
+  return `<span class="plogo" aria-hidden="true" style="background:${icon.color}">${icon.text}</span>`;
+}
+
+function skeletonRowsList(n) {
+  return Array.from({ length: n })
+    .map(() => `<div class="row skeleton-row-line"><span class="skeleton" style="width:24px;height:24px"></span><span class="skeleton" style="height:12px;flex:1"></span><span class="skeleton" style="width:72px;height:6px"></span></div>`)
+    .join("");
+}
+
+// Строка площадки в списке Главной. m — модель из sourceRowModel() или
+// своих каналов: key, name, logo, dot, statusText, counter, pct.
+function platformRowHtml(m, i = 0) {
+  const pct = m.pct == null ? null : Math.max(0, Math.min(100, m.pct));
+  const bar = pct == null
+    ? `<span class="bar is-empty" aria-hidden="true"></span>`
+    : `<span class="bar" aria-hidden="true"><span class="${pct >= 100 ? "full" : pct >= 70 ? "warn" : ""}" style="width:${pct}%"></span></span>`;
+  return `<div class="platform-row-wrap stagger-item" data-source="${m.key}" draggable="true" style="animation-delay:${staggerDelay(i, 40)}">
+    <button type="button" class="row platform-row${m.running ? " is-running" : ""}" data-open-source="${m.key}" aria-label="${escapeHtml(m.name)}: ${escapeHtml(m.statusText)}. Открыть настройки">
+      ${m.logo}
+      <span class="row-main">
+        <span class="row-title">${escapeHtml(m.name)}</span>
+        <span class="row-sub"><span class="dot ${m.dot}"></span><span class="row-sub-text">${escapeHtml(m.statusText)}</span></span>
+      </span>
+      ${m.counter != null ? `<span class="row-count mono">${escapeHtml(m.counter)}</span>` : ""}
+      ${bar}
+      ${CHEVRON_SVG}
+    </button>
+  </div>`;
+}
+
+function sourceRowModel(s, runNow) {
+  const running = !!(runNow?.running && runNow.current_source === s.name);
+  const searchOnly = s.name === "telegram" ? !s.auto_message : !s.auto_apply;
+  const mode = OWN_CHANNELS.has(s.name) ? "собирает вакансии и контакты HR" : searchOnly ? "только ищет" : "откликается сам";
+  let dot = "ok";
+  let text;
+  if (running) {
+    dot = "running";
+    text = "идёт ход — ищу и оцениваю вакансии";
+  } else if (!s.schedule_enabled) {
+    dot = "idle";
+    text = "выключена";
+  } else if (s.status === "blocked" || s.paused) {
+    dot = "warn";
+    text = s.last_error?.summary || "пауза после капчи — нужна проверка на сайте";
+  } else if (s.status === "error") {
+    dot = "error";
+    text = s.last_error?.summary || "ошибка в последнем ходе";
+  } else if (s.status === "never_run") {
+    dot = "never_run";
+    text = `${mode} · ещё не запускалась`;
+  } else {
+    text = `${mode} · проверка ${fmtDay(s.last_run)}`;
+  }
+  const hasLimit = !OWN_CHANNELS.has(s.name) && s.daily_limit;
+  return {
+    key: s.name,
+    name: sourceLabel(s.name),
+    logo: plogoHtml(s.name),
+    dot,
+    statusText: text,
+    counter: hasLimit ? `${s.applied_today}/${s.daily_limit}` : null,
+    pct: hasLimit && s.schedule_enabled ? Math.round((100 * s.applied_today) / s.daily_limit) : null,
+    running,
+  };
+}
+
+function telegramRowModel(w) {
+  const dot = w.running ? "ok" : w.enabled ? "never_run" : "idle";
+  const text = w.running
+    ? `слушает ${w.channels} ${plural(w.channels, "канал", "канала", "каналов")} · найдено ${w.matched}`
+    : w.enabled
+      ? w.daemon_running ? "подключается…" : "включён — заработает после «Запустить»"
+      : "выключен";
+  return { key: "telegram", name: "Telegram-парсер", logo: plogoHtml("telegram"), dot, statusText: text, counter: `${w.channels} кан.`, pct: null };
+}
+
+function mailRowModel(o) {
+  const next = pipelineNext(o);
+  if (next.kind === "empty") {
+    return { key: "mail", name: "Рассылка по почте", logo: plogoHtml("mail"), dot: "idle", statusText: "База пуста — загрузите список компаний", counter: null, pct: null };
+  }
+  const dot = next.tone === "alert" ? "error" : next.tone === "active" ? "running" : next.tone === "waiting" ? "never_run" : "ok";
+  return {
+    key: "mail",
+    name: "Рассылка по почте",
+    logo: plogoHtml("mail"),
+    dot,
+    statusText: stripLeadingEmoji(next.status),
+    counter: `${o.plan.sent_today}/${o.plan.limit}`,
+    pct: o.plan.limit ? Math.round((100 * o.plan.sent_today) / o.plan.limit) : null,
+  };
+}
+
 let lastOwnChannels = "";
 async function renderOwnChannels() {
   let w, o;
@@ -1211,66 +1324,482 @@ async function renderOwnChannels() {
   } catch (e) {
     return;
   }
-  const snapshot = JSON.stringify([w, o]);
-  if (snapshot === lastOwnChannels) return;
-  lastOwnChannels = snapshot;
   lastOutreach = o;
   lastTelegramWatch = w;
+  const own = (lastStatus?.sources || []).filter((s) => OWN_CHANNELS.has(s.name) && s.name !== "telegram");
+  const snapshot = JSON.stringify([w, o, own, lastRunNow]);
+  if (snapshot === lastOwnChannels) return;
+  lastOwnChannels = snapshot;
+  const rows = [telegramRowModel(w)];
+  const byName = Object.fromEntries(own.map((s) => [s.name, s]));
+  if (byName.direct) {
+    rows.push({ ...sourceRowModel(byName.direct, lastRunNow), name: "Сайты компаний" });
+  }
+  rows.push(mailRowModel(o));
+  ["talanto", "hirify"].forEach((n) => byName[n] && rows.push(sourceRowModel(byName[n], lastRunNow)));
   const el = document.getElementById("own-channels");
-  const tgState = w.running ? "ok" : w.enabled ? "never_run" : "error";
-  const tgText = w.running
-    ? "работает — посты приходят за секунды"
-    : w.enabled
-      ? w.daemon_running ? "подключается…" : "включён — заработает после «▶ Запустить»"
-      : "выключен";
-  // Детали открыты/закрыты — помним между обновлениями карточки.
-  const detailsOpen = el.querySelector(".pipeline-more")?.open;
-  el.innerHTML = `${pipelineCardHtml(o)}
-    <div class="source-card own-card">
-      <h3>
-        <input type="checkbox" class="switch" id="own-tg-toggle" title="Включить или выключить парсер" ${w.enabled ? "checked" : ""} />
-        <span class="dot ${tgState}"></span> ${sourceIconHtml("telegram")}Telegram-парсер
-      </h3>
-      <div class="row"><span>Состояние</span><span>${tgText}</span></div>
-      <div class="row"><span>Каналов</span><span>${w.channels}</span></div>
-      ${w.running && w.last_post_at ? `<div class="row"><span>Последний пост</span><span>${relativeTimeRu(new Date(w.last_post_at * 1000).toISOString())}</span></div>` : ""}
-      <div class="row"><span>Вакансий найдено с запуска</span><span>${w.matched}</span></div>
-      <div class="row"><span>Контактов HR в базе</span><span>${w.contacts_collected}</span></div>
-      <div class="row"><span>Ответы HR в диалогах</span><span>${w.running ? "ловит сразу" : "проверяет каждые 30 мин"}</span></div>
-      <div class="own-card-actions">
-        <button type="button" class="btn btn-secondary btn-small" data-own-go="telegram">Открыть</button>
-        <button type="button" class="btn btn-ghost btn-small" data-own-settings="settings-tg-quick">Настроить</button>
-      </div>
-    </div>`;
-  const more = el.querySelector(".pipeline-more"); // в пустом состоянии её нет
-  if (detailsOpen && more) more.open = true;
-  animateCounts(el);
-  bindPipelineCard(el, o);
-  el.querySelectorAll("[data-own-go]").forEach((b) =>
-    b.addEventListener("click", () => {
-      if (b.dataset.baseSource) {
-        document.getElementById("contacts-filter-source").value = b.dataset.baseSource;
-        baseState.page = 0;
+  el.innerHTML = applySourceOrder(rows, "key", "cj-source-order-own").map(platformRowHtml).join("");
+  if (openDrawerSource === "mail" && isPlatformDrawerOpen() && !drawerDirty) openMailDrawer(true);
+  if (openDrawerSource === "telegram" && isPlatformDrawerOpen() && !drawerDirty) openTelegramDrawer(true);
+}
+
+function refreshOwnChannels() {
+  lastOwnChannels = "";
+  renderOwnChannels();
+}
+
+// Сохранение из шторки сразу, без кнопки «Сохранить»: уведомление
+// «… · сохранено» с «Отменить», которое возвращает прежнее значение.
+async function saveSourceSettings(source, body, label, undoBody) {
+  try {
+    await api("/api/settings", { method: "POST", body: JSON.stringify({ source, ...body }) });
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+    return false;
+  }
+  showSavedToast(`${sourceLabel(source)}: ${label}`, undoBody
+    ? async () => {
+        await api("/api/settings", { method: "POST", body: JSON.stringify({ source, ...undoBody }) });
+        showToast(`${sourceLabel(source)}: вернул как было`, "info");
+        afterSourceSaved(source);
       }
-      switchTab(b.dataset.ownGo);
-    })
-  );
-  el.querySelectorAll("[data-own-settings]").forEach((b) =>
-    b.addEventListener("click", () => {
-      switchTab("settings");
-      switchSettingsTab(b.dataset.ownSettings);
-      if (b.dataset.ownSettings === "settings-tg-quick") loadTelegramWatch();
-    })
-  );
-  document.getElementById("own-tg-toggle").addEventListener("change", async (e) => {
+    : null);
+  afterSourceSaved(source);
+  return true;
+}
+
+function afterSourceSaved(source) {
+  lastOverviewSnapshot = "";
+  lastOwnChannels = "";
+  render.overview();
+  if (openDrawerSource === source && isPlatformDrawerOpen()) {
+    refreshSourceDrawerHead(source);
+  }
+}
+
+function statusLineHtml(m) {
+  return `<span class="dot ${m.dot}"></span><span>${escapeHtml(m.statusText)}</span>`;
+}
+
+function fieldRowHtml({ title, hint = "", control, ui = "" }) {
+  return `<div class="field-row"${ui ? ` data-ui="${ui}"` : ""}>
+    <div class="field-text"><div class="field-title">${title}</div>${hint ? `<div class="field-hint">${hint}</div>` : ""}</div>
+    <div class="field-control">${control}</div>
+  </div>`;
+}
+
+function switchHtml(cls, checked, label, extra = "") {
+  return `<input type="checkbox" class="switch ${cls}" ${checked ? "checked" : ""} aria-label="${escapeHtml(label)}" ${extra} />`;
+}
+
+// Причина сбоя и одно действие, чтобы его исправить.
+function fixBlockHtml(s) {
+  const blocked = s.status === "blocked" || s.paused;
+  if (!blocked && s.status !== "error") return "";
+  const err = s.last_error || {};
+  const summary = err.summary || (blocked ? "Площадка на паузе после капчи или проверки на сайте." : "Последний ход закончился ошибкой.");
+  const actions = blocked
+    ? `<button type="button" class="btn btn-primary btn-small" data-drawer-action="unblock">Я прошёл проверку — снять паузу</button>
+       <button type="button" class="btn btn-ghost btn-small" data-drawer-action="accounts">Подключения</button>`
+    : `<button type="button" class="btn btn-primary btn-small" data-drawer-action="run">Повторить сейчас</button>
+       <button type="button" class="btn btn-ghost btn-small" data-drawer-action="logs">Журнал</button>`;
+  return `<div class="fix ${blocked ? "is-warn" : "is-error"}" data-ui="home.platform.error drawer.fix">
+    <span class="dot ${blocked ? "warn" : "error"}"></span>
+    <div class="fix-body">
+      <div>${escapeHtml(summary)}${blocked ? ` Откройте сайт в окне бота, пройдите проверку и нажмите кнопку ниже (то же, что <code>/resume ${s.name}</code> в боте).` : ""}</div>
+      ${err.detail ? `<details class="fix-detail"><summary>Подробности</summary><pre>${escapeHtml(err.detail)}</pre></details>` : ""}
+      <div class="fix-actions">${actions}</div>
+    </div>
+  </div>`;
+}
+
+function sourceDrawerBody(s, limits, salary) {
+  const defaultDaily = s.name === "linkedin" ? limits.linkedin_daily_application_limit : limits.daily_application_limit;
+  const isOwn = OWN_CHANNELS.has(s.name);
+  const lastRunRows = `
+    <div class="kv"><span>Последняя проверка</span><span>${s.schedule_enabled ? fmtDay(s.last_run) : "—"}</span></div>
+    <div class="kv"><span>Следующая проверка</span><span>${s.schedule_enabled ? fmtTime(s.next_run) : "—"}</span></div>
+    ${s.schedule_enabled && s.duration_seconds != null ? `<div class="kv"><span>Последний ход</span><span>${Math.max(1, Math.round(s.duration_seconds / 60))} мин${s.idle_streak >= 2 ? ", пусто — следующая проверка реже" : ""}</span></div>` : ""}`;
+  const readiness = (s.readiness && s.readiness.missing) || [];
+  return `
+    ${fixBlockHtml(s)}
+    ${readiness.length ? `<div class="fix is-warn"><span class="dot warn"></span><div class="fix-body">Не хватает: ${escapeHtml(readiness.join(", "))}</div></div>` : ""}
+    <div class="field-stack">
+      ${fieldRowHtml({ title: "Площадка включена", hint: isOwn ? "Бот собирает здесь вакансии и контакты HR по кругу" : "Бот ищет здесь вакансии по кругу", control: switchHtml("d-schedule", s.schedule_enabled, "Площадка включена"), ui: "drawer.enabled home.platform.toggle" })}
+      ${isOwn ? "" : fieldRowHtml({ title: "Откликаться самому", hint: "Выключено — бот только находит, откликаетесь вы", control: switchHtml("d-auto", s.auto_apply, "Откликаться самому"), ui: "drawer.auto-apply home.platform.mode" })}
+    </div>
+    ${isOwn ? "" : fieldRowHtml({
+      title: "Откликов в день, не больше",
+      hint: `Сегодня отправлено ${s.applied_today}${s.daily_limit_override ? ` · своё значение, по умолчанию ${defaultDaily} <button type="button" class="link-btn" data-drawer-action="daily-reset">вернуть</button>` : " · как у всех площадок"}`,
+      control: `<div class="stepper" data-ui="drawer.daily-limit home.platform.today">
+        <button type="button" class="btn btn-small" data-step="-1" aria-label="Меньше">−</button>
+        <input type="number" class="d-daily-limit mono" min="1" value="${s.daily_limit}" aria-label="Откликов в день" />
+        <button type="button" class="btn btn-small" data-step="1" aria-label="Больше">+</button>
+      </div>`,
+    })}
+    ${isOwn ? "" : `<div class="field-block" data-ui="drawer.positions">
+      <div class="field-title">Должности для поиска</div>
+      <div class="field-hint">Пусто — как в «Что ищу»: ${escapeHtml((s.effective_positions || []).join(", ") || "—")}</div>
+      <textarea class="d-positions" rows="2" placeholder="оставить пустым — использовать общие">${escapeHtml((s.positions_override || []).join("\n"))}</textarea>
+    </div>`}
+    <div class="kv-list" data-ui="home.platform.last-run">${lastRunRows}</div>
+    <details class="drawer-more" data-ui="drawer.more">
+      <summary>Ещё настройки: ${isOwn ? "расписание" : "резюме, расписание, лимиты, фильтры"}</summary>
+      <div class="drawer-more-body">
+        ${fieldRowHtml({
+          title: "Интервал хода, минут",
+          hint: s.continuous_cycle_active ? "Включён «Постоянный цикл» (Настройки → Лимиты и оценка) — свой интервал не действует, все идут по кругу." : "Минимум 3 минуты — почти реалтайм, но не похоже на бота.",
+          control: `<input type="number" class="d-interval num-input" min="3" step="1" value="${Math.round((s.interval_hours ?? 3) * 60)}" ${s.continuous_cycle_active ? "disabled" : ""} aria-label="Интервал хода, минут" />`,
+          ui: "drawer.interval",
+        })}
+        ${isOwn ? "" : fieldRowHtml({
+          title: "Резюме на площадке",
+          hint: "id резюме на сайте площадки, если их несколько",
+          control: `<input type="text" class="d-resume-id" value="${escapeHtml(s.resume_id || "")}" placeholder="id резюме" aria-label="id резюме на площадке" />`,
+          ui: "drawer.resume-id",
+        })}
+        ${isOwn ? "" : fieldRowHtml({
+          title: "Максимум за один заход",
+          hint: `Не дневной лимит. По умолчанию ${limits.job_max_applications}`,
+          control: `<span class="override-field"><input type="number" class="d-max-applications num-input" min="1" value="${s.job_max_applications_override ? s.job_max_applications : ""}" placeholder="${limits.job_max_applications}" ${s.job_max_applications_override ? "" : "disabled"} aria-label="Максимум за один заход" /><label class="override-toggle"><input type="checkbox" class="d-max-applications-override" ${s.job_max_applications_override ? "checked" : ""} /> своё</label></span>`,
+          ui: "drawer.per-run",
+        })}
+        ${isOwn ? "" : `<div class="field-block" data-ui="drawer.locations">
+          <div class="field-title">Свои локации</div>
+          <div class="field-hint">Пусто — как в «Что ищу»${s.name === "linkedin" ? "; у LinkedIn свои локации (linkedin.locations)" : `: ${escapeHtml((s.effective_locations || []).join(", ") || "любые")}`}</div>
+          <textarea class="d-locations" rows="2" placeholder="оставить пустым — использовать общие">${escapeHtml((s.locations_override || []).join("\n"))}</textarea>
+        </div>`}
+        ${sourceFiltersHtml(s, salary)}
+      </div>
+    </details>`;
+}
+
+function sourceFiltersHtml(s, salary) {
+  const remote = s.remote_only_managed ? "" : fieldRowHtml({ title: "Только удалённые вакансии", control: switchHtml("d-remote-only", s.remote_only, "Только удалённые вакансии"), ui: "drawer.filters" });
+  const select = (cls, label, options, value, multiple = false) => fieldRowHtml({
+    title: label,
+    control: `<select class="${cls}" ${multiple ? `multiple size="${options.length}"` : ""} aria-label="${escapeHtml(label)}">${options
+      .map(([v, t]) => `<option value="${v}" ${(multiple ? (value || []).includes(v) : (value || "") === v) ? "selected" : ""}>${t}</option>`)
+      .join("")}</select>`,
+    ui: "drawer.filters",
+  });
+  if (s.name === "linkedin") {
+    return fieldRowHtml({
+      title: "Зарплата для скрининга LinkedIn",
+      hint: "USD в год, диапазоном",
+      control: `<input type="text" class="d-linkedin-salary" value="${escapeHtml(salary.linkedin_salary_range_usd || "")}" placeholder="60000-80000" aria-label="Зарплата для скрининга LinkedIn" /><span class="d-salary-hint field-hint"></span>`,
+      ui: "drawer.linkedin-salary",
+    });
+  }
+  if (s.name === "avito") {
+    return remote
+      + select("d-hc-qualification", "Опыт работы", [["", "Любой"], ["no_experience", "Без опыта"], ["under_1_year", "До 1 года"], ["over_1_year", "Более 1 года"], ["over_3_years", "Более 3 лет"], ["over_5_years", "Более 5 лет"], ["over_10_years", "Более 10 лет"]], s.qualification)
+      + select("d-hc-employment-type", "Занятость", [["", "Любая"], ["full_time", "Полная"], ["part_time", "Частичная"], ["temporary", "Временная"]], s.employment_type);
+  }
+  if (s.name === "getmatch") {
+    return remote + (s.levels_managed ? "" : select("d-gm-experience-level", "Уровень вакансии (пусто — любой)", [["junior", "Junior"], ["middle", "Middle"], ["senior", "Senior"], ["lead", "Lead / Manager"]], s.experience_level, true));
+  }
+  if (s.name === "habr_career") {
+    return remote
+      + (s.levels_managed ? "" : select("d-hc-qualification", "Квалификация", [["", "Любая"], ["intern", "Стажёр (Intern)"], ["junior", "Младший (Junior)"], ["middle", "Средний (Middle)"], ["senior", "Старший (Senior)"], ["lead", "Ведущий (Lead)"]], s.qualification))
+      + select("d-hc-employment-type", "Тип занятости", [["", "Любой"], ["full_time", "Полный рабочий день"], ["part_time", "Неполный рабочий день"]], s.employment_type);
+  }
+  if (s.name === "djinni") {
+    return fieldRowHtml({
+      title: "Поднимать профиль раз в 7 дней",
+      hint: "Кнопка «Bump My Profile» на Djinni — бот нажимает её сам, как только Djinni разрешит",
+      control: switchHtml("d-auto-bump", s.auto_bump_resume, "Поднимать профиль"),
+      ui: "drawer.bump",
+    });
+  }
+  if (s.name === "headhunter") {
+    return `${fieldRowHtml({ title: "Автоответ HR в чате", hint: "Простые вопросы бот закрывает сам, сложные — вам в «Общение»", control: switchHtml("d-auto-reply", s.auto_reply, "Автоответ HR в чате"), ui: "drawer.hh-chat" })}
+      ${fieldRowHtml({ title: "Письмо в чат после отклика", hint: "Если отклик ушёл без письма — досылает его в чат вакансии", control: switchHtml("d-chat-cover-letter-followup", s.chat_cover_letter_followup, "Письмо в чат после отклика") })}
+      ${fieldRowHtml({ title: "Поднимать резюме", control: switchHtml("d-auto-bump", s.auto_bump_resume, "Поднимать резюме на HH"), ui: "drawer.bump" })}
+      ${fieldRowHtml({ title: "Напомнить о себе, если молчат, через", hint: "Дней; 0 — не напоминать. Готовые напоминания — в «Общении»", control: `<input type="number" class="d-reminder-days num-input" min="0" value="${s.reminder_follow_up_days ?? 7}" aria-label="Напомнить через дней" />`, ui: "drawer.reminder-days" })}
+      ${fieldRowHtml({ title: "Отправлять напоминания сами", hint: "Выключено — ждут вашего «Отправить» в «Общении»", control: switchHtml("d-auto-reminder", s.auto_reminder, "Отправлять напоминания сами") })}
+      ${fieldRowHtml({ title: "Зарплата для ответов HR", hint: "Подставляется в автоответ в чате", control: `<input type="text" class="d-hh-salary" value="${escapeHtml(salary.hh_salary_expectations || "")}" placeholder="250000-300000 RUR" aria-label="Зарплата для ответов HR" /><span class="d-salary-hint field-hint"></span>`, ui: "drawer.hh-salary" })}`;
+  }
+  return "";
+}
+
+function sourceDrawerFoot(s, running) {
+  return `<button type="button" class="btn btn-primary" data-drawer-action="${running ? "stop" : "run"}" data-ui="home.platform.run-now">${running ? "Остановить ход" : "Запустить ход сейчас"}</button>
+    ${OWN_CHANNELS.has(s.name) ? "" : `<button type="button" class="btn btn-ghost" data-drawer-action="history" data-ui="home.platform.history">Отклики</button>`}
+    <button type="button" class="btn btn-ghost" data-drawer-action="logs" data-ui="home.platform.logs">Журнал</button>`;
+}
+
+async function openSourceDrawer(name) {
+  let status, limits, salary;
+  try {
+    [status, limits, salary] = await Promise.all([api("/api/status"), api("/api/settings/limits"), api("/api/settings/salary")]);
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+    return;
+  }
+  lastStatus = status;
+  const s = status.sources.find((x) => x.name === name);
+  if (!s) return;
+  const m = sourceRowModel(s, lastRunNow);
+  openDrawerSource = name;
+  drawerDirty = false;
+  const body = openSideDrawer({
+    title: `${plogoHtml(name)}<span>${name === "direct" ? "Сайты компаний" : sourceLabel(name)}</span>`,
+    sub: statusLineHtml(m),
+    body: sourceDrawerBody(s, limits, salary) + (name === "direct" ? `<p class="field-hint">Откуда собирать и какие компании отслеживать — <button type="button" class="link-btn" data-drawer-action="settings-direct">Настройки → Сайты компаний</button>. Компании с подходящими вакансиями попадают в <button type="button" class="link-btn" data-drawer-action="base-sites">Базу</button>.</p>` : ""),
+    foot: sourceDrawerFoot(s, m.running),
+  });
+  bindSourceDrawer(body, s);
+}
+
+async function refreshSourceDrawerHead(name) {
+  if (["telegram", "mail"].includes(name)) return;
+  const s = lastStatus?.sources.find((x) => x.name === name);
+  if (!s) return;
+  const m = sourceRowModel(s, lastRunNow);
+  const sub = document.getElementById("platform-drawer-sub");
+  if (sub) sub.innerHTML = statusLineHtml(m);
+  const foot = document.getElementById("platform-drawer-foot");
+  if (foot && !foot.contains(document.activeElement)) foot.innerHTML = sourceDrawerFoot(s, m.running);
+}
+
+function bindSourceDrawer(body, s) {
+  const name = s.name;
+  const linesOfEl = (el) => el.value.split("\n").map((x) => x.trim()).filter(Boolean);
+  body.querySelectorAll(".d-positions, .d-locations").forEach(initTagInput);
+  body.addEventListener("input", () => (drawerDirty = true));
+
+  const onSwitch = (cls, field, labels) => {
+    const box = body.querySelector(cls);
+    box?.addEventListener("change", () => {
+      const v = box.checked;
+      saveSourceSettings(name, { [field]: v }, v ? labels[0] : labels[1], { [field]: !v });
+    });
+  };
+  onSwitch(".d-schedule", "schedule_enabled", ["включена · сохранено", "выключена · сохранено"]);
+  onSwitch(".d-auto-bump", "auto_bump_resume", ["поднимать резюме · сохранено", "не поднимать резюме · сохранено"]);
+  onSwitch(".d-remote-only", "remote_only", ["только удалённые · сохранено", "любой формат · сохранено"]);
+  onSwitch(".d-auto-reply", "auto_reply", ["автоответ в чате включён", "автоответ в чате выключен"]);
+  onSwitch(".d-chat-cover-letter-followup", "chat_cover_letter_followup", ["письмо в чат после отклика включено", "письмо в чат после отклика выключено"]);
+  onSwitch(".d-auto-reminder", "auto_reminder", ["напоминания уходят сами", "напоминания ждут вашего «Отправить»"]);
+
+  const auto = body.querySelector(".d-auto");
+  auto?.addEventListener("change", async () => {
+    const v = auto.checked;
+    if (v && !(await showConfirm(`${sourceLabel(name)}: бот начнёт сам отправлять отклики — до дневного лимита. Включить?`))) {
+      auto.checked = false;
+      return;
+    }
+    saveSourceSettings(name, { auto_apply: v }, v ? "откликается сам · сохранено" : "только ищет · сохранено", { auto_apply: !v });
+  });
+
+  // Дневной лимит: − N + и ручной ввод. Своё число = «своё значение»
+  // для этой площадки; «вернуть» снимает его.
+  const daily = body.querySelector(".d-daily-limit");
+  if (daily) {
+    let saveTimer = null;
+    const prev = { override: s.daily_limit_override, value: s.daily_limit };
+    const commit = () => {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        const v = Math.max(1, parseInt(daily.value, 10) || 1);
+        daily.value = v;
+        if (v === prev.value && prev.override) return;
+        const undo = prev.override ? { daily_application_limit: prev.value } : { clear_daily_application_limit: true };
+        saveSourceSettings(name, { daily_application_limit: v }, `не больше ${v} откликов в день · сохранено`, undo);
+        prev.override = true;
+        prev.value = v;
+      }, 500);
+    };
+    body.querySelectorAll("[data-step]").forEach((b) =>
+      b.addEventListener("click", () => {
+        daily.value = Math.max(1, (parseInt(daily.value, 10) || 0) + Number(b.dataset.step));
+        commit();
+      })
+    );
+    daily.addEventListener("change", commit);
+  }
+
+  const saveOnChange = (cls, build, label) => {
+    const el = body.querySelector(cls);
+    if (!el) return;
+    el.addEventListener("change", () => {
+      const payload = build(el);
+      if (payload) saveSourceSettings(name, payload, label);
+    });
+  };
+  saveOnChange(".d-positions", (el) => ({ positions: linesOfEl(el) }), "должности · сохранено");
+  saveOnChange(".d-locations", (el) => ({ locations: linesOfEl(el) }), "локации · сохранено");
+  saveOnChange(".d-interval", (el) => ({ interval_hours: Math.max(3, parseInt(el.value, 10) || 3) / 60 }), "интервал · сохранено");
+  saveOnChange(".d-resume-id", (el) => ({ resume_id: el.value.trim() }), "id резюме · сохранено");
+  saveOnChange(".d-reminder-days", (el) => ({ reminder_follow_up_days: Math.max(0, parseInt(el.value, 10) || 0) }), "напоминание · сохранено");
+  saveOnChange(".d-hc-qualification", (el) => ({ qualification: el.value }), "фильтр · сохранено");
+  saveOnChange(".d-hc-employment-type", (el) => ({ employment_type: el.value }), "фильтр · сохранено");
+  saveOnChange(".d-gm-experience-level", (el) => ({ experience_level: Array.from(el.selectedOptions).map((o) => o.value) }), "уровень · сохранено");
+  saveOnChange(".d-max-applications", (el) => ({ job_max_applications: Math.max(1, parseInt(el.value, 10) || 1) }), "максимум за заход · сохранено");
+  const perRunOverride = body.querySelector(".d-max-applications-override");
+  perRunOverride?.addEventListener("change", () => {
+    const input = body.querySelector(".d-max-applications");
+    input.disabled = !perRunOverride.checked;
+    if (perRunOverride.checked) {
+      input.focus();
+    } else {
+      input.value = "";
+      saveSourceSettings(name, { clear_job_max_applications: true }, "максимум за заход — как у всех · сохранено");
+    }
+  });
+
+  body.querySelectorAll(".d-hh-salary, .d-linkedin-salary").forEach((input) => {
+    const hint = input.parentElement.querySelector(".d-salary-hint");
+    const validate = () => {
+      const v = input.value.trim();
+      const ok = !v || /^\d{4,}\s*[-–]\s*\d{4,}(\s*\S+)?$/.test(v);
+      if (hint) {
+        hint.textContent = ok ? "" : `Ожидается диапазон вида «${input.placeholder}»`;
+        hint.classList.toggle("warn-text", !ok);
+      }
+      return ok;
+    };
+    input.addEventListener("input", validate);
+    validate();
+    input.addEventListener("change", async () => {
+      const key = input.classList.contains("d-hh-salary") ? "hh_salary_expectations" : "linkedin_salary_range_usd";
+      try {
+        await api("/api/settings/salary", { method: "POST", body: JSON.stringify({ [key]: input.value.trim() }) });
+        showSavedToast(`${sourceLabel(name)}: зарплата · сохранено`);
+      } catch (err) {
+        showToast(err.message.replace(/^\d+: /, ""), "error");
+      }
+    });
+  });
+}
+
+// Кнопки в шторках Главной: запуск хода, журнал, переходы.
+async function handleDrawerAction(btn) {
+  const action = btn.dataset.drawerAction;
+  const name = openDrawerSource;
+  if (action === "run") {
+    if (!(await showConfirm(`Запустить ${sourceLabel(name)} прямо сейчас? Это реальный прогон, не тест — если включены отклики, они уйдут по-настоящему.`))) return;
+    try {
+      await withButtonLoading(btn, () => api("/api/run-now", { method: "POST", body: JSON.stringify({ sources: [name] }) }));
+    } catch (e) {
+      showToast(`Не удалось запустить ${sourceLabel(name)}: ${e.message}`, "error");
+      return;
+    }
+    showToast(`${sourceLabel(name)}: ход запущен`, "success");
+    lastOverviewSnapshot = "";
+    render.overview();
+    watchSourceRunCompletion(name);
+  } else if (action === "stop") {
+    try {
+      await withButtonLoading(btn, () => api("/api/run-now/stop", { method: "POST" }));
+      showToast(`${sourceLabel(name)}: остановка запрошена — текущий отклик досылается`, "success");
+    } catch (e) {
+      showToast(`Не удалось остановить: ${e.message}`, "error");
+    }
+  } else if (action === "unblock") {
+    try {
+      await withButtonLoading(btn, () => api(`/api/sources/${name}/resume`, { method: "POST" }));
+      showToast(`${sourceLabel(name)}: пауза снята, попробую в ближайший ход`, "success");
+      afterSourceSaved(name);
+      openSourceDrawer(name);
+    } catch (e) {
+      showToast(e.message.replace(/^\d+: /, ""), "error");
+    }
+  } else if (action === "daily-reset") {
+    await saveSourceSettings(name, { clear_daily_application_limit: true }, "дневной лимит — как у всех · сохранено");
+    openSourceDrawer(name);
+  } else if (action === "history") {
+    closePlatformDrawer();
+    document.getElementById("filter-source").value = name;
+    switchTab("history");
+  } else if (action === "logs") {
+    closePlatformDrawer();
+    document.getElementById("log-source").value = name === "mail" ? "" : name;
+    switchTab("logs");
+  } else if (action === "accounts") {
+    closePlatformDrawer();
+    gotoSettings("settings-accounts");
+  } else if (action === "settings-direct") {
+    closePlatformDrawer();
+    gotoSettings("settings-direct");
+  } else if (action === "settings-tg") {
+    closePlatformDrawer();
+    gotoSettings("settings-tg-quick");
+  } else if (action === "base-sites") {
+    closePlatformDrawer();
+    document.getElementById("contacts-filter-source").value = "sites";
+    baseState.page = 0;
+    switchTab("contacts");
+  } else if (action === "base-telegram") {
+    closePlatformDrawer();
+    document.getElementById("contacts-filter-source").value = "telegram";
+    baseState.page = 0;
+    switchTab("contacts");
+  } else if (action === "talk") {
+    closePlatformDrawer();
+    switchTab("telegram");
+  } else if (action === "outreach") {
+    closePlatformDrawer();
+    switchTab("outreach");
+  }
+}
+
+async function watchSourceRunCompletion(name) {
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 3000));
+    let runStatus;
+    try {
+      runStatus = await api("/api/run-now/status");
+    } catch (e) {
+      return;
+    }
+    if (!runStatus.running || runStatus.current_source !== name) break;
+  }
+  showToast(`${sourceLabel(name)}: ход завершён — см. «Вакансии»`, "success");
+  lastOverviewSnapshot = "";
+  render.overview();
+}
+
+function gotoSettings(tab) {
+  switchTab("settings");
+  switchSettingsTab(tab);
+  if (tab === "settings-tg-quick") loadTelegramWatch();
+}
+
+function openTelegramDrawer(refresh = false) {
+  const w = lastTelegramWatch;
+  if (!w) return;
+  const m = telegramRowModel(w);
+  openDrawerSource = "telegram";
+  if (!refresh) drawerDirty = false;
+  const body = openSideDrawer({
+    title: `${plogoHtml("telegram")}<span>Telegram-парсер</span>`,
+    sub: statusLineHtml(m),
+    body: `<div class="field-stack">
+        ${fieldRowHtml({ title: "Парсер включён", hint: "Новый пост с нужным словом — за секунды в боте и в «Общении»", control: switchHtml("d-tg-enabled", w.enabled, "Telegram-парсер включён"), ui: "home.tg" })}
+      </div>
+      <div class="kv-list">
+        <div class="kv"><span>Каналов</span><span class="mono">${w.channels}</span></div>
+        ${w.running && w.last_post_at ? `<div class="kv"><span>Последний пост</span><span>${relativeTimeRu(new Date(w.last_post_at * 1000).toISOString())}</span></div>` : ""}
+        <div class="kv"><span>Вакансий найдено с запуска</span><span class="mono">${w.matched}</span></div>
+        <div class="kv"><span>Контактов HR в Базе</span><span class="mono">${w.contacts_collected}</span></div>
+        <div class="kv"><span>Ответы HR в диалогах</span><span>${w.running ? "ловит сразу" : "проверяет каждые 30 мин"}</span></div>
+      </div>
+      <p class="field-hint">Каналы, ключевые слова, текст «Здравствуйте» и автоотправка — в <button type="button" class="link-btn" data-drawer-action="settings-tg">Настройки → Telegram-парсер</button>. Контакты HR из постов — в <button type="button" class="link-btn" data-drawer-action="base-telegram">Базе</button>.</p>`,
+    foot: `<button type="button" class="btn btn-primary" data-drawer-action="talk">Открыть диалоги</button>
+      <button type="button" class="btn btn-ghost" data-drawer-action="settings-tg">Правила парсера</button>`,
+  });
+  body.querySelector(".d-tg-enabled").addEventListener("change", async (e) => {
+    const on = e.target.checked;
     e.target.disabled = true;
     try {
       // Один переключатель на весь Telegram: парсер + поиск по расписанию.
       await Promise.all([
-        api("/api/settings/telegram-watch", { method: "POST", body: JSON.stringify({ enabled: e.target.checked }) }),
-        api("/api/settings", { method: "POST", body: JSON.stringify({ source: "telegram", schedule_enabled: e.target.checked }) }),
+        api("/api/settings/telegram-watch", { method: "POST", body: JSON.stringify({ enabled: on }) }),
+        api("/api/settings", { method: "POST", body: JSON.stringify({ source: "telegram", schedule_enabled: on }) }),
       ]);
-      showToast(e.target.checked ? "Telegram-парсер включён" : "Telegram-парсер выключен", "success");
+      showSavedToast(on ? "Telegram-парсер включён" : "Telegram-парсер выключен");
     } catch (err) {
       showToast(err.message.replace(/^\d+: /, ""), "error");
     }
@@ -1278,12 +1807,37 @@ async function renderOwnChannels() {
   });
 }
 
-let lastOutreach = null;
-let lastTelegramWatch = null;
+function openMailDrawer(refresh = false) {
+  const o = lastOutreach;
+  if (!o) return;
+  openDrawerSource = "mail";
+  if (!refresh) drawerDirty = false;
+  const m = mailRowModel(o);
+  const body = openSideDrawer({
+    title: `${plogoHtml("mail")}<span>Рассылка по почте</span>`,
+    sub: statusLineHtml(m),
+    body: `<div id="own-mail-card" data-ui="home.pipeline">${pipelineCardHtml(o)}</div>`,
+    foot: `<button type="button" class="btn btn-primary" data-drawer-action="outreach">Открыть рассылку</button>`,
+  });
+  bindPipelineCard(body, o);
+  body.querySelectorAll("[data-own-go]").forEach((b) =>
+    b.addEventListener("click", () => {
+      closePlatformDrawer();
+      switchTab(b.dataset.ownGo);
+    })
+  );
+  body.querySelectorAll("[data-own-settings]").forEach((b) =>
+    b.addEventListener("click", () => {
+      closePlatformDrawer();
+      gotoSettings(b.dataset.ownSettings);
+    })
+  );
+}
 
-function refreshOwnChannels() {
-  lastOwnChannels = "";
-  renderOwnChannels();
+function openPlatform(key) {
+  if (key === "telegram") openTelegramDrawer();
+  else if (key === "mail") openMailDrawer();
+  else openSourceDrawer(key);
 }
 
 // «🏢 Компании и рассылка» — весь путь в одной карточке: собрали → в Базе →
@@ -1451,12 +2005,29 @@ function bindPipelineCard(el, o) {
 }
 
 // Боковая панель поверх Главной — та же, что у окна площадки.
-function openSideDrawer(title, bodyHtml) {
-  document.getElementById("platform-drawer-title").textContent = title;
+// Шторка справа — одна на всё приложение: площадка, письма рассылки,
+// промт для ИИ. Старый вызов openSideDrawer(title, html) тоже работает.
+function openSideDrawer(titleOrOpts, bodyHtml) {
+  const o = typeof titleOrOpts === "object" && titleOrOpts
+    ? titleOrOpts
+    : { title: escapeHtml(titleOrOpts), body: bodyHtml };
+  if (typeof titleOrOpts !== "object") {
+    openDrawerSource = null;
+    drawerDirty = false;
+  }
+  document.getElementById("platform-drawer-title").innerHTML = o.title;
+  const sub = document.getElementById("platform-drawer-sub");
+  sub.innerHTML = o.sub || "";
+  sub.hidden = !o.sub;
   const body = document.getElementById("platform-drawer-body");
-  body.innerHTML = bodyHtml;
-  document.getElementById("platform-drawer-overlay").style.display = "flex";
-  trapFocus(document.getElementById("platform-drawer"));
+  body.innerHTML = o.body;
+  const foot = document.getElementById("platform-drawer-foot");
+  foot.innerHTML = o.foot || "";
+  foot.hidden = !o.foot;
+  const overlay = document.getElementById("platform-drawer-overlay");
+  const wasOpen = overlay.style.display !== "none";
+  overlay.style.display = "flex";
+  if (!wasOpen) trapFocus(document.getElementById("platform-drawer"));
   return body;
 }
 
@@ -1558,13 +2129,57 @@ function openReviewDrawer() {
   });
 }
 
-async function renderTodo() {
+// Кнопка действия у пункта «Нужно ваше решение» — по id пункта с сервера.
+const TODO_ACTIONS = {
+  campaign_drafts: "Просмотреть",
+  drafts: "Ответить",
+  replies: "Открыть",
+  interviews: "Подготовиться",
+  paused: "Исправить",
+  errors: "Открыть",
+  tg_login: "Войти",
+  watch_conn: "Журнал",
+  gateway_silent: "Проверить",
+  low_disk: "Подробнее",
+  linkedin_forms: "Посмотреть",
+  hh_reminders: "Напомнить",
+  tg_pending: "Открыть",
+  mail_stopped: "Исправить",
+};
+
+// Пункты, о которых сервер в /api/todo не знает, но они видны из
+// /api/status и сводки рассылки: очередь сообщений в Telegram,
+// молчащие работодатели на HH, сбои площадок, остановленная рассылка.
+function todoExtras(status) {
+  const extra = [];
+  if (!status) return extra;
+  if (status.pending_telegram_sends) {
+    const n = status.pending_telegram_sends;
+    extra.push({ id: "tg_pending", count: n, view: "telegram", text: `${plural(n, "сообщение ждёт", "сообщения ждут", "сообщений ждут")} отправки в Telegram — уйдут в рабочие часы` });
+  }
+  if (status.hh_reminders_due) {
+    const n = status.hh_reminders_due;
+    extra.push({ id: "hh_reminders", count: n, view: "replies", text: `${plural(n, "отклик", "отклика", "откликов")} на HH давно без ответа — можно напомнить о себе` });
+  }
+  const broken = status.sources.filter((s) => s.schedule_enabled && s.status === "error");
+  if (broken.length) {
+    extra.push({ id: "errors", count: broken.length, view: "overview", source: broken[0].name, text: `${plural(broken.length, "площадка", "площадки", "площадок")} с ошибкой: ${broken.map((s) => sourceLabel(s.name)).join(", ")}` });
+  }
+  const ms = lastOutreach?.mail_status;
+  if (ms?.state === "stopped") {
+    extra.push({ id: "mail_stopped", count: "!", view: ms.goto || "outreach", text: `Рассылка остановлена: ${stripLeadingEmoji(ms.text)}` });
+  }
+  return extra;
+}
+
+async function renderTodo(todo, status = lastStatus) {
   const el = document.getElementById("todo-panel");
-  let todo;
-  try {
-    todo = await api("/api/todo");
-  } catch (e) {
-    return false; // сеть моргнула — не прячем дашборд из-за этого
+  if (!todo) {
+    try {
+      todo = await api("/api/todo");
+    } catch (e) {
+      return false; // сеть моргнула — не прячем дашборд из-за этого
+    }
   }
   lastTodoBadges = todo.badges || {};
   applySubnavBadges();
@@ -1581,9 +2196,9 @@ async function renderTodo() {
     )
     .join("")}</ol>`;
   // Три состояния: 1) не настроено главное (резюме, ключ ИИ, площадка) —
-  // полный мастер для новичка; 2) главное есть, дополнительное нет — одна
-  // тихая строка, её можно раскрыть или скрыть ✕; 3) всё есть — ничего.
-  // Сломалось потом — отдельной строкой в «Что сделать сейчас», не мастером.
+  // чек-лист для новичка вместо подсказки-тура; 2) главное есть,
+  // дополнительное нет — одна тихая строка, её можно раскрыть или скрыть ✕;
+  // 3) всё есть — ничего. Сломалось потом — отдельным пунктом ниже.
   let setupHtml = "";
   const optionalKey = missing.map((c) => c.id).join(",");
   let dismissed = "";
@@ -1592,68 +2207,70 @@ async function renderTodo() {
   } catch (e) {}
   if (missingRequired.length) {
     const next = missingRequired[0];
-    setupHtml = `<div class="setup">
+    setupHtml = `<div class="setup" data-ui="home.setup">
         <div class="setup-head">
-          <h3 style="margin:0">Настройка: ${done} из ${setup.length}</h3>
+          <h3>Готовность: ${done} из ${setup.length}</h3>
           <div class="progress setup-progress"><div style="width:${Math.round((100 * done) / setup.length)}%"></div></div>
         </div>
         <div class="setup-next">
           <div><span class="muted small">Следующий шаг</span><div><b>${escapeHtml(next.label)}</b> — ${escapeHtml(next.hint)}</div></div>
-          ${next.goto ? `<button type="button" class="btn btn-primary" data-setup-goto="${escapeHtml(next.goto)}">Сделать →</button>` : ""}
+          ${next.goto ? `<button type="button" class="btn btn-primary" data-setup-goto="${escapeHtml(next.goto)}">Сделать</button>` : ""}
         </div>
         ${stepsHtml(next)}
       </div>`;
   } else if (missing.length && dismissed !== optionalKey) {
     setupHtml = `<details class="setup-slim">
-        <summary>✓ Всё главное настроено · можно ещё подключить: ${missing.map((c) => escapeHtml(c.label)).join(", ")}
+        <summary>Всё главное настроено · можно ещё подключить: ${missing.map((c) => escapeHtml(c.label)).join(", ")}
           <button type="button" class="icon-btn setup-dismiss" title="Скрыть — всё есть в Настройки → Подключения" aria-label="Скрыть">✕</button></summary>
         ${stepsHtml(null)}
       </details>`;
   }
-  const bindSetup = () => {
-    el.querySelector(".setup-dismiss")?.addEventListener("click", (e) => {
-      e.preventDefault(); // не раскрывать <details>
-      try {
-        // Запоминаем именно этот набор: появится новое — строка вернётся.
-        localStorage.setItem("cj-setup-dismissed", optionalKey);
-      } catch (err) {}
-      el.querySelector(".setup-slim")?.remove();
-    });
-    bindSetupSteps();
-  };
-  const bindSetupSteps = () =>
-    el.querySelectorAll("[data-setup-goto]").forEach((btn) =>
-      btn.addEventListener("click", () => {
-        const goto = btn.dataset.setupGoto;
-        if (goto.startsWith("settings-")) {
-          switchTab("settings");
-          switchSettingsTab(goto);
-          if (goto === "settings-tg-quick") loadTelegramWatch();
-        } else if (goto) {
-          switchTab(goto);
-        }
-      })
-    );
-  if (!todo.items.length) {
-    el.innerHTML = setupHtml + `<div class="todo-calm">✓ Сейчас ничего не ждёт вашего решения.</div>`;
-    bindSetup();
-    return !!missingRequired.length;
+  const items = [...todo.items, ...todoExtras(status)];
+  const badge = document.getElementById("overview-error-badge");
+  if (items.length) {
+    badge.textContent = String(items.length);
+    badge.style.display = "";
+  } else {
+    badge.style.display = "none";
   }
-  el.innerHTML = `${setupHtml}
-    <h3 style="margin:0 0 10px">Что сделать сейчас</h3>
-    ${todo.items
-      .map(
-        (i) => `
-      <button type="button" class="todo-item" data-todo-view="${i.view}">
-        <span class="todo-count">${i.count}</span>
-        <span class="todo-text">${escapeHtml(i.text)}</span>
-        <span class="todo-go" aria-hidden="true">→</span>
-      </button>`
-      )
-      .join("")}`;
+  const head = `<div class="card-head"><h3>Нужно ваше решение</h3><span class="muted small">всё остальное бот делает сам</span></div>`;
+  el.innerHTML = `${setupHtml}${head}${items.length
+    ? `<div class="todo-list">${items
+        .map(
+          (i, n) => `<div class="todo-row stagger-item" style="animation-delay:${staggerDelay(n, 40)}">
+            <span class="todo-count mono">${escapeHtml(String(i.count))}</span>
+            <span class="todo-text">${escapeHtml(stripLeadingEmoji(i.text))}</span>
+            <button type="button" class="btn btn-small" data-todo-view="${escapeHtml(i.view)}" data-todo-id="${escapeHtml(i.id || "")}" data-todo-source="${escapeHtml(i.source || "")}">${TODO_ACTIONS[i.id] || "Открыть"}</button>
+          </div>`
+        )
+        .join("")}</div>`
+    : `<div class="todo-calm"><span class="dot ok"></span>Сейчас ничего не ждёт вашего решения — бот справляется сам.</div>`}`;
+  el.querySelector(".setup-dismiss")?.addEventListener("click", (e) => {
+    e.preventDefault(); // не раскрывать <details>
+    try {
+      // Запоминаем именно этот набор: появится новое — строка вернётся.
+      localStorage.setItem("cj-setup-dismissed", optionalKey);
+    } catch (err) {}
+    el.querySelector(".setup-slim")?.remove();
+  });
+  el.querySelectorAll("[data-setup-goto]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const goto = btn.dataset.setupGoto;
+      if (goto.startsWith("settings-")) gotoSettings(goto);
+      else if (goto) switchTab(goto);
+    })
+  );
   el.querySelectorAll("[data-todo-view]").forEach((btn) => {
-    btn.addEventListener("click", () => switchTab(btn.dataset.todoView));
-  });  bindSetup();
+    btn.addEventListener("click", () => {
+      const view = btn.dataset.todoView;
+      if (btn.dataset.todoSource) openPlatform(btn.dataset.todoSource);
+      else if (btn.dataset.todoId === "paused") {
+        const paused = (lastStatus?.sources || []).find((s) => s.paused || s.status === "blocked");
+        if (paused) openPlatform(paused.name);
+      } else if (view.startsWith("settings-")) gotoSettings(view);
+      else switchTab(view);
+    });
+  });
   return !!missingRequired.length;
 }
 
@@ -2144,25 +2761,37 @@ function stepHead(n, title, state) {
 }
 
 // «Что бот делает сейчас»: последние значимые строки журнала без служебных.
+// «Что бот делает сейчас»: последние понятные строки журнала, или
+// «бот остановлен» с кнопкой запуска.
 async function renderLiveFeed() {
-  const box = document.getElementById("live-feed");
-  if (!box?.open) return;
+  const body = document.getElementById("live-feed-body");
+  const dot = document.getElementById("live-feed-dot");
+  if (!body) return;
+  const running = !!lastStatus?.daemon_running;
+  const busy = !!lastRunNow?.running;
+  dot.className = `dot ${running || busy ? "running" : "idle"}`;
+  if (!running && !busy) {
+    body.innerHTML = `<p class="feed-stopped">Бот остановлен. Площадки не ищут по расписанию; рассылка работает, пока открыто приложение.</p>
+      <button type="button" class="btn btn-small" id="feed-run">Запустить</button>`;
+    body.querySelector("#feed-run").addEventListener("click", () => document.getElementById("daemon-toggle").click());
+    return;
+  }
   try {
     const { lines } = await api("/api/logs?lines=120");
-    const rows = lines
+    const rows = (lines || [])
       .filter((l) => / (INFO|WARNING|ERROR) +\|/.test(l) && !l.includes("api.telegram.org"))
-      .slice(-10)
+      .slice(-8)
       .reverse()
-      .map((l) => {
+      .map((l, i) => {
         const [, time = "", level = "", , msg = l] = l.match(/^\S+ (\S+) \| (\w+) *\| ([^-]*) - (.*)$/) || [];
-        return `<div>${escapeHtml(time.slice(0, 8))} ${level === "INFO" ? "" : "⚠ "}${escapeHtml(msg.slice(0, 160))}</div>`;
+        return `<div class="feed-row stagger-item${level === "INFO" ? "" : " is-warn"}" style="animation-delay:${staggerDelay(i, 40)}"><span class="mono feed-time">${escapeHtml(time.slice(0, 5))}</span><span>${escapeHtml(msg.slice(0, 160))}</span></div>`;
       });
-    document.getElementById("live-feed-body").innerHTML = rows.join("") || "Пока тихо.";
+    body.innerHTML = rows.join("") || `<p class="feed-stopped">Пока тихо — бот ждёт следующего хода.</p>`;
   } catch (e) {
     /* лента необязательна */
   }
 }
-document.getElementById("live-feed")?.addEventListener("toggle", renderLiveFeed);
+
 
 // Пометки «не поддерживается»: по выбранным в «Что ищу» фильтрам — на каких
 // площадках каждый действует, а на каких нет (данные: /api/filters/support).
@@ -2478,46 +3107,196 @@ function progressHtml(label, progress, id) {
 // Карточка на Главной — "постоянный цикл" был спрятан внутри
 // Настроек → Лимиты откликов, а это прямой ответ на "успею ли я в
 // первые 30 кандидатов", так что вынесен на самое видное место.
-function renderSpeedCard(enabled, pendingTelegram, hhRemindersDue) {
-  const el = document.getElementById("speed-card");
-  const queueBadges = [
-    pendingTelegram
-      ? `<a href="#" class="queue-badge" data-view="telegram">⏳ В очереди на отправку в Telegram: ${pendingTelegram}</a>`
-      : "",
-    hhRemindersDue
-      ? `<a href="#" class="queue-badge" data-view="replies">🔔 Молчат долго на HH: ${hhRemindersDue} ${plural(hhRemindersDue, "отклик", "отклика", "откликов")}</a>`
-      : "",
-  ]
-    .filter(Boolean)
-    .join("");
-  el.innerHTML = `
-    <div class="row" style="align-items:center">
-      <span>⚡ Работать без пауз между площадками</span>
-      <label class="checkbox-row" style="margin:0"><input type="checkbox" id="speed-card-toggle" class="switch" ${enabled ? "checked" : ""} /></label>
-    </div>
-    <p class="muted small" style="margin:6px 0 0">${enabled ? "Включено — площадки идут по кругу с короткой паузой, а не ждут часами." : "Выключено — у каждой площадки своё расписание (Настройки → Площадки)."} <a href="#" data-goto-settings="settings-limits">Подробнее в настройках</a></p>
-    ${queueBadges ? `<div class="filters" style="margin-top:10px">${queueBadges}</div>` : ""}
-  `;
-  document.getElementById("speed-card-toggle").addEventListener("change", async (e) => {
-    e.target.disabled = true;
-    try {
-      await api("/api/settings/limits", {
-        method: "POST",
-        body: JSON.stringify({ continuous_cycle_enabled: e.target.checked }),
-      });
-      renderSpeedCard(e.target.checked, pendingTelegram, hhRemindersDue);
-    } catch (err) {
-      showToast(err.message.replace(/^\d+: /, ""), "error");
-      e.target.checked = !e.target.checked;
-      e.target.disabled = false;
-    }
+// ---------- Главная: шапка, карточки, полоса источников ----------
+
+function renderDaemonState(status) {
+  const badge = document.getElementById("daemon-badge");
+  const runningLabel = status.daemon_started_at
+    ? `бот работает · ${formatElapsed(status.daemon_started_at)}`
+    : "бот работает";
+  const gw = status.telegram_gateway;
+  badge.title = gw?.alive ? (gw.connected ? "Telegram-шлюз на связи" : "Telegram-шлюз переподключается") : "";
+  badge.innerHTML = `<span class="badge-dot"></span><span class="btn-label">${
+    status.daemon_running ? (status.daemon_paused ? "бот на паузе" : runningLabel) : "бот остановлен"
+  }${gw?.alive ? (gw.connected ? " · Telegram ✓" : " · Telegram …") : ""}</span>`;
+  badge.classList.toggle("on", status.daemon_running && !status.daemon_paused);
+  badge.classList.toggle("off", !status.daemon_running || !!status.daemon_paused);
+  document.getElementById("brand-dot")?.classList.toggle("is-live", !!status.daemon_running && !status.daemon_paused);
+  // Одна кнопка: «Запустить» ↔ «Остановить» (на паузе — «Возобновить»).
+  const toggleBtn = document.getElementById("daemon-toggle");
+  const isPauseAction = status.daemon_running && !status.daemon_paused;
+  toggleBtn.classList.toggle("is-pause-action", isPauseAction);
+  toggleBtn.classList.toggle("is-paused", !!status.daemon_paused);
+  const label = !status.daemon_running ? "Запустить" : status.daemon_paused ? "Возобновить" : "Остановить";
+  toggleBtn.querySelector(".btn-label").textContent = label;
+  toggleBtn.title = !status.daemon_running
+    ? "Запустить бота: площадки по расписанию, Telegram-парсер, проверка ответов"
+    : status.daemon_paused
+      ? "Возобновить работу бота"
+      : "Остановить бота";
+  const homeRun = document.getElementById("home-run");
+  if (homeRun) {
+    homeRun.textContent = !status.daemon_running ? "Запустить бота" : status.daemon_paused ? "Возобновить" : "Остановить бота";
+    homeRun.classList.toggle("btn-primary", !status.daemon_running || !!status.daemon_paused);
+    homeRun.title = toggleBtn.title;
+  }
+}
+
+// Общий режим «Откликаться / Только искать» — тот же флаг auto_apply,
+// что «Откликаться автоматически» в Настройках, только на виду.
+function modeSources(status) {
+  return status.sources.filter((s) => s.schedule_enabled && !OWN_CHANNELS.has(s.name));
+}
+
+function renderHomeMode(status) {
+  const box = document.getElementById("home-mode");
+  if (!box) return;
+  const on = modeSources(status);
+  const auto = on.filter((s) => s.auto_apply);
+  const state = !on.length ? "none" : auto.length === on.length ? "apply" : auto.length === 0 ? "search" : "mixed";
+  box.dataset.state = state;
+  box.title = state === "mixed"
+    ? `Сейчас сами откликаются ${auto.length} из ${on.length} площадок — выберите один режим для всех`
+    : state === "none" ? "Ни одна площадка не включена" : "";
+  box.querySelectorAll("[data-mode]").forEach((b) => {
+    const sel = b.dataset.mode === state;
+    b.classList.toggle("on", sel);
+    b.setAttribute("aria-checked", sel ? "true" : "false");
+    b.disabled = state === "none";
   });
-  bindGotoSettings(el);
-  el.querySelectorAll(".queue-badge").forEach((a) => {
-    a.addEventListener("click", (e) => {
-      e.preventDefault();
-      switchTab(a.dataset.view);
+  positionSegmented(box);
+}
+
+function positionSegmented(box) {
+  const ind = box.querySelector(".segmented-ind");
+  const sel = box.querySelector("button.on");
+  if (!ind) return;
+  if (!sel) {
+    ind.style.opacity = "0";
+    return;
+  }
+  ind.style.opacity = "1";
+  ind.style.width = `${sel.offsetWidth}px`;
+  ind.style.transform = `translateX(${sel.offsetLeft - 3}px)`;
+}
+
+async function setHomeMode(mode) {
+  const status = await api("/api/status");
+  const on = modeSources(status);
+  if (!on.length) return;
+  const enable = mode === "apply";
+  const targets = on.filter((s) => !!s.auto_apply !== enable);
+  if (!targets.length) return;
+  if (enable && !(await showConfirm(`Бот начнёт сам отправлять отклики на ${targets.length} ${plural(targets.length, "площадке", "площадках", "площадках")} — до дневного лимита каждой. Включить?`))) return;
+  try {
+    for (const s of targets) {
+      await api("/api/settings", { method: "POST", body: JSON.stringify({ source: s.name, auto_apply: enable }) });
+    }
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  }
+  showSavedToast(enable ? "Бот снова откликается сам" : "Только искать: вакансии копятся в «Вакансиях», откликаетесь вы", async () => {
+    for (const s of targets) {
+      await api("/api/settings", { method: "POST", body: JSON.stringify({ source: s.name, auto_apply: !enable }) });
+    }
+    lastOverviewSnapshot = "";
+    render.overview();
+  });
+  lastOverviewSnapshot = "";
+  render.overview();
+}
+
+function renderHomeLimit(status, stats) {
+  const el = document.getElementById("home-limit");
+  if (!el) return;
+  const on = modeSources(status);
+  const sum = on.reduce((acc, s) => acc + (s.daily_limit || 0), 0);
+  const total = status.total_daily_application_limit || 0;
+  const limit = total ? Math.min(total, sum || total) : sum;
+  el.textContent = limit ? `сегодня ${stats.day} из ${limit} откликов` : "";
+  el.title = limit ? (total ? "Общий дневной лимит по всем площадкам (Настройки → Лимиты и оценка)" : "Сумма дневных лимитов включённых площадок") : "";
+}
+
+function sparkPaths(values, w = 96, h = 32) {
+  if (!values.length) return { line: "", area: "" };
+  const max = Math.max(1, ...values);
+  const step = values.length > 1 ? w / (values.length - 1) : w;
+  const pts = values.map((v, i) => [i * step, h - 2 - (v / max) * (h - 4)]);
+  const line = pts.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
+  return { line, area: `${line} L${w} ${h} L0 ${h} Z` };
+}
+
+function kpiCardHtml({ label, help, value, prev, prevLabel, series, i }) {
+  const delta = value - prev;
+  const arrow = delta > 0 ? "↑" : delta < 0 ? "↓" : "·";
+  const tone = delta > 0 ? "good" : delta < 0 ? "bad" : "flat";
+  const text = delta === 0 ? `как ${prevLabel}` : `на ${Math.abs(delta)} ${delta > 0 ? "больше" : "меньше"}, чем ${prevLabel}`;
+  const sp = series ? sparkPaths(series) : null;
+  return `<div class="card kpi-card stagger-item" style="animation-delay:${staggerDelay(i, 40)}">
+    <div class="kpi-label tip" tabindex="0">${escapeHtml(label)}
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 7v4M8 5h.01" stroke-linecap="round"/></svg>
+      <span class="tiptext" role="tooltip">${escapeHtml(help)}</span>
+    </div>
+    <div class="kpi-main">
+      <span class="kpi-value mono" data-target="${value}">0</span>
+      ${sp ? `<svg class="spark" viewBox="0 0 96 32" aria-hidden="true"><path d="${sp.area}" class="spark-area"/><path d="${sp.line}" class="spark-line"/></svg>` : ""}
+    </div>
+    <div class="kpi-delta"><span class="trend-${tone}">${arrow}</span>${escapeHtml(text)}</div>
+  </div>`;
+}
+
+async function renderKpis(stats) {
+  const el = document.getElementById("stats-row");
+  let results = null;
+  try {
+    results = await api("/api/results");
+  } catch (e) {}
+  const daily = stats.daily || [];
+  const cards = [
+    { label: "Откликов сегодня", help: "Реально отправленные отклики с полуночи. Пропуски и тестовые прогоны не считаются.", value: stats.day, prev: stats.prev_day, prevLabel: "вчера", series: daily.slice(-7) },
+    { label: "За неделю", help: "Отклики за последние 7 дней, сравнение — с 7 днями до них.", value: stats.week, prev: stats.prev_week, prevLabel: "на прошлой неделе", series: daily.slice(-14) },
+    { label: "За месяц", help: "Отклики за последние 30 дней, сравнение — с 30 днями до них.", value: stats.month, prev: stats.prev_month, prevLabel: "в прошлом месяце", series: Array.from({ length: Math.ceil(daily.length / 3) }, (_, i) => daily.slice(i * 3, i * 3 + 3).reduce((a, b) => a + b, 0)) },
+  ];
+  if (results) {
+    cards.push({ label: "Ответов работодателей", help: "Ответы, приглашения и офферы за 7 дней — с площадок, из Telegram и на письма рассылки.", value: results.week.replies, prev: results.prev.replies, prevLabel: "неделей раньше", series: null });
+  }
+  el.innerHTML = cards.map((c, i) => kpiCardHtml({ ...c, i })).join("");
+  el.querySelectorAll(".kpi-value").forEach((v) => countUp(v, parseInt(v.dataset.target, 10)));
+}
+
+async function renderHomeSplit() {
+  const el = document.getElementById("home-split");
+  if (!el) return;
+  let r;
+  try {
+    r = await api("/api/results?days=30");
+  } catch (e) {
+    return;
+  }
+  const label = (src) => (src === "email_campaign" ? "Рассылка по почте" : sourceLabel(src));
+  const rows = r.by_source.filter((x) => x.applied > 0).sort((a, b) => b.applied - a.applied);
+  const total = rows.reduce((acc, x) => acc + x.applied, 0);
+  const top = rows.slice(0, 5);
+  const rest = rows.slice(5).reduce((acc, x) => acc + x.applied, 0);
+  const segs = top.map((x, i) => ({ name: label(x.source), value: x.applied, color: `var(--chart-${i + 1})`, replies: x.replies }));
+  if (rest) segs.push({ name: `Прочие: ${rows.slice(5).map((x) => label(x.source)).join(", ")}`, value: rest, color: "var(--chart-6)", replies: rows.slice(5).reduce((a, x) => a + x.replies, 0) });
+  el.innerHTML = `<div class="card-head flat between"><h3 id="home-split-h">Куда ушли отклики за месяц</h3><span class="mono small muted">${total}</span></div>
+    ${total
+      ? `<div class="segs" role="img" aria-label="${escapeHtml(segs.map((x) => `${x.name}: ${x.value}`).join(", "))}">${segs
+          .map((x, i) => `<div class="seg" data-i="${i}" style="flex:${x.value} 1 0;background:${x.color}"></div>`)
+          .join("")}</div>
+        <div class="seg-caption small muted" id="home-split-caption">Наведите на полосу, чтобы увидеть долю площадки</div>
+        <div class="seg-legend">${segs
+          .map((x) => `<div class="seg-key"><span class="seg-swatch" style="background:${x.color}"></span><span class="seg-name">${escapeHtml(x.name)}</span><span class="mono">${x.value}</span></div>`)
+          .join("")}</div>`
+      : `<p class="small muted">За 30 дней откликов пока нет — включите площадки ниже и запустите бота.</p>`}`;
+  const cap = el.querySelector("#home-split-caption");
+  el.querySelectorAll(".seg").forEach((seg) => {
+    seg.addEventListener("mouseenter", () => {
+      const x = segs[Number(seg.dataset.i)];
+      cap.textContent = `${x.name}: ${x.value} ${plural(x.value, "отклик", "отклика", "откликов")} (${Math.round((100 * x.value) / total)}%), ответов ${x.replies}`;
     });
+    seg.addEventListener("mouseleave", () => (cap.textContent = "Наведите на полосу, чтобы увидеть долю площадки"));
   });
 }
 
@@ -2536,247 +3315,57 @@ const render = {
   },
 
   async overview() {
-    const todoPromise = renderTodo();
-    renderLiveFeed();
-    renderOwnChannels();
+    const todoPromise = api("/api/todo").catch(() => null);
     if (!overviewLoaded) {
       document.getElementById("stats-row").innerHTML = skeletonStats();
-      document.getElementById("source-grid-ru").innerHTML = skeletonSourceGrid(5);
-      document.getElementById("source-grid-intl").innerHTML = skeletonSourceGrid(3);
+      document.getElementById("source-grid-ru").innerHTML = skeletonRowsList(4);
+      document.getElementById("source-grid-intl").innerHTML = skeletonRowsList(3);
     }
 
-    const [status, stats, runNow, isOnboarding] = await Promise.all([
+    const [status, stats, runNow, todo] = await Promise.all([
       api("/api/status"),
       api("/api/stats"),
       api("/api/run-now/status"),
       todoPromise,
     ]);
+    lastStatus = status;
+    lastRunNow = runNow;
+    const isOnboarding = todo ? await renderTodo(todo, status) : document.getElementById("dashboard-sections").style.display === "none";
+    renderOwnChannels();
+    renderLiveFeed();
     // Обязательные шаги (резюме/ключ ИИ/площадка) не пройдены — ниже
     // нечего показывать: пустая статистика и площадки без резюме
     // только отвлекают от чек-листа выше него. См. #dashboard-sections
     // в index.html.
     document.getElementById("dashboard-sections").style.display = isOnboarding ? "none" : "";
 
-    // ponytail: без этой проверки весь блок ниже (счётчики со
-    // start-anew анимацией, карточки площадок, чекбоксы) пересобирался
-    // на каждый опрос раз в 7с даже когда ничего не изменилось — визуально
-    // это и есть "мерцание", о котором сообщил пользователь.
+    // ponytail: без этой проверки весь блок ниже пересобирался на каждый
+    // опрос раз в 7с, даже когда ничего не изменилось — это и было
+    // «мерцание», о котором сообщил пользователь.
     const snapshot = JSON.stringify({ status, stats, runNow });
     const unchanged = overviewLoaded && snapshot === lastOverviewSnapshot;
     lastOverviewSnapshot = snapshot;
 
-    const badge = document.getElementById("daemon-badge");
-    const runningLabel = status.daemon_started_at
-      ? `бот работает · ${formatElapsed(status.daemon_started_at)}`
-      : "бот работает";
-    const gw = status.telegram_gateway;
-    badge.title = gw?.alive ? (gw.connected ? "Telegram-шлюз на связи" : "Telegram-шлюз переподключается") : "";
-    badge.innerHTML = `<span class="badge-dot"></span><span class="btn-label">${
-      status.daemon_running ? runningLabel : "бот остановлен"
-    }${gw?.alive ? (gw.connected ? " · Telegram ✓" : " · Telegram …") : ""}</span>`;
-    badge.classList.toggle("on", status.daemon_running);
-    badge.classList.toggle("off", !status.daemon_running);
-    // Одна кнопка вместо двух (Старт/Пауза): демон не запущен — это
-    // "Запустить"; запущен и активен — "Пауза"; запущен и на паузе —
-    // "Возобновить". is-pause-action переключает play/pause-иконку
-    // (см. style.css), is-paused — только цвет в состоянии "на паузе"
-    // (тот же класс/приём, что был у отдельной кнопки-паузы).
-    const toggleBtn = document.getElementById("daemon-toggle");
-    const isPauseAction = status.daemon_running && !status.daemon_paused;
-    toggleBtn.classList.toggle("is-pause-action", isPauseAction);
-    toggleBtn.classList.toggle("is-paused", !!status.daemon_paused);
-    // Одна кнопка: «Запустить» ↔ «Остановить». Пауза и отдельный «Стоп»
-    // для человека — одно и то же, лишний выбор только путал.
-    toggleBtn.querySelector(".btn-label").textContent = !status.daemon_running
-      ? "Запустить"
-      : status.daemon_paused
-        ? "Возобновить"
-        : "Остановить";
-    toggleBtn.title = !status.daemon_running
-      ? "Запустить бота: площадки по расписанию, Telegram-парсер, проверка ответов"
-      : status.daemon_paused
-        ? "Возобновить работу бота"
-        : "Остановить бота";
-
-    // Проблемные площадки видно только зайдя на "Обзор" — бейдж на
-    // самой вкладке (как непрочитанные в Telegram) сигналит о них,
-    // даже если человек сейчас смотрит Историю или Настройки.
-    const errorCount = status.sources.filter(
-      (s) => s.status === "error" || s.status === "blocked"
-    ).length;
-    const overviewBadge = document.getElementById("overview-error-badge");
-    if (errorCount > 0) {
-      overviewBadge.textContent = String(errorCount);
-      overviewBadge.style.display = "";
-    } else {
-      overviewBadge.style.display = "none";
-    }
+    renderDaemonState(status);
+    renderHomeMode(status);
+    renderHomeLimit(status, stats);
 
     if (!unchanged) {
-
-      const statsRow = document.getElementById("stats-row");
-      statsRow.classList.remove("content-fade-in");
-      void statsRow.offsetWidth;
-      statsRow.classList.add("content-fade-in");
-      statsRow.innerHTML = `
-        <div class="stat-card"><div class="value" data-target="${stats.day}">0</div><div class="label">откликов сегодня</div>${statTrendHtml(stats.day, stats.prev_day)}</div>
-        <div class="stat-card"><div class="value" data-target="${stats.week}">0</div><div class="label">за неделю</div>${statTrendHtml(stats.week, stats.prev_week)}</div>
-        <div class="stat-card"><div class="value" data-target="${stats.month}">0</div><div class="label">за месяц</div>${statTrendHtml(stats.month, stats.prev_month)}</div>
-      `;
-      statsRow.querySelectorAll(".value").forEach((el) => {
-        countUp(el, parseInt(el.dataset.target, 10));
-      });
-      renderSpeedCard(
-        status.continuous_cycle_enabled,
-        status.pending_telegram_sends,
-        status.hh_reminders_due
-      );
-
-      // ponytail: чекбокс теперь ЕСТЬ schedule_enabled этой площадки —
-      // единственный переключатель "площадка участвует в демоне", вместо
-      // отдельной кнопки "Запустить выбранные" поверх отдельного тумблера
-      // в "Настройках". checked всегда берётся из свежих данных сервера
-      // (s.schedule_enabled), а не сохраняется вручную между опросами —
-      // рендер и так пропускается, пока status не изменится (см. unchanged
-      // выше), так что раньше поставленная галочка не мигает.
-      // Telegram и «Сайты компаний» — отдельными карточками в «Свои каналы».
+      renderKpis(stats);
+      renderHomeSplit();
+      // Telegram, «Сайты компаний», Talanto и Hirify — в «Свои каналы».
       const ruSources = status.sources.filter((s) => !INTL_SOURCES.has(s.name) && !OWN_CHANNELS.has(s.name));
       const intlSources = status.sources.filter((s) => INTL_SOURCES.has(s.name));
-      const renderSourceCard = (s, i) => {
-          const dot = STATUS_DOT[s.status] || "never_run";
-          const ratio = s.daily_limit
-            ? Math.min(1, s.applied_today / s.daily_limit)
-            : 0;
-          const barClass =
-            ratio >= 1 ? "full" : ratio >= 0.7 ? "warn" : "";
-          const ringC = 2 * Math.PI * 13;
-          const ringOffset = ringC * (1 - ratio);
-          // telegram отправляет (пишет контакту) только при
-          // auto_message; остальные площадки — при auto_apply. Раньше
-          // в режиме "только поиск" счётчик "Откликов сегодня" вообще
-          // пропадал с карточки (заменялся строкой "Режим") — снаружи
-          // это выглядело как будто лимит нигде не виден. Теперь
-          // счётчик остаётся всегда (он и так 0/N, пока автоотклик
-          // выключен, — не вводит в заблуждение), а "только поиск"
-          // идёт отдельной строкой поверх него как пояснение.
-          const isSearchOnly =
-            s.name === "telegram" ? !s.auto_message : !s.auto_apply;
-          const isRunning = runNow.running && runNow.current_source === s.name;
-          // Один понятный выбор вместо «расписание» + «автоотклик» + «только поиск».
-          // Вкл/выкл — переключатель, как у Telegram-парсера; что делать, когда
-          // включена, — две кнопки: откликаться самому или только искать.
-          // Режим меняют редко — на карточке спокойная метка, по клику
-          // окно площадки с пояснением (случайно включить автоотклик нельзя).
-          const modeRow = `<div class="row"><span>Режим</span>${
-            s.schedule_enabled
-              ? `<button type="button" class="mode-chip${isSearchOnly ? "" : " is-apply"}" data-open-platform="${s.name}" title="Изменить режим и фильтры">${isSearchOnly ? "🔍 только ищет" : "✉️ откликается сам"}</button>`
-              : `<span class="muted">выключена</span>`
-          }</div>`;
-          const responseRow = `<div class="row"><span>Откликов сегодня</span>
-              <span class="limit-ring-wrap">
-                <svg width="18" height="18" viewBox="0 0 32 32">
-                  <circle class="limit-ring-bg" cx="16" cy="16" r="13"></circle>
-                  <circle class="limit-ring-fill ${barClass}" cx="16" cy="16" r="13" style="stroke-dasharray:${ringC.toFixed(2)};stroke-dashoffset:${ringOffset.toFixed(2)}"></circle>
-                </svg>
-                ${s.applied_today}/${s.daily_limit}
-              </span></div>`;
-          return `
-          <div class="source-card stagger-item${isRunning ? " is-running" : ""}" data-source="${s.name}" draggable="true" style="animation-delay:${staggerDelay(i)}">
-            <div class="source-card-actions">
-              <button type="button" class="src-run-now${isRunning ? " is-stop" : ""}" data-source="${s.name}" data-running="${isRunning ? "1" : "0"}" title="${isRunning ? "Остановить (текущая заявка досылается, следующая не начнётся)" : "Запустить эту площадку прямо сейчас, не дожидаясь расписания"}" aria-label="${isRunning ? "Остановить" : "Запустить сейчас"} ${sourceLabel(s.name)}">
-                ${isRunning
-                  ? `<svg viewBox="0 0 20 20" fill="none"><rect x="5.5" y="5.5" width="9" height="9" rx="1.5" fill="currentColor"/></svg>`
-                  : `<svg viewBox="0 0 20 20" fill="none"><path d="M7 5.2v9.6l8-4.8-8-4.8Z" fill="currentColor"/></svg>`}
-              </button>
-              <button type="button" class="src-goto-history" data-source="${s.name}" title="История откликов этой площадки" aria-label="История откликов ${sourceLabel(s.name)}">
-                <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.6"/><path d="M10 5.8V10l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-              </button>
-              <button type="button" class="src-goto-logs" data-source="${s.name}" title="Логи этой площадки" aria-label="Логи ${sourceLabel(s.name)}">
-                <svg viewBox="0 0 20 20" fill="none"><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M5.5 7.5 8 10l-2.5 2.5M9.8 12.5h4.7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </button>
-            </div>
-            <h3>
-              <input type="checkbox" class="switch platform-toggle" data-source="${s.name}" title="Включить или выключить площадку" aria-label="Включить ${sourceLabel(s.name)}" ${s.schedule_enabled ? "checked" : ""} />
-              <span class="dot ${isRunning ? "running" : dot}"></span> ${sourceIconHtml(s.name)}${sourceLabel(s.name)}
-            </h3>
-            ${modeRow}
-            <div class="row" title="Следующая проверка: ${escapeHtml(fmtTime(s.next_run))}"><span>Последняя проверка</span><span>${s.schedule_enabled ? fmtDay(s.last_run) : "—"}</span></div>
-            ${s.schedule_enabled && s.duration_seconds != null ? `<div class="row"><span>Последний ход</span><span>${Math.max(1, Math.round(s.duration_seconds / 60))} мин${s.idle_streak >= 2 ? ", пусто — следующий реже" : ""}</span></div>` : ""}
-            ${responseRow}
-            ${errorRowHtml(s.last_error)}
-          </div>`;
-      };
+      const rowOf = (s, i) => platformRowHtml(sourceRowModel(s, runNow), i);
       document.getElementById("source-grid-ru").innerHTML = applySourceOrder(ruSources, "name", "cj-source-order-ru")
-        .map(renderSourceCard)
+        .map(rowOf)
         .join("");
       document.getElementById("source-grid-intl").innerHTML = applySourceOrder(intlSources, "name", "cj-source-order-intl")
-        .map(renderSourceCard)
+        .map(rowOf)
         .join("");
-      const chatGrid = document.getElementById("chat-checks-grid");
-      if (chatGrid) chatGrid.innerHTML = applySourceOrder(status.chat_checks, "name", "cj-source-order")
-        .map((c, i) => {
-          const dot = STATUS_DOT[c.status] || "never_run";
-          return `
-          <div class="source-card stagger-item" data-source="${c.name}" draggable="true" style="animation-delay:${staggerDelay(i)}">
-            <div class="source-card-actions">
-              <button type="button" class="src-goto-history" data-source="${c.name}" title="История откликов этой площадки" aria-label="История откликов ${escapeHtml(c.label)}">
-                <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.6"/><path d="M10 5.8V10l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-              </button>
-              <button type="button" class="src-goto-logs" data-source="${c.name}" title="Логи этой площадки" aria-label="Логи ${escapeHtml(c.label)}">
-                <svg viewBox="0 0 20 20" fill="none"><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M5.5 7.5 8 10l-2.5 2.5M9.8 12.5h4.7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </button>
-            </div>
-            <h3>
-              <input type="checkbox" class="schedule-toggle switch" data-source="${c.name}" title="Бот проверяет по расписанию" ${c.schedule_enabled ? "checked" : ""} />
-              <span class="dot ${dot}"></span> ${c.label}
-            </h3>
-            <div class="row"><span>Проверяю</span><span>${c.schedule_enabled ? intervalLabel(c.interval_hours) : "выключено"}</span></div>
-            <div class="row"><span>Последняя проверка</span><span>${fmtTime(c.last_run)}</span></div>
-            <div class="row"><span>Следующая проверка</span><span>${fmtTime(c.next_run)}</span></div>
-            <p class="muted small" style="margin:6px 0 0">${c.note}</p>
-            ${errorRowHtml(c.last_error)}
-          </div>`;
-        })
-        .join("");
-
-      const savePlatform = async (source, body, label) => {
-        try {
-          await api("/api/settings", { method: "POST", body: JSON.stringify({ source, ...body }) });
-          showToast(`${sourceLabel(source)}: ${label}`, "success");
-        } catch (err) {
-          showToast(err.message.replace(/^\d+: /, ""), "error");
-        }
-        lastOverviewSnapshot = "";
-        render.overview();
-      };
-      document.querySelectorAll(".platform-toggle").forEach((box) =>
-        box.addEventListener("change", () => {
-          box.disabled = true;
-          savePlatform(box.dataset.source, { schedule_enabled: box.checked }, box.checked ? "включена" : "выключена");
-        })
-      );
-      document.querySelectorAll("[data-open-platform]").forEach((btn) =>
-        btn.addEventListener("click", () => {
-          pendingPlatformDrawer = btn.dataset.openPlatform;
-          switchTab("settings");
-        })
-      );
-      document.querySelectorAll(".schedule-toggle").forEach((box) => {
-        box.addEventListener("change", async () => {
-          box.disabled = true;
-          try {
-            await api("/api/settings", {
-              method: "POST",
-              body: JSON.stringify({
-                source: box.dataset.source,
-                schedule_enabled: box.checked,
-              }),
-            });
-          } finally {
-            box.disabled = false;
-          }
-        });
-      });
+      if (openDrawerSource && isPlatformDrawerOpen() && !drawerDirty) {
+        refreshSourceDrawerHead(openDrawerSource);
+      }
     }
 
     overviewLoaded = true;
@@ -3175,380 +3764,9 @@ const render = {
       });
     });
 
-    const linesOfEl = (el) =>
-      el.value
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean);
-
-    function renderDrawerBody(s) {
-      return `
-        <div class="drawer-section">
-          <h4>Расписание и отклик</h4>
-          <div class="limits-grid">
-            <label class="limit-field" style="justify-content:flex-end">
-              <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-schedule switch" ${s.schedule_enabled ? "checked" : ""} />Включена</span>
-            </label>
-            <label class="limit-field">
-              <span title="Минимум 3 минуты — почти реалтайм, но не выглядит ботом. Пока идут поиск и отклик, площадка проверяется по сути непрерывно: следующий заход стартует через этот интервал после конца предыдущего.">Интервал, минут</span>
-              <input type="number" class="d-interval" min="3" step="1" value="${Math.round((s.interval_hours ?? 3) * 60)}" ${s.continuous_cycle_active ? "disabled" : ""} />
-            </label>
-            ${
-              s.continuous_cycle_active
-                ? `<p class="muted small" style="margin:-6px 0 8px">⏱ Включён «Постоянный цикл» (Настройки → Лимиты откликов) — свой интервал этой площадки не действует, все идут по общему кругу.</p>`
-                : ""
-            }
-            <label class="limit-field" style="justify-content:flex-end">
-              <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto switch" ${s.auto_apply ? "checked" : ""} />Откликается сам</span>
-              <span class="muted small">Включено — бот сам отправляет отклики, до дневного лимита. Выключено — только ищет: вакансии появляются в «Вакансиях», откликаетесь вы.</span>
-            </label>
-            <label class="limit-field">
-              <span>Resume ID</span>
-              <input type="text" class="d-resume-id" value="${s.resume_id || ""}" placeholder="id резюме на площадке" />
-            </label>
-          </div>
-        </div>
-
-        <div class="drawer-section">
-          <h4>Лимиты — своё значение для этой площадки</h4>
-          <div class="limits-grid">
-            <div class="override-field">
-              <input type="number" class="d-max-applications" min="1"
-                value="${s.job_max_applications_override ? s.job_max_applications : ""}"
-                placeholder="${limits.job_max_applications}"
-                ${s.job_max_applications_override ? "" : "disabled"} />
-              <label class="override-toggle" title="Своё значение только для этой площадки — иначе используется дефолт из панели «Лимиты откликов»">
-                <input type="checkbox" class="d-max-applications-override" ${s.job_max_applications_override ? "checked" : ""} /> за один заход
-              </label>
-            </div>
-            <div class="override-field">
-              <input type="number" class="d-daily-limit" min="1"
-                value="${s.daily_limit_override ? s.daily_limit : ""}"
-                placeholder="${s.name === "linkedin" ? limits.linkedin_daily_application_limit : limits.daily_application_limit}"
-                ${s.daily_limit_override ? "" : "disabled"} />
-              <label class="override-toggle" title="Своё значение только для этой площадки — иначе используется дефолт из панели «Лимиты откликов»">
-                <input type="checkbox" class="d-daily-limit-override" ${s.daily_limit_override ? "checked" : ""} /> дневной лимит
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <div class="drawer-section">
-          <h4>Фильтры</h4>
-          <div class="limits-grid">
-            <label class="limit-field">
-              <span>Свои должности (пусто — общие из «Что ищу»)</span>
-              <textarea class="d-positions" rows="2" placeholder="оставить пустым — использовать общие">${(s.positions_override || []).join("\n")}</textarea>
-            </label>
-            <label class="limit-field">
-              <span>Свои локации (пусто — общие из «Что ищу»)</span>
-              <textarea class="d-locations" rows="2" placeholder="оставить пустым — использовать общие">${(s.locations_override || []).join("\n")}</textarea>
-            </label>
-            ${
-              s.name === "linkedin"
-                ? `<label class="limit-field">
-                <span>Зарплата для скрининга LinkedIn (USD/год)</span>
-                <input type="text" class="d-linkedin-salary" value="${salary.linkedin_salary_range_usd || ""}" placeholder="60000-80000" />
-                <span class="d-salary-hint muted small"></span>
-              </label>`
-                : ""
-            }
-            ${
-              s.name === "avito"
-                ? `${s.remote_only_managed ? "" : `<label class="limit-field" style="justify-content:flex-end"><span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-remote-only switch" ${s.remote_only ? "checked" : ""} />Только удалённые вакансии</span></label>`}
-              <label class="limit-field">
-                <span>Опыт работы (пусто — любой)</span>
-                <select class="d-hc-qualification">
-                  <option value="" ${!s.qualification ? "selected" : ""}>Любой</option>
-                  <option value="no_experience" ${s.qualification === "no_experience" ? "selected" : ""}>Без опыта</option>
-                  <option value="under_1_year" ${s.qualification === "under_1_year" ? "selected" : ""}>До 1 года</option>
-                  <option value="over_1_year" ${s.qualification === "over_1_year" ? "selected" : ""}>Более 1 года</option>
-                  <option value="over_3_years" ${s.qualification === "over_3_years" ? "selected" : ""}>Более 3 лет</option>
-                  <option value="over_5_years" ${s.qualification === "over_5_years" ? "selected" : ""}>Более 5 лет</option>
-                  <option value="over_10_years" ${s.qualification === "over_10_years" ? "selected" : ""}>Более 10 лет</option>
-                </select>
-              </label>
-              <label class="limit-field">
-                <span>Занятость (пусто — любая)</span>
-                <select class="d-hc-employment-type">
-                  <option value="" ${!s.employment_type ? "selected" : ""}>Любая</option>
-                  <option value="full_time" ${s.employment_type === "full_time" ? "selected" : ""}>Полная</option>
-                  <option value="part_time" ${s.employment_type === "part_time" ? "selected" : ""}>Частичная</option>
-                  <option value="temporary" ${s.employment_type === "temporary" ? "selected" : ""}>Временная</option>
-                </select>
-              </label>`
-                : ""
-            }
-            ${
-              s.name === "getmatch"
-                ? `${s.remote_only_managed ? "" : `<label class="limit-field" style="justify-content:flex-end"><span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-remote-only switch" ${s.remote_only ? "checked" : ""} />Только удалённые вакансии</span></label>`}
-              ${s.levels_managed ? "" : `<label class="limit-field">
-                <span>Уровень вакансии (пусто — любой)</span>
-                <select class="d-gm-experience-level" multiple size="4">
-                  <option value="junior" ${(s.experience_level || []).includes("junior") ? "selected" : ""}>Junior</option>
-                  <option value="middle" ${(s.experience_level || []).includes("middle") ? "selected" : ""}>Middle</option>
-                  <option value="senior" ${(s.experience_level || []).includes("senior") ? "selected" : ""}>Senior</option>
-                  <option value="lead" ${(s.experience_level || []).includes("lead") ? "selected" : ""}>Lead / Manager</option>
-                </select>
-              </label>`}`
-                : ""
-            }
-            ${
-              s.name === "habr_career"
-                ? `${s.remote_only_managed ? "" : `<label class="limit-field" style="justify-content:flex-end"><span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-remote-only switch" ${s.remote_only ? "checked" : ""} />Только удалённые вакансии</span></label>`}
-              ${s.levels_managed ? "" : `<label class="limit-field">
-                <span>Квалификация (пусто — любая)</span>
-                <select class="d-hc-qualification">
-                  <option value="" ${!s.qualification ? "selected" : ""}>Любая</option>
-                  <option value="intern" ${s.qualification === "intern" ? "selected" : ""}>Стажёр (Intern)</option>
-                  <option value="junior" ${s.qualification === "junior" ? "selected" : ""}>Младший (Junior)</option>
-                  <option value="middle" ${s.qualification === "middle" ? "selected" : ""}>Средний (Middle)</option>
-                  <option value="senior" ${s.qualification === "senior" ? "selected" : ""}>Старший (Senior)</option>
-                  <option value="lead" ${s.qualification === "lead" ? "selected" : ""}>Ведущий (Lead)</option>
-                </select>
-              </label>`}
-              <label class="limit-field">
-                <span>Тип занятости (пусто — любой)</span>
-                <select class="d-hc-employment-type">
-                  <option value="" ${!s.employment_type ? "selected" : ""}>Любой</option>
-                  <option value="full_time" ${s.employment_type === "full_time" ? "selected" : ""}>Полный рабочий день</option>
-                  <option value="part_time" ${s.employment_type === "part_time" ? "selected" : ""}>Неполный рабочий день</option>
-                </select>
-              </label>`
-                : ""
-            }
-          </div>
-          <p class="muted small">Сейчас реально ищет по: «${(s.effective_positions || []).join("», «") || "—"}»${
-        s.name === "linkedin"
-          ? " · локации LinkedIn настраиваются отдельно (linkedin.locations)"
-          : `, локации: «${(s.effective_locations || []).join("», «") || "любые"}»`
-      }.</p>
-        </div>
-
-        ${
-          s.name === "headhunter" || s.name === "djinni"
-            ? `<div class="drawer-section">
-          <h4>Автоматика в чате</h4>
-          <div class="limits-grid">
-            ${
-              s.name === "headhunter"
-                ? `<label class="limit-field" style="justify-content:flex-end">
-                <span style="display:flex;align-items:center;gap:8px" title="Одним переключателем: отвечает на рутинные вопросы в чате, досылает письмо, если отклик ушёл без него, и напоминает о себе молчащим работодателям"><input type="checkbox" class="d-auto-reply switch" ${s.auto_reply ? "checked" : ""} />Вести переписку в чате HH</span>
-              </label>
-              <label class="limit-field" style="justify-content:flex-end">
-                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto-bump switch" ${s.auto_bump_resume ? "checked" : ""} />Бамп резюме на HH</span>
-              </label>
-              <label class="limit-field">
-                <span title="0 — выключить напоминания. Список готовых напоминаний — во «Входящих»">Напомнить о себе, если молчат (не просмотрели или не ответили), через (дней)</span>
-                <input type="number" class="d-reminder-days" min="0" value="${s.reminder_follow_up_days ?? 7}" style="width:80px" />
-              </label>
-              <label class="limit-field">
-                <span>Зарплата для автоответа в чате HH</span>
-                <input type="text" class="d-hh-salary" value="${salary.hh_salary_expectations || ""}" placeholder="250000-300000 RUR" />
-                <span class="d-salary-hint muted small"></span>
-              </label>`
-                : `<label class="limit-field" style="justify-content:flex-end">
-                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto-bump switch" ${s.auto_bump_resume ? "checked" : ""} />Поднимать профиль раз в 7 дней</span>
-                <span class="muted small">Кнопка «Bump My Profile» на Djinni — профиль снова наверху у рекрутеров. Бот нажимает её сам, как только Djinni разрешит.</span>
-              </label>`
-            }
-          </div>
-        </div>`
-            : ""
-        }
-
-        <div class="filters">
-          <button class="btn btn-primary" id="platform-drawer-save">Сохранить</button>
-          <span id="platform-drawer-status" class="muted small"></span>
-        </div>`;
-    }
-
-    // Пришли с карточки на Главной (метка режима) — сразу открываем окно площадки.
-    if (pendingPlatformDrawer) {
-      const source = pendingPlatformDrawer;
-      pendingPlatformDrawer = null;
-      switchSettingsTab("settings-table");
-      setTimeout(() => openPlatformDrawer(source));
-    }
-    function openPlatformDrawer(sourceName) {
-      const s = status.sources.find((x) => x.name === sourceName);
-      if (!s) return;
-      document.getElementById("platform-drawer-title").innerHTML =
-        `${sourceIconHtml(s.name)}${sourceLabel(s.name)}`;
-      const drawerBody = document.getElementById("platform-drawer-body");
-      drawerBody.innerHTML = renderDrawerBody(s);
-      drawerBody
-        .querySelectorAll(".d-positions, .d-locations")
-        .forEach(initTagInput);
-      // Поле раньше молчало о неверном формате — пользователь узнавал
-      // об этом только по факту, что автоответ в чате не сработал.
-      // Подсказка не блокирует сохранение (мало ли какой формат
-      // площадка реально примет), только предупреждает заранее.
-      drawerBody.querySelectorAll(".d-hh-salary, .d-linkedin-salary").forEach((input) => {
-        const hint = input.parentElement.querySelector(".d-salary-hint");
-        if (!hint) return;
-        let wasOk = true;
-        const validate = () => {
-          const v = input.value.trim();
-          const ok = !v || /^\d{4,}\s*[-–]\s*\d{4,}(\s*\S+)?$/.test(v);
-          hint.textContent = ok ? "" : `Ожидается диапазон вида «${input.placeholder}» — иначе бот может не понять сумму`;
-          hint.classList.toggle("warn-text", !ok);
-          // Один раз в момент, когда поле только что стало невалидным —
-          // не на каждую клавишу, пока человек ещё дописывает диапазон.
-          if (!ok && wasOk) {
-            input.classList.remove("field-shake");
-            void input.offsetWidth;
-            input.classList.add("field-shake");
-          }
-          wasOk = ok;
-        };
-        input.addEventListener("input", validate);
-        validate();
-      });
-      // Тот же паттерн inherited/override, что в Stripe/AWS для
-      // лимитов бюджета: чекбокс "своё" выключен → инпут задизейблен
-      // и показывает дефолт как placeholder, не как значение.
-      drawerBody
-        .querySelectorAll(
-          ".d-max-applications-override, .d-daily-limit-override"
-        )
-        .forEach((cb) => {
-          cb.addEventListener("change", () => {
-            const input = cb
-              .closest(".override-field")
-              .querySelector("input[type=number]");
-            input.disabled = !cb.checked;
-            if (cb.checked) input.focus();
-          });
-        });
-      drawerBody
-        .querySelector("#platform-drawer-save")
-        .addEventListener("click", async () => {
-          const jobMaxOverride = drawerBody.querySelector(
-            ".d-max-applications-override"
-          ).checked;
-          const dailyOverride = drawerBody.querySelector(
-            ".d-daily-limit-override"
-          ).checked;
-          const statusEl = drawerBody.querySelector("#platform-drawer-status");
-          const autoReplyEl = drawerBody.querySelector(".d-auto-reply");
-          const autoBumpEl = drawerBody.querySelector(".d-auto-bump");
-          const chatFollowupEl = drawerBody.querySelector(
-            ".d-chat-cover-letter-followup"
-          );
-          const reminderDaysEl = drawerBody.querySelector(".d-reminder-days");
-          const autoReminderEl = drawerBody.querySelector(".d-auto-reminder");
-          const remoteOnlyEl = drawerBody.querySelector(".d-remote-only");
-          const gmExperienceLevelEl = drawerBody.querySelector(
-            ".d-gm-experience-level"
-          );
-          const hcQualificationEl = drawerBody.querySelector(
-            ".d-hc-qualification"
-          );
-          const hcEmploymentTypeEl = drawerBody.querySelector(
-            ".d-hc-employment-type"
-          );
-          await api("/api/settings", {
-            method: "POST",
-            body: JSON.stringify({
-              source: sourceName,
-              schedule_enabled: drawerBody.querySelector(".d-schedule").checked,
-              interval_hours: Math.max(
-                3,
-                parseInt(drawerBody.querySelector(".d-interval").value, 10) || 3
-              ) / 60,
-              auto_apply: drawerBody.querySelector(".d-auto").checked,
-              resume_id: drawerBody.querySelector(".d-resume-id").value.trim(),
-              // "своё" выключено → clear_* удаляет override в YAML,
-              // площадка возвращается к общему дефолту (см.
-              // unset_source_field на бэкенде); включено → пишем
-              // введённое число как явное значение этой площадки.
-              clear_job_max_applications: !jobMaxOverride,
-              clear_daily_application_limit: !dailyOverride,
-              positions: linesOfEl(drawerBody.querySelector(".d-positions")),
-              locations: linesOfEl(drawerBody.querySelector(".d-locations")),
-              // «Вести переписку» — один переключатель на три настройки HH.
-              ...(autoReplyEl
-                ? {
-                    auto_reply: autoReplyEl.checked,
-                    chat_cover_letter_followup: autoReplyEl.checked,
-                    auto_reminder: autoReplyEl.checked,
-                  }
-                : {}),
-              ...(autoBumpEl ? { auto_bump_resume: autoBumpEl.checked } : {}),
-              ...(reminderDaysEl
-                ? {
-                    reminder_follow_up_days: Math.max(
-                      0,
-                      parseInt(reminderDaysEl.value, 10) || 0
-                    ),
-                  }
-                : {}),
-              ...(autoReminderEl
-                ? { auto_reminder: autoReminderEl.checked }
-                : {}),
-              ...(remoteOnlyEl
-                ? { remote_only: remoteOnlyEl.checked }
-                : {}),
-              ...(gmExperienceLevelEl
-                ? {
-                    experience_level: Array.from(
-                      gmExperienceLevelEl.selectedOptions
-                    ).map((o) => o.value),
-                  }
-                : {}),
-              ...(hcQualificationEl
-                ? { qualification: hcQualificationEl.value }
-                : {}),
-              ...(hcEmploymentTypeEl
-                ? { employment_type: hcEmploymentTypeEl.value }
-                : {}),
-              ...(jobMaxOverride
-                ? {
-                    job_max_applications: parseInt(
-                      drawerBody.querySelector(".d-max-applications").value,
-                      10
-                    ),
-                  }
-                : {}),
-              ...(dailyOverride
-                ? {
-                    daily_application_limit: parseInt(
-                      drawerBody.querySelector(".d-daily-limit").value,
-                      10
-                    ),
-                  }
-                : {}),
-            }),
-          });
-          const hhSalaryEl = drawerBody.querySelector(".d-hh-salary");
-          const liSalaryEl = drawerBody.querySelector(".d-linkedin-salary");
-          if (hhSalaryEl || liSalaryEl) {
-            await api("/api/settings/salary", {
-              method: "POST",
-              body: JSON.stringify({
-                ...(hhSalaryEl
-                  ? { hh_salary_expectations: hhSalaryEl.value.trim() }
-                  : {}),
-                ...(liSalaryEl
-                  ? { linkedin_salary_range_usd: liSalaryEl.value.trim() }
-                  : {}),
-              }),
-            });
-          }
-          statusEl.textContent = "Сохранено";
-          setTimeout(() => {
-            closePlatformDrawer();
-            render.settings();
-          }, 500);
-        });
-      const overlay = document.getElementById("platform-drawer-overlay");
-      overlay.style.display = "flex";
-      trapFocus(document.getElementById("platform-drawer"));
-    }
-
+    // «Настроить» открывает ту же шторку площадки, что и строка на Главной.
     platformCards.querySelectorAll(".p-open-drawer").forEach((btn) => {
-      btn.addEventListener("click", () => openPlatformDrawer(btn.dataset.source));
+      btn.addEventListener("click", () => openPlatform(btn.dataset.source));
     });
   },
 
@@ -4287,6 +4505,27 @@ function showToast(message, type = "info", duration = 3500) {
   }, duration);
 }
 
+// «Сохранено» с кнопкой «Отменить»: изменение уже записано, отмена
+// возвращает прежнее значение.
+function showSavedToast(message, undo = null, duration = 6000) {
+  const container = document.getElementById("toast-container");
+  if (!container) return;
+  const el = document.createElement("div");
+  el.className = "toast success";
+  el.innerHTML = `<svg class="toast-check" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>${escapeHtml(message)}</span>${undo ? `<button type="button" class="toast-action">Отменить</button>` : ""}`;
+  container.appendChild(el);
+  const timer = setTimeout(() => el.remove(), duration);
+  el.querySelector(".toast-action")?.addEventListener("click", async () => {
+    clearTimeout(timer);
+    el.remove();
+    try {
+      await undo();
+    } catch (err) {
+      showToast(err.message.replace(/^\d+: /, ""), "error");
+    }
+  });
+}
+
 // Общий плавающий индикатор для sidebar-nav и вкладок настроек — вместо
 // мгновенной смены фона у активной кнопки, полоска физически едет к ней.
 // CSS transition, не GSAP — двигать плоский прямоугольник по позиции
@@ -4471,6 +4710,24 @@ let commandActiveIndex = 0;
 
 function collectCommandItems(query) {
   const items = [];
+  const status = lastStatus;
+  if (status) {
+    status.sources
+      .filter((s) => s.name !== "telegram")
+      .forEach((s) => items.push({ label: `${s.name === "direct" ? "Сайты компаний" : sourceLabel(s.name)}: настройки`, hint: "Площадка", action: () => { switchTab("overview"); openPlatform(s.name); } }));
+  }
+  items.push(
+    { label: "Telegram-парсер: состояние", hint: "Площадка", action: () => { switchTab("overview"); openTelegramDrawer(); } },
+    { label: "Рассылка по почте: что сейчас", hint: "Площадка", action: () => { switchTab("overview"); openMailDrawer(); } },
+    { label: "Только искать, без откликов", hint: "Режим", action: () => setHomeMode("search") },
+    { label: "Снова откликаться", hint: "Режим", action: () => setHomeMode("apply") },
+    { label: status?.daemon_running ? "Остановить бота" : "Запустить бота", hint: "Действие", action: () => document.getElementById("daemon-toggle").click() },
+    { label: "Тема: светлая", hint: "Вид", ui: "shell.theme", action: () => setTheme("light") },
+    { label: "Тема: тёмная", hint: "Вид", ui: "shell.theme", action: () => setTheme("dark") },
+    { label: "Тема: как в системе", hint: "Вид", ui: "shell.theme", action: () => setTheme("system") },
+    { label: "Как пользоваться", hint: "Помощь", action: () => document.getElementById("help-dialog").showModal() },
+    { label: "Горячие клавиши", hint: "Помощь", action: () => openShortcutsOverlay() }
+  );
   Object.values(NAV_GROUPS)
     .flat()
     .forEach(([view, label]) => {
@@ -4741,6 +4998,8 @@ function closePlatformDrawer() {
   const overlay = document.getElementById("platform-drawer-overlay");
   if (overlay.style.display === "none") return;
   overlay.style.display = "none";
+  openDrawerSource = null;
+  drawerDirty = false;
   releaseFocusTrap(document.getElementById("platform-drawer"));
 }
 
@@ -5106,7 +5365,7 @@ async function updateActivity() {
 // «Откликаться автоматически» разом для всех включённых площадок —
 // большинству не нужно настраивать режим каждой отдельно.
 function renderAutoAll(status) {
-  const on = status.sources.filter((s) => s.schedule_enabled && s.name !== "telegram");
+  const on = modeSources(status);
   const auto = on.filter((s) => s.auto_apply);
   const box = document.getElementById("search-auto-all");
   box.checked = on.length > 0 && auto.length === on.length;
@@ -5515,7 +5774,7 @@ function initKeyboardShortcuts() {
       else closeShortcutsOverlay();
       return;
     }
-    if (/^[1-8]$/.test(e.key)) {
+    if (/^[1-6]$/.test(e.key)) {
       const buttons = document.querySelectorAll("nav.tabs button[data-tab]");
       const idx = parseInt(e.key, 10) - 1;
       if (buttons[idx]) switchTab(buttons[idx].dataset.tab);
@@ -5828,54 +6087,84 @@ function initDragReorder(gridId, storageKey) {
   const grid = document.getElementById(gridId);
   let dragged = null;
   grid.addEventListener("dragstart", (e) => {
-    const card = e.target.closest(".source-card");
-    if (!card) return;
-    dragged = card;
+    const row = e.target.closest(".platform-row-wrap");
+    if (!row) return;
+    dragged = row;
+    row.classList.add("is-dragging");
     e.dataTransfer.effectAllowed = "move";
   });
   grid.addEventListener("dragover", (e) => {
     if (!dragged) return;
     e.preventDefault();
-    const target = e.target.closest(".source-card");
-    if (!target || target === dragged) return;
+    const target = e.target.closest(".platform-row-wrap");
+    if (!target || target === dragged || target.parentElement !== grid) return;
     const rect = target.getBoundingClientRect();
-    const before = e.clientX < rect.left + rect.width / 2;
-    target.parentElement.insertBefore(dragged, before ? target : target.nextSibling);
+    const before = e.clientY < rect.top + rect.height / 2;
+    grid.insertBefore(dragged, before ? target : target.nextSibling);
   });
   grid.addEventListener("dragend", () => {
     if (!dragged) return;
+    dragged.classList.remove("is-dragging");
     dragged = null;
-    const order = [...grid.querySelectorAll(".source-card")].map((c) => c.dataset.source);
+    const order = [...grid.querySelectorAll(".platform-row-wrap")].map((c) => c.dataset.source);
     saveSourceOrder(storageKey, order);
   });
 }
 
+// Тема: "light", "dark" или "system" (как в системе — ничего не
+// сохраняем, берём из ОС).
+function setTheme(mode, originEl = null) {
+  const resolved = mode === "system"
+    ? (window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark")
+    : mode;
+  const apply = () => {
+    document.documentElement.dataset.theme = resolved;
+    try {
+      if (mode === "system") localStorage.removeItem("cj-theme");
+      else localStorage.setItem("cj-theme", mode);
+    } catch (e) {}
+  };
+  if (originEl) {
+    const rect = originEl.getBoundingClientRect();
+    document.documentElement.style.setProperty("--theme-toggle-x", `${rect.left + rect.width / 2}px`);
+    document.documentElement.style.setProperty("--theme-toggle-y", `${rect.top + rect.height / 2}px`);
+  }
+  if (document.startViewTransition && !REDUCE_MOTION) document.startViewTransition(apply);
+  else apply();
+}
+
 // ---------- Changelog popover ----------
 
-const CHANGELOG_VERSION = "2026-09-24-tg-quick";
+const CHANGELOG_VERSION = "2026-10-08-new-ui";
 const CHANGELOG_ITEMS = [
-  "✈️ Telegram-парсер: вакансия из каналов через секунды в вашем боте — кнопки «Здравствуйте», «+ резюме», «сопроводительное под вакансию»; контакты HR из постов — сразу в «Базу компаний». Настройки → «Telegram-парсер»",
-  "Меню стало проще: 5 разделов — Главная, Вакансии, Общение, Аналитика, Настройки",
-  "На Главной — «Что сделать сейчас»: черновики, новые ответы, интервью, контакты HR",
-  "У любой вакансии «Действия» → «Найти HR этой компании»",
-  "«Входящие»: ответы hh и HR из Telegram в одном месте + черновики ответов на подтверждение",
-  "Этап у каждого отклика и воронка до оффера в Аналитике",
-  "Настройки → «Контакты и письма»: почта Gmail, Hunter, сводка, напоминания HR",
-  "🏢 «Сайты компаний» в «Свои каналы»: сами собирают компании с email HR в Базу — дальше рассылка одной кнопкой",
-  "У интервью в Истории → «Действия»: подготовка, тренажёр, событие в календарь",
-  "Аналитика: спрос на навыки, зарплаты на рынке, сравнение офферов",
+  "Новый вид: спокойная тёмная и светлая темы, цвет — только у состояний. Все функции на месте: редкие настройки — в шторке справа, на один клик ниже",
+  "Главная: «Нужно ваше решение» первым блоком, итоги с трендом, площадки списком — нажмите на строку, и настройки откроются справа",
+  "Режим «Откликаться / Только искать» для всех площадок разом — в шапке Главной",
+  "Площадка на паузе после капчи — в её шторке кнопка «Я прошёл проверку — снять паузу» (то же, что /resume в боте)",
+  "Изменения в шторке площадки сохраняются сразу — с кнопкой «Отменить» в уведомлении",
+  "Палитра ⌘K ищет разделы, настройки, площадки и действия",
 ];
 
 function initChangelogPopover() {
-  if (localStorage.getItem("cj-seen-changelog") === CHANGELOG_VERSION) return;
-  // Не показываем поверх онбординг-тура на самом первом запуске —
-  // одновременно два оверлея это перегруз, а не "круто". Чейнджлог
-  // подождёт следующего открытия, когда тур уже пройден.
-  if (localStorage.getItem("cj-seen-tour") !== "1") return;
+  let seen = null;
+  try {
+    seen = localStorage.getItem("cj-seen-changelog");
+    // Новичку «что нового» не нужно — запоминаем версию молча; окно
+    // увидят только те, кто пользовался приложением до обновления.
+    if (seen === null && localStorage.getItem("cj-seen-tour") !== "1") {
+      localStorage.setItem("cj-seen-changelog", CHANGELOG_VERSION);
+      return;
+    }
+  } catch (e) {
+    return;
+  }
+  if (seen === CHANGELOG_VERSION) return;
   const el = document.createElement("div");
   el.className = "changelog-popover";
+  el.setAttribute("role", "dialog");
+  el.setAttribute("aria-label", "Что нового");
   el.innerHTML = `
-    <h4>✨ Что нового</h4>
+    <h4 data-ui="shell.changelog">Что нового</h4>
     <ul>${CHANGELOG_ITEMS.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}</ul>
     <button class="btn btn-primary" type="button">Понятно</button>
   `;
@@ -5911,21 +6200,11 @@ function initDashboard() {
     b.addEventListener("click", () => switchTab(b.dataset.tab));
   });
 
-  document.getElementById("theme-toggle").addEventListener("click", (ev) => {
+  document.getElementById("theme-toggle")?.addEventListener("click", (ev) => {
     const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
-    const apply = () => {
-      document.documentElement.dataset.theme = next;
-      localStorage.setItem("cj-theme", next);
-    };
-    const rect = ev.currentTarget.getBoundingClientRect();
-    document.documentElement.style.setProperty("--theme-toggle-x", `${rect.left + rect.width / 2}px`);
-    document.documentElement.style.setProperty("--theme-toggle-y", `${rect.top + rect.height / 2}px`);
-    if (document.startViewTransition && !REDUCE_MOTION) {
-      document.startViewTransition(apply);
-    } else {
-      apply();
-    }
+    setTheme(next, ev.currentTarget);
   });
+
 
   document.querySelectorAll("#settings-jump button").forEach((b) => {
     b.addEventListener("click", () => switchSettingsTab(b.dataset.settingsTab));
@@ -5958,95 +6237,29 @@ function initDashboard() {
     const input = document.getElementById("telegram-bot-token");
     input.type = input.type === "password" ? "text" : "password";
   });
+  initDragReorder("own-channels", "cj-source-order-own");
   initDragReorder("source-grid-ru", "cj-source-order-ru");
   initDragReorder("source-grid-intl", "cj-source-order-intl");
   initChangelogPopover();
   initPointerEffects();
-  initOnboardingTour();
 
-  function handleSourceCardActionClick(e) {
-    const runBtn = e.target.closest(".src-run-now");
-    const historyBtn = e.target.closest(".src-goto-history");
-    const logsBtn = e.target.closest(".src-goto-logs");
-    if (runBtn) {
-      if (runBtn.dataset.running === "1") {
-        stopSourceNow(runBtn);
-      } else {
-        runSourceNow(runBtn);
-      }
-    } else if (historyBtn) {
-      document.getElementById("filter-source").value = historyBtn.dataset.source;
-      switchTab("history");
-    } else if (logsBtn) {
-      document.getElementById("log-source").value = logsBtn.dataset.source;
-      switchTab("logs");
-    }
-  }
-
-  // Запускает одну конкретную площадку прямо сейчас (реальный прогон, с
-  // её собственным auto_apply — не форсированный dry-run, как у общей
-  // кнопки "Тестовый прогон") — чтобы не ждать next_run при отладке/
-  // ручной проверке. Переиспользует тот же /api/run-now, что и общая
-  // кнопка, просто с одним источником в списке.
-  //
-  // ponytail: раньше withButtonLoading держал is-loading на кнопке на
-  // ВСЁ время прогона (иногда минуты), пока рядом отдельный опрос
-  // overview (render.overview, раз в 7с) параллельно перерисовывал ту
-  // же карточку по server-side isRunning — два независимых источника
-  // правды дрались за один DOM-узел, и после пересборки innerHTML
-  // ссылка btn протухала, а visible-состояние "зависало". Теперь
-  // is-loading висит только на быстром POST-запуске, а "идёт/не идёт"
-  // всегда только из уже существующего опроса overview (пульс точки +
-  // свечение карточки) — второго индикатора больше нет.
-  async function runSourceNow(btn) {
-    const name = btn.dataset.source;
-    if (
-      !(await showConfirm(
-        `Запустить ${sourceLabel(name)} прямо сейчас? Это реальный прогон, ` +
-          `не тест — если у площадки включён автоотклик, заявки уйдут по-настоящему.`
-      ))
-    ) {
-      return;
-    }
-    try {
-      await withButtonLoading(btn, () =>
-        api("/api/run-now", {
-          method: "POST",
-          body: JSON.stringify({ sources: [name] }),
-        })
-      );
-    } catch (e) {
-      showToast(`Не удалось запустить ${sourceLabel(name)}: ${e.message}`, "error");
-      return;
-    }
-    render.overview();
-    watchSourceRunCompletion(name);
-  }
-
-  async function watchSourceRunCompletion(name) {
-    for (;;) {
-      await new Promise((r) => setTimeout(r, 3000));
-      const runStatus = await api("/api/run-now/status");
-      if (!runStatus.running || runStatus.current_source !== name) break;
-    }
-    showToast(`${sourceLabel(name)}: прогон завершён — см. Историю`, "success");
-    render.overview();
-  }
-
-  // Мягкий стоп: текущая уже начатая заявка досылается (см. main.py —
-  // stop_event проверяется между вакансиями, не посреди клика
-  // "Откликнуться"), следующая не начинается.
-  async function stopSourceNow(btn) {
-    const name = btn.dataset.source;
-    try {
-      await withButtonLoading(btn, () => api("/api/run-now/stop", { method: "POST" }));
-      showToast(`${sourceLabel(name)}: остановка запрошена`, "success");
-    } catch (e) {
-      showToast(`Не удалось остановить ${sourceLabel(name)}: ${e.message}`, "error");
-    }
-  }
-  document.getElementById("source-grid-ru").addEventListener("click", handleSourceCardActionClick);
-  document.getElementById("source-grid-intl").addEventListener("click", handleSourceCardActionClick);
+  // Строка площадки на Главной открывает её шторку; кнопки внутри
+  // шторки — запуск хода, журнал, переходы (см. handleDrawerAction).
+  document.getElementById("dashboard-sections").addEventListener("click", (e) => {
+    const row = e.target.closest("[data-open-source]");
+    if (row) openPlatform(row.dataset.openSource);
+  });
+  document.getElementById("platform-drawer").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-drawer-action]");
+    if (btn) handleDrawerAction(btn);
+  });
+  document.querySelectorAll("#home-mode [data-mode]").forEach((b) =>
+    b.addEventListener("click", () => setHomeMode(b.dataset.mode))
+  );
+  document.getElementById("home-run").addEventListener("click", () => document.getElementById("daemon-toggle").click());
+  document.getElementById("home-palette").addEventListener("click", openCommandPalette);
+  document.getElementById("palette-open").addEventListener("click", openCommandPalette);
+  window.addEventListener("resize", () => positionSegmented(document.getElementById("home-mode")));
   requestAnimationFrame(repositionTabIndicators);
   window.addEventListener("resize", repositionTabIndicators);
 

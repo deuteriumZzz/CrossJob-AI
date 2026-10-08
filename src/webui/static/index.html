@@ -4,11 +4,12 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>CrossJob-AI</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%278%27 fill=%27%23121417%27/%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%275%27 fill=%27%232fb36b%27/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="/vendor/fonts/fonts.css" />
-<link rel="stylesheet" href="/style.css?v=43" />
+<link rel="stylesheet" href="/style.css?v=45" />
 </head>
 <body>
-<div id="setup-screen" class="setup-screen" style="display:none">
+<div id="setup-screen" class="setup-screen" style="display:none" data-ui="shell.first-run">
   <div class="setup-card panel">
     <svg aria-hidden="true" class="brand-mark" viewBox="0 0 40 40" fill="none">
       <circle cx="20" cy="20" r="17" stroke="#2a2d34" stroke-width="1.6"/>
@@ -34,64 +35,66 @@
 <div id="app-shell" class="shell" style="display:none">
   <aside class="sidebar">
     <div class="brand">
-      <svg aria-hidden="true" class="brand-mark" viewBox="0 0 40 40" fill="none">
-        <circle cx="20" cy="20" r="17" stroke="#2a2d34" stroke-width="1.6"/>
-        <circle cx="20" cy="20" r="10" stroke="#7ab8ff" stroke-width="1.6" opacity="0.85"/>
-        <circle cx="20" cy="20" r="3" fill="#6fdc8c"/>
-      </svg>
+      <span class="brand-dot" id="brand-dot" aria-hidden="true"></span>
       <div class="brand-text">
         <div class="brand-name">CrossJob<span>-AI</span></div>
-        <div class="brand-sub">панель управления</div>
+        <div class="brand-sub">ваш поиск работы</div>
       </div>
-      <button id="help-open" class="theme-toggle help-toggle" title="Как пользоваться" aria-label="Как пользоваться">?</button>
-      <button id="theme-toggle" class="theme-toggle" title="Переключить тему" aria-label="Переключить тему">
-        <svg aria-hidden="true" class="theme-icon-sun" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="4" stroke="currentColor" stroke-width="1.6"/><path d="M10 1.8v2M10 16.2v2M18.2 10h-2M3.8 10h-2M15.6 4.4l-1.4 1.4M5.8 14.2l-1.4 1.4M15.6 15.6l-1.4-1.4M5.8 5.8 4.4 4.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-        <svg aria-hidden="true" class="theme-icon-moon" viewBox="0 0 20 20" fill="none"><path d="M17 11.5A7.5 7.5 0 0 1 8.5 3 7.5 7.5 0 1 0 17 11.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-      </button>
     </div>
 
-    <nav class="tabs">
+    <nav class="tabs" aria-label="Разделы">
       <div class="tab-indicator" id="nav-tab-indicator"></div>
-      <button data-tab="overview" title="Главная — что сделать сейчас и статус площадок" class="active">
-        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><rect x="2.5" y="2.5" width="6.5" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="11" y="2.5" width="6.5" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="2.5" y="11" width="6.5" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="11" y="11" width="6.5" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/></svg>
-        <span>Главная</span>
+      <button data-tab="overview" class="active" title="Главная — что ждёт вашего решения и как идут дела" data-ui="nav.home nav.home.badge">
+        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7 8 2.5 13.5 7v6a.5.5 0 0 1-.5.5H10V10H6v3.5H3a.5.5 0 0 1-.5-.5V7Z"/></svg>
+        <span class="tab-label">Главная</span>
         <span id="overview-error-badge" class="tab-badge" style="display:none"></span>
       </button>
-      <button data-tab="history" title="Вакансии — куда откликнулись, что с этим, и технические логи исполнения">
-        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><rect x="2.5" y="5.5" width="15" height="11" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M7 5.5V4a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 13 4v1.5M2.5 10h15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-        <span>Вакансии</span>
+      <button data-tab="history" title="Вакансии — куда бот откликнулся, что пропустил и почему" data-ui="nav.jobs">
+        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4.5" width="12" height="9" rx="1.5"/><path d="M5.5 4.5V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5"/></svg>
+        <span class="tab-label">Вакансии</span>
       </button>
-      <button data-tab="replies" title="Общение — ответы работодателей и Telegram">
-        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="M3 5.5A2 2 0 0 1 5 3.5h10a2 2 0 0 1 2 2V12a2 2 0 0 1-2 2H8l-3.5 3V14H5a2 2 0 0 1-2-2V5.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-        <span>Общение</span>
+      <button data-tab="replies" title="Общение — работодатели, письма и Telegram" data-ui="nav.talk nav.talk.badge" class="nav-bell">
+        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5V7a4 4 0 1 1 8 0v3.5l1 1.5H3l1-1.5Z"/><path d="M6.5 13.5a1.5 1.5 0 0 0 3 0"/></svg>
+        <span class="tab-label">Общение</span>
         <span id="telegram-unread-badge" class="tab-badge" style="display:none"></span>
       </button>
-      <button data-tab="contacts" title="Компании — ваша база компаний и HR и рассылки им">
-        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><rect x="2.5" y="4.5" width="15" height="11" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="m3 5.5 7 5.5 7-5.5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-        <span>Компании</span>
+      <button data-tab="contacts" title="Компании — ваша база компаний и HR и письма им" data-ui="nav.companies">
+        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="m2.5 4.5 5.5 4 5.5-4"/></svg>
+        <span class="tab-label">Компании</span>
       </button>
-      <button data-tab="analytics" title="Аналитика — воронка, рынок, офферы">
-        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="M3.5 16.5v-5M9 16.5V5.5M14.5 16.5v-8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-        <span>Аналитика</span>
+      <button data-tab="analytics" title="Аналитика — что приносит ответы" data-ui="nav.analytics">
+        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13V8M8 13V3M13 13v-7"/></svg>
+        <span class="tab-label">Аналитика</span>
       </button>
-      <button data-tab="settings" title="Настройки — поиск, резюме, площадки">
-        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="2.6" stroke="currentColor" stroke-width="1.6"/><path d="M10 2.5v2.1M10 15.4v2.1M17.5 10h-2.1M4.6 10H2.5M15.1 4.9l-1.5 1.5M6.4 13.6l-1.5 1.5M15.1 15.1l-1.5-1.5M6.4 6.4 4.9 4.9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-        <span>Настройки</span>
+      <button data-tab="settings" title="Настройки — поиск, площадки, письма, система" data-ui="nav.settings" class="nav-gear">
+        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M14.2 8h-1.6M3.4 8H1.8M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1M12.4 12.4l-1.1-1.1M4.7 4.7 3.6 3.6"/></svg>
+        <span class="tab-label">Настройки</span>
       </button>
     </nav>
 
-    <div class="daemon-controls">
-      <span id="daemon-badge" class="badge off"><span class="badge-dot"></span><span class="btn-label">бот остановлен</span></span>
-      <div class="daemon-buttons">
-        <button id="daemon-toggle" class="btn btn-primary" title="Запустить бота">
-          <svg aria-hidden="true" class="icon-play" viewBox="0 0 20 20" fill="none"><path d="M6.5 4.7v10.6a1 1 0 0 0 1.53.85l8.4-5.3a1 1 0 0 0 0-1.7l-8.4-5.3a1 1 0 0 0-1.53.85Z" fill="currentColor"/></svg>
-          <svg aria-hidden="true" class="icon-pause" viewBox="0 0 20 20" fill="none"><rect x="5" y="5" width="10" height="10" rx="1.5" fill="currentColor"/></svg>
-          <span class="btn-label">Запустить</span>
-        </button>
+    <div class="side-foot">
+      <button type="button" id="help-open" class="side-link" title="Как пользоваться" data-ui="shell.help">
+        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M6.5 6.2a1.6 1.6 0 1 1 2.2 1.5c-.5.2-.7.6-.7 1.1v.4M8 11.2h.01"/></svg>
+        <span class="side-label">Как пользоваться</span>
+      </button>
+      <button type="button" id="palette-open" class="side-link" title="Найти действие (Ctrl/⌘+K)" data-ui="shell.palette">
+        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+        <span class="side-label">Найти действие</span>
+        <kbd class="side-kbd">⌘K</kbd>
+      </button>
+      <div class="daemon-controls">
+        <span id="daemon-badge" class="badge off" data-ui="bot.status"><span class="badge-dot"></span><span class="btn-label">бот остановлен</span></span>
+        <div class="daemon-buttons">
+          <button id="daemon-toggle" class="btn btn-primary" title="Запустить бота" data-ui="bot.toggle">
+            <svg aria-hidden="true" class="icon-play" viewBox="0 0 20 20" fill="none"><path d="M6.5 4.7v10.6a1 1 0 0 0 1.53.85l8.4-5.3a1 1 0 0 0 0-1.7l-8.4-5.3a1 1 0 0 0-1.53.85Z" fill="currentColor"/></svg>
+            <svg aria-hidden="true" class="icon-pause" viewBox="0 0 20 20" fill="none"><rect x="5" y="5" width="10" height="10" rx="1.5" fill="currentColor"/></svg>
+            <span class="btn-label">Запустить</span>
+          </button>
+        </div>
       </div>
+      <div id="activity" class="activity" role="status" data-ui="bot.activity"></div>
     </div>
-    <div id="activity" class="activity" role="status"></div>
-    <button id="sidebar-collapse-toggle" class="sidebar-collapse-toggle" title="Свернуть меню" aria-label="Свернуть меню">
+    <button id="sidebar-collapse-toggle" class="sidebar-collapse-toggle" title="Свернуть меню (Ctrl/⌘+B)" aria-label="Свернуть меню" data-ui="nav.collapse">
       <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="M12.5 4.5 7 10l5.5 5.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
   </aside>
@@ -99,76 +102,103 @@
   <dialog id="help-dialog" class="help-dialog" aria-labelledby="help-title">
     <div class="help-head">
       <h2 id="help-title" class="m0">Как пользоваться</h2>
-      <button type="button" class="btn btn-ghost btn-small" id="help-close" aria-label="Закрыть">✕</button>
+      <button type="button" class="icon-btn" id="help-close" aria-label="Закрыть">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg>
+      </button>
     </div>
-    <p class="muted">Три способа выйти на работодателя. Можно пользоваться одним или всеми сразу — бот делает рутину, решения остаются за вами.</p>
+    <p class="muted">Три способа выйти на работодателя — одним или всеми сразу. Бот делает рутину, решения остаются за вами.</p>
 
     <section class="help-case">
-      <h3>1. Площадки — hh, LinkedIn и другие</h3>
+      <h3>1. Площадки — HeadHunter, LinkedIn и другие</h3>
       <ol>
-        <li>Главная → включите нужные площадки переключателем.</li>
-        <li>Режим на карточке: <b>откликается сам</b> (бот отправляет отклики до дневного лимита) или <b>только ищет</b> (вакансии появляются в «Вакансиях», откликаетесь вы).</li>
-        <li>Нажмите <b>▶ Запустить</b>. Ответы работодателей — в «Общение → Входящие».</li>
+        <li>Главная → «Площадки»: нажмите на строку площадки — справа откроется шторка, включите площадку там.</li>
+        <li>Режим для всех площадок — в шапке Главной: <b>Откликаться</b> (бот отправляет отклики до дневного лимита) или <b>Только искать</b> (вакансии копятся в «Вакансиях», откликаетесь вы). Для одной площадки — переключатель «Откликаться самому» в её шторке.</li>
+        <li>Нажмите <b>Запустить бота</b>. Ответы работодателей — в «Общении».</li>
       </ol>
     </section>
     <section class="help-case">
       <h3>2. Telegram-парсер</h3>
       <ol>
-        <li>Общение → Telegram-парсер → войдите своим аккаунтом (один раз) и добавьте каналы.</li>
+        <li>Общение → Telegram-парсер: войдите своим аккаунтом (один раз), в Настройки → Telegram-парсер добавьте каналы.</li>
         <li>Подходящий пост за секунды приходит в <b>CrossJob-бот</b> с кнопками «Здравствуйте», «+ резюме», «Сопроводительное».</li>
         <li>Нажали кнопку — сообщение уходит HR <b>с вашего аккаунта</b>. Контакты из постов сами попадают в базу компаний.</li>
       </ol>
     </section>
     <section class="help-case">
       <h3>3. Своя база компаний и рассылка</h3>
-      <p class="muted small">Всё делается на Главной, в карточке <b>🏢 Компании и рассылка</b>: в ней всегда одна большая кнопка — следующий шаг.</p>
+      <p class="muted small">Состояние рассылки — на Главной, строка <b>Рассылка по почте</b>: в её шторке всегда одна большая кнопка — следующий шаг. Полный вид — Компании → Рассылка.</p>
       <ol>
-        <li><b>📥 Загрузить список компаний</b> — Excel, CSV, PDF или Word. Нет списка — «Где взять список?»: там готовый промт для ИИ с поиском в интернете. Ещё база пополняется сама из Telegram-парсера и с сайтов компаний (переключатель в карточке).</li>
-        <li><b>✍️ Написать письма</b> — бот пишет каждой компании личное письмо по вашему резюме, порцией на сегодня.</li>
-        <li><b>👀 Просмотреть и отправить</b> → <b>🚀 Начать отправку</b>. Письма уходят с вашего Gmail с резюме во вложении — по одному, в рабочее время, со случайными паузами. Что не ушло сегодня, бот отправит в следующие дни сам, а следующую порцию писем пришлёт в CrossJob-бот.</li>
+        <li><b>Загрузить список компаний</b> — Excel, CSV, PDF или Word. Нет списка — «Где взять список?»: там готовый промт для ИИ с поиском в интернете. Ещё база пополняется сама из Telegram-парсера и с сайтов компаний (строка «Сайты компаний» на Главной).</li>
+        <li><b>Написать письма</b> — бот пишет каждой компании личное письмо по вашему резюме, порцией на сегодня.</li>
+        <li><b>Просмотреть и отправить</b> → <b>Начать отправку</b>. Письма уходят с вашего Gmail с резюме во вложении — по одному, в рабочее время, со случайными паузами. Что не ушло сегодня, бот отправит в следующие дни сам, а следующую порцию писем пришлёт в CrossJob-бот.</li>
       </ol>
-      <p class="muted small">Что происходит сейчас — в строке «Сейчас» в меню: 🔄 отправляю, ⏸ ждёт (вечер, выходные, лимит), ⛔ остановлено. Отдельные компании — Компании → База: выделите → <b>✉️ Написать выбранным</b>.</p>
+      <p class="muted small">Что происходит сейчас — в строке под меню: идёт отправка, ждёт (вечер, выходные, лимит) или остановлено. Отдельные компании — Компании → База: выделите → <b>Написать выбранным</b>.</p>
     </section>
 
     <h3>Частые вопросы</h3>
-    <details><summary>Бот может что-то отправить без меня?</summary><p>Только отклики на площадках в режиме «откликается сам». Сообщения HR в Telegram и письма рассылки уходят только после вашего нажатия; после «Начать отправку» уже просмотренные письма бот досылает сам в следующие дни. Остановить — «Остановить рассылку» в карточке.</p></details>
-    <details><summary>Почту Gmail не заблокируют?</summary><p>Рассылка устроена как письма живого человека: первые дни — 15 писем, потом больше; только в рабочие часы; случайные паузы; много возвратов за сутки (по умолчанию 3) — стоп до завтра. Лимит и часы — Настройки → Почта и письма → 🛡 Защита почты.</p></details>
-    <details><summary>Рассылка идёт, если бот не запущен?</summary><p>Да: «▶ Запустить» — это поиск вакансий на площадках. Рассылка работает сама, пока открыто приложение.</p></details>
-    <details><summary>Где хранятся мои данные?</summary><p>Только на вашем компьютере, в папке <code>data_folder</code>. База только пополняется — сама ничего не удаляет; раз в день делается запасная копия (хранятся копии за 7 дней). Выгрузить в Excel — Компании → «⬇ Скачать в Excel».</p></details>
-    <details><summary>Слишком много сообщений от бота</summary><p>Настройки → 📣 Уведомления в Telegram → «Тихий режим»: несрочное придёт одним списком в утренней сводке.</p></details>
-    <details><summary>Площадка на паузе после капчи</summary><p>Откройте сайт площадки в браузере бота, пройдите проверку и напишите боту <code>/resume hh</code> (или имя площадки).</p></details>
-    <details><summary>Что-то не подключено или не работает</summary><p>Настройки → «Подключения» — там видно, что красное, и кнопка «Подключить». Подробности ошибок — Настройки → Логи.</p></details>
+    <details><summary>Бот может что-то отправить без меня?</summary><p>Только отклики на площадках в режиме «Откликаться». Сообщения HR в Telegram и письма рассылки уходят только после вашего нажатия; после «Начать отправку» уже просмотренные письма бот досылает сам в следующие дни. Остановить — «Остановить рассылку» в шторке рассылки.</p></details>
+    <details><summary>Почту Gmail не заблокируют?</summary><p>Рассылка устроена как письма живого человека: первые дни — 15 писем, потом больше; только в рабочие часы; случайные паузы; много возвратов за сутки (по умолчанию 3) — стоп до завтра. Лимит и часы — Настройки → Почта и письма → «Защита от блокировки».</p></details>
+    <details><summary>Рассылка идёт, если бот не запущен?</summary><p>Да: «Запустить бота» — это поиск вакансий на площадках. Рассылка работает сама, пока открыто приложение.</p></details>
+    <details><summary>Где хранятся мои данные?</summary><p>Только на вашем компьютере, в папке <code>data_folder</code>. База только пополняется — сама ничего не удаляет; раз в день делается запасная копия (хранятся копии за 7 дней, Настройки → Резервные копии). Выгрузить в Excel — Компании → «Скачать в Excel».</p></details>
+    <details><summary>Слишком много сообщений от бота</summary><p>Настройки → Уведомления в Telegram → «Тихий режим»: несрочное придёт одним списком в утренней сводке.</p></details>
+    <details><summary>Площадка на паузе после капчи</summary><p>Нажмите на неё на Главной: в шторке будет причина и кнопка «Я прошёл проверку — снять паузу». Или напишите боту <code>/resume hh</code> (или имя площадки).</p></details>
+    <details><summary>Что-то не подключено или не работает</summary><p>Настройки → «Подключения» — там видно, что красное, и кнопка «Подключить». Подробности ошибок — Вакансии → Журнал бота.</p></details>
   </dialog>
 
   <main>
-    <nav id="subnav" class="subnav" aria-label="Подразделы" style="display:none"></nav>
+    <nav id="subnav" class="subnav" aria-label="Подразделы" style="display:none" data-ui="nav.subtabs"></nav>
     <section id="view-overview" class="view active">
-      <div class="view-header">
-        <div>
+      <header class="page-head">
+        <div class="page-title">
           <h2>Главная</h2>
-          <p class="muted">Что ждёт вашего решения, статистика и площадки</p>
+          <p class="muted">Что требует вашего решения и как идут дела</p>
         </div>
-      </div>
-      <div id="todo-panel" class="panel todo-panel"></div>
+        <span id="home-limit" class="home-limit mono" data-ui="home.limit"></span>
+        <div class="segmented" id="home-mode" role="radiogroup" aria-label="Режим работы площадок" data-ui="home.mode">
+          <span class="segmented-ind" aria-hidden="true"></span>
+          <button type="button" role="radio" aria-checked="false" data-mode="apply" title="Бот сам отправляет отклики на включённых площадках — до дневного лимита">Откликаться</button>
+          <button type="button" role="radio" aria-checked="false" data-mode="search" title="Бот только находит вакансии, откликаетесь вы">Только искать</button>
+        </div>
+        <button type="button" class="btn" id="home-palette" title="Найти действие (Ctrl/⌘+K)">
+          <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>Поиск<kbd>⌘K</kbd>
+        </button>
+        <button type="button" class="btn btn-primary" id="home-run" data-ui="bot.toggle">Запустить</button>
+      </header>
+
+      <section id="todo-panel" class="card todo-panel" aria-label="Нужно ваше решение" data-ui="home.setup home.todo home.todo.calm home.queue.telegram home.queue.hh shell.tour"></section>
 
       <!-- Пока не пройдены обязательные шаги настройки (резюме, ключ ИИ,
            хотя бы одна площадка) — ниже нечего показывать: пустая
-           статистика и карточки площадок без резюме только отвлекают от
-           чек-листа выше. render.overview() прячет/показывает этот блок
-           целиком через #dashboard-sections. -->
-      <div id="dashboard-sections">
-        <div id="stats-row" class="stats-row"></div>
-        <div id="speed-card" class="panel speed-card"></div>
-        <details id="live-feed" class="panel"><summary>Что бот делает сейчас</summary><div id="live-feed-body" class="muted small"></div></details>
+           статистика и площадки без резюме только отвлекают от
+           чек-листа выше. render.overview() прячет этот блок целиком. -->
+      <div id="dashboard-sections" data-ui="home.gate">
+        <section id="stats-row" class="kpi-grid" aria-label="Итоги" data-ui="home.kpi"></section>
 
-        <h3 class="section-subheading"><svg class="section-subheading-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" stroke="currentColor" stroke-width="1.6"/><path d="M5.6 6.1a6 6 0 0 0 0 7.8M14.4 6.1a6 6 0 0 1 0 7.8M3 3.5a10 10 0 0 0 0 13M17 3.5a10 10 0 0 1 0 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Свои каналы</h3>
-        <div id="own-channels" class="source-grid"></div>
+        <div class="home-grid">
+          <section class="card list-card" aria-labelledby="platforms-h" data-ui="home.platforms home.platform.order">
+            <div class="card-head">
+              <h3 id="platforms-h">Площадки</h3>
+              <span class="muted small">нажмите на строку — настройки откроются справа</span>
+            </div>
+            <div class="grp">Свои каналы</div>
+            <div id="own-channels" class="platform-list" data-ui="home.tg home.sites home.pipeline home.own.extra"></div>
+            <div class="grp">Русские площадки</div>
+            <div id="source-grid-ru" class="platform-list"></div>
+            <div class="grp">Зарубежные площадки</div>
+            <div id="source-grid-intl" class="platform-list"></div>
+          </section>
 
-        <h3 class="section-subheading"><svg class="section-subheading-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 17.5S15.5 12.8 15.5 8.5a5.5 5.5 0 1 0-11 0c0 4.3 5.5 9 5.5 9Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="10" cy="8.3" r="2" stroke="currentColor" stroke-width="1.6"/></svg>Русские площадки</h3>
-        <div id="source-grid-ru" class="source-grid"></div>
-
-        <h3 class="section-subheading"><svg class="section-subheading-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="1.6"/><path d="M2.5 10h15M10 2.5c2.2 2 3.5 4.9 3.5 7.5s-1.3 5.5-3.5 7.5c-2.2-2-3.5-4.9-3.5-7.5S7.8 4.5 10 2.5Z" stroke="currentColor" stroke-width="1.6"/></svg>Зарубежные площадки</h3>
-        <div id="source-grid-intl" class="source-grid"></div>
+          <div class="home-side">
+            <section class="card pad-card" id="home-split" aria-labelledby="home-split-h" data-ui="home.split"></section>
+            <section class="card pad-card" id="live-feed" aria-labelledby="live-feed-h" data-ui="home.feed">
+              <div class="card-head flat">
+                <span class="dot never_run" id="live-feed-dot" aria-hidden="true"></span>
+                <h3 id="live-feed-h">Что бот делает сейчас</h3>
+              </div>
+              <div id="live-feed-body" class="feed muted small"></div>
+            </section>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -884,7 +914,7 @@
         <h4>Реже нужно</h4>
         <div class="limits-grid">
           <label class="limit-field" style="justify-content:flex-end">
-            <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="switch" id="limit-continuous-cycle" /> Постоянный цикл вместо расписания</span>
+            <span style="display:flex;align-items:center;gap:8px" data-ui="settings.cycle home.cycle"><input type="checkbox" class="switch" id="limit-continuous-cycle" /> Постоянный цикл вместо расписания</span>
           </label>
           <label class="limit-field">
             <span title="Пока включён постоянный цикл, свой интервал каждой площадки (в её ⚙ Настроить) не действует — все идут по общему кругу с этой паузой между переключением">Пауза между площадками в цикле, минут</span>
@@ -1033,7 +1063,7 @@
 
       <div class="settings-pane" id="settings-table" role="tabpanel" aria-labelledby="settings-table-tab">
         <p class="muted small">Клик по «⚙ Настроить» открывает расписание, лимиты и фильтры для площадки.</p>
-        <div class="source-grid" id="platform-cards"></div>
+        <div class="source-grid" id="platform-cards" data-ui="settings.platforms"></div>
       </div>
 
       <div class="panel settings-pane" id="settings-direct" role="tabpanel" aria-labelledby="settings-direct-tab">
@@ -1279,8 +1309,8 @@
   </main>
 </div>
 
-<div id="toast-container" role="status" aria-atomic="false"></div>
-<div id="sr-announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+<div id="toast-container" role="status" aria-atomic="false" data-ui="shell.toast drawer.save"></div>
+<div id="sr-announcer" class="sr-only" aria-live="polite" aria-atomic="true" data-ui="shell.sr"></div>
 
 <div id="command-overlay" class="command-overlay" style="display:none" role="dialog" aria-modal="true" aria-label="Командная палитра">
   <div class="command-palette">
@@ -1289,7 +1319,7 @@
   </div>
 </div>
 
-<div id="confirm-overlay" class="command-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="confirm-message">
+<div id="confirm-overlay" data-ui="shell.confirm" class="command-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="confirm-message">
   <div class="command-palette" style="padding:18px 20px">
     <p id="confirm-message" style="margin:0 0 16px;font-size:13.5px;line-height:1.5"></p>
     <div class="tour-actions">
@@ -1299,12 +1329,12 @@
   </div>
 </div>
 
-<div id="shortcuts-overlay" class="command-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
+<div id="shortcuts-overlay" data-ui="shell.shortcuts" class="command-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
   <div class="command-palette" style="padding:18px 20px">
     <h3 id="shortcuts-title" style="margin:0 0 4px">Горячие клавиши</h3>
     <div class="shortcuts-list">
       <div class="shortcuts-row"><span>Командная палитра</span><kbd>Ctrl/⌘</kbd> + <kbd>K</kbd></div>
-      <div class="shortcuts-row"><span>Переключить раздел</span><kbd>1</kbd>–<kbd>8</kbd></div>
+      <div class="shortcuts-row"><span>Переключить раздел</span><kbd>1</kbd>–<kbd>6</kbd></div>
       <div class="shortcuts-row"><span>Свернуть/развернуть меню</span><kbd>Ctrl/⌘</kbd> + <kbd>B</kbd></div>
       <div class="shortcuts-row"><span>Эта подсказка</span><kbd>?</kbd></div>
       <div class="shortcuts-row"><span>Закрыть окно</span><kbd>Esc</kbd></div>
@@ -1413,16 +1443,22 @@
 </div>
 
 <div id="platform-drawer-overlay" class="drawer-overlay" style="display:none">
-  <div class="drawer-panel" id="platform-drawer" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="platform-drawer-title">
+  <div class="drawer-panel" id="platform-drawer" data-ui="home.platform.last-run" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="platform-drawer-title">
     <div class="drawer-header">
-      <h3 id="platform-drawer-title"></h3>
-      <button type="button" class="btn btn-ghost btn-small" id="platform-drawer-close" aria-label="Закрыть">✕</button>
+      <div class="drawer-heading">
+        <h3 id="platform-drawer-title"></h3>
+        <div class="drawer-sub" id="platform-drawer-sub" hidden></div>
+      </div>
+      <button type="button" class="icon-btn" id="platform-drawer-close" aria-label="Закрыть">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg>
+      </button>
     </div>
     <div class="drawer-body" id="platform-drawer-body"></div>
+    <div class="drawer-foot" id="platform-drawer-foot" hidden></div>
   </div>
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=63"></script>
+<script src="/app.js?v=65"></script>
 </body>
 </html>

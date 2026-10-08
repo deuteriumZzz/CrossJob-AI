@@ -98,7 +98,7 @@ from src.job_sources.apply_pacing import (
     MAX_TELEGRAM_MESSAGE_DELAY_SECONDS,
     MIN_TELEGRAM_MESSAGE_DELAY_SECONDS,
 )
-from src.job_sources.block_detection import is_still_blocked
+from src.job_sources.block_detection import clear_blocked, is_still_blocked
 from src.job_sources.contact_book import ContactBook, company_key
 from src.job_sources.filters import (
     EMPLOYMENT,
@@ -189,7 +189,7 @@ from src.scheduler import (
     DEFAULT_INTERVAL_HOURS,
     Scheduler,
 )
-from src.scheduler_state import load_state
+from src.scheduler_state import load_state, record_run_result
 from src.utils import autostart, daemon_service
 from src.utils.constants import RESUME_PDF, RESUME_PDF_LINKEDIN, SECRETS_YAML
 
@@ -784,18 +784,22 @@ def get_stats(ctx: AppContext = Depends(get_ctx)) -> dict:
         "prev_day": ctx.applied_log.count_in_previous_period("day"),
         "prev_week": ctx.applied_log.count_in_previous_period("week"),
         "prev_month": ctx.applied_log.count_in_previous_period("month"),
+        "daily": ctx.applied_log.daily_counts(30),
     }
 
 
 @app.get("/api/results")
-def get_results(ctx: AppContext = Depends(get_ctx)) -> dict:
-    """Главная цифра — ответы и интервью за 7 дней (и прошлые 7 для
-    сравнения) по источникам: площадки, Telegram, рассылка по почте.
-    Время ответа — когда сменился этап/статус заявки."""
+def get_results(days: int = 7, ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Главная цифра — ответы и интервью за days дней (по умолчанию 7) и
+    столько же дней до них для сравнения, по источникам: площадки,
+    Telegram, рассылка по почте. Ключи "week"/"prev" — текущий и прошлый
+    период любой длины. Время ответа — когда сменился этап/статус
+    заявки."""
     from datetime import timedelta
 
+    days = min(max(days, 1), 3650)
     now = datetime.now().astimezone()
-    week, prev = now - timedelta(days=7), now - timedelta(days=14)
+    week, prev = now - timedelta(days=days), now - timedelta(days=2 * days)
     by_source: dict[str, dict] = {}
     totals = {
         "week": {"applied": 0, "replies": 0, "interviews": 0},
@@ -837,6 +841,7 @@ def get_results(ctx: AppContext = Depends(get_ctx)) -> dict:
                 add("email_campaign", "replies", item["replied_at"])
     return {
         **totals,
+        "days": days,
         "by_source": sorted(
             by_source.values(), key=lambda r: (-r["replies"], -r["applied"])
         ),
@@ -3413,6 +3418,24 @@ class SourceSettingsUpdate(BaseModel):
     # остальных площадок игнорируется тем же паттерном, что auto_reply.
     qualification: Optional[str] = None
     employment_type: Optional[str] = None
+
+
+@app.post("/api/sources/{source}/resume")
+def post_source_resume(
+    source: str, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """«Снять паузу» в шторке площадки — то же, что /resume в боте:
+    человек прошёл капчу или проверку на сайте сам. Включает площадку,
+    снимает кулдаун block_detection и ставит её в очередь на ближайший
+    тик планировщика."""
+    if source not in dict(SCHEDULER_SOURCES):
+        raise HTTPException(404, f"Unknown source: {source}")
+    set_source_field(ctx.config_file, source, "schedule_enabled", True)
+    clear_blocked(ctx.output_folder, source)
+    now = datetime.now()
+    record_run_result(ctx.output_folder, source, "ok", now, now)
+    ctx.reload_config()
+    return {"ok": True}
 
 
 @app.post("/api/settings")

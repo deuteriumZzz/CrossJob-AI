@@ -321,7 +321,55 @@ def test_stats_empty_log_returns_zeros(client):
         "prev_day": 0,
         "prev_week": 0,
         "prev_month": 0,
+        "daily": [0] * 30,
     }
+
+
+def test_stats_daily_counts_last_30_days(client):
+    import json
+    from datetime import datetime, timedelta
+
+    ctx = api.get_ctx()
+    now = datetime.now().astimezone()
+    base = {"company": "C", "title": "T", "link": "", "source": "hh"}
+    ctx.applied_log.path.write_text(
+        json.dumps(
+            {
+                "applications": [
+                    {
+                        **base,
+                        "external_id": "1",
+                        "status": "applied",
+                        "applied_at": now.isoformat(),
+                    },
+                    {
+                        **base,
+                        "external_id": "2",
+                        "status": "applied",
+                        "applied_at": (now - timedelta(days=2)).isoformat(),
+                    },
+                    {
+                        **base,
+                        "external_id": "3",
+                        "status": "skipped_low_fit",
+                        "applied_at": now.isoformat(),
+                    },
+                    {
+                        **base,
+                        "external_id": "4",
+                        "status": "applied",
+                        "applied_at": (now - timedelta(days=40)).isoformat(),
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    daily = client.get("/api/stats").json()["daily"]
+    assert len(daily) == 30
+    assert daily[-1] == 1
+    assert daily[-3] == 1
+    assert sum(daily) == 2
 
 
 def test_settings_update_persists_and_reflects_in_status(client):
@@ -1250,3 +1298,23 @@ def test_direct_settings_toggles_hirify_schedule(client):
         ]
         is False
     )
+
+
+def test_source_resume_clears_block_and_enables_source(client):
+    from src.job_sources.block_detection import is_still_blocked, mark_blocked
+
+    ctx = api.get_ctx()
+    mark_blocked(ctx.output_folder, "headhunter")
+    assert is_still_blocked(ctx.output_folder, "headhunter") is True
+
+    response = client.post("/api/sources/headhunter/resume")
+
+    assert response.status_code == 200
+    assert is_still_blocked(ctx.output_folder, "headhunter") is False
+    hh = next(
+        s
+        for s in client.get("/api/status").json()["sources"]
+        if s["name"] == "headhunter"
+    )
+    assert hh["schedule_enabled"] is True
+    assert client.post("/api/sources/nope/resume").status_code == 404
