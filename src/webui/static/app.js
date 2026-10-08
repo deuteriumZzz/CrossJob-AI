@@ -28,6 +28,7 @@ const SOURCE_LABELS = {
   avito: "Авито Работа",
   direct: "Сайты компаний",
   talanto: "Talanto",
+  hirify: "Hirify",
 };
 
 // ponytail: настоящие логотипы площадок — товарные знаки, тащить их к себе
@@ -49,10 +50,11 @@ const SOURCE_ICON = {
   avito: { text: "AV", color: "#6b4c9a" },
   direct: { text: "→", color: "#407e73" },
   talanto: { text: "TL", color: "#b4541f" },
+  hirify: { text: "HF", color: "#2f6f5e" },
 };
 
 // Площадки, нацеленные на зарубежный рынок — остальные площадки RU.
-const OWN_CHANNELS = new Set(["telegram", "direct", "talanto"]);
+const OWN_CHANNELS = new Set(["telegram", "direct", "talanto", "hirify"]);
 // "Расписание" звучит как редкий цикл раз в день — площадка на деле
 // проверяется почти непрерывно (следующий заход сразу после конца
 // предыдущего + этот интервал), просто с паузой, чтобы не выглядеть
@@ -788,6 +790,7 @@ const SOURCE_KIND = {
   telegram: "✈️ Telegram",
   sites: "🏢 сайты компаний",
   talanto: "🔎 Talanto",
+  hirify: "🔎 Hirify",
   dossier: "🔎 найден кнопкой",
   vacancy: "💼 вакансия",
 };
@@ -4106,6 +4109,7 @@ async function loadDirectSettings() {
   document.getElementById("direct-wwr").checked = d.wwr;
   document.getElementById("direct-hn").checked = d.hn;
   document.getElementById("direct-talanto").checked = d.talanto;
+  document.getElementById("direct-hirify").checked = d.hirify;
   loadDirectCompanies();
 }
 
@@ -4114,6 +4118,7 @@ async function saveDirectSetting(e) {
     "direct-wwr": "wwr",
     "direct-hn": "hn",
     "direct-talanto": "talanto",
+    "direct-hirify": "hirify",
   }[e.target.id];
   if (!field) return;
   try {

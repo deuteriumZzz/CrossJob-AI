@@ -84,6 +84,15 @@ FILTER_SUPPORT: dict[str, dict] = {
         "employment": True,
         "period": False,
     },
+    # Hirify: формат (удалёнка / офис), тип занятости и период — по данным
+    # самой вакансии; уровня и «только с зарплатой» в открытых данных нет.
+    "hirify": {
+        "formats": True,
+        "salary": False,
+        "levels": False,
+        "employment": True,
+        "period": True,
+    },
     "talanto": {
         "formats": True,
         "salary": True,
@@ -159,7 +168,10 @@ def posted_too_old(posted_at: str, preferences: dict) -> bool:
     from datetime import datetime, timedelta
 
     try:
-        posted = datetime.fromisoformat(posted_at)
+        # Python 3.9 не читает «Z» на конце — заменяем на +00:00.
+        posted = datetime.fromisoformat(
+            posted_at[:-1] + "+00:00" if posted_at.endswith("Z") else posted_at
+        )
     except ValueError:
         return False
     now = datetime.now(posted.tzinfo) if posted.tzinfo else datetime.now()

@@ -446,6 +446,7 @@ _CREDENTIAL_REQUIREMENTS: dict = {
     "djinni": None,
     "avito": None,
     "talanto": None,
+    "hirify": None,
 }
 
 
@@ -1415,12 +1416,13 @@ def _contact_events(
 
 def _source_kind(source: str) -> str:
     """Для фильтра и значка в базе: file / telegram / sites / talanto /
-    dossier / vacancy."""
+    hirify / dossier / vacancy."""
     group = _source_group(source)
     return {
         "Telegram-каналы": "telegram",
         "Сайты компаний": "sites",
         "Talanto": "talanto",
+        "Hirify": "hirify",
         "Досье компаний": "dossier",
         "Тексты вакансий": "vacancy",
     }.get(group, "file")
@@ -2481,6 +2483,8 @@ def _source_group(source: str) -> str:
         return "Сайты компаний"
     if source.startswith("Talanto"):
         return "Talanto"
+    if source.startswith("Hirify"):
+        return "Hirify"
     if source.startswith("файл "):
         return source.split(",")[0]
     # «пост в @канал» — найден в посте (email для отклика, «не писать»),
@@ -2990,6 +2994,9 @@ def get_direct_summary(ctx: AppContext = Depends(get_ctx)) -> dict:
         "talanto": bool(
             (ctx.config.get("talanto") or {}).get("schedule_enabled")
         ),
+        "hirify": bool(
+            (ctx.config.get("hirify") or {}).get("schedule_enabled")
+        ),
         "in_base": len(cards),
         "added_week": sum(
             1 for c in cards if c.get("created_at", "") >= week_ago
@@ -3010,6 +3017,7 @@ class DirectSettings(BaseModel):
     wwr: Optional[bool] = None
     hn: Optional[bool] = None
     talanto: Optional[bool] = None
+    hirify: Optional[bool] = None
 
 
 @app.post("/api/direct/settings")
@@ -3025,6 +3033,10 @@ def post_direct_settings(
     if body.talanto is not None:
         set_source_field(
             ctx.config_file, "talanto", "schedule_enabled", body.talanto
+        )
+    if body.hirify is not None:
+        set_source_field(
+            ctx.config_file, "hirify", "schedule_enabled", body.hirify
         )
     ctx.reload_config()
     return get_direct_summary(ctx)

@@ -1238,3 +1238,15 @@ def test_direct_settings_toggles_talanto_schedule(client):
     assert client.get("/api/direct/summary").json()["talanto"] is True
     off = client.post("/api/direct/settings", json={"talanto": False})
     assert off.json()["talanto"] is False
+
+
+def test_direct_settings_toggles_hirify_schedule(client):
+    assert client.get("/api/direct/summary").json()["hirify"] is False
+    on = client.post("/api/direct/settings", json={"hirify": True})
+    assert on.json()["hirify"] is True
+    assert (
+        client.post("/api/direct/settings", json={"hirify": False}).json()[
+            "hirify"
+        ]
+        is False
+    )

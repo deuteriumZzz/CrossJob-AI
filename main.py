@@ -139,6 +139,8 @@ from src.job_sources.himalayas.apply import (
 )
 from src.job_sources.himalayas.auth import HimalayasSession
 from src.job_sources.himalayas.source import HimalayasSource
+from src.job_sources.hirify.client import HirifyClient
+from src.job_sources.hirify.source import HirifySource
 from src.job_sources.hr_replies import (
     CATEGORY_LABELS,
     CATEGORY_STAGE,
@@ -3883,6 +3885,209 @@ def search_talanto(
         )
 
 
+HIRIFY_CONTACTS_FILE = ".hirify_contacts.json"
+HIRIFY_LOGIN_ALERT_FILE = ".hirify_login_alerted"
+DEFAULT_HIRIFY_CONTACTS_PER_DAY = 20
+
+
+def _daily_count(output_folder: Path, filename: str) -> int:
+    try:
+        data = json.loads((output_folder / filename).read_text("utf-8"))
+    except (OSError, ValueError):
+        return 0
+    return data["count"] if data.get("date") == str(date.today()) else 0
+
+
+def _daily_count_add(output_folder: Path, filename: str) -> None:
+    (output_folder / filename).write_text(
+        json.dumps(
+            {
+                "date": str(date.today()),
+                "count": _daily_count(output_folder, filename) + 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def search_hirify(
+    parameters: dict,
+    llm_api_key: str,
+    stop_event: Optional[threading.Event] = None,
+):
+    """Канал «Hirify» (hirify: в work_preferences.yaml) — сборщик для Базы
+    по образцу Talanto: вакансии из Telegram-каналов, откликов на сайте
+    нет. Открытый список даёт вакансию и компанию; контакты HR и название
+    Telegram-канала сайт показывает только после входа — их берём из
+    вашего профиля (вход делаете сами, scripts/hirify_login.py), не больше
+    hirify.contacts_per_day в день. Подошедшие вакансии кладём в Базу,
+    Telegram-каналы — в список парсера; слабые пишутся в applied_log."""
+    config = parameters.get("hirify") or {}
+    data_folder: Path = parameters["dataFolder"]
+    resume_pdf_path = data_folder / RESUME_PDF_LINKEDIN
+    if not resume_pdf_path.exists():
+        resume_pdf_path = data_folder / RESUME_PDF
+    if not resume_pdf_path.exists():
+        raise FileNotFoundError(f"Resume PDF not found in {data_folder}.")
+
+    output_folder: Path = parameters["outputFileDirectory"]
+    if is_still_blocked(output_folder, "hirify"):
+        logger.warning("Hirify is cooling down after a block — skipping.")
+        return
+    applied_log = AppliedLog(output_folder / "applied_log.json")
+    book = ContactBook(output_folder)
+    contacts_per_day = int(
+        config.get("contacts_per_day", DEFAULT_HIRIFY_CONTACTS_PER_DAY)
+    )
+    job_max = _job_max_applications(parameters, "hirify")
+
+    added = with_contacts = processed = 0
+    needs_login = False
+    tg_handles: list[str] = []
+    with HirifyClient(output_folder / ".chrome_profile_hirify") as client:
+        try:
+            jobs = HirifySource(client).search(parameters)
+        except PlatformBlockedError as e:
+            logger.error(f"Hirify appears to have blocked us: {e}")
+            mark_blocked(output_folder, "hirify")
+            notify(
+                parameters,
+                f"Hirify: похоже на блокировку ({e}). Источник поставлен "
+                "на паузу на 24ч.",
+                category="hirify",
+            )
+            return
+        logger.info(f"Found {len(jobs)} new Hirify vacancies.")
+        in_book = {
+            v["link"]
+            for card in book.all().values()
+            for v in card["vacancies"]
+        }
+        for job in jobs:
+            if stop_event is not None and stop_event.is_set():
+                break
+            if processed >= job_max:
+                break
+            if job.link in in_book or applied_log.already_applied(job):
+                continue
+            processed += 1
+            fit = score_job_fit(resume_pdf_path, job, llm_api_key)
+            tier = classify_fit(
+                fit.score,
+                _job_min_score(parameters),
+                _job_suitability_score(parameters),
+            )
+            if tier == "skip":
+                applied_log.record(
+                    job, "", "", "skipped_low_fit", fit.score, fit.gaps
+                )
+                continue
+
+            contacts = [
+                {
+                    **c,
+                    "source": "Hirify: текст вакансии",
+                    "source_url": job.link,
+                }
+                for c in contacts_from_text(
+                    job.description, bare_mentions=False
+                )
+            ]
+            channel = ""
+            if (
+                not needs_login
+                and _daily_count(output_folder, HIRIFY_CONTACTS_FILE)
+                < contacts_per_day
+            ):
+                job_id, _, slug = job.link.rsplit("/", 1)[-1].partition("-")
+                try:
+                    info = client.show_contacts(job_id, slug)
+                except PlatformBlockedError as e:
+                    mark_blocked(output_folder, "hirify")
+                    notify(
+                        parameters,
+                        f"Hirify: похоже на блокировку ({e}).",
+                        category="hirify",
+                    )
+                    break
+                except Exception as e:
+                    logger.warning(f"Hirify: контакты {job.role}: {e}")
+                    info = {"text": "", "channel": "", "needs_login": False}
+                _daily_count_add(output_folder, HIRIFY_CONTACTS_FILE)
+                needs_login = bool(info.get("needs_login"))
+                channel = info.get("channel", "")
+                contacts += [
+                    {
+                        **c,
+                        "source": "Hirify: контакты",
+                        "source_url": job.link,
+                    }
+                    for c in contacts_from_text(
+                        info.get("text", ""), bare_mentions=False
+                    )
+                ]
+
+            if channel:
+                tg_handles.append(channel)
+            if not job.company and not contacts:
+                applied_log.record(
+                    job, "", "", "skipped_requirements", fit.score, fit.gaps
+                )
+                continue
+            book.add(
+                job.company,
+                contacts,
+                vacancy={
+                    "title": job.role,
+                    "link": job.link,
+                    "source": "hirify",
+                    "text": job.description[:4000],
+                    "score": fit.score,
+                },
+            )
+            in_book.add(job.link)
+            tg_handles += [
+                c["value"] for c in contacts if c["kind"] == "telegram"
+            ]
+            added += 1
+            with_contacts += bool(contacts)
+            logger.info(
+                f"[в Базу] {job.role} at {job.company or '?'}"
+                + (f" — {contacts[0]['value']}" if contacts else "")
+            )
+
+    if needs_login:
+        marker = output_folder / HIRIFY_LOGIN_ALERT_FILE
+        if not marker.exists() or marker.read_text() != str(date.today()):
+            marker.write_text(str(date.today()))
+            notify(
+                parameters,
+                "Hirify: контакты HR и каналы видны только после входа. "
+                "Один раз войдите в аккаунт hirify.me в окне бота "
+                "(scripts/hirify_login.py).",
+                category="hirify",
+            )
+    new_channels: list[str] = []
+    if tg_handles:
+        try:
+            new_channels = route_telegram_handles(parameters, tg_handles)
+        except Exception as e:
+            logger.warning(f"Hirify: каналы в парсер не добавлены: {e}")
+    if added or new_channels:
+        channels_part = (
+            f" Каналов в парсер: +{len(new_channels)} "
+            f"({', '.join('@' + c for c in new_channels)})."
+            if new_channels
+            else ""
+        )
+        notify_routine(
+            parameters,
+            f"🔎 Hirify: +{added} в Базе, с контактами — {with_contacts}."
+            f"{channels_part}",
+            category="Hirify",
+        )
+
+
 # Окна с предзаполненной формой должны жить, пока человек дозаполняет
 # и отправляет — держим ссылки, иначе сборщик мусора закроет драйвер.
 _PREFILL_BROWSERS: list = []
@@ -4926,6 +5131,7 @@ ALL_SOURCES: list[Tuple[str, Callable[..., Any]]] = [
     ("avito", search_and_apply_avito),
     ("direct", search_direct),
     ("talanto", search_talanto),
+    ("hirify", search_hirify),
 ]
 
 
