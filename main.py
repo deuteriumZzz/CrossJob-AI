@@ -191,6 +191,9 @@ from src.job_sources.llm_provider import (
     set_fallback_mode as set_llm_fallback_mode,
 )
 from src.job_sources.llm_provider import (
+    set_fallback_order as set_llm_fallback_order,
+)
+from src.job_sources.llm_provider import (
     set_provider_override as set_llm_provider_override,
 )
 from src.job_sources.llm_usage import (
@@ -247,7 +250,10 @@ from src.job_sources.telegram_notify import (
     bot_credentials,
     bot_request,
     get_or_create_topic,
+    notification_allowed,
+    notification_kind,
     notify_from_secrets,
+    record_notification,
     send_document_from_secrets,
     send_notification,
 )
@@ -1160,6 +1166,7 @@ def apply_llm_provider_override(parameters: dict) -> None:
     )
     set_llm_fallback_mode(llm_config.get("mode"))
     set_llm_fallback_enabled(llm_config.get("fallback_enabled"))
+    set_llm_fallback_order(llm_config.get("fallback_order"))
 
 
 def _job_min_score(parameters: dict) -> float:
@@ -5337,6 +5344,11 @@ def notify_routine(
     if not (parameters.get("digest") or {}).get("quiet"):
         notify(parameters, text, category)
         return
+    kind = notification_kind(text, category)
+    if not notification_allowed(parameters, kind):
+        record_notification(parameters, text, category, kind, "muted")
+        return
+    record_notification(parameters, text, category, kind, "digest")
     path = Path(parameters["outputFileDirectory"]) / QUIET_QUEUE_FILE
     with state_file_lock(path):
         try:
@@ -7322,6 +7334,7 @@ def _maybe_send_daily_digest(
         return
     queue_path.unlink(missing_ok=True)
     state_path.write_text(json.dumps({"last_sent": today}), encoding="utf-8")
+    record_notification(parameters, text, "Сводка", "activity", "sent")
 
 
 # ponytail: check_*_replies не входят в ALL_SOURCES (это не

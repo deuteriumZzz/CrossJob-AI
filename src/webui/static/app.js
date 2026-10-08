@@ -3730,6 +3730,7 @@ const render = {
       document.getElementById("llm-mode").value = llm.mode || "auto";
       document.getElementById("llm-fallback-enabled").checked =
         llm.fallback_enabled !== false;
+      renderFallbackOrder(llm);
     });
 
     api("/api/settings/llm/status").then(applyLLMProviderStatus);
@@ -4379,7 +4380,7 @@ async function loadBackups() {
     .map(
       (b) => `
     <div class="account-row">
-      <span class="account-text"><b>${escapeHtml(b.date)}</b><span class="muted small">${b.files} ${plural(b.files, "файл", "файла", "файлов")} · ${Math.max(1, Math.round(b.size_bytes / 1024))} КБ</span></span>
+      <span class="account-text"><b>${escapeHtml(backupLabel(b))}</b><span class="muted small">${b.manual ? "вручную · " : ""}${b.files} ${plural(b.files, "файл", "файла", "файлов")} · ${Math.max(1, Math.round(b.size_bytes / 1024))} КБ</span></span>
       <button type="button" class="btn btn-secondary btn-small" data-restore-backup="${escapeHtml(b.date)}">Восстановить</button>
     </div>`
     )
@@ -4388,7 +4389,7 @@ async function loadBackups() {
     btn.addEventListener("click", async () => {
       const date = btn.dataset.restoreBackup;
       const ok = await showConfirm(
-        `Восстановить данные на состояние ${date}? База компаний, рассылки, отклики, переписка и черновики будут заменены копией за эту дату — текущее состояние тоже сохранится отдельным снимком, но проверьте дату перед подтверждением.`
+        `Восстановить данные на состояние ${backupLabel({ date })}? База компаний, рассылки, отклики, переписка и черновики будут заменены копией за эту дату — текущее состояние тоже сохранится отдельным снимком, но проверьте дату перед подтверждением.`
       );
       if (!ok) return;
       btn.disabled = true;
@@ -5881,6 +5882,10 @@ async function loadOutreachSettings() {
   document.getElementById("outreach-digest").checked = s.digest_enabled;
   document.getElementById("outreach-digest-hour").value = s.digest_hour;
   document.getElementById("digest-quiet").checked = s.digest_quiet;
+  document.getElementById("notify-activity").checked = s.notify_activity !== false;
+  document.getElementById("notify-failures").checked = s.notify_failures !== false;
+  document.getElementById("outreach-letter-instructions").value = s.letter_instructions || "";
+  renderLetterInstructions(s.letter_instructions || "");
   document.getElementById("outreach-skip-us").checked = s.skip_us_only;
   document.getElementById("outreach-skip-eu").checked = s.skip_europe_only;
   document.getElementById("outreach-candidate-telegram").value = s.candidate_telegram;
@@ -5912,6 +5917,7 @@ async function saveOutreachSettings() {
     candidate_telegram: document.getElementById("outreach-candidate-telegram").value.trim(),
     candidate_whatsapp: document.getElementById("outreach-candidate-whatsapp").value.trim(),
     candidate_linkedin: document.getElementById("outreach-candidate-linkedin").value.trim(),
+    letter_instructions: document.getElementById("outreach-letter-instructions").value.trim(),
   };
   const password = document.getElementById("outreach-app-password").value.trim();
   if (password) body.email_app_password = password;
@@ -6123,9 +6129,11 @@ async function saveDigest() {
         digest_enabled: document.getElementById("outreach-digest").checked || document.getElementById("digest-quiet").checked,
         digest_hour: parseInt(document.getElementById("outreach-digest-hour").value, 10) || 9,
         digest_quiet: document.getElementById("digest-quiet").checked,
+        notify_activity: document.getElementById("notify-activity").checked,
+        notify_failures: document.getElementById("notify-failures").checked,
       }),
     });
-    showToast("Сводка сохранена", "success");
+    showToast("Уведомления сохранены", "success");
   } catch (err) {
     showToast(err.message.replace(/^\d+: /, ""), "error");
   }
@@ -7955,7 +7963,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   );
   document.getElementById("contacts-filter-query").addEventListener("input", resetPage);
   document.getElementById("outreach-email-test").addEventListener("click", testOutreachEmail);
-  ["outreach-digest", "outreach-digest-hour", "digest-quiet"].forEach((id) => document.getElementById(id).addEventListener("change", saveDigest));
+  ["outreach-digest", "outreach-digest-hour", "digest-quiet", "notify-activity", "notify-failures"].forEach((id) => document.getElementById(id).addEventListener("change", saveDigest));
   // Фильтры удалёнки — в «Что ищу», сохраняются сразу.
   ["outreach-skip-us", "outreach-skip-eu"].forEach((id) =>
     document.getElementById(id).addEventListener("change", async () => {
@@ -7986,5 +7994,199 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.querySelectorAll("[data-close-overlay]").forEach((btn) => {
     btn.addEventListener("click", () => hideOverlay(btn.closest(".command-overlay")));
   });
-
+  initSettingsExtras();
+  initNotifications();
 });
+
+
+// --- Доработки из раздела 11 карты интерфейса (docs/UI_MAP.md) -------------
+
+// «2026-10-08» → «8 октября», ручная копия «2026-10-08-153012» → «8 октября, 15:30».
+function backupLabel(b) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:-(\d{2})(\d{2})\d{2})?$/.exec(b.date || "");
+  if (!m) return b.date;
+  const day = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const text = day.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+  return m[4] ? `${text}, ${m[4]}:${m[5]}` : text;
+}
+
+async function backupNow(btn) {
+  btn.disabled = true;
+  try {
+    const res = await api("/api/backups/now", { method: "POST" });
+    showToast(`Копия сохранена: ${backupLabel({ date: res.date })}`, "success");
+    loadBackups();
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderLetterInstructions(text) {
+  const el = document.getElementById("outreach-letter-current");
+  if (!el) return;
+  el.textContent = text ? `Ваши правила: ${text.replace(/\s*\n\s*/g, "; ")}` : "Своих правил нет — бот пишет по основе.";
+}
+
+// «Запасные — пробуются по порядку»: провайдеры с сохранёнными ключами,
+// кроме основного; порядок меняется стрелками и сохраняется сразу.
+let fallbackOrderState = [];
+function providerTitle(p) {
+  const card = document.querySelector(`#provider-grid .provider-card[data-provider="${p}"] span`);
+  return card ? card.textContent : p;
+}
+function renderFallbackOrder(llm) {
+  const list = document.getElementById("llm-fallback-order");
+  if (!list) return;
+  const withKeys = Object.keys(llm.api_key_previews || {}).filter((p) => p !== llm.provider);
+  const order = (llm.fallback_order || []).filter((p) => withKeys.includes(p));
+  fallbackOrderState = [...order, ...withKeys.filter((p) => !order.includes(p))];
+  if (!fallbackOrderState.length) {
+    list.innerHTML = `<li class="order-empty muted small">Ключей других провайдеров нет — запасных не будет. Добавьте ключ ниже, выбрав провайдера.</li>`;
+    return;
+  }
+  list.innerHTML = fallbackOrderState
+    .map(
+      (p, i) => `<li class="order-item"><span class="order-num">${i + 1}</span><span class="order-name">${escapeHtml(providerTitle(p))}</span>
+        <button type="button" class="btn btn-ghost btn-icon btn-small" data-order-move="-1" data-order-index="${i}" aria-label="Поднять ${escapeHtml(providerTitle(p))}" ${i === 0 ? "disabled" : ""}>↑</button>
+        <button type="button" class="btn btn-ghost btn-icon btn-small" data-order-move="1" data-order-index="${i}" aria-label="Опустить ${escapeHtml(providerTitle(p))}" ${i === fallbackOrderState.length - 1 ? "disabled" : ""}>↓</button></li>`
+    )
+    .join("");
+}
+
+async function moveFallback(index, delta) {
+  const before = [...fallbackOrderState];
+  const to = index + delta;
+  if (to < 0 || to >= fallbackOrderState.length) return;
+  const order = [...fallbackOrderState];
+  [order[index], order[to]] = [order[to], order[index]];
+  try {
+    const llm = await api("/api/settings/llm", { method: "POST", body: JSON.stringify({ fallback_order: order }) });
+    renderFallbackOrder(llm);
+    const btn = document.querySelector(`#llm-fallback-order [data-order-index="${to}"][data-order-move="${delta}"]`)
+      || document.querySelector(`#llm-fallback-order [data-order-index="${to}"]`);
+    btn?.focus();
+    showSavedToast("Порядок запасных сохранён", async () => {
+      renderFallbackOrder(await api("/api/settings/llm", { method: "POST", body: JSON.stringify({ fallback_order: before }) }));
+    });
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  }
+}
+
+function initSettingsExtras() {
+  document.getElementById("backup-now")?.addEventListener("click", (e) => backupNow(e.currentTarget));
+  document.getElementById("llm-fallback-order")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-order-move]");
+    if (btn) moveFallback(Number(btn.dataset.orderIndex), Number(btn.dataset.orderMove));
+  });
+  const edit = document.getElementById("outreach-letter-edit");
+  const box = document.getElementById("outreach-letter-box");
+  edit?.addEventListener("click", () => {
+    box.hidden = !box.hidden;
+    edit.setAttribute("aria-expanded", String(!box.hidden));
+    edit.textContent = box.hidden ? "Изменить" : "Свернуть";
+    if (!box.hidden) document.getElementById("outreach-letter-instructions").focus();
+  });
+  document.getElementById("outreach-letter-instructions")?.addEventListener("change", (e) =>
+    renderLetterInstructions(e.target.value.trim())
+  );
+}
+
+// --- Уведомления: история того, что бот сообщал (колокольчик) --------------
+
+const NOTIF_SEEN_KEY = "cj-notif-seen";
+const NOTIF_STATUS = {
+  sent: "в Telegram",
+  queued: "ждёт связи с Telegram",
+  app: "только здесь — бот не подключён",
+  muted: "не отправлено — этот вид выключен",
+  digest: "в утренней сводке",
+};
+let notifItems = [];
+
+function notifSeenAt() {
+  try {
+    return localStorage.getItem(NOTIF_SEEN_KEY) || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+function renderNotifCount() {
+  const badge = document.getElementById("notif-count");
+  if (!badge) return;
+  const seen = notifSeenAt();
+  const unread = notifItems.filter((n) => n.at > seen).length;
+  badge.hidden = !unread;
+  badge.textContent = unread > 99 ? "99+" : String(unread);
+  document.getElementById("notif-open")?.setAttribute("aria-label", unread ? `Уведомления: новых ${unread}` : "Уведомления");
+}
+
+async function refreshNotifications() {
+  if (document.visibilityState !== "visible") return;
+  try {
+    notifItems = (await api("/api/notifications?limit=100")).items || [];
+  } catch (e) {
+    return;
+  }
+  renderNotifCount();
+}
+
+function notifRowHtml(n) {
+  const failure = n.kind === "failure";
+  const time = n.at ? fmtDay(n.at) : "";
+  const topic = SOURCE_LABELS[n.category] ? sourceLabel(n.category) : n.category;
+  return `<li class="notif-row${failure ? " is-failure" : ""}">
+    <span class="dot ${failure ? "error" : "ok"}" aria-hidden="true"></span>
+    <div class="notif-body"><div class="notif-text">${escapeHtml(n.text)}</div>
+      <div class="muted small">${escapeHtml(time)}${topic ? ` · ${escapeHtml(topic)}` : ""} · ${escapeHtml(NOTIF_STATUS[n.status] || n.status)}</div></div></li>`;
+}
+
+async function openNotifications() {
+  await refreshNotifications();
+  const filters = [["all", "Все"], ["failure", "Сбои"], ["activity", "Отклики и ответы"]];
+  const body = openSideDrawer({
+    title: "Уведомления",
+    sub: "Что бот сообщал. Что присылать в Telegram — в Настройках → Уведомления",
+    body: `<div class="subnav notif-filter" role="group" aria-label="Какие уведомления показать">${filters
+      .map(([v, t], i) => `<button type="button" class="${i ? "" : "active"}" data-notif-filter="${v}" aria-pressed="${i ? "false" : "true"}">${t}</button>`)
+      .join("")}</div><ul class="notif-list" id="notif-list"></ul>`,
+    foot: `<button type="button" class="btn btn-small" id="notif-settings">Что присылать</button>`,
+  });
+  openDrawerSource = null;
+  const list = body.querySelector("#notif-list");
+  const show = (kind) => {
+    const items = notifItems.filter((n) => kind === "all" || n.kind === kind);
+    list.innerHTML = items.length
+      ? items.map(notifRowHtml).join("")
+      : `<li>${emptyStateHtml(kind === "failure" ? "Сбоев не было." : "Пока бот ничего не сообщал.")}</li>`;
+  };
+  show("all");
+  body.querySelectorAll("[data-notif-filter]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      body.querySelectorAll("[data-notif-filter]").forEach((b) => {
+        b.classList.toggle("active", b === btn);
+        b.setAttribute("aria-pressed", String(b === btn));
+      });
+      show(btn.dataset.notifFilter);
+    })
+  );
+  document.getElementById("notif-settings").addEventListener("click", () => {
+    closePlatformDrawer();
+    gotoSettings("settings-notifications");
+  });
+  if (notifItems.length) {
+    try {
+      localStorage.setItem(NOTIF_SEEN_KEY, notifItems[0].at);
+    } catch (e) {}
+  }
+  renderNotifCount();
+}
+
+function initNotifications() {
+  document.getElementById("notif-open")?.addEventListener("click", openNotifications);
+  refreshNotifications();
+  setInterval(refreshNotifications, 30000);
+}

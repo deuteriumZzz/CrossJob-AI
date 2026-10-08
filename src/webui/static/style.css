@@ -8070,3 +8070,113 @@ a.btn-primary:hover {
 .mail-bottom > .card {
   max-width: none;
 }
+
+/* ---------- Доработки раздела 11: уведомления, запасные ИИ, копии ---------- */
+
+.side-count {
+  margin-left: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.sidebar.collapsed .side-count {
+  position: absolute;
+  top: 2px;
+  right: 6px;
+  min-width: 8px;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  font-size: 0;
+  background: var(--text-2);
+}
+#notif-open {
+  position: relative;
+}
+
+.notif-filter {
+  margin-bottom: 12px;
+}
+.notif-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.notif-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.notif-row:last-child {
+  border-bottom: 0;
+}
+.notif-row .dot {
+  margin-top: 6px;
+  flex: none;
+}
+.notif-body {
+  min-width: 0;
+}
+.notif-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.order-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.order-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.order-item:last-child {
+  border-bottom: 0;
+}
+.order-num {
+  width: 18px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.order-name {
+  flex: 1;
+}
+.order-empty {
+  padding: 10px 12px;
+}
+.btn-icon {
+  min-width: 28px;
+  padding-left: 0;
+  padding-right: 0;
+  justify-content: center;
+}
+
+.field-row-split {
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+#outreach-letter-box textarea {
+  width: 100%;
+  margin-top: 8px;
+}
+#outreach-letter-current {
+  margin: 4px 0 0;
+}

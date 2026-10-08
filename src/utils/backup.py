@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
+import re
 import shutil
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from src.logging import logger
@@ -18,6 +19,16 @@ BACKUP_FILES = (
     ".hr_reply_drafts.json",
 )
 KEEP_DAYS = 7
+# Копии «Сделать копию сейчас» (Настройки → Резервные копии) — в папках
+# ГГГГ-ММ-ДД-ЧЧММСС рядом с дневными, считаются отдельно: ручная копия не
+# вытесняет дневные, и наоборот.
+KEEP_MANUAL = 5
+_DAILY_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_MANUAL_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{6}$")
+
+
+def is_backup_name(name: str) -> bool:
+    return bool(_DAILY_NAME.match(name) or _MANUAL_NAME.match(name))
 
 
 def daily_backup(
@@ -51,11 +62,36 @@ def daily_backup(
         for f in files:
             shutil.copy2(f, target / f.name)
         # Старше недели — удаляем, папки названы датой, сортируются сами.
-        for old in sorted(p for p in root.iterdir() if p.is_dir())[
-            :-KEEP_DAYS
-        ]:
+        for old in sorted(
+            p
+            for p in root.iterdir()
+            if p.is_dir() and not _MANUAL_NAME.match(p.name)
+        )[:-KEEP_DAYS]:
             shutil.rmtree(old, ignore_errors=True)
     except OSError as e:
         logger.warning(f"Резервная копия не сделана: {e}")
         return None
+    return target
+
+
+def backup_now(output_folder: Path, now: datetime | None = None) -> Path:
+    """Копия прямо сейчас, сколько бы их ни было за день. Бросает OSError,
+    если копию сделать не удалось, и FileNotFoundError, если копировать
+    нечего — кнопка в настройках должна честно сказать, что вышло."""
+    root = output_folder.parent / "backups"
+    files = [
+        output_folder / name
+        for name in BACKUP_FILES
+        if (output_folder / name).exists()
+    ]
+    if not files:
+        raise FileNotFoundError("Пока нечего копировать — данных ещё нет")
+    target = root / (now or datetime.now()).strftime("%Y-%m-%d-%H%M%S")
+    target.mkdir(parents=True, exist_ok=True)
+    for f in files:
+        shutil.copy2(f, target / f.name)
+    for old in sorted(
+        p for p in root.iterdir() if p.is_dir() and _MANUAL_NAME.match(p.name)
+    )[:-KEEP_MANUAL]:
+        shutil.rmtree(old, ignore_errors=True)
     return target

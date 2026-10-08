@@ -24,6 +24,9 @@ _fallback_keys: dict = {}
 _fallback_base_urls: dict = {}
 _fallback_mode: str = "auto"  # "auto" | "free" | "paid"
 _fallback_enabled: bool = True
+# Порядок запасных провайдеров (Настройки → ИИ → «Запасные»): названные
+# идут первыми в этом порядке, остальные с ключами — после, как раньше.
+_fallback_order: list = []
 # Без явного таймаута зависший (не ответивший, но и не упавший с
 # ошибкой) провайдер блокирует поток навсегда: .with_fallbacks()
 # переключает на следующего провайдера только по исключению, а
@@ -312,6 +315,12 @@ def set_fallback_enabled(enabled: Optional[bool]) -> None:
     _fallback_enabled = True if enabled is None else bool(enabled)
 
 
+def set_fallback_order(order: Optional[list]) -> None:
+    """Порядок запасных провайдеров; пусто — порядок по режиму (как раньше)."""
+    global _fallback_order
+    _fallback_order = [str(p) for p in (order or [])]
+
+
 def _recommended_model(provider: str) -> Optional[dict]:
     models = PROVIDER_MODELS.get(provider) or []
     return next((m for m in models if m.get("recommended")), None) or (
@@ -589,6 +598,10 @@ def _build_fallback_llms(
         others.sort(
             key=lambda p: not (_recommended_model(p) or {}).get("free", False)
         )
+    if _fallback_order:
+        # sort стабильный: не названные в списке сохраняют порядок режима.
+        rank = {p: i for i, p in enumerate(_fallback_order)}
+        others.sort(key=lambda p: rank.get(p, len(rank)))
 
     fallbacks = []
     for provider in others:

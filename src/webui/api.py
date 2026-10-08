@@ -1021,6 +1021,9 @@ class OutreachSettings(BaseModel):
     digest_enabled: Optional[bool] = None
     digest_hour: Optional[int] = None
     digest_quiet: Optional[bool] = None
+    notify_activity: Optional[bool] = None
+    notify_failures: Optional[bool] = None
+    letter_instructions: Optional[str] = None
     skip_us_only: Optional[bool] = None
     skip_europe_only: Optional[bool] = None
     candidate_telegram: Optional[str] = None
@@ -1058,6 +1061,18 @@ def get_outreach_settings(ctx: AppContext = Depends(get_ctx)) -> dict:
         "digest_enabled": digest.get("enabled", True) is not False,
         "digest_hour": int(digest.get("hour", 9)),
         "digest_quiet": bool(digest.get("quiet")),
+        "notify_activity": (ctx.config.get("notify") or {}).get(
+            "activity", True
+        )
+        is not False,
+        "notify_failures": (ctx.config.get("notify") or {}).get(
+            "failures", True
+        )
+        is not False,
+        "letter_instructions": (ctx.config.get("direct") or {}).get(
+            "letter_instructions", ""
+        )
+        or "",
         "skip_us_only": "us_only" in (excluded or []),
         "skip_europe_only": "europe_only" in (excluded or []),
         "candidate_telegram": (ctx.config.get("direct") or {}).get(
@@ -1153,6 +1168,18 @@ def post_outreach_settings(
         )
     if body.digest_quiet is not None:
         set_source_field(prefs, "digest", "quiet", body.digest_quiet)
+    if body.notify_activity is not None:
+        set_source_field(prefs, "notify", "activity", body.notify_activity)
+    if body.notify_failures is not None:
+        set_source_field(prefs, "notify", "failures", body.notify_failures)
+    if body.letter_instructions is not None:
+        set_source_field(
+            prefs,
+            "direct",
+            "letter_instructions",
+            body.letter_instructions.strip()[:2000],
+            quote=True,
+        )
     if body.skip_us_only is not None or body.skip_europe_only is not None:
         current = get_outreach_settings(ctx)
         regions = [
@@ -4671,6 +4698,11 @@ def _llm_snapshot(ctx: AppContext) -> dict:
         "provider_base_urls": provider_base_urls,
         "mode": llm_config.get("mode") or "auto",
         "fallback_enabled": llm_config.get("fallback_enabled", True),
+        "fallback_order": [
+            p
+            for p in (llm_config.get("fallback_order") or [])
+            if p in _KNOWN_LLM_PROVIDERS
+        ],
     }
 
 
@@ -4688,6 +4720,9 @@ class LLMProviderUpdate(BaseModel):
     base_url: Optional[str] = None
     mode: Optional[str] = None
     fallback_enabled: Optional[bool] = None
+    # «Запасные — пробуются по порядку»: провайдеры с ключами, первым —
+    # тот, к кому уходить при лимите или ошибке основного.
+    fallback_order: Optional[list[str]] = None
 
 
 @app.post("/api/settings/llm")
@@ -4714,6 +4749,18 @@ def post_llm_settings(
         )
     if body.base_url is not None:
         set_source_field(ctx.config_file, "llm", "base_url", body.base_url)
+    if body.fallback_order is not None:
+        unknown = [
+            p for p in body.fallback_order if p not in _KNOWN_LLM_PROVIDERS
+        ]
+        if unknown:
+            raise HTTPException(400, f"Unknown provider: {unknown[0]}")
+        set_source_list_field(
+            ctx.config_file,
+            "llm",
+            "fallback_order",
+            list(dict.fromkeys(body.fallback_order)),
+        )
     ctx.reload_config()
     return _llm_snapshot(ctx)
 
@@ -4813,9 +4860,24 @@ def get_backups(ctx: AppContext = Depends(get_ctx)) -> dict:
                 "date": day_dir.name,
                 "files": len(files),
                 "size_bytes": sum(f.stat().st_size for f in files),
+                # Ручная копия («Сделать копию сейчас») — папка с временем.
+                "manual": len(day_dir.name) > 10,
             }
         )
     return {"backups": backups}
+
+
+@app.post("/api/backups/now")
+def post_backups_now(ctx: AppContext = Depends(get_ctx)) -> dict:
+    from src.utils.backup import backup_now
+
+    try:
+        target = backup_now(ctx.output_folder)
+    except FileNotFoundError as e:
+        raise HTTPException(409, str(e))
+    except OSError as e:
+        raise HTTPException(500, f"Копия не сделана: {e}")
+    return {"date": target.name, **get_backups(ctx)}
 
 
 class BackupRestoreRequest(BaseModel):
@@ -4828,8 +4890,10 @@ def post_backups_restore(
 ) -> dict:
     import shutil
 
-    from src.utils.backup import BACKUP_FILES
+    from src.utils.backup import BACKUP_FILES, is_backup_name
 
+    if not is_backup_name(body.date):
+        raise HTTPException(400, "Неизвестная резервная копия")
     root = ctx.output_folder.parent / "backups"
     source = root / body.date
     if not source.is_dir():
@@ -5125,6 +5189,22 @@ def get_activity(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
     return items
 
 
+@app.get("/api/notifications")
+def get_notifications(
+    limit: int = 100, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """История уведомлений (колокольчик): что бот сообщал и куда это ушло —
+    в Telegram, в утреннюю сводку или только сюда (бот не подключён или
+    этот вид уведомлений выключен)."""
+    from src.job_sources.telegram_notify import notification_history
+
+    return {
+        "items": notification_history(
+            ctx.output_folder, max(1, min(300, limit))
+        )
+    }
+
+
 @app.post("/api/notifications/test")
 def post_test_notification(ctx: AppContext = Depends(get_ctx)) -> dict:
     """В отличие от main.notify() (best-effort, глотает ошибки) — эта
@@ -5137,7 +5217,7 @@ def post_test_notification(ctx: AppContext = Depends(get_ctx)) -> dict:
     if not bot_token or not chat_id:
         raise HTTPException(
             400,
-            "Бот уведомлений не подключён — Настройки → «🤖 CrossJob-бот».",
+            "Бот уведомлений не подключён — Настройки → «Уведомления».",
         )
     try:
         send_notification(

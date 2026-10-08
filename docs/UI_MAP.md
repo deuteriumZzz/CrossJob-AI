@@ -69,6 +69,7 @@
 | `shell.tour` | `initOnboardingTour()`, подсказка-тур поверх экрана | убирается; его роль выполняет чек-лист настройки `home.setup` | ≈ |
 | `shell.changelog` | `initChangelogPopover()`: всплывающее «Что нового» при обновлении | то же окно, в новом оформлении, не закрывает главный блок | = |
 | `shell.sr` | `#sr-announcer` | то же | = |
+| `shell.notifications` | уведомления только в Telegram-боте | «Уведомления» в меню: история того, что бот сообщал, с отметкой, куда ушло (Telegram, сводка, только здесь); счётчик новых (добавка 7) | + |
 
 ## 2. Главная
 
@@ -330,6 +331,7 @@
 | `settings.mail.bounce` | `#outreach-bounce-stop` | Стоп после возвратов (Ещё) | = |
 | `settings.mail.warmup` | `#outreach-warmup` | Разогрев ящика (Ещё) | = |
 | `settings.mail.follow-up` | `#outreach-follow-up` | Напоминание, если HR молчит | = |
+| `settings.mail.prompt` | промт письма не настраивался | «Промт письма — Изменить»: свои правила к общей основе письма рассылки; `direct.letter_instructions` | + |
 | `settings.mail.signature` | `#outreach-candidate-telegram`, `#outreach-candidate-whatsapp`, `#outreach-candidate-linkedin` | Контакты для подписи (Ещё) | = |
 | `settings.mail.hunter` | `#outreach-hunter`, `#outreach-hunter-status` | Ключ hunter.io (Ещё) | = |
 | `settings.mail.auto-send` | `#outreach-auto-send` | «Без просмотра», с предупреждением | = |
@@ -357,6 +359,7 @@
 |---|---|---|---|
 | `settings.llm.provider` | `#provider-grid` (14 плиток), `#provider-grid-toggle` | «Основной провайдер»: компактная плитка — выбранный, у кого есть ключ (точка) и кто отвечает сейчас (рамка); «Показать все провайдеры» | ≈ |
 | `settings.llm.fallback` | `#llm-fallback-enabled` | «Переключаться при ошибке или лимите» | = |
+| `settings.llm.fallbacks` | порядок запасных задавал только режим | «Запасные» — провайдеры с ключами по порядку, стрелками; `llm.fallback_order` | + |
 | `settings.llm.model` | `#llm-model` | Модель (Ещё) | = |
 | `settings.llm.mode` | `#llm-mode` | Режим запасных (Ещё) | = |
 | `settings.llm.base-url` | `#llm-base-url` | Base URL (Ещё) | = |
@@ -373,6 +376,7 @@
 | `settings.bot.token` | `#telegram-bot-token`, `#telegram-bot-token-toggle`, `#telegram-connect-btn`, `#telegram-connect-status`, «Ещё нет бота?» | Уведомления → Бот; состояние — и в Подключениях | = |
 | `settings.bot.test` | `#notif-test` | «Отправить тест» | = |
 | `settings.bot.group` | `#telegram-connect-group-btn`, `#telegram-connect-group-status` | «Темы по площадкам» (Ещё) | = |
+| `settings.notify.kinds` | присылалось всё | «Отклики и ответы HR», «Сбои и блокировки» — `notify.activity`, `notify.failures`; выключенное видно в истории уведомлений | + |
 | `settings.digest` | `#outreach-digest`, `#outreach-digest-hour` | «Утренняя сводка», «Сводка в» | = |
 | `settings.quiet` | `#digest-quiet` | «Тихий режим» | = |
 | `settings.bot.commands` | «Команды боту» | Ещё | = |
@@ -386,6 +390,7 @@
 | `settings.autostart` | `#autostart-toggle`, `#autostart-status` | Автозапуск → «Открывать при входе в систему» | = |
 | `settings.daemon-service` | `#daemon-service-toggle`, `#daemon-service-status`, предупреждение о двух планировщиках | «Держать бота в фоне без окна»; предупреждение сохраняем | = |
 | `settings.backups` | `#backups-list`, «Восстановить» с подтверждением | Резервные копии | = |
+| `settings.backups.now` | копия только раз в день | «Сделать копию сейчас» — ручные копии хранятся отдельно, последние 5 | + |
 
 ## 9. Мои резюме
 
@@ -435,11 +440,7 @@
 | `talk.block-company` | «Не писать компании» из разговора | есть: отметка «не писать» в Базе |
 | `settings.tg.preview` | «Показывать текст перед отправкой» (черновик вместо мгновенной отправки) | нужен |
 | `settings.tg.night` | «Ночные вакансии — утром» | нужен |
-| `settings.llm.fallbacks` | «Запасные» провайдеры списком по порядку | нужен: сейчас порядок задаёт режим |
-| `settings.notify.kinds` | что присылать: «Отклики и ответы HR», «Сбои и блокировки» | нужен |
-| `settings.mail.prompt` | «Промт письма — Изменить» | нужен: сейчас промт не настраивается |
 | `settings.accounts.tg-off` | «Отключить» Telegram-аккаунт | проверить |
-| `settings.backups.now` | «Сделать копию сейчас» | нужен POST (есть только список и восстановление) |
 | `resume.audit.general` | «Проверить» резюме без вакансии | нужен: аудит сейчас требует ссылку на вакансию |
 
 Изменения в самом Telegram-боте (кнопки «Написать», «Без резюме», «Переписать», «Утром», «Скрыть» на доске «Бот в Telegram») — не веб-интерфейс и в эту карту не входят. Слова и статусы в боте сверяются с интерфейсом по добавке 4.
