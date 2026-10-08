@@ -518,6 +518,33 @@ let llmCatalog = { models: {}, api_key_previews: {}, provider_base_urls: {} };
 // set_fallback_base_urls().
 const PROVIDERS_NEEDING_BASE_URL = new Set(["cloudflare"]);
 let activeTelegramContact = null;
+// Пост из Telegram-парсера, открытый в чате (вместо диалога).
+let activeTelegramPost = null;
+let telegramInbox = { posts: [], sent_today: 0, daily_limit: 15, resumes: [], can_schedule: false };
+// Черновик на пост — правки не теряются при переключении диалогов.
+const telegramDrafts = {};
+
+// api() бросает «400: {"detail": "…"}» — человеку нужен только detail.
+function apiErrorText(e) {
+  const m = /^\d+: ([\s\S]*)$/.exec(e.message);
+  if (!m) return e.message;
+  try {
+    return JSON.parse(m[1]).detail || m[1];
+  } catch {
+    return m[1];
+  }
+}
+
+function chatBubblesHtml(messages) {
+  // Без пробелов внутри пузыря: у него white-space: pre-wrap, отступы
+  // разметки превращались в пустую строку и сдвиг текста.
+  return messages
+    .map(
+      (m) =>
+        `<div class="chat-bubble ${m.direction === "out" ? "out" : "in"}">${escapeHtml(m.text || "")}<span class="chat-bubble-time">${formatChatTime(m.at)}</span></div>`
+    )
+    .join("");
+}
 
 function formatChatTime(iso) {
   try {
@@ -3554,10 +3581,11 @@ const render = {
 
   async telegram() {
     loadTelegramWatch();
-    const [status, settings, conversations] = await Promise.all([
+    const [status, settings, conversations, inbox] = await Promise.all([
       api("/api/telegram/status"),
       api("/api/settings/telegram"),
       api("/api/telegram/conversations"),
+      api("/api/telegram/posts").catch(() => telegramInbox),
     ]);
 
     const badge = document.getElementById("telegram-status-badge");
@@ -3606,37 +3634,70 @@ const render = {
       navBadge.style.display = "none";
     }
 
+    telegramInbox = inbox;
+    document.getElementById("tg-sent-today").textContent =
+      `Написали сегодня ${inbox.sent_today} из ${inbox.daily_limit}`;
+
     const list = document.getElementById("tg-conv-list");
+    const posts = inbox.posts;
     // "Выберите диалог слева" в правой панели уместно, только пока
     // список слева не пуст — иначе получаются два взаимоисключающих
     // сообщения одновременно ("диалогов нет" + "выберите один из них").
     const chatEmpty = document.getElementById("tg-chat-empty");
-    if (!activeTelegramContact) {
-      chatEmpty.textContent = conversations.length
-        ? "Выберите диалог слева."
-        : "Диалогов пока нет — появятся здесь, как только кто-то напишет.";
+    if (!activeTelegramContact && !activeTelegramPost) {
+      chatEmpty.textContent = conversations.length || posts.length
+        ? "Выберите вакансию или диалог слева."
+        : "Пока пусто — новые вакансии из каналов и ответы HR появятся здесь.";
     }
-    if (!conversations.length) {
-      list.innerHTML = '<p class="muted small">Пока нет диалогов.</p>';
-    } else {
-      list.innerHTML = conversations
-        .map(
-          (c) => `
-        <div class="conv-item${c.contact === activeTelegramContact ? " active" : ""}" data-contact="${c.contact}">
-          <span class="conv-contact">${c.unread ? '<span class="conv-unread-dot"></span>' : ""}@${c.contact}</span>
-          <span class="conv-preview">${c.last_message ? c.last_message.text : ""}</span>
+    const postBadge = (p) => {
+      if (p.status === "later") return `уйдёт ${formatChatTime(p.send_after)}`;
+      if (!p.contacts.some((c) => c.kind === "telegram")) return "нет контакта в Telegram";
+      return Object.values(p.notes || {})[0] || "черновик готов";
+    };
+    const postsHtml = posts.length
+      ? `<div class="conv-group">Новые вакансии · ${posts.length}</div>` +
+        posts
+          .map(
+            (p) => `
+        <div class="conv-item conv-post${p.id === activeTelegramPost ? " active" : ""}" data-post="${escapeHtml(p.id)}">
+          <span class="conv-contact">${escapeHtml(p.title)}</span>
+          <span class="conv-preview">@${escapeHtml(p.channel)} · ${formatChatTime(p.found_at)}</span>
+          <span class="conv-badge">${escapeHtml(postBadge(p))}</span>
         </div>`
-        )
-        .join("");
-      list.querySelectorAll(".conv-item").forEach((el) => {
-        el.addEventListener("click", () =>
-          openTelegramConversation(el.dataset.contact)
-        );
-      });
-    }
+          )
+          .join("")
+      : "";
+    const convHtml = conversations.length
+      ? `<div class="conv-group">Переписка</div>` +
+        conversations
+          .map(
+            (c) => `
+        <div class="conv-item${c.contact === activeTelegramContact ? " active" : ""}" data-contact="${escapeHtml(c.contact)}">
+          <span class="conv-contact">${c.unread ? '<span class="conv-unread-dot"></span>' : ""}@${escapeHtml(c.contact)}</span>
+          <span class="conv-preview">${c.last_message ? escapeHtml(c.last_message.text) : ""}</span>
+        </div>`
+          )
+          .join("")
+      : "";
+    list.innerHTML =
+      postsHtml + convHtml || '<p class="muted small">Пока нет вакансий и диалогов.</p>';
+    list.querySelectorAll(".conv-item[data-contact]").forEach((el) => {
+      el.addEventListener("click", () => openTelegramConversation(el.dataset.contact));
+    });
+    list.querySelectorAll(".conv-item[data-post]").forEach((el) => {
+      el.addEventListener("click", () => openTelegramPost(el.dataset.post));
+    });
 
-    if (activeTelegramContact) {
-      await openTelegramConversation(activeTelegramContact);
+    if (activeTelegramPost && posts.some((p) => p.id === activeTelegramPost)) {
+      await openTelegramPost(activeTelegramPost);
+    } else {
+      activeTelegramPost = null;
+      document.getElementById("tg-post-panel").style.display = "none";
+      if (activeTelegramContact) {
+        await openTelegramConversation(activeTelegramContact);
+      } else {
+        chatEmpty.style.display = "";
+      }
     }
   },
 
@@ -3817,6 +3878,8 @@ function renderRepliesRows() {
 
 async function openTelegramConversation(contact) {
   activeTelegramContact = contact;
+  activeTelegramPost = null;
+  document.getElementById("tg-post-panel").style.display = "none";
   document
     .querySelectorAll("#tg-conv-list .conv-item")
     .forEach((el) =>
@@ -3827,18 +3890,23 @@ async function openTelegramConversation(contact) {
   document.getElementById("tg-chat-empty").style.display = "none";
   document.getElementById("tg-chat-panel").style.display = "";
   document.getElementById("tg-chat-contact").textContent = `@${contact}`;
+  const jobLink = [...conv.messages].reverse().find((m) => m.job_link)?.job_link;
+  const job = document.getElementById("tg-chat-job");
+  job.style.display = jobLink ? "" : "none";
+  if (jobLink) job.href = jobLink;
 
   const messages = document.getElementById("tg-chat-messages");
-  messages.innerHTML = conv.messages
-    .map(
-      (m) => `
-    <div class="chat-bubble ${m.direction}">
-      ${m.text.replace(/</g, "&lt;")}
-      <span class="chat-bubble-time">${formatChatTime(m.at)}</span>
-    </div>`
-    )
-    .join("");
+  messages.innerHTML = chatBubblesHtml(conv.messages);
   messages.scrollTop = messages.scrollHeight;
+  // Полная переписка из самого Telegram — с тем, что писали через бота
+  // и руками в Telegram (локальный журнал знает только своё).
+  api(`/api/telegram/history/${contact}`)
+    .then((h) => {
+      if (activeTelegramContact !== contact || h.source !== "telegram" || !h.messages.length) return;
+      messages.innerHTML = chatBubblesHtml(h.messages);
+      messages.scrollTop = messages.scrollHeight;
+    })
+    .catch(() => {});
 
   // Открытие треда гасит бейдж "непрочитано" на бэкенде (см.
   // get_telegram_conversation) — обновляем счётчик в шапке вкладки,
@@ -3858,6 +3926,195 @@ async function openTelegramConversation(contact) {
     } else {
       navBadge.style.display = "none";
     }
+  }
+}
+
+// --- Пост из Telegram-парсера как диалог: черновик → отправка ---------
+
+async function openTelegramPost(id) {
+  const post = telegramInbox.posts.find((p) => p.id === id);
+  if (!post) return;
+  activeTelegramPost = id;
+  activeTelegramContact = null;
+  document
+    .querySelectorAll("#tg-conv-list .conv-item")
+    .forEach((el) => el.classList.toggle("active", el.dataset.post === id));
+  document.getElementById("tg-chat-empty").style.display = "none";
+  document.getElementById("tg-chat-panel").style.display = "none";
+  document.getElementById("tg-post-panel").style.display = "";
+  document.getElementById("tg-post-status").textContent = "";
+
+  document.getElementById("tg-post-meta").textContent =
+    `@${post.channel} · ${formatChatTime(post.found_at)}` +
+    (post.unverified ? " · ИИ не проверил, вакансия ли это" : "");
+  document.getElementById("tg-post-link").href = post.link;
+  document.getElementById("tg-post-title").textContent = post.title;
+  document.getElementById("tg-post-body").textContent = post.text;
+  const tgContacts = post.contacts.filter((c) => c.kind === "telegram");
+  const others = post.contacts.filter((c) => c.kind !== "telegram");
+  const withNote = (c, prefix) =>
+    prefix + c.value + (post.notes?.[c.value] ? ` (${post.notes[c.value]})` : "");
+  document.getElementById("tg-post-note").textContent = [
+    tgContacts.length
+      ? `Контакт: ${tgContacts.map((c) => withNote(c, "@")).join(", ")}`
+      : "В посте нет контакта в Telegram — откликнитесь по ссылке в посте",
+    others.length ? `Ещё: ${others.map((c) => withNote(c, "")).join(", ")}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const isLater = post.status === "later";
+  document.getElementById("tg-post-compose").style.display =
+    tgContacts.length && !isLater ? "" : "none";
+  document.getElementById("tg-post-later-box").style.display = isLater ? "" : "none";
+  if (isLater) {
+    document.getElementById("tg-post-later-text").textContent =
+      `Сообщение @${post.contact} уйдёт ${formatChatTime(post.send_after)}`;
+  }
+  const history = document.getElementById("tg-post-history");
+  history.style.display = "none";
+  history.innerHTML = "";
+  if (tgContacts.length) loadTelegramPostHistory(id, isLater ? post.contact : tgContacts[0].value);
+  if (!tgContacts.length || isLater) return;
+
+  const contactSel = document.getElementById("tg-post-contact");
+  contactSel.innerHTML = tgContacts
+    .map((c) => `<option value="${escapeHtml(c.value)}">@${escapeHtml(c.value)}</option>`)
+    .join("");
+  contactSel.parentElement.style.display = tgContacts.length > 1 ? "" : "none";
+  const resumeSel = document.getElementById("tg-post-resume");
+  resumeSel.innerHTML =
+    '<option value="">Без резюме</option>' +
+    telegramInbox.resumes
+      .map((r) => `<option value="${escapeHtml(r.value)}">${escapeHtml(r.name)}</option>`)
+      .join("");
+  const later = document.getElementById("tg-post-later");
+  later.disabled = !telegramInbox.can_schedule;
+  later.title = telegramInbox.can_schedule
+    ? "К началу рабочих часов из правил парсера"
+    : "Отложенная отправка работает с ботом уведомлений: Настройки → Уведомления";
+  const cached = telegramDrafts[id];
+  if (cached) {
+    // Черновик другого поста мог ещё грузиться и выключить поле/кнопку.
+    document.getElementById("tg-post-input").disabled = false;
+    document.getElementById("tg-post-send").disabled = false;
+    document.getElementById("tg-post-input").value = cached.text;
+    resumeSel.value = cached.resume;
+    return;
+  }
+  await loadTelegramDraft(id);
+}
+
+async function loadTelegramDraft(id) {
+  const input = document.getElementById("tg-post-input");
+  const status = document.getElementById("tg-post-status");
+  const send = document.getElementById("tg-post-send");
+  input.value = "";
+  input.placeholder = "ИИ пишет черновик под вакансию…";
+  input.disabled = true;
+  send.disabled = true;
+  try {
+    const d = await api(`/api/telegram/posts/${id}/draft`, { method: "POST" });
+    telegramDrafts[id] = { text: d.text, resume: d.resume };
+    if (activeTelegramPost !== id) return;
+    input.value = d.text;
+    document.getElementById("tg-post-resume").value = d.resume;
+    status.textContent =
+      d.source === "ai" ? "" : "ИИ недоступен — подставлен шаблон из правил парсера.";
+  } catch (e) {
+    if (activeTelegramPost === id) status.textContent = `Черновик не получился: ${apiErrorText(e)}`;
+  } finally {
+    if (activeTelegramPost === id) {
+      input.disabled = false;
+      send.disabled = false;
+      input.placeholder = "Текст сообщения HR";
+    }
+  }
+}
+
+async function loadTelegramPostHistory(id, contact) {
+  const box = document.getElementById("tg-post-history");
+  box.style.display = "none";
+  box.innerHTML = "";
+  try {
+    const h = await api(`/api/telegram/history/${contact}`);
+    if (activeTelegramPost !== id || !h.messages.length) return;
+    box.innerHTML =
+      `<p class="muted small m0">Вы уже переписывались с @${escapeHtml(contact)}:</p>` +
+      chatBubblesHtml(h.messages);
+    box.style.display = "";
+    box.scrollTop = box.scrollHeight;
+  } catch {
+    // Истории нет — просто не показываем блок.
+  }
+}
+
+async function sendTelegramPost(later) {
+  const id = activeTelegramPost;
+  if (!id) return;
+  const status = document.getElementById("tg-post-status");
+  const text = document.getElementById("tg-post-input").value.trim();
+  if (!text) {
+    status.textContent = "Текст сообщения пустой.";
+    return;
+  }
+  if (!later && telegramInbox.sent_today >= telegramInbox.daily_limit) {
+    const ok = await showConfirm(
+      `Сегодня уже ${telegramInbox.sent_today} сообщений из ${telegramInbox.daily_limit}. Лимит бережёт ваш личный аккаунт от ограничений Telegram. Отправить всё равно?`
+    );
+    if (!ok) return;
+  }
+  const body = {
+    contact: document.getElementById("tg-post-contact").value,
+    text,
+    resume: document.getElementById("tg-post-resume").value,
+  };
+  const buttons = ["tg-post-send", "tg-post-later"].map((b) => document.getElementById(b));
+  buttons.forEach((b) => (b.disabled = true));
+  status.textContent = later ? "Ставлю в очередь…" : "Отправка…";
+  try {
+    const res = await api(`/api/telegram/posts/${id}/${later ? "later" : "send"}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    if (later) {
+      showToast(`Уйдёт ${formatChatTime(res.send_after)}`, "success");
+    } else {
+      delete telegramDrafts[id];
+      showToast(res.warning || `Отправлено @${res.contact}`, res.warning ? "error" : "success");
+      activeTelegramPost = null;
+      activeTelegramContact = res.contact;
+    }
+    await render.telegram();
+  } catch (e) {
+    status.textContent = apiErrorText(e);
+  } finally {
+    document.getElementById("tg-post-send").disabled = false;
+    document.getElementById("tg-post-later").disabled = !telegramInbox.can_schedule;
+  }
+}
+
+async function setTelegramPostStatus(status) {
+  const id = activeTelegramPost;
+  if (!id) return;
+  try {
+    await api(`/api/telegram/posts/${id}/status`, {
+      method: "POST",
+      body: JSON.stringify({ status }),
+    });
+    const done = {
+      hidden: "Вакансия скрыта",
+      blocked: "Больше не пишем этой компании — отмечено в Базе",
+      new: "Отложенная отправка отменена",
+    };
+    showToast(done[status], "success");
+    if (status !== "new") {
+      activeTelegramPost = null;
+      delete telegramDrafts[id];
+    }
+    await render.telegram();
+  } catch (e) {
+    document.getElementById("tg-post-status").textContent = apiErrorText(e);
   }
 }
 
@@ -6798,6 +7055,36 @@ function initDashboard() {
   document
     .getElementById("tg-chat-send")
     .addEventListener("click", sendTelegramMessage);
+
+  // Пост из парсера: отправка, «утром», переписать, скрыть, не писать.
+  document.getElementById("tg-post-send").addEventListener("click", () => sendTelegramPost(false));
+  document.getElementById("tg-post-later").addEventListener("click", () => sendTelegramPost(true));
+  document.getElementById("tg-post-rewrite").addEventListener("click", () => {
+    if (!activeTelegramPost) return;
+    delete telegramDrafts[activeTelegramPost];
+    loadTelegramDraft(activeTelegramPost);
+  });
+  document.getElementById("tg-post-hide").addEventListener("click", () => setTelegramPostStatus("hidden"));
+  document.getElementById("tg-post-block").addEventListener("click", () => setTelegramPostStatus("blocked"));
+  document.getElementById("tg-post-unlater").addEventListener("click", () => setTelegramPostStatus("new"));
+  const tgPostInput = document.getElementById("tg-post-input");
+  tgPostInput.addEventListener("input", () => {
+    if (!activeTelegramPost) return;
+    telegramDrafts[activeTelegramPost] = {
+      text: tgPostInput.value,
+      resume: document.getElementById("tg-post-resume").value,
+    };
+  });
+  tgPostInput.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) sendTelegramPost(false);
+  });
+  document.getElementById("tg-post-resume").addEventListener("change", (ev) => {
+    const draft = telegramDrafts[activeTelegramPost];
+    if (draft) draft.resume = ev.target.value;
+  });
+  document.getElementById("tg-post-contact").addEventListener("change", (ev) => {
+    if (activeTelegramPost) loadTelegramPostHistory(activeTelegramPost, ev.target.value);
+  });
   document.getElementById("tg-chat-input").addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") sendTelegramMessage();
   });

@@ -364,7 +364,7 @@
         <h3 class="mt0">Как это работает</h3>
         <div class="howto-grid">
           <div><b>1. Читает каналы</b><p class="muted small">Через ваш личный аккаунт Telegram — как будто вы сами листаете каналы из списка. Если вы не подписаны на канал, парсер подпишется сам.</p></div>
-          <div><b>2. Присылает вакансию</b><p class="muted small">Пост с вашими ключевыми словами за секунды приходит в ваш <b>CrossJob-бот</b> с кнопками «Здравствуйте», «+ резюме», «Сопроводительное». Контакты HR из поста — сразу в «Базу компаний».</p></div>
+          <div><b>2. Присылает вакансию</b><p class="muted small">Пост с вашими ключевыми словами за секунды появляется ниже, в шаге 3, с готовым черновиком — и копией в вашем <b>CrossJob-боте</b> с кнопками. Кому написали — те попадают в «Базу компаний».</p></div>
           <div><b>3. Пишет HR от вашего имени</b><p class="muted small">Когда вы нажимаете кнопку, сообщение уходит <b>с вашего личного аккаунта</b> — HR видит вас, а не бота и не канал. Без вашего нажатия никому ничего не отправляется.</p></div>
         </div>
       </div>
@@ -417,17 +417,43 @@
         </li>
 
         <li class="panel step">
-          <div class="step-head"><span class="step-num">3</span><h3>Диалоги — отвечать нужно самому</h3></div>
-          <p class="muted small">Автоответа на входящие нет — только уведомление в CrossJob-бот и здесь.</p>
+          <div class="step-head"><span class="step-num">3</span><h3>Вакансии из каналов и переписка</h3><span id="tg-sent-today" class="muted small tg-sent-today"></span></div>
+          <p class="muted small">Новая вакансия из канала — диалог с готовым черновиком: поправьте и отправьте с вашего аккаунта, ответ HR придёт сюда же. Без вашего «Отправить» ничего не уходит. В CrossJob-боте — копия с кнопками.</p>
           <div class="telegram-layout">
             <div id="tg-conv-list" class="conv-list">
               <p class="muted small">Загрузка…</p>
             </div>
             <div class="chat-thread">
               <div id="tg-chat-empty" class="muted small">Выберите диалог слева.</div>
+              <div id="tg-post-panel" style="display:none">
+                <div class="post-card">
+                  <div class="post-card-meta"><span id="tg-post-meta" class="muted small"></span><a id="tg-post-link" class="btn btn-ghost btn-small" href="#" target="_blank" rel="noopener">Открыть пост ↗</a></div>
+                  <h3 id="tg-post-title" class="m0"></h3>
+                  <p id="tg-post-body" class="post-card-text"></p>
+                  <p id="tg-post-note" class="muted small m0"></p>
+                </div>
+                <div id="tg-post-history" class="chat-messages" style="display:none"></div>
+                <div id="tg-post-compose" class="post-compose">
+                  <div class="filters">
+                    <label class="muted small">Кому <select id="tg-post-contact" aria-label="Кому написать"></select></label>
+                    <label class="muted small">Резюме <select id="tg-post-resume" aria-label="Резюме к сообщению"></select></label>
+                    <button type="button" id="tg-post-rewrite" class="btn btn-ghost btn-small">🔄 Переписать</button>
+                  </div>
+                  <textarea id="tg-post-input" rows="6" aria-label="Текст сообщения"></textarea>
+                  <div class="filters">
+                    <button type="button" id="tg-post-send" class="btn btn-primary">Отправить</button>
+                    <button type="button" id="tg-post-later" class="btn btn-secondary">Утром, в рабочие часы</button>
+                    <button type="button" id="tg-post-hide" class="btn btn-ghost btn-small">Скрыть</button>
+                    <button type="button" id="tg-post-block" class="btn btn-ghost btn-small">🚫 Не писать компании</button>
+                  </div>
+                </div>
+                <div id="tg-post-later-box" class="filters" style="display:none"><span id="tg-post-later-text" class="muted small"></span><button type="button" id="tg-post-unlater" class="btn btn-secondary btn-small">Отменить</button></div>
+                <span id="tg-post-status" class="muted small" role="status"></span>
+              </div>
               <div id="tg-chat-panel" style="display:none">
                 <div class="filters" style="justify-content:space-between;margin-bottom:8px">
                   <h3 id="tg-chat-contact" class="m0"></h3>
+                  <a id="tg-chat-job" class="btn btn-ghost btn-small" href="#" target="_blank" rel="noopener" style="display:none">Вакансия ↗</a>
                   <button id="tg-chat-delete" class="btn btn-ghost btn-small" title="Удалить диалог из истории">🗑 Удалить диалог</button>
                 </div>
                 <div id="tg-chat-messages" class="chat-messages"></div>

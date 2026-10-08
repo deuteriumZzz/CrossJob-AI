@@ -170,8 +170,16 @@ from src.job_sources.telegram.client import (
 )
 from src.job_sources.telegram.watcher import (
     TELEGRAM_FOLDER,
+    block_post_contacts,
+    cancel_pending_telegram_send,
+    contact_notes,
     gateway_state,
+    get_watch_post,
+    list_watch_posts,
     pending_telegram_sends_count,
+    queue_telegram_send,
+    remember_telegram_post_contact,
+    update_watch_post,
 )
 from src.job_sources.telegram_connect import (
     get_bot_username,
@@ -4393,6 +4401,37 @@ def get_telegram_conversation(
     return conv
 
 
+@app.get("/api/telegram/history/{contact}")
+def get_telegram_history(contact: str, ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Переписка с HR из самого Telegram: и отправленное через бота, и
+    написанное вами руками в Telegram. Только через запущенный шлюз —
+    его сессия точно авторизована (свежий клиент без входа спросил бы
+    номер в консоли и подвесил запрос). Нет шлюза или ошибка —
+    локальный журнал приложения."""
+    from src.job_sources.telegram.watcher import active_watcher
+
+    contact = contact.strip().lstrip("@")
+    creds = _telegram_secrets(ctx)
+    if creds is not None and active_watcher() is not None:
+        try:
+            with TelegramSourceClient(
+                int(creds[0]), creds[1], _telegram_session_path(ctx)
+            ) as client:
+                return {
+                    "messages": client.dialog_history(contact),
+                    "source": "telegram",
+                }
+        except Exception as e:
+            logger.warning(f"История @{contact} из Telegram недоступна: {e}")
+    conv = (
+        TelegramConversations(
+            ctx.output_folder / "telegram_conversations.json"
+        ).get(contact)
+        or {}
+    )
+    return {"messages": conv.get("messages", []), "source": "local"}
+
+
 class TelegramMessageSend(BaseModel):
     text: str
 
@@ -4494,6 +4533,242 @@ def delete_telegram_conversation(
     if not existed:
         raise HTTPException(404, f"No conversation with @{contact}")
     return {"deleted": contact}
+
+
+# --- Чат «Новые вакансии из каналов» -------------------------------------
+# Пост из Telegram-парсера — диалог в приложении: черновик от ИИ в поле
+# ввода, отправка с вашего аккаунта, ответ HR приходит в тот же диалог
+# (входящие пишет шлюз, см. watcher._on_private_message). Кнопки в боте
+# остаются копией: что отправлено там, отсюда пропадает (update_watch_post).
+
+TELEGRAM_INBOX_DAYS = 7
+
+
+def _telegram_post_or_404(ctx: AppContext, post_id: str) -> dict:
+    post = get_watch_post(ctx.output_folder, post_id)
+    if post is None:
+        raise HTTPException(404, "Пост устарел — откройте его по ссылке")
+    return post
+
+
+@app.get("/api/telegram/posts")
+def get_telegram_posts(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Посты, ждущие ответа: new и «утром». Только найденные за
+    TELEGRAM_INBOX_DAYS — старые записи без found_at (до появления чата)
+    не всплывают разом."""
+    from datetime import timedelta
+
+    tg = ctx.config.get("telegram") or {}
+    conversations = TelegramConversations(
+        ctx.output_folder / "telegram_conversations.json"
+    )
+    now = datetime.now().astimezone()
+    cutoff = now - timedelta(days=TELEGRAM_INBOX_DAYS)
+    posts = []
+    for post_id, post in list_watch_posts(ctx.output_folder).items():
+        status = post.get("status", "new")
+        try:
+            found = datetime.fromisoformat(post["found_at"])
+        except (KeyError, ValueError):
+            continue
+        if found < cutoff or status not in ("new", "later"):
+            continue
+        if (
+            status == "later"
+            and post.get("send_after", "") <= now.isoformat()
+            and conversations.already_contacted(post.get("contact", ""))
+        ):
+            continue  # отложенное уже ушло — дальше это обычный диалог
+        posts.append({**post, "id": post_id, "status": status})
+    posts.sort(key=lambda p: p["found_at"], reverse=True)
+    notes = contact_notes(
+        ctx.output_folder, [c for p in posts for c in p.get("contacts") or []]
+    )
+    for p in posts:
+        p["notes"] = {
+            c["value"]: notes[c["value"].lower()]
+            for c in p.get("contacts") or []
+            if c["value"].lower() in notes
+        }
+    return {
+        "posts": posts,
+        "sent_today": conversations.sent_today_count(),
+        "daily_limit": tg.get("daily_message_limit", 15),
+        "resumes": available_resumes(ctx.config),
+        "can_schedule": bot_credentials(ctx.config) is not None,
+    }
+
+
+@app.post("/api/telegram/posts/{post_id}/draft")
+def post_telegram_post_draft(
+    post_id: str, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Черновик первого сообщения под вакансию — тот же генератор, что у
+    кнопки «👋» в боте. ИИ недоступен — шаблон из настроек парсера."""
+    post = _telegram_post_or_404(ctx, post_id)
+    tg = ctx.config.get("telegram") or {}
+    russian = _looks_russian(post.get("text") or post.get("title", ""))
+    resume = resolve_resume(ctx.config, "telegram", russian)
+    template = tg.get("intro_message_template") or TELEGRAM_INTRO_TEMPLATE_DEFAULT
+    text = template.format(role=post.get("title", ""), link=post.get("link", ""))
+    source = "template"
+    if ctx.llm_api_key and tg.get("smart_greeting", True):
+        resume_for_llm = resume or ctx.config["dataFolder"] / RESUME_PDF
+        try:
+            message = generate_first_message(
+                resume_for_llm,
+                candidate_name(ctx.config, resume_for_llm),
+                "",
+                post.get("title", ""),
+                post.get("text", ""),
+                "telegram",
+                ctx.llm_api_key,
+            )
+            if message["text"]:
+                text, source = message["text"], "ai"
+        except Exception as e:
+            logger.warning(f"Черновик для поста {post_id}: ИИ недоступен: {e}")
+    return {
+        "text": text,
+        "source": source,
+        "resume": resume_relative_name(ctx.config, resume),
+    }
+
+
+class TelegramPostSend(BaseModel):
+    contact: str
+    text: str
+    resume: str = ""
+
+
+def _telegram_post_send_args(
+    ctx: AppContext, post: dict, body: TelegramPostSend
+) -> tuple[str, str, Optional[Path]]:
+    contact = body.contact.strip().lstrip("@")
+    allowed = {
+        c["value"].lower()
+        for c in post.get("contacts") or []
+        if c.get("kind") == "telegram"
+    }
+    if contact.lower() not in allowed:
+        raise HTTPException(400, "Этого контакта нет в посте")
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(400, "Текст сообщения пустой")
+    resume = resolve_resume_name(ctx.config, body.resume) if body.resume else None
+    if body.resume and (resume is None or not resume.exists()):
+        raise HTTPException(400, "Резюме не найдено — загрузите в «Мои резюме»")
+    return contact, text, resume
+
+
+@app.post("/api/telegram/posts/{post_id}/send")
+def post_telegram_post_send(
+    post_id: str, body: TelegramPostSend, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """Отправить сейчас с вашего аккаунта (+ резюме файлом). Текст и
+    резюме — раздельно: упало резюме после ушедшего текста — пост всё
+    равно «отправлен», иначе повтор задублирует сообщение HR."""
+    post = _telegram_post_or_404(ctx, post_id)
+    contact, text, resume = _telegram_post_send_args(ctx, post, body)
+    creds = _telegram_secrets(ctx)
+    if creds is None:
+        raise HTTPException(
+            400, "Сначала подключите Telegram-аккаунт: шаг 1 на этой вкладке."
+        )
+    session = (int(creds[0]), creds[1], _telegram_session_path(ctx))
+    try:
+        with TelegramSourceClient(*session) as client:
+            client.send_message(contact, text)
+    except Exception as e:
+        raise HTTPException(502, f"Не удалось отправить: {e}")
+    conversations = TelegramConversations(
+        ctx.output_folder / "telegram_conversations.json"
+    )
+    conversations.record_outbound(contact, text, job_link=post.get("link", ""))
+    remember_telegram_post_contact(
+        ctx.output_folder, [{"kind": "telegram", "value": contact}], post
+    )
+    update_watch_post(ctx.output_folder, post_id, status="sent", contact=contact)
+    warning = ""
+    if resume is not None:
+        try:
+            with TelegramSourceClient(*session) as client:
+                client.send_file(contact, resume)
+            conversations.record_outbound(
+                contact, f"📎 Отправлено резюме ({resume.name})"
+            )
+        except Exception as e:
+            warning = f"Текст ушёл, резюме — нет: {e}"
+    return {"contact": contact, "warning": warning}
+
+
+@app.post("/api/telegram/posts/{post_id}/later")
+def post_telegram_post_later(
+    post_id: str, body: TelegramPostSend, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """«Утром»: в очередь отложенных (её разбирает шлюз вместе с ботом)
+    к началу рабочих часов — пост ночью, а HR не будим."""
+    from datetime import timedelta
+
+    if bot_credentials(ctx.config) is None:
+        raise HTTPException(
+            400,
+            "Отложенная отправка работает с ботом уведомлений: "
+            "Настройки → Уведомления.",
+        )
+    post = _telegram_post_or_404(ctx, post_id)
+    contact, text, resume = _telegram_post_send_args(ctx, post, body)
+    tg = ctx.config.get("telegram") or {}
+    hour = int(tg.get("active_hours_start") or 10)
+    now = datetime.now().astimezone()
+    send_at = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+    if send_at <= now:
+        send_at += timedelta(days=1)
+    delay = (send_at - now).total_seconds()
+    queue_telegram_send(
+        ctx.output_folder,
+        contact,
+        text,
+        post.get("link", ""),
+        delay,
+        delay,
+        str(resume or ""),
+        post=post,
+    )
+    update_watch_post(
+        ctx.output_folder,
+        post_id,
+        status="later",
+        contact=contact,
+        send_after=send_at.isoformat(timespec="seconds"),
+    )
+    return {"send_after": send_at.isoformat(timespec="seconds")}
+
+
+class TelegramPostStatus(BaseModel):
+    status: str
+
+
+@app.post("/api/telegram/posts/{post_id}/status")
+def post_telegram_post_status(
+    post_id: str, body: TelegramPostStatus, ctx: AppContext = Depends(get_ctx)
+) -> dict:
+    """hidden — скрыть; blocked — «Не писать компании» (как в боте);
+    new — вернуть (у «утром» заодно снимает сообщение с очереди)."""
+    if body.status not in ("hidden", "blocked", "new"):
+        raise HTTPException(400, "Неизвестный статус")
+    post = _telegram_post_or_404(ctx, post_id)
+    found = True
+    if body.status == "blocked":
+        found = block_post_contacts(
+            ctx.output_folder, post.get("contacts") or [], post
+        )
+    if body.status == "new" and post.get("status") == "later":
+        cancel_pending_telegram_send(
+            ctx.output_folder, post.get("contact", ""), post.get("link", "")
+        )
+    update_watch_post(ctx.output_folder, post_id, status=body.status)
+    return {"status": body.status, "in_base": found}
 
 
 @app.post("/api/settings/generate-positions")

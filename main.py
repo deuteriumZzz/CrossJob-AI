@@ -232,10 +232,12 @@ from src.job_sources.telegram.watcher import (
     RATE_LIMIT_RETRY_DELAYS_SECONDS,
     _llm_check_post,
     active_watcher,
+    block_post_contacts,
     get_watch_post,
     remember_telegram_post_contact,
     save_telegram_letter,
     telegram_resumes,
+    update_watch_post,
 )
 from src.job_sources.telegram_control import HELP_TEXT as _TELEGRAM_HELP_TEXT
 from src.job_sources.telegram_control import (
@@ -6683,6 +6685,9 @@ def _handle_vacancy_button(
             output_folder / "telegram_conversations.json"
         ).record_outbound(contact["value"], text, job_link=post["link"])
         remember_telegram_post_contact(output_folder, [contact], post)
+        update_watch_post(
+            output_folder, parts[1], status="sent", contact=contact["value"]
+        )
         done(
             f"✅ Отправлено @{contact['value']}"
             + (" + резюме" if resume_index >= 0 else "")
@@ -6809,6 +6814,13 @@ def _handle_vacancy_button(
             with _telegram_client(parameters) as client:
                 client.send_file(draft["contact"], resumes[resume_index])
             result += " + резюме"
+        if result.startswith("Отправлено") and draft.get("post_id"):
+            update_watch_post(
+                output_folder,
+                draft["post_id"],
+                status="sent",
+                contact=draft.get("contact", ""),
+            )
         done(("✅ " if result.startswith("Отправлено") else "⚠️ ") + result)
     elif parts[0] == "x":
         drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
@@ -6823,6 +6835,7 @@ def _handle_vacancy_button(
         # «Не писать компании»: в Базе — «не писать», из рассылок выпадает.
         # Снять можно в Базе («Можно писать»).
         drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
+        draft = {}
         if parts[0] == "n":
             found = get_watch_post(output_folder, parts[1])
             if found is None:
@@ -6849,20 +6862,13 @@ def _handle_vacancy_button(
                     draft["campaign"], draft["contact"], status="skipped"
                 )
             drafts.remove(parts[1])
-        values = [c["value"] for c in post_contacts]
-        if post:
-            # Контакты постов в Базу до отправки не попадают — «не писать»
-            # единственный повод завести карточку без письма, иначе
-            # отмечать нечего.
-            remember_telegram_post_contact(
-                output_folder, post_contacts, post, sent=False
-            )
-        book = ContactBook(output_folder)
-        keys = sorted({k for v in values for k in book.keys_with(v)})
-        book.update(keys, do_not_contact=True)
+        blocked = block_post_contacts(output_folder, post_contacts, post)
+        post_id = parts[1] if parts[0] == "n" else draft.get("post_id", "")
+        if post_id:
+            update_watch_post(output_folder, post_id, status="blocked")
         done(
             "🚫 Больше не пишем этой компании"
-            if keys
+            if blocked
             else "⚠️ Компании нет в Базе"
         )
     elif parts[0] in ("cs", "cf"):

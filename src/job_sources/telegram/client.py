@@ -158,6 +158,26 @@ class TelegramSourceClient:
             messages = self._client.iter_messages(contact, min_id=min_id)
         return [m for m in messages if not m.out]
 
+    def dialog_history(self, contact: str, limit: int = 40) -> list[dict]:
+        """Личная переписка с contact'ом из самого Telegram, старые
+        первыми: и то, что ушло через бота, и написанное вами руками в
+        Telegram, — локальный журнал знает только первое."""
+        if self._watcher is not None:
+            messages = self._watcher.call(
+                lambda c: c.get_messages(contact, limit=limit)
+            )
+        else:
+            messages = list(self._client.iter_messages(contact, limit=limit))
+        return [
+            {
+                "direction": "out" if m.out else "in",
+                "text": m.message or ("📎 файл" if m.media else ""),
+                "at": m.date.astimezone().isoformat(),
+                "id": m.id,
+            }
+            for m in reversed(list(messages))
+        ]
+
 
 class TelegramStatusClient:
     """Отдельный тонкий контекст-менеджер для проверки статуса сессии

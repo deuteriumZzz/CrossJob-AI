@@ -524,6 +524,87 @@ nav.tabs button.active {
   flex: 1;
 }
 
+/* Посты из Telegram-парсера в списке диалогов и панель ответа на пост */
+.conv-group {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 10px 10px 2px;
+}
+
+.conv-badge {
+  align-self: flex-start;
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 8px;
+}
+
+.tg-sent-today {
+  margin-left: auto;
+}
+
+#tg-post-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.post-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+
+.post-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.post-card-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.post-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+@media (max-width: 900px) {
+  .telegram-layout {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .conv-list {
+    flex-basis: auto;
+    max-height: 280px;
+  }
+}
+
+.post-compose textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 110px;
+  font: inherit;
+  line-height: 1.5;
+}
+
 @keyframes pulse {
   0%,
   100% {
