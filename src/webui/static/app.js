@@ -2170,6 +2170,18 @@ function stepHead(n, title, state) {
   return `<div class="step-head"><span class="step-num ${state}">${state === "done" ? "✓" : n}</span><h3>${title}</h3></div>`;
 }
 
+// Итог последнего захода площадки: «новых 0» — не поломка, а «всё уже
+// просмотрено»; без этой строки такой заход в интерфейсе невидим.
+function lastSummaryRowHtml(sum) {
+  const parts = [`новых ${sum.new}`];
+  if (sum.new) {
+    parts.push(`слабое совпадение ${sum.low_fit}`);
+    parts.push(`откликов ${sum.applied}`);
+  }
+  const title = `Проверено ${fmtTime(sum.at)}. «Новых» — вакансий, которых ещё не было в журнале.`;
+  return `<div class="row" title="${escapeHtml(title)}"><span>Итог захода</span><span>${parts.join(" · ")}</span></div>`;
+}
+
 // «Что бот делает сейчас»: последние значимые строки журнала без служебных.
 async function renderLiveFeed() {
   const box = document.getElementById("live-feed");
@@ -2728,7 +2740,8 @@ const render = {
             </h3>
             ${modeRow}
             <div class="row" title="Следующая проверка: ${escapeHtml(fmtTime(s.next_run))}"><span>Последняя проверка</span><span>${s.schedule_enabled ? fmtDay(s.last_run) : "—"}</span></div>
-            ${s.schedule_enabled && s.duration_seconds != null ? `<div class="row"><span>Последний ход</span><span>${Math.max(1, Math.round(s.duration_seconds / 60))} мин${s.idle_streak >= 2 ? ", пусто — следующий реже" : ""}</span></div>` : ""}
+            ${s.schedule_enabled && s.duration_seconds != null ? `<div class="row"><span>Последний ход</span><span>${Math.max(1, Math.round(s.duration_seconds / 60))} мин</span></div>` : ""}
+            ${s.schedule_enabled && s.last_summary ? lastSummaryRowHtml(s.last_summary) : ""}
             ${responseRow}
             ${errorRowHtml(s.last_error)}
           </div>`;

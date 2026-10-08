@@ -14,7 +14,7 @@ from src.logging import logger
 # ponytail: фиксированная неглубокая пагинация (2 страницы на должность)
 # вместо обхода всех страниц, увеличить, если это перестанет давать
 # достаточно вакансий.
-PAGES_PER_POSITION = 2
+PAGES_PER_POSITION = 30  # цикл сам встаёт на пустой странице
 
 # Автоотклик есть (geekjob.auto_apply в work_preferences.yaml, см.
 # main.py::search_geekjob → GeekjobClient.apply()) — best-effort клик

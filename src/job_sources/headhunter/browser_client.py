@@ -150,13 +150,12 @@ class HeadHunterBrowserClient:
         задваиваем параметр)."""
         driver, owns_it = self._acquire_driver()
         try:
-            # order_by=publication_time — сначала самые новые: по умолчанию
-            # "по релевантности" выдача каждый круг одна и та же, а
-            # свежие вакансии теряются за пределами первых страниц.
-            params = (
-                f"text={query}&area={HH_AREA_RUSSIA}&page={page}"
-                "&order_by=publication_time"
-            )
+            # Порядок по умолчанию — «по релевантности», как было до 7.10.
+            # Сортировка по дате (order_by=publication_time) подмешивала
+            # нерелевантное («инженер-сборщик», «АСУТП») — отклики упали с
+            # 20+ в день до единиц. Свежесть обеспечивает пропуск уже
+            # просмотренных вакансий и обход вглубь (browser_source).
+            params = f"text={query}&area={HH_AREA_RUSSIA}&page={page}"
             formats = set(work_formats)
             if remote_only and not formats:
                 formats.add("REMOTE")

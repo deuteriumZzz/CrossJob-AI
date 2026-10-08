@@ -592,6 +592,20 @@ def _readiness(secrets: dict, data_folder: Path, source: str) -> dict:
     return {"ready": ready, "missing": missing, "resume": resume}
 
 
+def _last_run_summaries(ctx: AppContext) -> dict:
+    """Итог последнего захода каждой площадки (main._record_last_run_summary)."""
+    import json
+
+    try:
+        return json.loads(
+            (ctx.output_folder / ".last_run_summary.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    except (OSError, ValueError):
+        return {}
+
+
 @app.get("/api/status")
 def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
     state = load_state(ctx.output_folder)
@@ -666,6 +680,7 @@ def get_status(ctx: AppContext = Depends(get_ctx)) -> dict:
                     ctx.config, name, "locations"
                 ),
                 "last_run": entry.get("last_run"),
+                "last_summary": _last_run_summaries(ctx).get(name),
                 "duration_seconds": entry.get("duration_seconds"),
                 "idle_streak": entry.get("idle_streak") or 0,
                 "next_run": entry.get("next_run"),

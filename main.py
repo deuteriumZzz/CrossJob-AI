@@ -1428,7 +1428,43 @@ def _log_funnel_summary(
         f"{easy_apply_failed_part}"
     )
     if parameters is not None:
+        _record_last_run_summary(
+            parameters, source, found, low_fit, applied, dry_run
+        )
         _update_funnel_health(parameters, source, found, applied, dry_run)
+
+
+LAST_RUNS_FILE = ".last_run_summary.json"
+
+
+def _record_last_run_summary(
+    parameters: dict,
+    source: str,
+    new: int,
+    low_fit: int,
+    applied: int,
+    dry_run: int,
+) -> None:
+    """Итог последнего захода площадки — для карточки в интерфейсе: заход
+    без новых вакансий ничего не пишет в журнал и выглядит как простой
+    («новых 0» — это не поломка, а «всё уже просмотрено»)."""
+    output_folder = parameters.get("outputFileDirectory")
+    if not output_folder:
+        return
+    path = Path(output_folder) / LAST_RUNS_FILE
+    with state_file_lock(path):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        data[source] = {
+            "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "new": new,
+            "low_fit": low_fit,
+            "applied": applied,
+            "dry_run": dry_run,
+        }
+        path.write_text(json.dumps(data, ensure_ascii=False), "utf-8")
 
 
 def _notify_hh_blocked(parameters: dict, error: Exception) -> None:
@@ -3757,6 +3793,7 @@ def search_talanto(
             )
             return
         logger.info(f"Found {len(jobs)} new Talanto vacancies.")
+        _record_last_run_summary(parameters, "talanto", len(jobs), 0, 0, 0)
         in_book = {
             v["link"]
             for card in book.all().values()
@@ -3960,6 +3997,7 @@ def search_hirify(
             )
             return
         logger.info(f"Found {len(jobs)} new Hirify vacancies.")
+        _record_last_run_summary(parameters, "hirify", len(jobs), 0, 0, 0)
         in_book = {
             v["link"]
             for card in book.all().values()

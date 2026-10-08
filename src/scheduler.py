@@ -46,7 +46,7 @@ CONTINUOUS_CYCLE_SOURCES = {
 
 # Предохранитель от зависания: ход площадки в постоянном цикле мягко
 # останавливается (через stop_event) по истечении этого времени.
-TURN_TIME_LIMIT_SECONDS = 40 * 60
+TURN_TIME_LIMIT_SECONDS: Optional[int] = None  # без лимита: первый заход долгий
 
 # Пауза до следующего хода площадки, которая N ходов подряд не нашла
 # ничего нового (все вакансии уже в журнале): чем дольше пусто, тем реже
@@ -56,11 +56,11 @@ IDLE_BACKOFF_MAX_HOURS = 1.0
 
 
 def _idle_interval_hours(gap_hours: float, idle_streak: int) -> float:
-    if idle_streak < 2:
-        return gap_hours
-    return max(
-        gap_hours, IDLE_BACKOFF_HOURS.get(idle_streak, IDLE_BACKOFF_MAX_HOURS)
-    )
+    # Замедление «пусто → реже заглядываем» отключено: бот должен идти
+    # дальше и сканировать, а не ждать (вместе с неглубокой выдачей это
+    # давало часы простоя 8–9.10). Таблица IDLE_BACKOFF_* оставлена на случай
+    # возврата.
+    return gap_hours
 
 
 # Как часто проверять ответы, если в настройках не задано: команды боту —
@@ -166,13 +166,16 @@ class Scheduler:
             fn(self.parameters, self.llm_api_key)
             return
         stop = threading.Event()
-        timer = threading.Timer(TURN_TIME_LIMIT_SECONDS, stop.set)
-        timer.daemon = True
-        timer.start()
+        timer = None
+        if TURN_TIME_LIMIT_SECONDS:
+            timer = threading.Timer(TURN_TIME_LIMIT_SECONDS, stop.set)
+            timer.daemon = True
+            timer.start()
         try:
             fn(self.parameters, self.llm_api_key, stop_event=stop)
         finally:
-            timer.cancel()
+            if timer is not None:
+                timer.cancel()
 
     def _supervise_gateway(self) -> None:
         """Шлюз Telegram сам поднимается, если поток умер (раньше он жил и

@@ -49,6 +49,18 @@ def test_raise_if_blocked_does_not_flag_robotics_vacancy():
     raise_if_blocked("Инженер по робототехнике, опыт с промышленными роботами")
 
 
+def test_long_vacancy_mentioning_captcha_is_not_a_block():
+    """9.10: вакансия про парсинг («обход captcha-сервисов») останавливала
+    весь HH на час при каждом заходе — это текст вакансии, не заглушка."""
+    vacancy = "Python-разработчик. " + "Обязанности и требования. " * 300
+    vacancy += "Обход защитных механизмов (rate limits, waf, captcha-сервисы)."
+    raise_if_blocked(vacancy)
+    with pytest.raises(PlatformBlockedError):
+        raise_if_blocked("Проверка безопасности: captcha")  # короткая заглушка
+    with pytest.raises(PlatformBlockedError):  # точная фраза — на любой длине
+        raise_if_blocked(vacancy + " Подтвердите, что вы не робот")
+
+
 def test_raise_if_blocked_raises_on_cloudflare_interstitial():
     # Регрессия: himalayas.app отдавал Cloudflare-интерстишл
     # ("Один момент…" / Ray ID), который не совпадал ни с одним
