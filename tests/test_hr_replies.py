@@ -578,3 +578,42 @@ def test_company_email_uses_vacancy_text_and_adds_link(monkeypatch):
     )
     assert "Job posting" not in letter["text"]
     assert letter["text"].startswith("Hello team.\n\nDmitry\nme@gmail.com")
+
+
+def test_company_email_does_not_leak_hashtags_from_telegram_title(monkeypatch):
+    """9.10: заголовок поста «#junior #middle #удаленка» попал в письмо как
+    «Ищу позицию #junior …» — в промт идёт очищенное название."""
+    import pdfminer.high_level
+    from langchain_core.runnables import RunnableLambda
+
+    from src.job_sources import hr_replies
+
+    prompts: list[str] = []
+
+    class FakeLLM:
+        def with_structured_output(self, schema):
+            def answer(prompt):
+                prompts.append(prompt.to_string())
+                return schema(letter="Привет.", role_in_letter_language="X")
+
+            return RunnableLambda(answer)
+
+    monkeypatch.setattr(hr_replies, "get_chat_llm", lambda *a, **k: FakeLLM())
+    monkeypatch.setattr(hr_replies, "humanize", lambda text, key: text)
+    monkeypatch.setattr(hr_replies, "build_contact_footer", lambda *a: "")
+    monkeypatch.setattr(hr_replies, "_candidate_own_contacts", lambda p: [])
+    monkeypatch.setattr(pdfminer.high_level, "extract_text", lambda p: "CV")
+    card = {
+        "company": "Мой Офис",
+        "contacts": [],
+        "vacancies": [{"title": "#junior #middle #удаленка", "text": "Нужен Python"}],
+    }
+
+    hr_replies.generate_company_email(
+        Path("cv.pdf"), "Дмитрий", "#junior #middle #удаленка", card, "", "k", {}
+    )
+
+    # в самом промте хештеги упомянуты как пример запрета — смотрим данные
+    data = prompts[0].split("Кандидат:", 1)[1]
+    assert "#junior" not in data and "#удаленка" not in data
+    assert 'вакансию "Python-разработчик"' in prompts[0]
