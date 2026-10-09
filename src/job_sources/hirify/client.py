@@ -134,9 +134,11 @@ class HirifyClient:
             b
             for b in driver.find_elements(By.CSS_SELECTOR, "button, a")
             if b.is_displayed()
-            and (b.text or "").strip().lower().lstrip("→›>↗ ").startswith(
-                _CONTACT_BUTTON_TEXTS
-            )
+            and (b.text or "")
+            .strip()
+            .lower()
+            .lstrip("→›>↗ ")
+            .startswith(_CONTACT_BUTTON_TEXTS)
             # Ссылка «Контакты» из меню сайта уводит на другую страницу —
             # годятся только кнопки и ссылки без перехода.
             and (
