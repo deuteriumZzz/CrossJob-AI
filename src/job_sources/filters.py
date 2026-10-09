@@ -358,7 +358,9 @@ def linkedin_search_params(preferences: dict) -> dict:
     формат не ограничивается (любой). f_AL (только Easy Apply) не
     настраивается: бот умеет откликаться лишь так."""
     formats = work_formats(preferences)
-    params = {"f_AL": "true", "sortBy": "DD"}
+    # Без sortBy=DD: по релевантности, как до 7.10 (по дате шла нерелевантная
+    # выдача; свежесть даёт пропуск просмотренных вакансий).
+    params = {"f_AL": "true"}
     if formats:
         params["f_WT"] = ",".join(
             sorted(_LINKEDIN_WORK_TYPE[f] for f in formats)

@@ -9,7 +9,10 @@ from urllib.parse import urlparse
 import httpx
 from selenium.webdriver.common.by import By
 
-from src.job_sources.block_detection import raise_if_blocked, visible_text
+from src.job_sources.block_detection import (
+    raise_if_blocked,
+    raise_if_page_blocked,
+)
 from src.job_sources.user_agents import random_user_agent
 from src.utils.chrome_utils import init_browser
 
@@ -93,7 +96,7 @@ class WellfoundClient:
             separator = "&" if "?" in vacancy_url else "?"
             driver.get(f"{vacancy_url}{separator}autoOpenApplication=true")
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
-            raise_if_blocked(visible_text(driver))
+            raise_if_page_blocked(driver)
 
             if driver.find_elements(By.CSS_SELECTOR, 'input[type="password"]'):
                 return False

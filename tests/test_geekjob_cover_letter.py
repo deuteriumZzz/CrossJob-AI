@@ -18,9 +18,9 @@ def test_apply_fills_textarea_when_present():
     with patch(
         "src.job_sources.geekjob.client.init_browser"
     ) as mock_init, patch(
-        "src.job_sources.geekjob.client.raise_if_blocked"
+        "src.job_sources.geekjob.client.raise_if_page_blocked"
     ), patch(
-        "src.job_sources.geekjob.client.visible_text", return_value=""
+        "src.job_sources.block_detection.visible_text", return_value=""
     ), patch(
         "src.job_sources.geekjob.client.time.sleep"
     ):
@@ -54,9 +54,9 @@ def test_apply_refuses_to_submit_without_letter_field():
     with patch(
         "src.job_sources.geekjob.client.init_browser"
     ) as mock_init, patch(
-        "src.job_sources.geekjob.client.raise_if_blocked"
+        "src.job_sources.geekjob.client.raise_if_page_blocked"
     ), patch(
-        "src.job_sources.geekjob.client.visible_text", return_value=""
+        "src.job_sources.block_detection.visible_text", return_value=""
     ), patch(
         "src.job_sources.geekjob.client.time.sleep"
     ):

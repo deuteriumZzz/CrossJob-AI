@@ -48,7 +48,9 @@ CONTINUOUS_CYCLE_SOURCES = {
 
 # Предохранитель от зависания: ход площадки в постоянном цикле мягко
 # останавливается (через stop_event) по истечении этого времени.
-TURN_TIME_LIMIT_SECONDS = 40 * 60
+TURN_TIME_LIMIT_SECONDS: Optional[int] = (
+    None  # без лимита: первый заход долгий
+)
 
 # Пауза до следующего хода площадки, которая N ходов подряд не нашла
 # ничего нового (все вакансии уже в журнале): чем дольше пусто, тем реже
@@ -58,11 +60,11 @@ IDLE_BACKOFF_MAX_HOURS = 1.0
 
 
 def _idle_interval_hours(gap_hours: float, idle_streak: int) -> float:
-    if idle_streak < 2:
-        return gap_hours
-    return max(
-        gap_hours, IDLE_BACKOFF_HOURS.get(idle_streak, IDLE_BACKOFF_MAX_HOURS)
-    )
+    # Замедление «пусто → реже заглядываем» отключено: бот должен идти
+    # дальше и сканировать, а не ждать (вместе с неглубокой выдачей это
+    # давало часы простоя 8–9.10). Таблица IDLE_BACKOFF_* оставлена на случай
+    # возврата.
+    return gap_hours
 
 
 # Как часто проверять ответы, если в настройках не задано: команды боту —
@@ -173,13 +175,16 @@ class Scheduler:
             fn(self.parameters, self.llm_api_key)
             return
         stop = threading.Event()
-        timer = threading.Timer(TURN_TIME_LIMIT_SECONDS, stop.set)
-        timer.daemon = True
-        timer.start()
+        timer = None
+        if TURN_TIME_LIMIT_SECONDS:
+            timer = threading.Timer(TURN_TIME_LIMIT_SECONDS, stop.set)
+            timer.daemon = True
+            timer.start()
         try:
             fn(self.parameters, self.llm_api_key, stop_event=stop)
         finally:
-            timer.cancel()
+            if timer is not None:
+                timer.cancel()
 
     def _supervise_gateway(self) -> None:
         """Шлюз Telegram сам поднимается, если поток умер (раньше он жил и
@@ -301,7 +306,13 @@ class Scheduler:
             # linkedin/habr и др. не запускались 4 дня подряд.
             waits = {n: get_next_run(self.output_folder, n) for n in due_cycle}
             due_cycle.sort(key=lambda n: (waits[n] is not None, waits[n] or 0))
-            due = due_rest + (due_cycle[:1] if due_cycle else [])
+            # Сначала быстрые check_*, затем ход площадки (отклики — главное),
+            # и только потом сборщики контактов (Hirify, Talanto, сайты
+            # компаний): их полный проход долгий (9.10: Hirify без лимита
+            # занял очередь, и ни одна площадка не стартовала 13 минут).
+            checks = [n for n in due_rest if n.startswith("check_")]
+            collectors = [n for n in due_rest if not n.startswith("check_")]
+            due = checks + (due_cycle[:1] if due_cycle else []) + collectors
 
         for name in due:
             run_at = self.now_fn()
@@ -320,6 +331,7 @@ class Scheduler:
                 and name != "check_hh_replies"
             )
             seen_before = self._seen_count(name) if platform_turn else 0
+            logger.info(f"[scheduler] ход: {name}")
             try:
                 self._call_source(name, platform_turn)
             except Exception as e:

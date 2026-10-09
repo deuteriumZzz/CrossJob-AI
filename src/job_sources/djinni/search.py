@@ -31,7 +31,7 @@ from src.job_sources.filters import (
 from src.job_sources.preferences import effective_list
 
 BASE = "https://djinni.co"
-PAGES_PER_POSITION = 3  # по 15 вакансий на странице
+PAGES_PER_POSITION = 30  # по 15 вакансий; цикл сам встаёт на последней
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126 Safari/537.36"

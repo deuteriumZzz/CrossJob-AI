@@ -675,50 +675,29 @@ class TelegramWatcher(threading.Thread):
                 )
                 return
 
+        delivered = {
+            **post,
+            "contacts": [
+                {"kind": c["kind"], "value": c["value"]} for c in contacts
+            ],
+            "unverified": unverified,
+        }
+        # Всегда — для «Общения» в приложении, даже без бота: там пост ждёт
+        # ответа с черновиком, бот — только копия.
+        post_id = await asyncio.get_event_loop().run_in_executor(
+            None, save_watch_post, self.output_folder, delivered
+        )
         if self.bot is not None and night_hold(tg_prefs):
-            # «Ночные вакансии — утром»: пост сохранён (виден в «Общении»),
-            # в бот придёт в начале рабочих часов — ночью не будим.
-            post_id = save_watch_post(
-                self.output_folder,
-                {
-                    **post,
-                    "contacts": [
-                        {"kind": c["kind"], "value": c["value"]}
-                        for c in contacts
-                    ],
-                    "unverified": unverified,
-                },
-            )
+            # «Ночные вакансии — утром»: в бот придёт в начале рабочих
+            # часов — ночью не будим. В «Общении» пост виден сразу.
             queue_night_post(self.output_folder, post_id, matched)
             return
         if self.bot is not None:
             # Через бота — чтобы под вакансией были кнопки быстрого ответа.
             await asyncio.get_event_loop().run_in_executor(
-                None,
-                self._deliver_via_bot,
-                {
-                    **post,
-                    "contacts": [
-                        {"kind": c["kind"], "value": c["value"]}
-                        for c in contacts
-                    ],
-                    "unverified": unverified,
-                },
-                matched,
+                None, self._deliver_via_bot, delivered, matched
             )
             return
-        # Без бота пост тоже сохраняется — его видно в «Общении» с
-        # черновиком от ИИ, а не только пересланным в «Избранное».
-        save_watch_post(
-            self.output_folder,
-            {
-                **post,
-                "contacts": [
-                    {"kind": c["kind"], "value": c["value"]} for c in contacts
-                ],
-                "unverified": unverified,
-            },
-        )
         try:
             forwarded = await self.client.forward_messages(
                 self.forward_to, message
@@ -1279,12 +1258,9 @@ def save_watch_post(output_folder: Path, post: dict) -> str:
     """Запоминает пост, под которым стоят кнопки, — id короткий, чтобы
     влезть в callback_data (≤64 байт)."""
     import json
+    from datetime import datetime
 
     post_id = hashlib.sha1(post["link"].encode("utf-8")).hexdigest()[:10]
-    if not post.get("saved_at"):
-        from datetime import datetime
-
-        post = {**post, "saved_at": datetime.now().astimezone().isoformat()}
     path = output_folder / WATCH_POSTS_FILE
     # Под замком: посты доставляются параллельно (run_in_executor, досмотр
     # истории каналов) — два write_text разом склеивали файл, следующее
@@ -1294,7 +1270,15 @@ def save_watch_post(output_folder: Path, post: dict) -> str:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             data = {}
-        data[post_id] = post
+        # Поверх прежней записи: бот пересохраняет пост, уже записанный в
+        # _handle_post, — статус из чата приложения и found_at не теряются.
+        data[post_id] = {
+            "found_at": datetime.now()
+            .astimezone()
+            .isoformat(timespec="seconds"),
+            **data.get(post_id, {}),
+            **post,
+        }
         if len(data) > _WATCH_POSTS_LIMIT:
             data = dict(list(data.items())[-_WATCH_POSTS_LIMIT:])
         path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
@@ -1302,14 +1286,76 @@ def save_watch_post(output_folder: Path, post: dict) -> str:
 
 
 def get_watch_post(output_folder: Path, post_id: str) -> Optional[dict]:
+    return list_watch_posts(output_folder).get(post_id)
+
+
+def list_watch_posts(output_folder: Path) -> dict[str, dict]:
     import json
 
     path = output_folder / WATCH_POSTS_FILE
     try:
         with state_file_lock(path):
-            return json.loads(path.read_text(encoding="utf-8")).get(post_id)
+            return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
+        return {}
+
+
+def update_watch_post(
+    output_folder: Path, post_id: str, **fields
+) -> Optional[dict]:
+    """Статус поста для чата в приложении: new / sent / later / hidden /
+    blocked (+ contact, send_after). None — поста нет (вытеснен лимитом)."""
+    import json
+
+    path = output_folder / WATCH_POSTS_FILE
+    with state_file_lock(path):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if post_id not in data:
+            return None
+        data[post_id].update(fields)
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        return data[post_id]
+
+
+def cancel_pending_telegram_send(
+    output_folder: Path, contact: str, job_link: str
+) -> bool:
+    """Убрать из очереди отложенное сообщение (кнопка «Отменить» у
+    «Утром»). Ключ тот же, что в queue_telegram_send."""
+    import json
+
+    path = output_folder / PENDING_SENDS_FILE
+    entry_id = hashlib.sha1(
+        f"{contact}:{job_link}".encode("utf-8")
+    ).hexdigest()[:10]
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if data.pop(entry_id, None) is None:
+        return False
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return True
+
+
+def block_post_contacts(
+    output_folder: Path, contacts: list[dict], post: dict
+) -> bool:
+    """«Не писать компании»: карточка в Базе с пометкой «не писать», из
+    рассылок выпадает. True — нашлась хотя бы одна карточка."""
+    if post:
+        # Контакты постов в Базу до отправки не попадают — «не писать»
+        # единственный повод завести карточку без письма.
+        remember_telegram_post_contact(
+            output_folder, contacts, post, sent=False
+        )
+    book = ContactBook(output_folder)
+    keys = sorted({k for c in contacts for k in book.keys_with(c["value"])})
+    book.update(keys, do_not_contact=True)
+    return bool(keys)
 
 
 def telegram_resumes(data_folder: Path) -> list[Path]:
@@ -1407,7 +1453,6 @@ def vacancy_keyboard(
 
 # --- Посты в «Общении», ночные вакансии -------------------------------------
 
-WATCH_POSTS_HIDDEN_FILE = ".watch_posts_hidden.json"
 NIGHT_POSTS_FILE = ".night_posts.json"
 MORNING_HOUR = 10
 # Без своих рабочих часов (Настройки → Telegram-парсер) ночь — 23:00–8:00.
@@ -1476,32 +1521,3 @@ def take_night_posts(output_folder: Path) -> list[dict]:
 
 def night_posts_count(output_folder: Path) -> int:
     return len(_load_json_file(output_folder / NIGHT_POSTS_FILE, []))
-
-
-def hidden_watch_posts(output_folder: Path) -> set[str]:
-    return set(_load_json_file(output_folder / WATCH_POSTS_HIDDEN_FILE, []))
-
-
-def set_watch_post_hidden(
-    output_folder: Path, post_id: str, hidden: bool
-) -> None:
-    """«Скрыть» вакансию в «Общении»: сам пост не удаляется."""
-    import json
-
-    path = output_folder / WATCH_POSTS_HIDDEN_FILE
-    with state_file_lock(path):
-        ids = set(_load_json_file(path, []))
-        if hidden:
-            ids.add(post_id)
-        else:
-            ids.discard(post_id)
-        path.write_text(json.dumps(sorted(ids)), encoding="utf-8")
-
-
-def all_watch_posts(output_folder: Path) -> dict:
-    path = output_folder / WATCH_POSTS_FILE
-    try:
-        with state_file_lock(path):
-            return _load_json_file(path, {})
-    except Exception:
-        return {}

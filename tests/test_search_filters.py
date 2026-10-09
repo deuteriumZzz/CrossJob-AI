@@ -33,7 +33,7 @@ def test_platform_remote_only_used_only_when_no_common_format():
 
 def test_linkedin_without_chosen_format_does_not_restrict_it():
     params = linkedin_search_params({})
-    assert params == {"f_AL": "true", "sortBy": "DD"}
+    assert params == {"f_AL": "true"}  # без sortBy=DD — по релевантности
 
 
 def test_linkedin_follows_common_formats():

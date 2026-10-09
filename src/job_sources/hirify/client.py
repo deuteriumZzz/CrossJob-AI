@@ -15,7 +15,11 @@ import httpx
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 
-from src.job_sources.block_detection import raise_if_blocked, visible_text
+from src.job_sources.block_detection import (
+    raise_if_blocked,
+    raise_if_page_blocked,
+    visible_text,
+)
 from src.job_sources.hirify.mapping import (
     BASE_URL,
     channels_from_links,
@@ -112,7 +116,7 @@ class HirifyClient:
     def _read_contacts(self, driver, job_id: str, slug: str) -> dict:
         driver.get(f"{BASE_URL}/jobs/{job_id}-{slug}")
         time.sleep(PAGE_WAIT_SECONDS)
-        raise_if_blocked(visible_text(driver))
+        raise_if_page_blocked(driver)
         # Дополнительные источники скрыты за «· ещё N источник» — раскрываем.
         driver.execute_script(
             "const b=[...document.querySelectorAll('button')].find(b=>"

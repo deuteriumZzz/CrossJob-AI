@@ -461,11 +461,13 @@ def test_posts_without_bot_are_saved_for_talk_view(client):  # noqa: F811
         "https://t.me/geekjobs/5",
     ]
     first = body["posts"][0]
-    assert first["saved_at"] and first["contacts"][0]["value"] == "bob_hr"
+    assert first["found_at"] and first["contacts"][0]["value"] == "bob_hr"
     assert first["draft"] is None and first["scheduled"] is None
     assert body["daily_limit"] == 15
 
-    client.post(f"/api/telegram/posts/{first['id']}/hide", json={})
+    client.post(
+        f"/api/telegram/posts/{first['id']}/status", json={"status": "hidden"}
+    )
     links = [
         p["link"] for p in client.get("/api/telegram/posts").json()["posts"]
     ]

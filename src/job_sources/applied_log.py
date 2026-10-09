@@ -764,7 +764,10 @@ def seen_ids_for(preferences: dict, source: str) -> set[str]:
     )
 
 
-DEFAULT_MAX_NEW_PER_RUN = 30
+# Без лимита, как до 7.10: проходим всё, что нашёл поиск (просмотренные
+# пропускаются, так что первый заход долгий, дальше — только новое).
+# Лимит можно задать на площадку: <площадка>.max_new_per_run.
+DEFAULT_MAX_NEW_PER_RUN = 1_000_000
 
 
 def max_new_per_run(preferences: dict, source: str) -> int:

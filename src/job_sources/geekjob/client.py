@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 
-from src.job_sources.block_detection import raise_if_blocked, visible_text
+from src.job_sources.block_detection import raise_if_page_blocked
 from src.job_sources.html_text import html_letter_to_plain_text
 from src.utils.chrome_utils import init_browser, is_driver_dead
 
@@ -66,7 +66,7 @@ class GeekjobClient:
             params = {**(filters or {}), "qs": query}
             driver.get(f"{GJ_BASE}{path}?{urlencode(params)}")
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
-            raise_if_blocked(visible_text(driver))
+            raise_if_page_blocked(driver)
             return driver.page_source
         finally:
             if owns_it:
@@ -77,7 +77,7 @@ class GeekjobClient:
         try:
             driver.get(f"{GJ_BASE}/vacancy/{vacancy_id}")
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
-            raise_if_blocked(visible_text(driver))
+            raise_if_page_blocked(driver)
             return driver.page_source
         finally:
             if owns_it:
@@ -108,7 +108,7 @@ class GeekjobClient:
         try:
             driver.get(vacancy_url)
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
-            raise_if_blocked(visible_text(driver))
+            raise_if_page_blocked(driver)
             buttons = driver.find_elements(
                 By.XPATH,
                 '//button[contains(normalize-space(), "Откликнуться")]',

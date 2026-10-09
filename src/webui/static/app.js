@@ -1538,13 +1538,26 @@ function fixBlockHtml(s) {
   </div>`;
 }
 
+// Итог последнего захода площадки: «новых 0» — не поломка, а «всё уже
+// просмотрено»; без этой строки такой заход в интерфейсе невидим.
+function lastSummaryKvHtml(sum) {
+  const parts = [`новых ${sum.new}`];
+  if (sum.new) {
+    parts.push(`слабое совпадение ${sum.low_fit}`);
+    parts.push(`откликов ${sum.applied}`);
+  }
+  const title = `Проверено ${fmtTime(sum.at)}. «Новых» — вакансий, которых ещё не было в журнале.`;
+  return `<div class="kv" title="${escapeHtml(title)}"><span>Итог захода</span><span>${parts.join(" · ")}</span></div>`;
+}
+
 function sourceDrawerBody(s, limits, salary) {
   const defaultDaily = s.name === "linkedin" ? limits.linkedin_daily_application_limit : limits.daily_application_limit;
   const isOwn = OWN_CHANNELS.has(s.name);
   const lastRunRows = `
     <div class="kv"><span>Последняя проверка</span><span>${s.schedule_enabled ? fmtDay(s.last_run) : "—"}</span></div>
     <div class="kv"><span>Следующая проверка</span><span>${s.schedule_enabled ? fmtTime(s.next_run) : "—"}</span></div>
-    ${s.schedule_enabled && s.duration_seconds != null ? `<div class="kv"><span>Последний ход</span><span>${Math.max(1, Math.round(s.duration_seconds / 60))} мин${s.idle_streak >= 2 ? ", пусто — следующая проверка реже" : ""}</span></div>` : ""}`;
+    ${s.schedule_enabled && s.duration_seconds != null ? `<div class="kv"><span>Последний ход</span><span>${Math.max(1, Math.round(s.duration_seconds / 60))} мин${s.idle_streak >= 2 ? ", пусто — следующая проверка реже" : ""}</span></div>` : ""}
+    ${s.schedule_enabled && s.last_summary ? lastSummaryKvHtml(s.last_summary) : ""}`;
   const readiness = (s.readiness && s.readiness.missing) || [];
   return `
     ${fixBlockHtml(s)}
@@ -4163,10 +4176,22 @@ async function openTelegramConversation(contact, fromInbox = false) {
   document.getElementById("tg-chat-contact").textContent = `@${contact}`;
 
   const messages = document.getElementById("tg-chat-messages");
-  messages.innerHTML = conv.messages
-    .map((m) => `<div class="chat-bubble ${m.direction}">${escapeHtml(m.text)}<span class="chat-bubble-time">${formatChatTime(m.at)}</span></div>`)
-    .join("");
+  const bubbles = (list) =>
+    list
+      .map((m) => `<div class="chat-bubble ${m.direction === "out" ? "out" : "in"}">${escapeHtml(m.text || "")}<span class="chat-bubble-time">${formatChatTime(m.at)}</span></div>`)
+      .join("");
+  messages.innerHTML = bubbles(conv.messages);
   messages.scrollTop = messages.scrollHeight;
+  // Полная переписка из самого Telegram — и то, что писали через бота, и
+  // руками в Telegram (журнал приложения знает только своё). Есть, пока
+  // работает шлюз; иначе остаётся журнал приложения.
+  api(`/api/telegram/history/${encodeURIComponent(contact)}`)
+    .then((h) => {
+      if (activeTelegramContact !== contact || h.source !== "telegram" || !h.messages.length) return;
+      messages.innerHTML = bubbles(h.messages);
+      messages.scrollTop = messages.scrollHeight;
+    })
+    .catch(() => {});
 
   // Открытие треда гасит бейдж "непрочитано" на бэкенде (см.
   // get_telegram_conversation) — обновляем счётчик в шапке вкладки,
@@ -8430,7 +8455,7 @@ async function setPauseAll(paused) {
 
 // --- Общение: вакансии из Telegram с черновиком от ИИ (talk.tg.posts) ------
 
-let tgPostsData = { posts: [], resumes: [], sent_today: 0, daily_limit: 15 };
+let tgPostsData = { posts: [], resume_options: [], sent_today: 0, daily_limit: 15 };
 let activeTgPostId = null;
 let lastTgPostsSnapshot = "";
 const tgPostResume = {}; // выбор «Резюме:» по посту, пока не отправили
@@ -8464,6 +8489,8 @@ async function renderTelegramPosts() {
     return;
   }
   tgPostsData = data;
+  const laterBtn = document.getElementById("tg-chat-later");
+  if (laterBtn) laterBtn.textContent = `Утром, в ${data.morning_hour ?? 10}:00`;
   const showAll = !repliesKind || repliesKind === "telegram";
   block.hidden = !data.posts.length || !showAll;
   const snapshot = JSON.stringify([data.posts.map((p) => [p.id, p.draft?.code, p.scheduled?.id, p.contacts.map((c) => c.note)]), activeTgPostId, showAll]);
@@ -8477,7 +8504,7 @@ async function renderTelegramPosts() {
       return `<button type="button" class="row talk-row${p.id === activeTgPostId ? " is-selected" : ""}" data-tg-post="${escapeHtml(p.id)}">
         ${plogoHtml("telegram")}
         <span class="row-main">
-          <span class="talk-row-top"><span class="row-title">@${escapeHtml(p.channel)}</span><span class="muted small nowrap">${p.saved_at ? fmtDay(p.saved_at) : ""}</span></span>
+          <span class="talk-row-top"><span class="row-title">@${escapeHtml(p.channel)}</span><span class="muted small nowrap">${p.found_at ? fmtDay(p.found_at) : ""}</span></span>
           <span class="talk-preview small">${escapeHtml(truncate(p.title, 90))}</span>
           <span class="row-sub small muted">${b.dot ? `<span class="dot ${b.dot}" aria-hidden="true"></span>` : ""}${escapeHtml(b.text)}</span>
         </span>
@@ -8504,7 +8531,7 @@ function tgPostContact(post) {
 
 function tgPostResumeChoice(post) {
   if (post.id in tgPostResume) return tgPostResume[post.id];
-  const fit = tgPostsData.resumes.find((r) => r.russian === post.russian || r.russian === null);
+  const fit = tgPostsData.resume_options.find((r) => r.russian === post.russian || r.russian === null);
   return fit ? fit.name : "";
 }
 
@@ -8514,7 +8541,7 @@ function tgPostPanelHtml(post) {
   const resume = tgPostResumeChoice(post);
   const full = !isEmail && tgPostsData.sent_today >= tgPostsData.daily_limit;
   const head = `<div class="thread-head"><h3 class="m0">${escapeHtml(truncate(post.title, 80))}</h3>
-    <span class="muted small">@${escapeHtml(post.channel)}${post.saved_at ? " · " + escapeHtml(fmtDay(post.saved_at)) : ""}</span></div>
+    <span class="muted small">@${escapeHtml(post.channel)}${post.found_at ? " · " + escapeHtml(fmtDay(post.found_at)) : ""}</span></div>
     <details class="post-text"><summary>Текст поста</summary><div class="letter-text">${escapeHtml(post.text)}</div></details>`;
   if (!contact) {
     return `${head}<div class="composer-empty"><span>В посте нет контакта — отклик, скорее всего, через форму на сайте.</span>
@@ -8535,12 +8562,12 @@ function tgPostPanelHtml(post) {
        <textarea id="tg-post-text" rows="7" aria-label="Текст сообщения">${escapeHtml(post.draft.text)}</textarea>`
     : `<div class="composer-empty"><span>Черновика пока нет. ИИ напишет его под эту вакансию и ваше резюме — ничего не уйдёт без вашего «Отправить».</span>
        <button type="button" class="btn btn-primary btn-small" data-post-action="draft">Написать черновик</button></div>`;
-  const resumes = [{ name: "", label: "без резюме" }, ...tgPostsData.resumes];
+  const resumes = [{ name: "", label: "без резюме" }, ...tgPostsData.resume_options];
   const resumeRow = post.draft
     ? `<div class="composer-row"><span class="muted small">Резюме:</span><div class="chip-row" role="radiogroup" aria-label="Резюме">${resumes
         .map((r) => `<button type="button" class="chip${r.name === resume ? " active" : ""}" role="radio" aria-checked="${r.name === resume}" data-post-resume="${escapeHtml(r.name)}">${escapeHtml(r.label)}</button>`)
         .join("")}</div>
-       <span class="composer-actions">${!isEmail && !post.scheduled ? `<button type="button" class="btn btn-small" data-post-action="later">Утром, в 10:00</button>` : ""}
+       <span class="composer-actions">${!isEmail && !post.scheduled ? `<button type="button" class="btn btn-small" data-post-action="later">Утром, в ${tgPostsData.morning_hour ?? 10}:00</button>` : ""}
        <button type="button" class="btn btn-primary btn-small" data-post-action="send" ${full ? "disabled" : ""}>${full ? "Лимит на сегодня" : resume ? "Отправить с резюме" : "Отправить"}</button></span></div>
        <span class="muted small">${isEmail ? "Уйдёт письмом через ваш Gmail" : `Уйдёт с вашего личного аккаунта Telegram · сегодня ${tgPostsData.sent_today} из ${tgPostsData.daily_limit}`} · Ctrl/⌘ + Enter — отправить</span>`
     : "";
@@ -8557,7 +8584,7 @@ function tgPostContextHtml(post) {
     <div class="talk-actions">
       <a class="btn btn-small" href="${escapeHtml(post.link)}" target="_blank" rel="noopener">Открыть пост ↗</a>
       <button type="button" class="btn btn-small btn-ghost" data-post-action="hide">Скрыть вакансию</button>
-      ${contact ? blockContactButtonHtml(contact.value, post.id) : ""}
+      ${contact ? `<button type="button" class="btn btn-small btn-ghost is-danger" data-post-action="block" data-ui="talk.block-company">Не писать компании</button>` : ""}
     </div>`;
 }
 
@@ -8607,34 +8634,51 @@ async function tgPostAction(action, btn) {
     } else if (action === "send") {
       if (!text) return;
       busy("Отправляю…");
-      const res = await api(`/api/hr-drafts/${post.draft.code}/send`, { method: "POST", body: JSON.stringify({ text, resume }) });
-      showToast(res.message, "success");
+      const contact = tgPostContact(post);
+      if (contact.kind === "email") {
+        const res = await api(`/api/hr-drafts/${post.draft.code}/send`, { method: "POST", body: JSON.stringify({ text, resume }) });
+        showToast(res.message, "success");
+      } else {
+        // Отправлено — пост становится обычной перепиской в списке ниже.
+        const res = await api(`/api/telegram/posts/${post.id}/send`, { method: "POST", body: JSON.stringify({ contact: contact.value, text, resume }) });
+        showToast(res.warning || `Отправлено @${res.contact}${resume ? " + резюме" : ""}`, res.warning ? "error" : "success");
+        delete tgPostResume[post.id];
+        await refreshTelegramPost(post.id);
+        await render.telegram();
+        openTelegramConversation(res.contact);
+        return;
+      }
       delete tgPostResume[post.id];
       await refreshTelegramPost(post.id);
       render.telegram();
     } else if (action === "later") {
       if (!text) return;
       busy("Ставлю на утро…");
-      const res = await api(`/api/hr-drafts/${post.draft.code}/later`, { method: "POST", body: JSON.stringify({ text, resume }) });
+      const contact = tgPostContact(post);
+      const res = await api(`/api/telegram/posts/${post.id}/later`, { method: "POST", body: JSON.stringify({ contact: contact.value, text, resume }) });
       await refreshTelegramPost(post.id);
       showSavedToast(`Уйдёт ${fmtWhen(res.send_after)} — ночью HR не беспокоим`, async () => {
-        await api(`/api/telegram/scheduled/${res.id}`, { method: "DELETE" });
+        await api(`/api/telegram/posts/${post.id}/status`, { method: "POST", body: JSON.stringify({ status: "new" }) });
         await refreshTelegramPost(post.id);
       });
     } else if (action === "unschedule") {
       busy("Отменяю…");
-      await api(`/api/telegram/scheduled/${post.scheduled.id}`, { method: "DELETE" });
+      await api(`/api/telegram/posts/${post.id}/status`, { method: "POST", body: JSON.stringify({ status: "new" }) });
       showToast("Отправка отменена — черновик снова здесь", "success");
       await refreshTelegramPost(post.id);
-    } else if (action === "hide") {
-      await api(`/api/telegram/posts/${post.id}/hide`, { method: "POST", body: JSON.stringify({ hidden: true }) });
+    } else if (action === "hide" || action === "block") {
+      await api(`/api/telegram/posts/${post.id}/status`, { method: "POST", body: JSON.stringify({ status: action === "hide" ? "hidden" : "blocked" }) });
       closeTelegramPost();
       document.getElementById("tg-chat-empty").style.display = "";
       document.getElementById("talk-context-body").innerHTML = "";
       lastTgPostsSnapshot = "";
       await renderTelegramPosts();
-      showSavedToast("Вакансия скрыта", async () => {
-        await api(`/api/telegram/posts/${post.id}/hide`, { method: "POST", body: JSON.stringify({ hidden: false }) });
+      showSavedToast(action === "hide" ? "Вакансия скрыта" : "Больше не пишем этой компании — отмечено в Базе", async () => {
+        await api(`/api/telegram/posts/${post.id}/status`, { method: "POST", body: JSON.stringify({ status: "new" }) });
+        if (action === "block") {
+          const contact = tgPostContact(post);
+          if (contact) await api("/api/contacts/do-not-contact", { method: "POST", body: JSON.stringify({ value: contact.value, on: false }) }).catch(() => {});
+        }
         await refreshTelegramPost(post.id);
       });
     }
@@ -8766,7 +8810,7 @@ function initTalkExtras() {
       blockContact(btn.dataset.blockContact, btn.dataset.blockPost);
       return;
     }
-    const hide = e.target.closest('[data-post-action="hide"]');
-    if (hide) tgPostAction("hide", hide);
+    const postBtn = e.target.closest('[data-post-action="hide"], [data-post-action="block"]');
+    if (postBtn) tgPostAction(postBtn.dataset.postAction, postBtn);
   });
 }

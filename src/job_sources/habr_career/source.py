@@ -17,9 +17,10 @@ from src.job_sources.habr_career.mapping import (
 from src.job_sources.preferences import effective_list
 from src.logging import logger
 
-# ponytail: одна страница /vacancies?q=... на позицию, без пагинации —
-# ?page= поддерживается сайтом, но не подключён здесь: 20-25 вакансий
-# на запрос достаточно для старта.
+# Страницы /vacancies?q=...&page=N (20-25 вакансий на странице): идём, пока
+# страница приносит что-то новое для этого поиска. Потолок — на случай, если
+# сайт зациклит выдачу.
+MAX_PAGES = 30
 
 
 class HabrCareerSource:
@@ -52,53 +53,60 @@ class HabrCareerSource:
             effective_list(preferences, "habr_career", "positions"),
             qualifications,
         ):
-            # ponytail: тот же краш посреди прогона, что чинили у
-            # GeekjobSource/GetMatchSource — Chrome может умереть между
-            # вызовами клиента и вылететь исключением наружу вместо
-            # того, чтобы дать _acquire_driver пересоздать драйвер на
-            # следующем вызове.
-            try:
-                html = self.client.search_html(
-                    position,
-                    remote_only=remote_only,
-                    qualification=qualification,
-                    employment_type=employment_type,
-                    only_with_salary=bool(preferences.get("only_with_salary")),
-                )
-            except PlatformBlockedError:
-                raise
-            except Exception as e:
-                logger.exception(
-                    f"habr.career поиск упал на '{position}' — "
-                    f"пропускаю, продолжаю со следующей позицией: {e}"
-                )
-                continue
-
-            posted = parse_search_dates(html)
-            for vacancy_id in parse_search_results(html):
-                if vacancy_id in seen_ids:
-                    continue
-                if posted_too_old(posted.get(vacancy_id, ""), preferences):
-                    continue  # старше выбранного периода
-                seen_ids.add(vacancy_id)
-                if vacancy_id in already_seen:
-                    continue  # уже в журнале — страницу не открываем
-                if opened >= max_new:
-                    return jobs
-                opened += 1
-
+            for page in range(1, MAX_PAGES + 1):
+                # ponytail: тот же краш посреди прогона, что чинили у
+                # GeekjobSource/GetMatchSource — Chrome может умереть между
+                # вызовами клиента и вылететь исключением наружу вместо
+                # того, чтобы дать _acquire_driver пересоздать драйвер на
+                # следующем вызове.
                 try:
-                    detail_html = self.client.get_vacancy_html(vacancy_id)
+                    html = self.client.search_html(
+                        position,
+                        page=page,
+                        remote_only=remote_only,
+                        qualification=qualification,
+                        employment_type=employment_type,
+                        only_with_salary=bool(
+                            preferences.get("only_with_salary")
+                        ),
+                    )
                 except PlatformBlockedError:
                     raise
                 except Exception as e:
                     logger.exception(
-                        f"habr.career вакансия {vacancy_id} упала — "
-                        f"пропускаю, продолжаю: {e}"
+                        f"habr.career поиск упал на '{position}' — "
+                        f"пропускаю, продолжаю со следующей позицией: {e}"
                     )
-                    continue
-                job = habr_vacancy_to_job(detail_html, vacancy_id)
-                if passes_blacklists(job, preferences):
-                    jobs.append(job)
+                    break
+
+                posted = parse_search_dates(html)
+                page_ids = parse_search_results(html)
+                if not page_ids or all(v in seen_ids for v in page_ids):
+                    break  # выдача кончилась (или пошли повторы)
+                for vacancy_id in page_ids:
+                    if vacancy_id in seen_ids:
+                        continue
+                    if posted_too_old(posted.get(vacancy_id, ""), preferences):
+                        continue  # старше выбранного периода
+                    seen_ids.add(vacancy_id)
+                    if vacancy_id in already_seen:
+                        continue  # уже в журнале — страницу не открываем
+                    if opened >= max_new:
+                        return jobs
+                    opened += 1
+
+                    try:
+                        detail_html = self.client.get_vacancy_html(vacancy_id)
+                    except PlatformBlockedError:
+                        raise
+                    except Exception as e:
+                        logger.exception(
+                            f"habr.career вакансия {vacancy_id} упала — "
+                            f"пропускаю, продолжаю: {e}"
+                        )
+                        continue
+                    job = habr_vacancy_to_job(detail_html, vacancy_id)
+                    if passes_blacklists(job, preferences):
+                        jobs.append(job)
 
         return jobs

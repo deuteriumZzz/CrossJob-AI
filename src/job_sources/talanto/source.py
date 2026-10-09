@@ -14,10 +14,11 @@ from src.job_sources.talanto.client import TalantoClient
 from src.job_sources.talanto.selectors import SELECTORS
 from src.logging import logger
 
-PAGES_PER_POSITION = 2
-# За один ход открываем не больше стольких новых вакансий — остальные
-# достанутся следующему ходу (в журнал они не попадают, пока не оценены).
-DEFAULT_MAX_NEW_PER_RUN = 30
+PAGES_PER_POSITION = 10  # цикл встаёт на пустой странице
+# Сборщик контактов, не площадка откликов: за заход до 100 новых вакансий
+# (без лимита первый проход блокировал расписание на часы, 9.10). Остальные
+# достанутся следующему заходу. Своё значение: max_new_per_run.
+DEFAULT_MAX_NEW_PER_RUN = 100
 
 
 def talanto_vacancy_to_job(raw: dict, job_id: str) -> Job:

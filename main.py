@@ -226,7 +226,10 @@ from src.job_sources.talanto.client import (
     company_from_apply_url,
 )
 from src.job_sources.talanto.source import TalantoSource
-from src.job_sources.telegram.client import TelegramSourceClient
+from src.job_sources.telegram.client import (
+    TelegramSourceClient,
+    TelegramStatusClient,
+)
 from src.job_sources.telegram.contact import extract_contact
 from src.job_sources.telegram.post_parser import parse_post
 from src.job_sources.telegram.source import TelegramSource
@@ -235,12 +238,14 @@ from src.job_sources.telegram.watcher import (
     RATE_LIMIT_RETRY_DELAYS_SECONDS,
     _llm_check_post,
     active_watcher,
+    block_post_contacts,
     flush_pending_telegram_sends,
     get_watch_post,
     pending_telegram_sends,
     remember_telegram_post_contact,
     save_telegram_letter,
     telegram_resumes,
+    update_watch_post,
 )
 from src.job_sources.telegram_control import HELP_TEXT as _TELEGRAM_HELP_TEXT
 from src.job_sources.telegram_control import (
@@ -1472,7 +1477,43 @@ def _log_funnel_summary(
         f"{easy_apply_failed_part}"
     )
     if parameters is not None:
+        _record_last_run_summary(
+            parameters, source, found, low_fit, applied, dry_run
+        )
         _update_funnel_health(parameters, source, found, applied, dry_run)
+
+
+LAST_RUNS_FILE = ".last_run_summary.json"
+
+
+def _record_last_run_summary(
+    parameters: dict,
+    source: str,
+    new: int,
+    low_fit: int,
+    applied: int,
+    dry_run: int,
+) -> None:
+    """Итог последнего захода площадки — для карточки в интерфейсе: заход
+    без новых вакансий ничего не пишет в журнал и выглядит как простой
+    («новых 0» — это не поломка, а «всё уже просмотрено»)."""
+    output_folder = parameters.get("outputFileDirectory")
+    if not output_folder:
+        return
+    path = Path(output_folder) / LAST_RUNS_FILE
+    with state_file_lock(path):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        data[source] = {
+            "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "new": new,
+            "low_fit": low_fit,
+            "applied": applied,
+            "dry_run": dry_run,
+        }
+        path.write_text(json.dumps(data, ensure_ascii=False), "utf-8")
 
 
 def _notify_hh_blocked(parameters: dict, error: Exception) -> None:
@@ -3801,6 +3842,7 @@ def search_talanto(
             )
             return
         logger.info(f"Found {len(jobs)} new Talanto vacancies.")
+        _record_last_run_summary(parameters, "talanto", len(jobs), 0, 0, 0)
         in_book = {
             v["link"]
             for card in book.all().values()
@@ -4004,6 +4046,7 @@ def search_hirify(
             )
             return
         logger.info(f"Found {len(jobs)} new Hirify vacancies.")
+        _record_last_run_summary(parameters, "hirify", len(jobs), 0, 0, 0)
         in_book = {
             v["link"]
             for card in book.all().values()
@@ -6665,6 +6708,19 @@ def flush_telegram_scheduled(parameters: dict) -> None:
     )
     if not tg.get("api_id") or not tg.get("api_hash"):
         return
+    # Без входа в Telegram (вышли кнопкой «Отключить») свежий клиент спросил
+    # бы номер в консоли и подвесил поток — сначала проверка без вопросов.
+    try:
+        with TelegramStatusClient(
+            int(tg["api_id"]),
+            tg["api_hash"],
+            output_folder / ".telegram_session",
+        ) as status_client:
+            if not status_client.is_authorized():
+                return
+    except Exception as e:
+        logger.warning(f"Отложенные сообщения Telegram ждут: {e}")
+        return
     tg_prefs = parameters.get("telegram") or {}
     start, end = tg_prefs.get("active_hours_start"), tg_prefs.get(
         "active_hours_end"
@@ -6814,6 +6870,9 @@ def _handle_vacancy_button(
             output_folder / "telegram_conversations.json"
         ).record_outbound(contact["value"], text, job_link=post["link"])
         remember_telegram_post_contact(output_folder, [contact], post)
+        update_watch_post(
+            output_folder, parts[1], status="sent", contact=contact["value"]
+        )
         done(
             f"✅ Отправлено @{contact['value']}"
             + (" + резюме" if resume_index >= 0 else "")
@@ -6940,6 +6999,13 @@ def _handle_vacancy_button(
             with _telegram_client(parameters) as client:
                 client.send_file(draft["contact"], resumes[resume_index])
             result += " + резюме"
+        if result.startswith("Отправлено") and draft.get("post_id"):
+            update_watch_post(
+                output_folder,
+                draft["post_id"],
+                status="sent",
+                contact=draft.get("contact", ""),
+            )
         done(("✅ " if result.startswith("Отправлено") else "⚠️ ") + result)
     elif parts[0] == "x":
         drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
@@ -6954,6 +7020,7 @@ def _handle_vacancy_button(
         # «Не писать компании»: в Базе — «не писать», из рассылок выпадает.
         # Снять можно в Базе («Можно писать»).
         drafts = DraftStore(output_folder / HR_DRAFTS_FILE)
+        draft = {}
         if parts[0] == "n":
             found = get_watch_post(output_folder, parts[1])
             if found is None:
@@ -6980,20 +7047,13 @@ def _handle_vacancy_button(
                     draft["campaign"], draft["contact"], status="skipped"
                 )
             drafts.remove(parts[1])
-        values = [c["value"] for c in post_contacts]
-        if post:
-            # Контакты постов в Базу до отправки не попадают — «не писать»
-            # единственный повод завести карточку без письма, иначе
-            # отмечать нечего.
-            remember_telegram_post_contact(
-                output_folder, post_contacts, post, sent=False
-            )
-        book = ContactBook(output_folder)
-        keys = sorted({k for v in values for k in book.keys_with(v)})
-        book.update(keys, do_not_contact=True)
+        blocked = block_post_contacts(output_folder, post_contacts, post)
+        post_id = parts[1] if parts[0] == "n" else draft.get("post_id", "")
+        if post_id:
+            update_watch_post(output_folder, post_id, status="blocked")
         done(
             "🚫 Больше не пишем этой компании"
-            if keys
+            if blocked
             else "⚠️ Компании нет в Базе"
         )
     elif parts[0] in ("cs", "cf"):

@@ -46,6 +46,24 @@ _BLOCK_KEYWORDS = (
 )
 
 
+# Одиночные слова встречаются в обычных вакансиях («обход captcha-сервисов»
+# в описании парсинг-вакансии 9.10 останавливал весь HH на час при каждом
+# заходе). Страница-заглушка короткая, а настоящий текст вакансии длинный —
+# на длинной странице такие слова не считаем блокировкой; точные фразы
+# («подтвердите, что вы не робот», Ray ID…) работают на любой длине.
+_WEAK_KEYWORDS = frozenset({"captcha", "доступ ограничен", "access denied"})
+_LONG_PAGE_CHARS = 5000
+
+
+# Одиночные слова встречаются в обычных вакансиях («обход captcha-сервисов»
+# в описании парсинг-вакансии 9.10 останавливал весь HH на час при каждом
+# заходе). Страница-заглушка короткая, а настоящий текст вакансии длинный —
+# на длинной странице такие слова не считаем блокировкой; точные фразы
+# («подтвердите, что вы не робот», Ray ID…) работают на любой длине.
+_WEAK_KEYWORDS = frozenset({"captcha", "доступ ограничен", "access denied"})
+_LONG_PAGE_CHARS = 5000
+
+
 class PlatformBlockedError(Exception):
     """Площадка вернула капчу/бан вместо обычного ответа."""
 
@@ -60,11 +78,26 @@ def raise_if_blocked(response_or_html) -> None:
     if status_code == 429:
         raise PlatformBlockedError(f"HTTP 429 (rate limited): {text[:200]}")
     lowered = text.lower()
+    long_page = len(lowered) > _LONG_PAGE_CHARS
     for keyword in _BLOCK_KEYWORDS:
+        if long_page and keyword in _WEAK_KEYWORDS:
+            continue
         if keyword in lowered:
             raise PlatformBlockedError(
                 f"Blocked (detected {keyword!r} in response body)"
             )
+
+
+def raise_if_page_blocked(driver) -> None:
+    """raise_if_blocked для открытой Selenium-страницы — с её адресом в
+    ошибке. Ошибка уходит в Telegram (notify), и адрес приходит ссылкой:
+    открыл — прошёл капчу руками. Раньше ссылка была только при
+    редиректе HH на /account/captcha; при капче, найденной по тексту
+    страницы (8.10), сообщение приходило без неё."""
+    try:
+        raise_if_blocked(visible_text(driver))
+    except PlatformBlockedError as e:
+        raise PlatformBlockedError(f"{e}: {driver.current_url}") from None
 
 
 def raise_if_blocked_after_wait(
@@ -78,7 +111,7 @@ def raise_if_blocked_after_wait(
     deadline = time.monotonic() + seconds
     while True:
         try:
-            raise_if_blocked(visible_text(driver))
+            raise_if_page_blocked(driver)
             return
         except PlatformBlockedError:
             if time.monotonic() >= deadline:
