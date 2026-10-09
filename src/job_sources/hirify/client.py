@@ -46,6 +46,9 @@ def _raise_if_blocked(response: httpx.Response, expected: str) -> None:
     raise_if_blocked(response)
 
 
+_CONTACT_BUTTON_TEXTS = ("показать контакты", "контакты")
+
+
 class HirifyClient:
     def __init__(self, profile_dir: Path):
         self.profile_dir = profile_dir
@@ -125,11 +128,22 @@ class HirifyClient:
         hrefs = driver.execute_script(
             "return [...document.querySelectorAll('a[href]')].map(a=>a.href)"
         )
+        # Кнопка называется «Контакты» (жёлтая, со стрелкой) или «Показать
+        # контакты» — у вошедшего и у гостя по-разному; может быть и ссылкой.
         buttons = [
             b
-            for b in driver.find_elements(By.CSS_SELECTOR, "button")
+            for b in driver.find_elements(By.CSS_SELECTOR, "button, a")
             if b.is_displayed()
-            and (b.text or "").strip().lower().startswith("показать контакты")
+            and (b.text or "").strip().lower().lstrip("→›>↗ ").startswith(
+                _CONTACT_BUTTON_TEXTS
+            )
+            # Ссылка «Контакты» из меню сайта уводит на другую страницу —
+            # годятся только кнопки и ссылки без перехода.
+            and (
+                b.tag_name == "button"
+                or (b.get_attribute("href") or "#").rstrip("/").endswith("#")
+                or b.get_attribute("role") == "button"
+            )
         ]
         text = ""
         needs_login = False
@@ -150,6 +164,20 @@ class HirifyClient:
                 "document.dispatchEvent(new KeyboardEvent('keydown',"
                 "{key:'Escape'}));"
             )
+        # Диагностика (9.10: вакансии попадали в Базу без контактов, причину
+        # снаружи не видно): что нашли и чем кончилось.
+        logger.info(
+            f"Hirify {job_id}: кнопка «Показать контакты» — "
+            f"{'есть' if buttons else 'НЕТ'}, текст контактов "
+            f"{len(text)} симв., вход нужен: {needs_login}"
+        )
+        if buttons and not text and not needs_login:
+            try:
+                path = self.profile_dir / f"hirify_no_contacts_{job_id}.png"
+                driver.save_screenshot(str(path))
+                logger.info(f"Hirify {job_id}: снимок страницы — {path}")
+            except Exception:
+                pass
         return {
             "text": text,
             "channels": channels_from_links(hrefs),
