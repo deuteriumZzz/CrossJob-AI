@@ -297,7 +297,13 @@ class Scheduler:
             # linkedin/habr и др. не запускались 4 дня подряд.
             waits = {n: get_next_run(self.output_folder, n) for n in due_cycle}
             due_cycle.sort(key=lambda n: (waits[n] is not None, waits[n] or 0))
-            due = due_rest + (due_cycle[:1] if due_cycle else [])
+            # Сначала быстрые check_*, затем ход площадки (отклики — главное),
+            # и только потом сборщики контактов (Hirify, Talanto, сайты
+            # компаний): их полный проход долгий (9.10: Hirify без лимита
+            # занял очередь, и ни одна площадка не стартовала 13 минут).
+            checks = [n for n in due_rest if n.startswith("check_")]
+            collectors = [n for n in due_rest if not n.startswith("check_")]
+            due = checks + (due_cycle[:1] if due_cycle else []) + collectors
 
         for name in due:
             run_at = self.now_fn()
@@ -316,6 +322,7 @@ class Scheduler:
                 and name != "check_hh_replies"
             )
             seen_before = self._seen_count(name) if platform_turn else 0
+            logger.info(f"[scheduler] ход: {name}")
             try:
                 self._call_source(name, platform_turn)
             except Exception as e:

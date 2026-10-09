@@ -14,10 +14,11 @@ from src.job_sources.hirify.mapping import parse_job, parse_list
 from src.job_sources.preferences import effective_list
 from src.logging import logger
 
-PAGES_PER_POSITION = 30  # цикл встаёт на пустой странице
-# Без лимита, как у остальных площадок: просмотренные пропускаются, первый
-# заход долгий. Задать можно на площадку: max_new_per_run.
-DEFAULT_MAX_NEW_PER_RUN = 1_000_000
+PAGES_PER_POSITION = 10  # цикл встаёт на пустой странице
+# Сборщик контактов, не площадка откликов: за заход до 100 новых вакансий
+# (без лимита первый проход блокировал расписание на часы, 9.10). Остальные
+# достанутся следующему заходу. Своё значение: max_new_per_run.
+DEFAULT_MAX_NEW_PER_RUN = 100
 
 _EMPLOYMENT = {
     "full": "FULL_TIME",

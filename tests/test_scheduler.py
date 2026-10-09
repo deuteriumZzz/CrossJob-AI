@@ -310,3 +310,25 @@ def test_continuous_cycle_gives_turn_to_longest_waiting_source():
             scheduler.run_once()
             clock[0] += timedelta(seconds=30)
         assert calls == ["getmatch", "linkedin", "geekjob", "headhunter"]
+
+
+def test_continuous_cycle_runs_platform_before_collectors():
+    """9.10: Hirify (сборщик, вне круга) шёл первым и занимал очередь на
+    часы — ни одна площадка не стартовала. Порядок: check_* → ход
+    площадки → сборщики."""
+    with tempfile.TemporaryDirectory() as tmp:
+        calls = []
+        parameters = {
+            "headhunter": {"schedule_enabled": True},
+            "hirify": {"schedule_enabled": True},
+            "limits": {"continuous_cycle_enabled": True},
+        }
+        source_map = {
+            name: (lambda p, k, n=name: calls.append(n))
+            for name in ("headhunter", "hirify")
+        }
+        scheduler = _make_scheduler(
+            tmp, parameters, source_map, now=datetime(2026, 10, 9, 10, 0)
+        )
+        scheduler.run_once()
+        assert calls == ["headhunter", "hirify"]
