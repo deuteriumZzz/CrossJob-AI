@@ -105,6 +105,7 @@ def test_source_search_passes_remote_only_and_qualification_filters():
 
     client.search_html.assert_called_with(
         "python",
+        page=1,
         remote_only=True,
         qualification="senior",
         employment_type="full_time",
@@ -121,6 +122,7 @@ def test_source_search_without_filters_passes_none():
 
     client.search_html.assert_called_with(
         "python",
+        page=1,
         remote_only=False,
         qualification=None,
         employment_type=None,

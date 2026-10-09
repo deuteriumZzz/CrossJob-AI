@@ -14,10 +14,10 @@ from src.job_sources.hirify.mapping import parse_job, parse_list
 from src.job_sources.preferences import effective_list
 from src.logging import logger
 
-PAGES_PER_POSITION = 2
-# За ход открываем не больше стольких новых вакансий; остальные — в
-# следующий ход (в журнал попадают только оценённые).
-DEFAULT_MAX_NEW_PER_RUN = 30
+PAGES_PER_POSITION = 30  # цикл встаёт на пустой странице
+# Без лимита, как у остальных площадок: просмотренные пропускаются, первый
+# заход долгий. Задать можно на площадку: max_new_per_run.
+DEFAULT_MAX_NEW_PER_RUN = 1_000_000
 
 _EMPLOYMENT = {
     "full": "FULL_TIME",
