@@ -205,6 +205,11 @@ class TelegramStatusClient:
     def is_authorized(self) -> bool:
         return self._client.is_user_authorized()
 
+    def log_out(self) -> bool:
+        """Выход из аккаунта (как «Завершить сеанс» в настройках Telegram):
+        сеанс закрывается и на сервере, файл сессии удаляет Telethon."""
+        return bool(self._client.log_out())
+
 
 class TelegramLoginSession:
     """Многошаговый вход из вебui вместо интерактивного консольного —

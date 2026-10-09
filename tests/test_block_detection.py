@@ -138,7 +138,9 @@ def test_page_block_error_carries_page_url_for_telegram_link():
     )
 
     driver = MagicMock(current_url="https://hh.ru/search/vacancy?text=python")
-    driver.execute_script.return_value = "Подтвердите, что вы не робот: captcha"
+    driver.execute_script.return_value = (
+        "Подтвердите, что вы не робот: captcha"
+    )
     with pytest.raises(PlatformBlockedError, match=r"https://hh\.ru/search"):
         raise_if_page_blocked(driver)
 

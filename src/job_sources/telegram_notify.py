@@ -114,6 +114,10 @@ def notify_from_secrets(
     .pending_notifications.json и досылается перед следующим
     уведомлением, когда связь вернётся. Живой случай: час таймаутов до
     api.telegram.org, и сообщение «HH: капча» пропало молча."""
+    kind = notification_kind(text, category)
+    if not notification_allowed(parameters, kind):
+        record_notification(parameters, text, category, kind, "muted")
+        return
     try:
         secrets_path: Path = parameters["secretsFile"]
         with open(secrets_path, "r") as stream:
@@ -123,8 +127,10 @@ def notify_from_secrets(
         chat_id = notifications.get("telegram_chat_id")
     except Exception as e:
         logger.warning(f"Failed to send Telegram notification: {e}")
+        record_notification(parameters, text, category, kind, "app")
         return
     if not bot_token or not chat_id:
+        record_notification(parameters, text, category, kind, "app")
         return
     output = parameters.get("outputFileDirectory")
     pending = Path(output) / _PENDING_FILE if output else None
@@ -155,6 +161,112 @@ def notify_from_secrets(
             pending,
             [{**item, "at": item["at"] or now} for item in queue[sent:]],
         )
+    record_notification(
+        parameters,
+        text,
+        category,
+        kind,
+        "sent" if sent == len(queue) else "queued",
+    )
+
+
+# Что присылать (Настройки → Уведомления): «Отклики и ответы HR» и «Сбои
+# и блокировки» — notify.activity / notify.failures в work_preferences.yaml,
+# по умолчанию оба включены. Вид определяется по теме и тексту сообщения:
+# отдельного поля у сотни мест, где зовётся notify(), нет.
+_ACTIVITY_CATEGORIES = {"Ответы HR", "Анкеты", "Сводка"}
+_FAILURE_CATEGORIES = {"Ошибки", "Система", "Лимиты"}
+_FAILURE_MARKERS = (
+    "капч",
+    "captcha",
+    "заблок",
+    "блокиров",
+    "на паузе",
+    "пауза площадки",
+    "ошибк",
+    "сбой",
+    "упал",
+    "не удалось",
+    "не поднимается",
+    "ручного входа",
+    "на диске",
+    "расходы на llm",
+    "⛔",
+    "⚠️",
+)
+
+HISTORY_FILE = ".notifications_history.json"
+_HISTORY_LIMIT = 300
+
+
+def notification_kind(text: str, category: Optional[str]) -> str:
+    """ "failure" — сбои и блокировки, "activity" — отклики и ответы HR."""
+    if category in _ACTIVITY_CATEGORIES:
+        return "activity"
+    if category in _FAILURE_CATEGORIES:
+        return "failure"
+    low = (text or "").lower()
+    return "failure" if any(m in low for m in _FAILURE_MARKERS) else "activity"
+
+
+def notification_allowed(parameters: dict, kind: str) -> bool:
+    prefs = parameters.get("notify") or {}
+    key = "failures" if kind == "failure" else "activity"
+    return prefs.get(key, True) is not False
+
+
+def record_notification(
+    parameters: dict,
+    text: str,
+    category: Optional[str],
+    kind: str,
+    status: str,
+) -> None:
+    """История уведомлений для приложения (колокольчик на Главной): видно,
+    что бот сообщал, даже без подключённого Telegram-бота. status:
+    sent — ушло в бот, queued — ждёт связи, app — бот не подключён,
+    muted — этот вид выключен в настройках, digest — ждёт утренней сводки.
+    Best-effort: история не должна мешать самому уведомлению."""
+    output = parameters.get("outputFileDirectory")
+    if not output:
+        return
+    path = Path(output) / HISTORY_FILE
+    try:
+        with state_file_lock(path):
+            try:
+                items = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                items = []
+            if not isinstance(items, list):
+                items = []
+            items.append(
+                {
+                    "at": datetime.now().astimezone().isoformat(),
+                    "text": str(text)[:2000],
+                    "category": category or "",
+                    "kind": kind,
+                    "status": status,
+                }
+            )
+            path.write_text(
+                json.dumps(items[-_HISTORY_LIMIT:], ensure_ascii=False),
+                encoding="utf-8",
+            )
+    except Exception as e:
+        logger.debug(f"История уведомлений не записана: {e}")
+
+
+def notification_history(output_folder: Path, limit: int = 100) -> list[dict]:
+    """Последние уведомления, новые сверху."""
+    try:
+        items = json.loads(
+            (Path(output_folder) / HISTORY_FILE).read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return []
+    if not isinstance(items, list):
+        return []
+    return list(reversed(items[-limit:]))
 
 
 _PENDING_FILE = ".pending_notifications.json"

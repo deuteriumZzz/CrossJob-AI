@@ -10,7 +10,7 @@ def test_sidebar_collapse_does_not_overflow_or_flash_on_startup():
     assert ".sidebar.collapsed .activity" in css
     assert ".sidebar.is-transitioning .activity" in css
     assert ".sidebar.is-transitioning .brand-text" in css
-    assert ".sidebar.is-transitioning .theme-toggle" in css
+    assert ".sidebar.is-transitioning .side-label" in css
     assert "function restoreSidebarCollapse()" in script
     assert 'sidebar.classList.add("is-transitioning");' in script
     assert (

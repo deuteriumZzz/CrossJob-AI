@@ -47,7 +47,9 @@ def test_apply_attaches_cover_letter_after_successful_response():
     with patch(
         "src.job_sources.habr_career.client.init_browser",
         return_value=driver,
-    ), patch("src.job_sources.habr_career.client.raise_if_page_blocked"), patch(
+    ), patch(
+        "src.job_sources.habr_career.client.raise_if_page_blocked"
+    ), patch(
         "src.job_sources.block_detection.visible_text", return_value=""
     ), patch(
         "src.job_sources.habr_career.client.time.sleep"
@@ -67,7 +69,9 @@ def test_apply_skips_cover_letter_step_when_no_letter_given():
     with patch(
         "src.job_sources.habr_career.client.init_browser",
         return_value=driver,
-    ), patch("src.job_sources.habr_career.client.raise_if_page_blocked"), patch(
+    ), patch(
+        "src.job_sources.habr_career.client.raise_if_page_blocked"
+    ), patch(
         "src.job_sources.block_detection.visible_text", return_value=""
     ), patch(
         "src.job_sources.habr_career.client.time.sleep"
@@ -84,7 +88,9 @@ def test_apply_still_reports_success_when_cover_letter_form_missing():
     with patch(
         "src.job_sources.habr_career.client.init_browser",
         return_value=driver,
-    ), patch("src.job_sources.habr_career.client.raise_if_page_blocked"), patch(
+    ), patch(
+        "src.job_sources.habr_career.client.raise_if_page_blocked"
+    ), patch(
         "src.job_sources.block_detection.visible_text", return_value=""
     ), patch(
         "src.job_sources.habr_career.client.time.sleep"
@@ -106,7 +112,9 @@ def test_apply_still_reports_applied_when_cover_letter_step_crashes():
     with patch(
         "src.job_sources.habr_career.client.init_browser",
         return_value=driver,
-    ), patch("src.job_sources.habr_career.client.raise_if_page_blocked"), patch(
+    ), patch(
+        "src.job_sources.habr_career.client.raise_if_page_blocked"
+    ), patch(
         "src.job_sources.block_detection.visible_text", return_value=""
     ), patch(
         "src.job_sources.habr_career.client.time.sleep"

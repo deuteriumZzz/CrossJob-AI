@@ -272,7 +272,7 @@ def format_draft_notification(
         f"HR: {incoming}\n\n"
         f"Черновик ответа:\n{draft}\n\n"
         f"«отправить {code}» — отправить, «пропустить {code}» — не "
-        "отвечать. Или поправьте текст во «Входящих» в дашборде."
+        "отвечать. Или поправьте текст в «Общении» в окне приложения."
     )
 
 
@@ -544,6 +544,8 @@ _COMPANY_EMAIL_PROMPT = ChatPromptTemplate.from_template(
       "{target_position}", переведённая на язык письма ({language}), если
       она изначально на другом языке — не меняй смысл, только язык.
       Если она уже на языке {language} — верни её как есть.
+    - Свои правила кандидата для письма (Настройки → Почта → «Промт
+      письма»; соблюдай, если не спорят с правилами выше): {extra_rules}
 
     Кандидат: {candidate_name}
     Компания: {company}
@@ -752,6 +754,10 @@ def generate_company_email(
                 "vacancy_text": vacancy.get("text") or "не указан",
                 "emphasis": card.get("emphasis") or "не указано",
                 "resume_text": extract_text(str(resume_pdf_path)),
+                "extra_rules": (
+                    (parameters.get("direct") or {}).get("letter_instructions")
+                    or "нет"
+                ),
             }
         ),
     )

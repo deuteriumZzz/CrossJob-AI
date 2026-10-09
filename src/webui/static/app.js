@@ -48,7 +48,8 @@ const SOURCE_ICON = {
   himalayas: { text: "HM", color: "#476fd1" },
   djinni: { text: "DJ", color: "#27825b" },
   avito: { text: "AV", color: "#6b4c9a" },
-  direct: { text: "→", color: "#407e73" },
+  direct: { text: "WW", color: "#407e73" },
+  mail: { text: "@", color: "#5b6068" },
   talanto: { text: "TL", color: "#b4541f" },
   hirify: { text: "HF", color: "#2f6f5e" },
 };
@@ -219,9 +220,9 @@ const STATUS_LABELS = {
 };
 
 const REGION_LABELS = {
-  us_only: "🇺🇸 только США",
-  europe_only: "🇪🇺 только Европа",
-  global: "🌍 откуда угодно",
+  us_only: "только США",
+  europe_only: "только Европа",
+  global: "откуда угодно",
 };
 
 const STAGE_LABELS = {
@@ -273,12 +274,24 @@ function statusLabel(status) {
 function fmtTime(iso) {
   if (!iso) return "—";
   const d = new Date(iso);
-  return d.toLocaleString();
+  if (Number.isNaN(d.getTime())) return "—";
+  // Русский формат всегда, независимо от языка браузера/окна.
+  return d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: d.getFullYear() === new Date().getFullYear() ? undefined : "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
-const REDUCE_MOTION = window.matchMedia(
-  "(prefers-reduced-motion: reduce)"
-).matches;
+// «Уменьшить движение»: из системы или Настройки → Вид → «Анимации: выключить».
+let REDUCE_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+(function applyLookPrefs() {
+  try {
+    const density = localStorage.getItem("cj-density");
+    const motion = localStorage.getItem("cj-motion");
+    if (density === "compact") document.documentElement.dataset.density = "compact";
+    if (motion === "reduce") {
+      document.documentElement.dataset.motion = "reduce";
+      REDUCE_MOTION = true;
+    }
+  } catch (e) {}
+})();
 
 function countUp(el, target, duration = 700, start = 0) {
   if (REDUCE_MOTION) {
@@ -353,7 +366,7 @@ async function refreshTelegramConnectStatus() {
   try {
     const data = await api("/api/settings/telegram/connect/status");
     if (data.status === "connected") {
-      statusEl.innerHTML = `✅ Подключено (chat_id: ${escapeHtml(String(data.chat_id))}) <button type="button" class="copy-btn" title="Скопировать chat_id" aria-label="Скопировать chat_id">${COPY_ICON_SVG}</button>`;
+      statusEl.innerHTML = `Подключено (chat_id: ${escapeHtml(String(data.chat_id))}) <button type="button" class="copy-btn" title="Скопировать chat_id" aria-label="Скопировать chat_id">${COPY_ICON_SVG}</button>`;
       statusEl.querySelector(".copy-btn").addEventListener("click", (e) => {
         copyToClipboard(String(data.chat_id), e.currentTarget);
       });
@@ -381,7 +394,7 @@ async function refreshTelegramGroupConnectStatus() {
   try {
     const data = await api("/api/settings/telegram/connect-group/status");
     if (data.status === "connected") {
-      statusEl.innerHTML = `✅ Группа подключена (chat_id: ${escapeHtml(String(data.chat_id))}) <button type="button" class="copy-btn" title="Скопировать chat_id" aria-label="Скопировать chat_id">${COPY_ICON_SVG}</button> — теперь включите «Темы» в настройках группы и сделайте бота админом с правом «Управление темами».`;
+      statusEl.innerHTML = `Группа подключена (chat_id: ${escapeHtml(String(data.chat_id))}) <button type="button" class="copy-btn" title="Скопировать chat_id" aria-label="Скопировать chat_id">${COPY_ICON_SVG}</button> — теперь включите «Темы» в настройках группы и сделайте бота админом с правом «Управление темами».`;
       statusEl.querySelector(".copy-btn").addEventListener("click", (e) => {
         copyToClipboard(String(data.chat_id), e.currentTarget);
       });
@@ -414,16 +427,15 @@ const NAV_GROUPS = {
   // (топ-навигация против "Настройки"), хотя отвечают на один и тот же
   // вопрос "что бот сейчас делает и сделал".
   history: [
-    ["history", "Вакансии"],
-    ["logs", "Технические детали"],
+    ["history", "Отклики"],
+    ["logs", "Журнал бота"],
   ],
-  replies: [
-    ["replies", "Входящие"],
-    ["telegram", "Telegram-парсер"],
-  ],
+  // Входящие и Telegram-диалоги — одно окно «Общение»; старый адрес
+  // #telegram ведёт туда же (см. switchTab).
+  replies: [["replies", "Общение"]],
   contacts: [
     ["contacts", "База"],
-    ["outreach", "Рассылки"],
+    ["outreach", "Рассылка"],
   ],
   analytics: [["analytics", "Аналитика"]],
   settings: [
@@ -458,6 +470,10 @@ function renderSubnav(group, view) {
 }
 
 function switchTab(name) {
+  if (name === "telegram") {
+    name = "replies";
+    repliesKind = "telegram";
+  }
   if (!VIEW_GROUP[name]) name = "overview";
   const prevName = currentView;
   currentView = name;
@@ -499,7 +515,6 @@ function switchTab(name) {
 
 let overviewLoaded = false;
 let lastOverviewSnapshot = null;
-let pendingPlatformDrawer = null;
 let historyLoaded = false;
 let lastHistorySnapshot = null;
 let lastHistoryEntries = [];
@@ -518,33 +533,6 @@ let llmCatalog = { models: {}, api_key_previews: {}, provider_base_urls: {} };
 // set_fallback_base_urls().
 const PROVIDERS_NEEDING_BASE_URL = new Set(["cloudflare"]);
 let activeTelegramContact = null;
-// Пост из Telegram-парсера, открытый в чате (вместо диалога).
-let activeTelegramPost = null;
-let telegramInbox = { posts: [], sent_today: 0, daily_limit: 15, resumes: [], can_schedule: false };
-// Черновик на пост — правки не теряются при переключении диалогов.
-const telegramDrafts = {};
-
-// api() бросает «400: {"detail": "…"}» — человеку нужен только detail.
-function apiErrorText(e) {
-  const m = /^\d+: ([\s\S]*)$/.exec(e.message);
-  if (!m) return e.message;
-  try {
-    return JSON.parse(m[1]).detail || m[1];
-  } catch {
-    return m[1];
-  }
-}
-
-function chatBubblesHtml(messages) {
-  // Без пробелов внутри пузыря: у него white-space: pre-wrap, отступы
-  // разметки превращались в пустую строку и сдвиг текста.
-  return messages
-    .map(
-      (m) =>
-        `<div class="chat-bubble ${m.direction === "out" ? "out" : "in"}">${escapeHtml(m.text || "")}<span class="chat-bubble-time">${formatChatTime(m.at)}</span></div>`
-    )
-    .join("");
-}
 
 function formatChatTime(iso) {
   try {
@@ -602,7 +590,7 @@ function applyLLMSelection(provider, currentModel) {
   modelSelect.innerHTML = models
     .map(
       (m) =>
-        `<option value="${m.id}">${m.recommended ? "👑 " : ""}${m.id}${m.free ? " · бесплатно" : ""}</option>`
+        `<option value="${m.id}">${m.id}${m.recommended ? " · рекомендуем" : ""}${m.free ? " · бесплатно" : ""}</option>`
     )
     .join("");
   const recommended = models.find((m) => m.recommended);
@@ -610,7 +598,7 @@ function applyLLMSelection(provider, currentModel) {
     modelSelect.value = currentModel;
   } else if (recommended) {
     // Свежее переключение провайдера без сохранённой модели — сразу
-    // подставляем рекомендованную (👑), а не первую по силе: для
+    // подставляем рекомендованную («рекомендуем»), а не первую по силе: для
     // наших задач (оценка вакансии, письма) это лучший выбор
     // цена/скорость/качество, не обязательно самая мощная модель.
     modelSelect.value = recommended.id;
@@ -749,7 +737,7 @@ function renderTotalBudget(status, totalLimit) {
     <div class="limit-bar"><div class="limit-bar-fill ${usedClass}" style="width:${Math.round(usedRatio * 100)}%"></div></div>
     ${
       overBudget
-        ? `<div class="risk-banner" style="margin-top:10px;margin-bottom:0">⚠️ ${distributionLine} — превышает общий лимит, снизьте лимиты отдельных площадок.</div>`
+        ? `<div class="risk-banner" style="margin-top:10px;margin-bottom:0">${distributionLine} — превышает общий лимит, снизьте лимиты отдельных площадок.</div>`
         : `<p class="muted small" style="margin-top:8px">${distributionLine}</p>`
     }
   `;
@@ -792,8 +780,8 @@ function skeletonRows(rows, cols) {
 }
 
 const CONTACT_KIND = {
-  telegram: { icon: "✈️", label: "Telegram" },
-  email: { icon: "✉️", label: "Email" },
+  telegram: { icon: "TG", label: "Telegram" },
+  email: { icon: "@", label: "Email" },
   linkedin: { icon: "in", label: "LinkedIn" },
 };
 // Один язык статусов для базы, рассылки и входящих: слово + цвет.
@@ -813,13 +801,13 @@ const CONTACT_STATUS_HINT = {
   skip: "Помечено вручную «не писать» — бот пропускает эту компанию в рассылке.",
 };
 const SOURCE_KIND = {
-  file: "📄 мой файл",
-  telegram: "✈️ Telegram",
-  sites: "🏢 сайты компаний",
-  talanto: "🔎 Talanto",
-  hirify: "🔎 Hirify",
-  dossier: "🔎 найден кнопкой",
-  vacancy: "💼 вакансия",
+  file: "мой файл",
+  telegram: "Telegram",
+  sites: "сайты компаний",
+  talanto: "Talanto",
+  hirify: "Hirify",
+  dossier: "найден кнопкой",
+  vacancy: "вакансия",
 };
 let lastContacts = [];
 let focusContactKey = null;
@@ -873,12 +861,12 @@ function renderContactsList() {
   );
 
   if (!lastContacts.length) {
-    el.innerHTML = `<tr><td colspan="7">${emptyStateHtml("База пока пуста. Загрузите свой список компаний кнопкой «📥 Загрузить файл» — или включите Telegram-парсер: он сам добавляет HR из постов.")}</td></tr>`;
-    // База пуста — это ровно момент, когда вопрос "где взять список
-    // компаний" актуален; разворачиваем сам, а не оставляем свёрнутой
-    // строкой среди прочих <details> на экране. Для уже заполненной
-    // базы (у кого этот промт уже не нужен) поведение не меняется.
-    document.getElementById("import-help").open = true;
+    // База пуста — ровно момент, когда нужен вопрос «где взять список»:
+    // обе кнопки прямо в пустом состоянии.
+    el.innerHTML = `<tr><td colspan="5"><div class="empty-state"><p>База пока пуста. Загрузите свой список компаний — Excel, CSV, PDF или Word — или включите Telegram-парсер: он сам добавляет HR из постов.</p>
+      <div class="fix-actions"><button type="button" class="btn btn-primary btn-small" data-empty-import>Загрузить файл</button><button type="button" class="btn btn-small" data-empty-prompt>Где взять список?</button></div></div></td></tr>`;
+    el.querySelector("[data-empty-import]").addEventListener("click", () => document.getElementById("import-file").click());
+    el.querySelector("[data-empty-prompt]").addEventListener("click", openPromptDrawer);
     renderBaseBulk();
     return;
   }
@@ -910,7 +898,7 @@ function renderContactsList() {
   baseState.page = Math.min(baseState.page, pages - 1);
   renderBasePager(filtered.length, pages);
   if (!filtered.length) {
-    el.innerHTML = `<tr><td colspan="7">${emptyStateHtml("Ничего не найдено.")}</td></tr>`;
+    el.innerHTML = `<tr><td colspan="5">${emptyStateHtml("Ничего не найдено.")}</td></tr>`;
     renderBaseBulk();
     return;
   }
@@ -923,51 +911,40 @@ function renderContactsList() {
     });
   }
   baseSeen = new Map(lastContacts.map((c) => [c.key, c.updated_at]));
-  el.innerHTML =
-    rows
-      .map((card) => {
-        const p = card.primary;
-        const more = card.contacts.length - 1;
-        const open = baseState.open.has(card.key) || card.key === focusContactKey;
-        return `
-      <tr class="base-row${fresh.has(card.key) ? " row-fresh" : ""}${open ? " is-open" : ""}${card.key === focusContactKey ? " is-focused" : ""}" data-card-key="${escapeHtml(card.key)}" tabindex="0" aria-expanded="${open}">
+  el.innerHTML = rows
+    .map((card) => {
+      const p = card.primary;
+      const more = card.contacts.length - 1;
+      return `
+      <tr class="base-row${fresh.has(card.key) ? " row-fresh" : ""}${card.key === focusContactKey ? " is-focused" : ""}" data-card-key="${escapeHtml(card.key)}" tabindex="0">
         <td class="base-check"><input type="checkbox" data-select="${escapeHtml(card.key)}" aria-label="Выбрать" ${baseState.selected.has(card.key) ? "checked" : ""} /></td>
-        <td><strong>${escapeHtml(card.company || p?.value || "Без названия")}</strong>
-          ${card.website ? `<div class="muted small">${escapeHtml(card.website.replace(/^https?:\/\//, "").replace(/\/$/, ""))}</div>` : ""}</td>
-        <td>${p ? `${CONTACT_KIND[p.kind]?.icon || "•"} ${escapeHtml(p.kind === "telegram" ? "@" + p.value : p.value)}` : "—"}${more > 0 ? ` <span class="muted small">+${more}</span>` : ""}
-          ${card.hr ? `<div class="muted small">${escapeHtml(card.hr)}</div>` : ""}</td>
-        <td class="small col-source">${card.source_kinds.map((k) => SOURCE_KIND[k]).join("<br>")}</td>
+        <td><div class="row-main"><span class="row-title">${escapeHtml(card.company || p?.value || "Без названия")}</span>
+          <span class="row-sub">${p ? `${escapeHtml(p.kind === "telegram" ? "@" + p.value : p.value)}${more > 0 ? ` · +${more}` : ""}` : "контакта нет"}${card.hr ? ` · ${escapeHtml(card.hr)}` : ""}</span></div></td>
+        <td class="small col-source muted">${card.source_kinds.map((k) => SOURCE_KIND[k]).join(", ")}</td>
         <td>${statusPill(card.status)}</td>
         <td class="small col-last">${card.last ? `${escapeHtml(truncate(card.last.text, 60))}<div class="muted">${fmtDay(card.last.at)}</div>` : "—"}</td>
-        <td class="base-toggle" aria-hidden="true">${open ? "▾" : "▸"}</td>
-      </tr>
-      ${open ? `<tr class="base-detail"><td colspan="7">${baseDetailHtml(card)}</td></tr>` : ""}`;
-      })
-      .join("");
-  if (focusContactKey) {
-    el.querySelector(".base-row.is-focused")?.scrollIntoView({ block: "center", behavior: REDUCE_MOTION ? "auto" : "smooth" });
-    baseState.open.add(focusContactKey);
-    focusContactKey = null;
-  }
-  const toggleRow = (row) => {
-    const k = row.dataset.cardKey;
-    baseState.open.has(k) ? baseState.open.delete(k) : baseState.open.add(k);
-    renderContactsList();
-    el.querySelector(`.base-row[data-card-key="${CSS.escape(k)}"]`)?.focus();
-  };
+      </tr>`;
+    })
+    .join("");
+  const openKey = focusContactKey;
+  focusContactKey = null;
   el.querySelectorAll(".base-row").forEach((row) => {
     row.addEventListener("click", (e) => {
       if (e.target.closest("input, a, button")) return;
-      toggleRow(row);
+      openCompanyDrawer(row.dataset.cardKey);
     });
-    // С клавиатуры: Tab до строки, Enter/пробел — раскрыть.
+    // С клавиатуры: Tab до строки, Enter/пробел — открыть карточку.
     row.addEventListener("keydown", (e) => {
       if ((e.key === "Enter" || e.key === " ") && e.target === row) {
         e.preventDefault();
-        toggleRow(row);
+        openCompanyDrawer(row.dataset.cardKey);
       }
     });
   });
+  if (openKey) {
+    el.querySelector(".base-row.is-focused")?.scrollIntoView({ block: "center", behavior: REDUCE_MOTION ? "auto" : "smooth" });
+    openCompanyDrawer(openKey);
+  }
   el.querySelectorAll("[data-select]").forEach((box) =>
     box.addEventListener("change", () => {
       box.checked ? baseState.selected.add(box.dataset.select) : baseState.selected.delete(box.dataset.select);
@@ -981,8 +958,50 @@ function renderContactsList() {
     renderContactsList();
   };
   baseState.pageKeys = rows.map((c) => c.key);
-  bindBaseDetail(el);
   renderBaseBulk();
+}
+
+// Карточка компании — шторка справа: контакты, вакансии, история и
+// действия, вместо строки, раскрывающейся посреди таблицы.
+function openCompanyDrawer(key) {
+  const card = lastContacts.find((c) => c.key === key);
+  if (!card) return;
+  const skipped = card.status === "skip";
+  const written = card.status === "written" || card.status === "replied";
+  const body = openSideDrawer({
+    title: `<span>${escapeHtml(card.company || card.primary?.value || "Без названия")}</span>`,
+    sub: `${statusPill(card.status)}<span>${escapeHtml(card.source_kinds.map((k) => SOURCE_KIND[k]).join(", "))}</span>`,
+    body: `${written ? `<div class="fix is-warn"><span class="dot warn"></span><div class="fix-body">Этой компании уже писали${card.last ? " " + fmtDay(card.last.at) : ""}. Второй раз бот не напишет, даже на другой адрес.</div></div>` : ""}
+      ${card.website ? `<div class="field-hint"><a href="${escapeHtml(/^https?:/.test(card.website) ? card.website : "https://" + card.website)}" target="_blank" rel="noopener">${escapeHtml(card.website.replace(/^https?:\/\//, ""))} ↗</a></div>` : ""}
+      ${baseDetailHtml(card)}`,
+    foot: `${skipped || written ? "" : `<button type="button" class="btn btn-primary" data-company-action="write" data-ui="companies.detail.contacts">Написать письмо</button>`}
+      <button type="button" class="btn btn-ghost" data-company-action="${skipped ? "unskip" : "skip"}" data-ui="companies.detail.skip">${skipped ? "Снова можно писать" : "Не писать"}</button>`,
+  });
+  openDrawerSource = null;
+  bindBaseDetail(body);
+  document.getElementById("platform-drawer-foot").querySelectorAll("[data-company-action]").forEach((btn) =>
+    btn.addEventListener("click", async () => {
+      const action = btn.dataset.companyAction;
+      try {
+        if (action === "write") {
+          await api("/api/campaigns", { method: "POST", body: JSON.stringify({ keys: [card.key] }) });
+          showToast("Письмо для компании готовится — появится в рассылке", "success");
+          closePlatformDrawer();
+          switchTab("outreach");
+          return;
+        }
+        await api("/api/contacts/bulk", { method: "POST", body: JSON.stringify({ keys: [card.key], action }) });
+        showSavedToast(action === "skip" ? `${card.company || "Компания"}: больше не пишем` : `${card.company || "Компания"}: снова можно писать`, async () => {
+          await api("/api/contacts/bulk", { method: "POST", body: JSON.stringify({ keys: [card.key], action: action === "skip" ? "unskip" : "skip" }) });
+          render.contacts();
+        });
+        closePlatformDrawer();
+        render.contacts();
+      } catch (err) {
+        showToast(err.message.replace(/^\d+: /, ""), "error");
+      }
+    })
+  );
 }
 
 function baseDetailHtml(card) {
@@ -998,19 +1017,19 @@ function baseDetailHtml(card) {
                 <div class="muted small">${escapeHtml(c.source || "")}</div></span>
               <span>${statusPill(c.status)}
                 ${(c.kind === "telegram" || c.kind === "email") && c.status === "new" && card.status !== "skip"
-                  ? `<button type="button" class="btn btn-secondary btn-small" data-contact-draft data-key="${escapeHtml(card.key)}" data-kind="${c.kind}" data-value="${escapeHtml(c.value)}">✍️ Написать</button>`
+                  ? `<button type="button" class="btn btn-small" data-contact-draft data-key="${escapeHtml(card.key)}" data-kind="${c.kind}" data-value="${escapeHtml(c.value)}">Написать</button>`
                   : ""}</span>
             </div>`
           )
           .join("")}
         ${card.emphasis ? `<p class="small"><b>На что сделать упор:</b> ${escapeHtml(card.emphasis)}</p>` : ""}
-        <p class="small">${card.resume_hint ? `📎 <b>Резюме для письма:</b> ${escapeHtml(card.resume_hint)}` : `⚠️ <b>Резюме для письма:</b> не найдено — проверьте Настройки → Почта и письма → маршруты резюме`}</p>
-        ${card.vacancies.length ? `<h4>Вакансии</h4>${card.vacancies.slice(-3).map((v) => `<div class="small">${sourceIconHtml(v.source)}<a href="${escapeHtml(v.link)}" target="_blank" rel="noopener">${escapeHtml(v.title || v.link)}</a></div>`).join("")}` : ""}
+        <p class="small" data-ui="companies.detail.resume">${card.resume_hint ? `<b>Резюме для письма:</b> ${escapeHtml(card.resume_hint)}` : `<span class="warn-text"><b>Резюме для письма:</b> не найдено — проверьте «Мои резюме» → «Какое резюме куда уходит»</span>`}</p>
+        ${card.vacancies.length ? `<h4 data-ui="companies.detail.vacancies">Вакансии компании</h4>${card.vacancies.slice(-3).map((v) => `<div class="small">${sourceIconHtml(v.source)}<a href="${escapeHtml(v.link)}" target="_blank" rel="noopener">${escapeHtml(v.title || v.link)}</a></div>`).join("")}` : ""}
         ${card.company ? `<div class="step-actions">${card.website ? "" : `<input type="text" class="dossier-site" placeholder="сайт компании" aria-label="Сайт компании" />`}
-          <button type="button" class="btn btn-ghost btn-small" data-dossier data-key="${escapeHtml(card.key)}" title="Найти контакты на сайте компании и через Hunter">🔎 Найти ещё контакты</button></div>` : ""}
+          <button type="button" class="btn btn-small" data-dossier data-key="${escapeHtml(card.key)}" title="Найти контакты на сайте компании и через Hunter" data-ui="companies.detail.dossier">Найти ещё контакты</button></div>` : ""}
       </div>
       <div>
-        <h4>История</h4>
+        <h4 data-ui="companies.detail.history">История</h4>
         <ol class="base-history">${card.history
           .slice()
           .reverse()
@@ -1037,7 +1056,7 @@ function bindBaseDetail(el) {
       } catch (err) {
         showToast(err.message.replace(/^\d+: /, ""), "error", 6000);
         btn.disabled = false;
-        btn.textContent = "🔎 Найти ещё контакты";
+        btn.textContent = "Найти ещё контакты";
       }
     });
   });
@@ -1050,7 +1069,7 @@ function bindBaseDetail(el) {
           method: "POST",
           body: JSON.stringify({ key: btn.dataset.key, kind: btn.dataset.kind, value: btn.dataset.value }),
         });
-        showToast("Черновик готов — проверьте и отправьте в «Общение → Входящие».", "success", 6000);
+        showToast("Черновик готов — проверьте и отправьте в «Общении».", "success", 6000);
         render.contacts();
       } catch (err) {
         showToast(err.message.replace(/^\d+: /, ""), "error");
@@ -1100,7 +1119,7 @@ function fillFileOptions() {
   const value = select.value;
   select.querySelectorAll('option[value^="file:"]').forEach((o) => o.remove());
   const anchor = select.querySelector('option[value="file"]');
-  files.reverse().forEach((f) => anchor.after(new Option(`↳ 📄 ${f}`, `file:${f}`)));
+  files.reverse().forEach((f) => anchor.after(new Option(`↳ ${f}`, `file:${f}`)));
   select.value = [...select.options].some((o) => o.value === value) ? value : "";
 }
 
@@ -1119,15 +1138,20 @@ function renderBaseBulk() {
   const pageAll = (baseState.pageKeys || []).length && baseState.pageKeys.every((k) => baseState.selected.has(k));
   const moreByFilter = pageAll && baseFiltered.length > keys.length;
   bar.innerHTML = `
-    <span>Выбрано: <b>${keys.length.toLocaleString("ru-RU")}</b>${
-      moreByFilter ? ` · <button type="button" class="link-btn" data-bulk="all">Выбрать все ${baseFiltered.length.toLocaleString("ru-RU")} по фильтру</button>` : ""
-    }</span>
-    <button type="button" class="btn btn-primary btn-small" data-bulk="write">✉️ Написать выбранным</button>
-    <button type="button" class="btn btn-secondary btn-small" data-bulk="${skipped ? "unskip" : "skip"}">${skipped ? "Снова можно писать" : "🚫 Не писать"}</button>
-    <button type="button" class="btn btn-ghost btn-small" data-bulk="mark_written" title="Вы уже писали этим компаниям сами — рассылка их пропустит">Писал сам</button>
-    <button type="button" class="btn btn-ghost btn-small" data-bulk="unmark_written" title="Снять ручную отметку «писал сам»">Не писал</button>
-    <button type="button" class="btn btn-ghost btn-small" data-bulk="delete">🗑 Удалить</button>
-    <button type="button" class="btn btn-ghost btn-small" data-bulk="clear">Снять выбор</button>`;
+    <span class="bulk-count">Выбрано <b class="mono">${keys.length.toLocaleString("ru-RU")}</b></span>
+    <button type="button" class="btn btn-primary btn-small" data-bulk="write">Написать письма</button>
+    <button type="button" class="btn btn-small" data-bulk="mark_written" title="Вы уже писали этим компаниям сами — рассылка их пропустит">Писал сам</button>
+    <button type="button" class="btn btn-small" data-bulk="${skipped ? "unskip" : "skip"}">${skipped ? "Снова можно писать" : "Не писать"}</button>
+    <button type="button" class="btn btn-ghost btn-small" data-bulk="clear">Снять выбор</button>
+    <details class="bulk-more">
+      <summary class="btn btn-ghost btn-small">Ещё</summary>
+      <div class="bulk-menu">
+        ${moreByFilter ? `<button type="button" data-bulk="all">Выбрать все ${baseFiltered.length.toLocaleString("ru-RU")} по фильтру</button>` : ""}
+        <button type="button" data-bulk="unmark_written" title="Снять ручную отметку «писал сам»">Не писал</button>
+        ${skipped ? "" : `<button type="button" data-bulk="unskip">Снова можно писать</button>`}
+        <button type="button" data-bulk="delete" class="danger">Удалить из Базы</button>
+      </div>
+    </details>`;
   bar.querySelectorAll("[data-bulk]").forEach((b) =>
     b.addEventListener("click", async () => {
       const action = b.dataset.bulk;
@@ -1182,43 +1206,111 @@ function showUndo(text, undo) {
 // счётчики в строку подразделов «Общения».
 let lastTodoBadges = {};
 
-// Главная цифра — ответы и интервью за 7 дней, откуда они пришли.
+// Аналитика: итоги за выбранный период (неделя, месяц, всё время) и
+// таблица по источникам — что приносит ответы.
+let statsPeriodDays = 7;
 async function renderResults() {
   const el = document.getElementById("results-panel");
   let r;
   try {
-    r = await api("/api/results");
+    r = await api(`/api/results?days=${statsPeriodDays}`);
   } catch (e) {
     return;
   }
   const w = r.week;
-  const delta = w.replies - r.prev.replies;
-  const deltaHtml = delta
-    ? `<span class="${delta > 0 ? "ok-text" : "err-text"}">${delta > 0 ? "↑" : "↓"} ${Math.abs(delta)} к прошлой неделе</span>`
-    : `<span class="muted">как на прошлой неделе</span>`;
-  const label = (s) => (s === "email_campaign" ? "✉️ Рассылка по почте" : `${sourceIconHtml(s)}${escapeHtml(sourceLabel(s))}`);
-  const rate = (row) => (row.applied ? `${Math.round((100 * row.replies) / row.applied)}%` : "—");
+  const p = r.prev;
+  const all = statsPeriodDays >= 3650;
+  const prevLabel = statsPeriodDays === 7 ? "прошлой неделей" : statsPeriodDays === 30 ? "прошлым месяцем" : "";
+  const rate = (x) => (x.applied ? Math.round((100 * x.replies) / x.applied) : 0);
+  const card = (label, help, value, prevValue, suffix = "", i = 0) => {
+    const delta = value - prevValue;
+    const tone = delta > 0 ? "good" : delta < 0 ? "bad" : "flat";
+    const deltaText = all ? "за всё время" : delta === 0 ? `как за ${prevLabel.replace("прошлой неделей", "прошлую неделю").replace("прошлым месяцем", "прошлый месяц")}` : `на ${Math.abs(delta)}${suffix} ${delta > 0 ? "больше" : "меньше"}, чем ${prevLabel}`;
+    return `<div class="card kpi-card stagger-item" style="animation-delay:${staggerDelay(i, 40)}">
+      <div class="kpi-label tip" tabindex="0">${escapeHtml(label)}<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 7v4M8 5h.01" stroke-linecap="round"/></svg><span class="tiptext" role="tooltip">${escapeHtml(help)}</span></div>
+      <div class="kpi-main"><span class="kpi-value mono">${value}${suffix}</span></div>
+      <div class="kpi-delta">${all ? "" : `<span class="trend-${tone}">${delta > 0 ? "↑" : delta < 0 ? "↓" : "·"}</span>`}${escapeHtml(deltaText)}</div>
+    </div>`;
+  };
+  const label = (src) => (src === "email_campaign" ? `${plogoHtml("mail")}Рассылка по почте` : `${plogoHtml(src)}${escapeHtml(sourceLabel(src))}`);
   el.innerHTML = `
-    <div class="results-head">
-      <h3>Результат за 7 дней</h3>
-      <span class="muted small">${deltaHtml}</span>
+    <div class="kpi-grid">
+      ${card("Отправлено откликов", "Реальные отклики на площадках и письма рассылки за период.", w.applied, p.applied, "", 0)}
+      ${card("Ответов", "Ответы, приглашения и офферы — по времени ответа.", w.replies, p.replies, "", 1)}
+      ${card("Доля ответов", "Ответы ÷ отклики за период.", rate(w), rate(p), "%", 2)}
+      ${card("Интервью", "Приглашения на интервью и офферы за период.", w.interviews, p.interviews, "", 3)}
     </div>
-    <div class="results-numbers">
-      <div><span class="results-big">${w.replies}</span><span class="muted">ответов</span></div>
-      <div><span class="results-big accent">${w.interviews}</span><span class="muted">интервью</span></div>
-      <div><span class="results-big muted">${w.applied}</span><span class="muted">отправлено</span></div>
-    </div>
-    ${
-      r.by_source.length
+    <section class="card pad-card" aria-labelledby="by-source-h">
+      <div class="card-head flat between"><h3 id="by-source-h">Что приносит ответы</h3><span class="muted small">источники с низким откликом можно выключить — лимиты уйдут на те, что отвечают</span></div>
+      ${r.by_source.length
         ? `<div class="table-wrap"><table class="results-table">
-            <thead><tr><th>Откуда</th><th>Отправлено</th><th>Ответы</th><th>Интервью</th><th title="Доля ответов от отправленного">Отклик</th></tr></thead>
+            <thead><tr><th>Откуда</th><th>Отправлено</th><th>Ответы</th><th>Интервью</th><th title="Доля ответов от отправленного">Доля ответов</th></tr></thead>
             <tbody>${r.by_source
-              .map((row) => `<tr><td>${label(row.source)}</td><td>${row.applied}</td><td><b>${row.replies}</b></td><td>${row.interviews}</td><td>${rate(row)}</td></tr>`)
-              .join("")}</tbody></table></div>
-          <p class="muted small">Источники с низким откликом можно выключить — бот потратит лимиты на те, что приносят ответы.</p>`
-        : `<p class="muted small">За неделю пока ничего не отправлено — запустите бота или рассылку.</p>`
-    }`;
+              .map((row) => `<tr><td><span class="src-cell">${label(row.source)}</span></td><td class="mono">${row.applied}</td><td class="mono"><b>${row.replies}</b></td><td class="mono">${row.interviews}</td><td class="mono">${row.applied ? rate(row) + "%" : "—"}</td></tr>`)
+              .join("")}</tbody></table></div>`
+        : `<p class="muted small">За период пока ничего не отправлено — запустите бота или рассылку.</p>`}
+    </section>`;
   updateAllTableScrollHints();
+}
+
+// «Отклики по неделям»: 13 недель, площадной график с перекрестием.
+function renderWeeklyChart(entries) {
+  const el = document.getElementById("weekly-chart");
+  const readout = document.getElementById("weekly-readout");
+  if (!el) return;
+  const weeks = 13;
+  const now = new Date();
+  now.setHours(23, 59, 59, 999);
+  const counts = new Array(weeks).fill(0);
+  entries.forEach((e) => {
+    if (e.status !== "applied" || !e.applied_at) return;
+    const ago = Math.floor((now - new Date(e.applied_at)) / (7 * 86400000));
+    if (ago >= 0 && ago < weeks) counts[weeks - 1 - ago] += 1;
+  });
+  const W = 640;
+  const H = 180;
+  const pad = { l: 28, r: 8, t: 10, b: 22 };
+  const max = Math.max(4, ...counts);
+  const x = (i) => pad.l + (i * (W - pad.l - pad.r)) / (weeks - 1);
+  const y = (v) => H - pad.b - (v / max) * (H - pad.t - pad.b);
+  const line = counts.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(" ");
+  const area = `${line} L${x(weeks - 1).toFixed(1)} ${H - pad.b} L${x(0).toFixed(1)} ${H - pad.b} Z`;
+  const ticks = [0, Math.round(max / 2), max];
+  const label = (i) => (i === weeks - 1 ? "эта неделя" : `${weeks - 1 - i} нед. назад`);
+  // Линии и заливка тянутся по ширине карточки (preserveAspectRatio=none,
+  // толщина штриха от этого не меняется); подписи и точка — обычным HTML
+  // поверх, чтобы не растягивались вместе с SVG.
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="area-svg" aria-hidden="true">
+      ${ticks.map((t) => `<line x1="${pad.l}" x2="${W - pad.r}" y1="${y(t)}" y2="${y(t)}" class="grid-line" vector-effect="non-scaling-stroke"/>`).join("")}
+      <path d="${area}" class="chart-area"/>
+      <path d="${line}" class="chart-line" vector-effect="non-scaling-stroke"/>
+      <line class="crosshair" x1="0" x2="0" y1="${pad.t}" y2="${H - pad.b}" visibility="hidden" vector-effect="non-scaling-stroke"/>
+    </svg>
+    ${ticks.map((t) => `<span class="axis-label" style="top:${(y(t) / H) * 100}%">${t}</span>`).join("")}
+    <span class="chart-dot" hidden></span>
+    <div class="area-axis small muted"><span>13 нед. назад</span><span>8 нед.</span><span>4 нед.</span><span>эта неделя</span></div>`;
+  const svg = el.querySelector("svg");
+  const cross = svg.querySelector(".crosshair");
+  const dot = el.querySelector(".chart-dot");
+  const show = (clientX) => {
+    const rect = svg.getBoundingClientRect();
+    const rel = ((clientX - rect.left) / rect.width) * W;
+    const i = Math.max(0, Math.min(weeks - 1, Math.round(((rel - pad.l) / (W - pad.l - pad.r)) * (weeks - 1))));
+    cross.setAttribute("x1", x(i));
+    cross.setAttribute("x2", x(i));
+    cross.setAttribute("visibility", "visible");
+    dot.hidden = false;
+    dot.style.left = `${(x(i) / W) * 100}%`;
+    dot.style.top = `${(y(counts[i]) / H) * rect.height}px`;
+    readout.textContent = `${label(i)} · ${counts[i]} ${plural(counts[i], "отклик", "отклика", "откликов")}`;
+  };
+  svg.addEventListener("pointermove", (e) => show(e.clientX));
+  svg.addEventListener("pointerleave", () => {
+    cross.setAttribute("visibility", "hidden");
+    dot.hidden = true;
+    readout.textContent = `всего за 13 недель: ${counts.reduce((a, b) => a + b, 0)}`;
+  });
+  readout.textContent = `всего за 13 недель: ${counts.reduce((a, b) => a + b, 0)}`;
 }
 
 // 1 письмо, 2 письма, 5 писем.
@@ -1228,8 +1320,125 @@ function plural(n, one, few, many) {
   return m % 10 === 1 ? one : m % 10 >= 2 && m % 10 <= 4 ? few : many;
 }
 
-// «Свои каналы» на Главной: Telegram-парсер и рассылка по почте —
-// не площадки с откликами, а свои способы выйти на работодателя.
+// ---------- Главная: строки площадок и шторка ----------
+
+let lastStatus = null;
+let lastRunNow = null;
+let lastOutreach = null;
+let lastTelegramWatch = null;
+// Площадка, чья шторка открыта сейчас: опрос Главной обновляет её
+// шапку (состояние, счётчик), пока человек ничего в ней не правит.
+let openDrawerSource = null;
+let drawerDirty = false;
+
+const CHEVRON_SVG = `<svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg>`;
+
+// Эмодзи в начале серверных фраз («⛔ …», «🔄 …») — в новом виде их
+// заменяет цветная точка состояния.
+function stripLeadingEmoji(text) {
+  return String(text || "").replace(/^[\p{Extended_Pictographic}️‍\s]+/u, "");
+}
+
+function plogoHtml(name) {
+  const icon = SOURCE_ICON[name] || { text: name.slice(0, 2).toUpperCase(), color: "#5b6068" };
+  return `<span class="plogo" aria-hidden="true" style="background:${icon.color}">${icon.text}</span>`;
+}
+
+function skeletonRowsList(n) {
+  return Array.from({ length: n })
+    .map(() => `<div class="row skeleton-row-line"><span class="skeleton" style="width:24px;height:24px"></span><span class="skeleton" style="height:12px;flex:1"></span><span class="skeleton" style="width:72px;height:6px"></span></div>`)
+    .join("");
+}
+
+// Строка площадки в списке Главной. m — модель из sourceRowModel() или
+// своих каналов: key, name, logo, dot, statusText, counter, pct.
+function platformRowHtml(m, i = 0) {
+  const pct = m.pct == null ? null : Math.max(0, Math.min(100, m.pct));
+  const bar = pct == null
+    ? `<span class="bar is-empty" aria-hidden="true"></span>`
+    : `<span class="bar" aria-hidden="true"><span class="${pct >= 100 ? "full" : pct >= 70 ? "warn" : ""}" style="width:${pct}%"></span></span>`;
+  return `<div class="platform-row-wrap stagger-item" data-source="${m.key}" draggable="true" style="animation-delay:${staggerDelay(i, 40)}">
+    <button type="button" class="row platform-row${m.running ? " is-running" : ""}" data-open-source="${m.key}" aria-label="${escapeHtml(m.name)}: ${escapeHtml(m.statusText)}. Открыть настройки">
+      ${m.logo}
+      <span class="row-main">
+        <span class="row-title">${escapeHtml(m.name)}</span>
+        <span class="row-sub"><span class="dot ${m.dot}"></span><span class="row-sub-text">${escapeHtml(m.statusText)}</span></span>
+      </span>
+      ${m.counter != null ? `<span class="row-count mono">${escapeHtml(m.counter)}</span>` : ""}
+      ${bar}
+      ${CHEVRON_SVG}
+    </button>
+  </div>`;
+}
+
+function sourceRowModel(s, runNow) {
+  const running = !!(runNow?.running && runNow.current_source === s.name);
+  const searchOnly = s.name === "telegram" ? !s.auto_message : !s.auto_apply;
+  const mode = OWN_CHANNELS.has(s.name) ? "собирает вакансии и контакты HR" : searchOnly ? "только ищет" : "откликается сам";
+  let dot = "ok";
+  let text;
+  if (running) {
+    dot = "running";
+    text = "идёт ход — ищу и оцениваю вакансии";
+  } else if (!s.schedule_enabled) {
+    dot = "idle";
+    text = "выключена";
+  } else if (s.status === "blocked" || s.paused) {
+    // Четыре статуса из единого словаря: работает, пауза, нужен вход, ошибка.
+    dot = "warn";
+    text = `пауза · ${s.last_error?.summary || "после капчи нужна проверка на сайте"}`;
+  } else if (s.status === "error" && s.last_error?.kind === "login") {
+    dot = "warn";
+    text = "нужен вход · откройте и нажмите «Войти»";
+  } else if (s.status === "error") {
+    dot = "error";
+    text = `ошибка · ${s.last_error?.summary || "последний ход не удался"}`;
+  } else if (s.status === "never_run") {
+    dot = "never_run";
+    text = `${mode} · ещё не запускалась`;
+  } else {
+    text = `${mode} · проверка ${fmtDay(s.last_run)}`;
+  }
+  const hasLimit = !OWN_CHANNELS.has(s.name) && s.daily_limit;
+  return {
+    key: s.name,
+    name: sourceLabel(s.name),
+    logo: plogoHtml(s.name),
+    dot,
+    statusText: text,
+    counter: hasLimit ? `${s.applied_today}/${s.daily_limit}` : null,
+    pct: hasLimit && s.schedule_enabled ? Math.round((100 * s.applied_today) / s.daily_limit) : null,
+    running,
+  };
+}
+
+function telegramRowModel(w) {
+  const dot = w.running ? "ok" : w.enabled ? "never_run" : "idle";
+  const text = w.running
+    ? `слушает ${w.channels} ${plural(w.channels, "канал", "канала", "каналов")} · найдено ${w.matched}`
+    : w.enabled
+      ? w.daemon_running ? "подключается…" : "включён — заработает после «Запустить»"
+      : "выключен";
+  return { key: "telegram", name: "Telegram-парсер", logo: plogoHtml("telegram"), dot, statusText: text, counter: `${w.channels} кан.`, pct: null };
+}
+
+function mailRowModel(o) {
+  const next = pipelineNext(o);
+  if (next.kind === "empty") {
+    return { key: "mail", name: "Рассылка по почте", logo: plogoHtml("mail"), dot: "idle", statusText: "База пуста — загрузите список компаний", counter: null, pct: null };
+  }
+  const dot = next.tone === "alert" ? "error" : next.tone === "active" ? "running" : next.tone === "waiting" ? "never_run" : "ok";
+  return {
+    key: "mail",
+    name: "Рассылка по почте",
+    logo: plogoHtml("mail"),
+    dot,
+    statusText: stripLeadingEmoji(next.status),
+    counter: `${o.plan.sent_today}/${o.plan.limit}`,
+    pct: o.plan.limit ? Math.round((100 * o.plan.sent_today) / o.plan.limit) : null,
+  };
+}
+
 let lastOwnChannels = "";
 async function renderOwnChannels() {
   let w, o;
@@ -1238,66 +1447,497 @@ async function renderOwnChannels() {
   } catch (e) {
     return;
   }
-  const snapshot = JSON.stringify([w, o]);
-  if (snapshot === lastOwnChannels) return;
-  lastOwnChannels = snapshot;
   lastOutreach = o;
   lastTelegramWatch = w;
+  const own = (lastStatus?.sources || []).filter((s) => OWN_CHANNELS.has(s.name) && s.name !== "telegram");
+  const snapshot = JSON.stringify([w, o, own, lastRunNow]);
+  if (snapshot === lastOwnChannels) return;
+  lastOwnChannels = snapshot;
+  const rows = [telegramRowModel(w)];
+  const byName = Object.fromEntries(own.map((s) => [s.name, s]));
+  if (byName.direct) {
+    rows.push({ ...sourceRowModel(byName.direct, lastRunNow), name: "Сайты компаний" });
+  }
+  rows.push(mailRowModel(o));
+  ["talanto", "hirify"].forEach((n) => byName[n] && rows.push(sourceRowModel(byName[n], lastRunNow)));
   const el = document.getElementById("own-channels");
-  const tgState = w.running ? "ok" : w.enabled ? "never_run" : "error";
-  const tgText = w.running
-    ? "работает — посты приходят за секунды"
-    : w.enabled
-      ? w.daemon_running ? "подключается…" : "включён — заработает после «▶ Запустить»"
-      : "выключен";
-  // Детали открыты/закрыты — помним между обновлениями карточки.
-  const detailsOpen = el.querySelector(".pipeline-more")?.open;
-  el.innerHTML = `${pipelineCardHtml(o)}
-    <div class="source-card own-card">
-      <h3>
-        <input type="checkbox" class="switch" id="own-tg-toggle" title="Включить или выключить парсер" ${w.enabled ? "checked" : ""} />
-        <span class="dot ${tgState}"></span> ${sourceIconHtml("telegram")}Telegram-парсер
-      </h3>
-      <div class="row"><span>Состояние</span><span>${tgText}</span></div>
-      <div class="row"><span>Каналов</span><span>${w.channels}</span></div>
-      ${w.running && w.last_post_at ? `<div class="row"><span>Последний пост</span><span>${relativeTimeRu(new Date(w.last_post_at * 1000).toISOString())}</span></div>` : ""}
-      <div class="row"><span>Вакансий найдено с запуска</span><span>${w.matched}</span></div>
-      <div class="row"><span>Контактов HR в базе</span><span>${w.contacts_collected}</span></div>
-      <div class="row"><span>Ответы HR в диалогах</span><span>${w.running ? "ловит сразу" : "проверяет каждые 30 мин"}</span></div>
-      <div class="own-card-actions">
-        <button type="button" class="btn btn-secondary btn-small" data-own-go="telegram">Открыть</button>
-        <button type="button" class="btn btn-ghost btn-small" data-own-settings="settings-tg-quick">Настроить</button>
-      </div>
-    </div>`;
-  const more = el.querySelector(".pipeline-more"); // в пустом состоянии её нет
-  if (detailsOpen && more) more.open = true;
-  animateCounts(el);
-  bindPipelineCard(el, o);
-  el.querySelectorAll("[data-own-go]").forEach((b) =>
-    b.addEventListener("click", () => {
-      if (b.dataset.baseSource) {
-        document.getElementById("contacts-filter-source").value = b.dataset.baseSource;
-        baseState.page = 0;
+  el.innerHTML = applySourceOrder(rows, "key", "cj-source-order-own").map(platformRowHtml).join("");
+  if (openDrawerSource === "mail" && isPlatformDrawerOpen() && !drawerDirty) openMailDrawer(true);
+  if (openDrawerSource === "telegram" && isPlatformDrawerOpen() && !drawerDirty) openTelegramDrawer(true);
+}
+
+function refreshOwnChannels() {
+  lastOwnChannels = "";
+  renderOwnChannels();
+}
+
+// Сохранение из шторки сразу, без кнопки «Сохранить»: уведомление
+// «… · сохранено» с «Отменить», которое возвращает прежнее значение.
+async function saveSourceSettings(source, body, label, undoBody) {
+  try {
+    await api("/api/settings", { method: "POST", body: JSON.stringify({ source, ...body }) });
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+    return false;
+  }
+  showSavedToast(`${sourceLabel(source)}: ${label}`, undoBody
+    ? async () => {
+        await api("/api/settings", { method: "POST", body: JSON.stringify({ source, ...undoBody }) });
+        showToast(`${sourceLabel(source)}: вернул как было`, "info");
+        afterSourceSaved(source);
       }
-      switchTab(b.dataset.ownGo);
-    })
-  );
-  el.querySelectorAll("[data-own-settings]").forEach((b) =>
-    b.addEventListener("click", () => {
-      switchTab("settings");
-      switchSettingsTab(b.dataset.ownSettings);
-      if (b.dataset.ownSettings === "settings-tg-quick") loadTelegramWatch();
-    })
-  );
-  document.getElementById("own-tg-toggle").addEventListener("change", async (e) => {
+    : null);
+  afterSourceSaved(source);
+  return true;
+}
+
+function afterSourceSaved(source) {
+  lastOverviewSnapshot = "";
+  lastOwnChannels = "";
+  render.overview();
+  if (openDrawerSource === source && isPlatformDrawerOpen()) {
+    refreshSourceDrawerHead(source);
+  }
+}
+
+function statusLineHtml(m) {
+  return `<span class="dot ${m.dot}"></span><span>${escapeHtml(m.statusText)}</span>`;
+}
+
+function fieldRowHtml({ title, hint = "", control, ui = "" }) {
+  return `<div class="field-row"${ui ? ` data-ui="${ui}"` : ""}>
+    <div class="field-text"><div class="field-title">${title}</div>${hint ? `<div class="field-hint">${hint}</div>` : ""}</div>
+    <div class="field-control">${control}</div>
+  </div>`;
+}
+
+function switchHtml(cls, checked, label, extra = "") {
+  return `<input type="checkbox" class="switch ${cls}" ${checked ? "checked" : ""} aria-label="${escapeHtml(label)}" ${extra} />`;
+}
+
+// Причина сбоя и одно действие, чтобы его исправить.
+function fixBlockHtml(s) {
+  const blocked = s.status === "blocked" || s.paused;
+  if (!blocked && s.status !== "error") return "";
+  const err = s.last_error || {};
+  const login = !blocked && err.kind === "login";
+  const summary = err.summary || (blocked ? "Пауза: площадка ждёт проверки на сайте после капчи." : "Ошибка: последний ход не удался.");
+  const actions = blocked
+    ? `<button type="button" class="btn btn-primary btn-small" data-drawer-action="unblock">Я прошёл проверку — снять паузу</button>
+       <button type="button" class="btn btn-ghost btn-small" data-drawer-action="accounts">Подключения</button>`
+    : `<button type="button" class="btn btn-primary btn-small" data-drawer-action="run">${login ? "Войти" : "Повторить сейчас"}</button>
+       <button type="button" class="btn btn-ghost btn-small" data-drawer-action="logs">Журнал</button>`;
+  const warn = blocked || login;
+  return `<div class="fix ${warn ? "is-warn" : "is-error"}" data-ui="home.platform.error drawer.fix">
+    <span class="dot ${warn ? "warn" : "error"}"></span>
+    <div class="fix-body">
+      <div>${escapeHtml(summary)}${blocked ? ` Откройте сайт в окне бота, пройдите проверку и нажмите кнопку ниже (то же, что <code>/resume ${s.name}</code> в боте).` : ""}</div>
+      ${err.detail ? `<details class="fix-detail"><summary>Подробности</summary><pre>${escapeHtml(err.detail)}</pre></details>` : ""}
+      <div class="fix-actions">${actions}</div>
+    </div>
+  </div>`;
+}
+
+// Итог последнего захода площадки: «новых 0» — не поломка, а «всё уже
+// просмотрено»; без этой строки такой заход в интерфейсе невидим.
+function lastSummaryKvHtml(sum) {
+  const parts = [`новых ${sum.new}`];
+  if (sum.new) {
+    parts.push(`слабое совпадение ${sum.low_fit}`);
+    parts.push(`откликов ${sum.applied}`);
+  }
+  const title = `Проверено ${fmtTime(sum.at)}. «Новых» — вакансий, которых ещё не было в журнале.`;
+  return `<div class="kv" title="${escapeHtml(title)}"><span>Итог захода</span><span>${parts.join(" · ")}</span></div>`;
+}
+
+function sourceDrawerBody(s, limits, salary) {
+  const defaultDaily = s.name === "linkedin" ? limits.linkedin_daily_application_limit : limits.daily_application_limit;
+  const isOwn = OWN_CHANNELS.has(s.name);
+  const lastRunRows = `
+    <div class="kv"><span>Последняя проверка</span><span>${s.schedule_enabled ? fmtDay(s.last_run) : "—"}</span></div>
+    <div class="kv"><span>Следующая проверка</span><span>${s.schedule_enabled ? fmtTime(s.next_run) : "—"}</span></div>
+    ${s.schedule_enabled && s.duration_seconds != null ? `<div class="kv"><span>Последний ход</span><span>${Math.max(1, Math.round(s.duration_seconds / 60))} мин${s.idle_streak >= 2 ? ", пусто — следующая проверка реже" : ""}</span></div>` : ""}
+    ${s.schedule_enabled && s.last_summary ? lastSummaryKvHtml(s.last_summary) : ""}`;
+  const readiness = (s.readiness && s.readiness.missing) || [];
+  return `
+    ${fixBlockHtml(s)}
+    ${readiness.length ? `<div class="fix is-warn"><span class="dot warn"></span><div class="fix-body">Не хватает: ${escapeHtml(readiness.join(", "))}</div></div>` : ""}
+    <div class="field-stack">
+      ${fieldRowHtml({ title: "Площадка включена", hint: isOwn ? "Бот собирает здесь вакансии и контакты HR по кругу" : "Бот ищет здесь вакансии по кругу", control: switchHtml("d-schedule", s.schedule_enabled, "Площадка включена"), ui: "drawer.enabled home.platform.toggle" })}
+      ${isOwn ? "" : fieldRowHtml({ title: "Откликаться самому", hint: "Выключено — бот только находит, откликаетесь вы", control: switchHtml("d-auto", s.auto_apply, "Откликаться самому"), ui: "drawer.auto-apply home.platform.mode" })}
+    </div>
+    ${isOwn ? "" : fieldRowHtml({
+      title: "Откликов в день, не больше",
+      hint: `Сегодня отправлено ${s.applied_today}${s.daily_limit_override ? ` · своё значение, по умолчанию ${defaultDaily} <button type="button" class="link-btn" data-drawer-action="daily-reset">вернуть</button>` : " · как у всех площадок"}`,
+      control: `<div class="stepper" data-ui="drawer.daily-limit home.platform.today">
+        <button type="button" class="btn btn-small" data-step="-1" aria-label="Меньше">−</button>
+        <input type="number" class="d-daily-limit mono" min="1" value="${s.daily_limit}" aria-label="Откликов в день" />
+        <button type="button" class="btn btn-small" data-step="1" aria-label="Больше">+</button>
+      </div>`,
+    })}
+    ${isOwn ? "" : `<div class="field-block" data-ui="drawer.positions">
+      <div class="field-title">Должности для поиска</div>
+      <div class="field-hint">Пусто — как в «Что ищу»: ${escapeHtml((s.effective_positions || []).join(", ") || "—")}</div>
+      <textarea class="d-positions" rows="2" placeholder="оставить пустым — использовать общие">${escapeHtml((s.positions_override || []).join("\n"))}</textarea>
+    </div>`}
+    <div class="kv-list" data-ui="home.platform.last-run">${lastRunRows}</div>
+    <details class="drawer-more" data-ui="drawer.more">
+      <summary>Ещё настройки: ${isOwn ? "расписание" : "резюме, расписание, лимиты, фильтры"}</summary>
+      <div class="drawer-more-body">
+        ${fieldRowHtml({
+          title: "Интервал хода, минут",
+          hint: s.continuous_cycle_active ? "Включён «Постоянный цикл» (Настройки → Лимиты и оценка) — свой интервал не действует, все идут по кругу." : "Минимум 3 минуты — почти реалтайм, но не похоже на бота.",
+          control: `<input type="number" class="d-interval num-input" min="3" step="1" value="${Math.round((s.interval_hours ?? 3) * 60)}" ${s.continuous_cycle_active ? "disabled" : ""} aria-label="Интервал хода, минут" />`,
+          ui: "drawer.interval",
+        })}
+        ${isOwn ? "" : fieldRowHtml({
+          title: "Резюме на площадке",
+          hint: "id резюме на сайте площадки, если их несколько",
+          control: `<input type="text" class="d-resume-id" value="${escapeHtml(s.resume_id || "")}" placeholder="id резюме" aria-label="id резюме на площадке" />`,
+          ui: "drawer.resume-id",
+        })}
+        ${isOwn ? "" : fieldRowHtml({
+          title: "Максимум за один заход",
+          hint: `Не дневной лимит. По умолчанию ${limits.job_max_applications}`,
+          control: `<span class="override-field"><input type="number" class="d-max-applications num-input" min="1" value="${s.job_max_applications_override ? s.job_max_applications : ""}" placeholder="${limits.job_max_applications}" ${s.job_max_applications_override ? "" : "disabled"} aria-label="Максимум за один заход" /><label class="override-toggle"><input type="checkbox" class="d-max-applications-override" ${s.job_max_applications_override ? "checked" : ""} /> своё</label></span>`,
+          ui: "drawer.per-run",
+        })}
+        ${isOwn ? "" : `<div class="field-block" data-ui="drawer.locations">
+          <div class="field-title">Свои локации</div>
+          <div class="field-hint">Пусто — как в «Что ищу»${s.name === "linkedin" ? "; у LinkedIn свои локации (linkedin.locations)" : `: ${escapeHtml((s.effective_locations || []).join(", ") || "любые")}`}</div>
+          <textarea class="d-locations" rows="2" placeholder="оставить пустым — использовать общие">${escapeHtml((s.locations_override || []).join("\n"))}</textarea>
+        </div>`}
+        ${sourceFiltersHtml(s, salary)}
+      </div>
+    </details>`;
+}
+
+function sourceFiltersHtml(s, salary) {
+  const remote = s.remote_only_managed ? "" : fieldRowHtml({ title: "Только удалённые вакансии", control: switchHtml("d-remote-only", s.remote_only, "Только удалённые вакансии"), ui: "drawer.filters" });
+  const select = (cls, label, options, value, multiple = false) => fieldRowHtml({
+    title: label,
+    control: `<select class="${cls}" ${multiple ? `multiple size="${options.length}"` : ""} aria-label="${escapeHtml(label)}">${options
+      .map(([v, t]) => `<option value="${v}" ${(multiple ? (value || []).includes(v) : (value || "") === v) ? "selected" : ""}>${t}</option>`)
+      .join("")}</select>`,
+    ui: "drawer.filters",
+  });
+  if (s.name === "linkedin") {
+    return fieldRowHtml({
+      title: "Зарплата для скрининга LinkedIn",
+      hint: "USD в год, диапазоном",
+      control: `<input type="text" class="d-linkedin-salary" value="${escapeHtml(salary.linkedin_salary_range_usd || "")}" placeholder="60000-80000" aria-label="Зарплата для скрининга LinkedIn" /><span class="d-salary-hint field-hint"></span>`,
+      ui: "drawer.linkedin-salary",
+    });
+  }
+  if (s.name === "avito") {
+    return remote
+      + select("d-hc-qualification", "Опыт работы", [["", "Любой"], ["no_experience", "Без опыта"], ["under_1_year", "До 1 года"], ["over_1_year", "Более 1 года"], ["over_3_years", "Более 3 лет"], ["over_5_years", "Более 5 лет"], ["over_10_years", "Более 10 лет"]], s.qualification)
+      + select("d-hc-employment-type", "Занятость", [["", "Любая"], ["full_time", "Полная"], ["part_time", "Частичная"], ["temporary", "Временная"]], s.employment_type);
+  }
+  if (s.name === "getmatch") {
+    return remote + (s.levels_managed ? "" : select("d-gm-experience-level", "Уровень вакансии (пусто — любой)", [["junior", "Junior"], ["middle", "Middle"], ["senior", "Senior"], ["lead", "Lead / Manager"]], s.experience_level, true));
+  }
+  if (s.name === "habr_career") {
+    return remote
+      + (s.levels_managed ? "" : select("d-hc-qualification", "Квалификация", [["", "Любая"], ["intern", "Стажёр (Intern)"], ["junior", "Младший (Junior)"], ["middle", "Средний (Middle)"], ["senior", "Старший (Senior)"], ["lead", "Ведущий (Lead)"]], s.qualification))
+      + select("d-hc-employment-type", "Тип занятости", [["", "Любой"], ["full_time", "Полный рабочий день"], ["part_time", "Неполный рабочий день"]], s.employment_type);
+  }
+  if (s.name === "djinni") {
+    return fieldRowHtml({
+      title: "Поднимать профиль раз в 7 дней",
+      hint: "Кнопка «Bump My Profile» на Djinni — бот нажимает её сам, как только Djinni разрешит",
+      control: switchHtml("d-auto-bump", s.auto_bump_resume, "Поднимать профиль"),
+      ui: "drawer.bump",
+    });
+  }
+  if (s.name === "headhunter") {
+    return `${fieldRowHtml({ title: "Автоответ HR в чате", hint: "Простые вопросы бот закрывает сам, сложные — вам в «Общение»", control: switchHtml("d-auto-reply", s.auto_reply, "Автоответ HR в чате"), ui: "drawer.hh-chat" })}
+      ${fieldRowHtml({ title: "Письмо в чат после отклика", hint: "Если отклик ушёл без письма — досылает его в чат вакансии", control: switchHtml("d-chat-cover-letter-followup", s.chat_cover_letter_followup, "Письмо в чат после отклика") })}
+      ${fieldRowHtml({ title: "Поднимать резюме", control: switchHtml("d-auto-bump", s.auto_bump_resume, "Поднимать резюме на HH"), ui: "drawer.bump" })}
+      ${fieldRowHtml({ title: "Напомнить о себе, если молчат, через", hint: "Дней; 0 — не напоминать. Готовые напоминания — в «Общении»", control: `<input type="number" class="d-reminder-days num-input" min="0" value="${s.reminder_follow_up_days ?? 7}" aria-label="Напомнить через дней" />`, ui: "drawer.reminder-days" })}
+      ${fieldRowHtml({ title: "Отправлять напоминания сами", hint: "Выключено — ждут вашего «Отправить» в «Общении»", control: switchHtml("d-auto-reminder", s.auto_reminder, "Отправлять напоминания сами") })}
+      ${fieldRowHtml({ title: "Зарплата для ответов HR", hint: "Подставляется в автоответ в чате", control: `<input type="text" class="d-hh-salary" value="${escapeHtml(salary.hh_salary_expectations || "")}" placeholder="250000-300000 RUR" aria-label="Зарплата для ответов HR" /><span class="d-salary-hint field-hint"></span>`, ui: "drawer.hh-salary" })}`;
+  }
+  return "";
+}
+
+function sourceDrawerFoot(s, running) {
+  return `<button type="button" class="btn btn-primary" data-drawer-action="${running ? "stop" : "run"}" data-ui="home.platform.run-now">${running ? "Остановить ход" : "Запустить ход сейчас"}</button>
+    ${OWN_CHANNELS.has(s.name) ? "" : `<button type="button" class="btn btn-ghost" data-drawer-action="history" data-ui="home.platform.history">Отклики</button>`}
+    <button type="button" class="btn btn-ghost" data-drawer-action="logs" data-ui="home.platform.logs">Журнал</button>`;
+}
+
+async function openSourceDrawer(name) {
+  let status, limits, salary;
+  try {
+    [status, limits, salary] = await Promise.all([api("/api/status"), api("/api/settings/limits"), api("/api/settings/salary")]);
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+    return;
+  }
+  lastStatus = status;
+  const s = status.sources.find((x) => x.name === name);
+  if (!s) return;
+  const m = sourceRowModel(s, lastRunNow);
+  openDrawerSource = name;
+  drawerDirty = false;
+  const body = openSideDrawer({
+    title: `${plogoHtml(name)}<span>${name === "direct" ? "Сайты компаний" : sourceLabel(name)}</span>`,
+    sub: statusLineHtml(m),
+    body: sourceDrawerBody(s, limits, salary) + (name === "direct" ? `<p class="field-hint">Откуда собирать и какие компании отслеживать — <button type="button" class="link-btn" data-drawer-action="settings-direct">Настройки → Сайты компаний</button>. Компании с подходящими вакансиями попадают в <button type="button" class="link-btn" data-drawer-action="base-sites">Базу</button>.</p>` : ""),
+    foot: sourceDrawerFoot(s, m.running),
+  });
+  bindSourceDrawer(body, s);
+}
+
+async function refreshSourceDrawerHead(name) {
+  if (["telegram", "mail"].includes(name)) return;
+  const s = lastStatus?.sources.find((x) => x.name === name);
+  if (!s) return;
+  const m = sourceRowModel(s, lastRunNow);
+  const sub = document.getElementById("platform-drawer-sub");
+  if (sub) sub.innerHTML = statusLineHtml(m);
+  const foot = document.getElementById("platform-drawer-foot");
+  if (foot && !foot.contains(document.activeElement)) foot.innerHTML = sourceDrawerFoot(s, m.running);
+}
+
+function bindSourceDrawer(body, s) {
+  const name = s.name;
+  const linesOfEl = (el) => el.value.split("\n").map((x) => x.trim()).filter(Boolean);
+  body.querySelectorAll(".d-positions, .d-locations").forEach(initTagInput);
+  body.addEventListener("input", () => (drawerDirty = true));
+
+  const onSwitch = (cls, field, labels) => {
+    const box = body.querySelector(cls);
+    box?.addEventListener("change", () => {
+      const v = box.checked;
+      saveSourceSettings(name, { [field]: v }, v ? labels[0] : labels[1], { [field]: !v });
+    });
+  };
+  onSwitch(".d-schedule", "schedule_enabled", ["включена · сохранено", "выключена · сохранено"]);
+  onSwitch(".d-auto-bump", "auto_bump_resume", ["поднимать резюме · сохранено", "не поднимать резюме · сохранено"]);
+  onSwitch(".d-remote-only", "remote_only", ["только удалённые · сохранено", "любой формат · сохранено"]);
+  onSwitch(".d-auto-reply", "auto_reply", ["автоответ в чате включён", "автоответ в чате выключен"]);
+  onSwitch(".d-chat-cover-letter-followup", "chat_cover_letter_followup", ["письмо в чат после отклика включено", "письмо в чат после отклика выключено"]);
+  onSwitch(".d-auto-reminder", "auto_reminder", ["напоминания уходят сами", "напоминания ждут вашего «Отправить»"]);
+
+  const auto = body.querySelector(".d-auto");
+  auto?.addEventListener("change", async () => {
+    const v = auto.checked;
+    if (v && !(await showConfirm(`${sourceLabel(name)}: бот начнёт сам отправлять отклики — до дневного лимита. Включить?`))) {
+      auto.checked = false;
+      return;
+    }
+    saveSourceSettings(name, { auto_apply: v }, v ? "откликается сам · сохранено" : "только ищет · сохранено", { auto_apply: !v });
+  });
+
+  // Дневной лимит: − N + и ручной ввод. Своё число = «своё значение»
+  // для этой площадки; «вернуть» снимает его.
+  const daily = body.querySelector(".d-daily-limit");
+  if (daily) {
+    let saveTimer = null;
+    const prev = { override: s.daily_limit_override, value: s.daily_limit };
+    const commit = () => {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        const v = Math.max(1, parseInt(daily.value, 10) || 1);
+        daily.value = v;
+        if (v === prev.value && prev.override) return;
+        const undo = prev.override ? { daily_application_limit: prev.value } : { clear_daily_application_limit: true };
+        saveSourceSettings(name, { daily_application_limit: v }, `не больше ${v} откликов в день · сохранено`, undo);
+        prev.override = true;
+        prev.value = v;
+      }, 500);
+    };
+    body.querySelectorAll("[data-step]").forEach((b) =>
+      b.addEventListener("click", () => {
+        daily.value = Math.max(1, (parseInt(daily.value, 10) || 0) + Number(b.dataset.step));
+        commit();
+      })
+    );
+    daily.addEventListener("change", commit);
+  }
+
+  const saveOnChange = (cls, build, label) => {
+    const el = body.querySelector(cls);
+    if (!el) return;
+    el.addEventListener("change", () => {
+      const payload = build(el);
+      if (payload) saveSourceSettings(name, payload, label);
+    });
+  };
+  saveOnChange(".d-positions", (el) => ({ positions: linesOfEl(el) }), "должности · сохранено");
+  saveOnChange(".d-locations", (el) => ({ locations: linesOfEl(el) }), "локации · сохранено");
+  saveOnChange(".d-interval", (el) => ({ interval_hours: Math.max(3, parseInt(el.value, 10) || 3) / 60 }), "интервал · сохранено");
+  saveOnChange(".d-resume-id", (el) => ({ resume_id: el.value.trim() }), "id резюме · сохранено");
+  saveOnChange(".d-reminder-days", (el) => ({ reminder_follow_up_days: Math.max(0, parseInt(el.value, 10) || 0) }), "напоминание · сохранено");
+  saveOnChange(".d-hc-qualification", (el) => ({ qualification: el.value }), "фильтр · сохранено");
+  saveOnChange(".d-hc-employment-type", (el) => ({ employment_type: el.value }), "фильтр · сохранено");
+  saveOnChange(".d-gm-experience-level", (el) => ({ experience_level: Array.from(el.selectedOptions).map((o) => o.value) }), "уровень · сохранено");
+  saveOnChange(".d-max-applications", (el) => ({ job_max_applications: Math.max(1, parseInt(el.value, 10) || 1) }), "максимум за заход · сохранено");
+  const perRunOverride = body.querySelector(".d-max-applications-override");
+  perRunOverride?.addEventListener("change", () => {
+    const input = body.querySelector(".d-max-applications");
+    input.disabled = !perRunOverride.checked;
+    if (perRunOverride.checked) {
+      input.focus();
+    } else {
+      input.value = "";
+      saveSourceSettings(name, { clear_job_max_applications: true }, "максимум за заход — как у всех · сохранено");
+    }
+  });
+
+  body.querySelectorAll(".d-hh-salary, .d-linkedin-salary").forEach((input) => {
+    const hint = input.parentElement.querySelector(".d-salary-hint");
+    const validate = () => {
+      const v = input.value.trim();
+      const ok = !v || /^\d{4,}\s*[-–]\s*\d{4,}(\s*\S+)?$/.test(v);
+      if (hint) {
+        hint.textContent = ok ? "" : `Ожидается диапазон вида «${input.placeholder}»`;
+        hint.classList.toggle("warn-text", !ok);
+      }
+      return ok;
+    };
+    input.addEventListener("input", validate);
+    validate();
+    input.addEventListener("change", async () => {
+      const key = input.classList.contains("d-hh-salary") ? "hh_salary_expectations" : "linkedin_salary_range_usd";
+      try {
+        await api("/api/settings/salary", { method: "POST", body: JSON.stringify({ [key]: input.value.trim() }) });
+        showSavedToast(`${sourceLabel(name)}: зарплата · сохранено`);
+      } catch (err) {
+        showToast(err.message.replace(/^\d+: /, ""), "error");
+      }
+    });
+  });
+}
+
+// Кнопки в шторках Главной: запуск хода, журнал, переходы.
+async function handleDrawerAction(btn) {
+  const action = btn.dataset.drawerAction;
+  const name = openDrawerSource;
+  if (action === "run") {
+    if (!(await showConfirm(`Запустить ${sourceLabel(name)} прямо сейчас? Это реальный прогон, не тест — если включены отклики, они уйдут по-настоящему.`))) return;
+    try {
+      await withButtonLoading(btn, () => api("/api/run-now", { method: "POST", body: JSON.stringify({ sources: [name] }) }));
+    } catch (e) {
+      showToast(`Не удалось запустить ${sourceLabel(name)}: ${e.message}`, "error");
+      return;
+    }
+    showToast(`${sourceLabel(name)}: ход запущен`, "success");
+    lastOverviewSnapshot = "";
+    render.overview();
+    watchSourceRunCompletion(name);
+  } else if (action === "stop") {
+    try {
+      await withButtonLoading(btn, () => api("/api/run-now/stop", { method: "POST" }));
+      showToast(`${sourceLabel(name)}: остановка запрошена — текущий отклик досылается`, "success");
+    } catch (e) {
+      showToast(`Не удалось остановить: ${e.message}`, "error");
+    }
+  } else if (action === "unblock") {
+    try {
+      await withButtonLoading(btn, () => api(`/api/sources/${name}/resume`, { method: "POST" }));
+      showToast(`${sourceLabel(name)}: пауза снята, попробую в ближайший ход`, "success");
+      afterSourceSaved(name);
+      openSourceDrawer(name);
+    } catch (e) {
+      showToast(e.message.replace(/^\d+: /, ""), "error");
+    }
+  } else if (action === "daily-reset") {
+    await saveSourceSettings(name, { clear_daily_application_limit: true }, "дневной лимит — как у всех · сохранено");
+    openSourceDrawer(name);
+  } else if (action === "history") {
+    closePlatformDrawer();
+    document.getElementById("filter-source").value = name;
+    switchTab("history");
+  } else if (action === "logs") {
+    closePlatformDrawer();
+    document.getElementById("log-source").value = name === "mail" ? "" : name;
+    switchTab("logs");
+  } else if (action === "accounts") {
+    closePlatformDrawer();
+    gotoSettings("settings-accounts");
+  } else if (action === "settings-direct") {
+    closePlatformDrawer();
+    gotoSettings("settings-direct");
+  } else if (action === "settings-tg") {
+    closePlatformDrawer();
+    gotoSettings("settings-tg-quick");
+  } else if (action === "base-sites") {
+    closePlatformDrawer();
+    document.getElementById("contacts-filter-source").value = "sites";
+    baseState.page = 0;
+    switchTab("contacts");
+  } else if (action === "base-telegram") {
+    closePlatformDrawer();
+    document.getElementById("contacts-filter-source").value = "telegram";
+    baseState.page = 0;
+    switchTab("contacts");
+  } else if (action === "talk") {
+    closePlatformDrawer();
+    switchTab("telegram");
+  } else if (action === "outreach") {
+    closePlatformDrawer();
+    switchTab("outreach");
+  }
+}
+
+async function watchSourceRunCompletion(name) {
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 3000));
+    let runStatus;
+    try {
+      runStatus = await api("/api/run-now/status");
+    } catch (e) {
+      return;
+    }
+    if (!runStatus.running || runStatus.current_source !== name) break;
+  }
+  showToast(`${sourceLabel(name)}: ход завершён — см. «Вакансии»`, "success");
+  lastOverviewSnapshot = "";
+  render.overview();
+}
+
+function gotoSettings(tab) {
+  switchTab("settings");
+  switchSettingsTab(tab);
+  if (tab === "settings-tg-quick") loadTelegramWatch();
+}
+
+function openTelegramDrawer(refresh = false) {
+  const w = lastTelegramWatch;
+  if (!w) return;
+  const m = telegramRowModel(w);
+  openDrawerSource = "telegram";
+  if (!refresh) drawerDirty = false;
+  const body = openSideDrawer({
+    title: `${plogoHtml("telegram")}<span>Telegram-парсер</span>`,
+    sub: statusLineHtml(m),
+    body: `<div class="field-stack">
+        ${fieldRowHtml({ title: "Парсер включён", hint: "Новый пост с нужным словом — за секунды в боте и в «Общении»", control: switchHtml("d-tg-enabled", w.enabled, "Telegram-парсер включён"), ui: "home.tg" })}
+      </div>
+      <div class="kv-list">
+        <div class="kv"><span>Каналов</span><span class="mono">${w.channels}</span></div>
+        ${w.running && w.last_post_at ? `<div class="kv"><span>Последний пост</span><span>${relativeTimeRu(new Date(w.last_post_at * 1000).toISOString())}</span></div>` : ""}
+        <div class="kv"><span>Вакансий найдено с запуска</span><span class="mono">${w.matched}</span></div>
+        <div class="kv"><span>Контактов HR в Базе</span><span class="mono">${w.contacts_collected}</span></div>
+        <div class="kv"><span>Ответы HR в диалогах</span><span>${w.running ? "ловит сразу" : "проверяет каждые 30 мин"}</span></div>
+      </div>
+      <p class="field-hint">Каналы, ключевые слова, текст «Здравствуйте» и автоотправка — в <button type="button" class="link-btn" data-drawer-action="settings-tg">Настройки → Telegram-парсер</button>. Контакты HR из постов — в <button type="button" class="link-btn" data-drawer-action="base-telegram">Базе</button>.</p>`,
+    foot: `<button type="button" class="btn btn-primary" data-drawer-action="talk">Открыть диалоги</button>
+      <button type="button" class="btn btn-ghost" data-drawer-action="settings-tg">Правила парсера</button>`,
+  });
+  body.querySelector(".d-tg-enabled").addEventListener("change", async (e) => {
+    const on = e.target.checked;
     e.target.disabled = true;
     try {
       // Один переключатель на весь Telegram: парсер + поиск по расписанию.
       await Promise.all([
-        api("/api/settings/telegram-watch", { method: "POST", body: JSON.stringify({ enabled: e.target.checked }) }),
-        api("/api/settings", { method: "POST", body: JSON.stringify({ source: "telegram", schedule_enabled: e.target.checked }) }),
+        api("/api/settings/telegram-watch", { method: "POST", body: JSON.stringify({ enabled: on }) }),
+        api("/api/settings", { method: "POST", body: JSON.stringify({ source: "telegram", schedule_enabled: on }) }),
       ]);
-      showToast(e.target.checked ? "Telegram-парсер включён" : "Telegram-парсер выключен", "success");
+      showSavedToast(on ? "Telegram-парсер включён" : "Telegram-парсер выключен");
     } catch (err) {
       showToast(err.message.replace(/^\d+: /, ""), "error");
     }
@@ -1305,15 +1945,40 @@ async function renderOwnChannels() {
   });
 }
 
-let lastOutreach = null;
-let lastTelegramWatch = null;
-
-function refreshOwnChannels() {
-  lastOwnChannels = "";
-  renderOwnChannels();
+function openMailDrawer(refresh = false) {
+  const o = lastOutreach;
+  if (!o) return;
+  openDrawerSource = "mail";
+  if (!refresh) drawerDirty = false;
+  const m = mailRowModel(o);
+  const body = openSideDrawer({
+    title: `${plogoHtml("mail")}<span>Рассылка по почте</span>`,
+    sub: statusLineHtml(m),
+    body: `<div id="own-mail-card" data-ui="home.pipeline">${pipelineCardHtml(o)}</div>`,
+    foot: `<button type="button" class="btn btn-primary" data-drawer-action="outreach">Открыть рассылку</button>`,
+  });
+  bindPipelineCard(body, o);
+  body.querySelectorAll("[data-own-go]").forEach((b) =>
+    b.addEventListener("click", () => {
+      closePlatformDrawer();
+      switchTab(b.dataset.ownGo);
+    })
+  );
+  body.querySelectorAll("[data-own-settings]").forEach((b) =>
+    b.addEventListener("click", () => {
+      closePlatformDrawer();
+      gotoSettings(b.dataset.ownSettings);
+    })
+  );
 }
 
-// «🏢 Компании и рассылка» — весь путь в одной карточке: собрали → в Базе →
+function openPlatform(key) {
+  if (key === "telegram") openTelegramDrawer();
+  else if (key === "mail") openMailDrawer();
+  else openSourceDrawer(key);
+}
+
+// «Компании и рассылка» — весь путь в одной карточке: собрали → в Базе →
 // отправка. Крупно — одна кнопка следующего шага, остальное мелко и в
 // «Подробнее». Действия — здесь же или в боковой панели, без перехода.
 function pipelineNext(o) {
@@ -1326,7 +1991,7 @@ function pipelineNext(o) {
       : "";
   if (!o.base_total) return { kind: "empty" };
   if (ms?.state === "stopped") {
-    return { tone: "alert", status: `⛔ ${ms.text}`, action: ms.goto.startsWith("settings-")
+    return { tone: "alert", status: ms.text, action: ms.goto.startsWith("settings-")
       ? { label: "Что делать", attrs: `data-own-settings="${ms.goto}"`, primary: true }
       : { label: "Проверить адреса в Базе", attrs: `data-own-go="${ms.goto}"`, primary: true } };
   }
@@ -1335,25 +2000,25 @@ function pipelineNext(o) {
   const autoOn = o.auto_send && cur?.reviewed;
   const autoOff = { label: "Выключить автоматический режим", attrs: `data-pipeline="auto-off"` };
   if (ms?.state === "active" || ms?.state === "waiting") {
-    return { tone: ms.state, status: `${ms.state === "active" ? "🔄" : "⏸"} ${ms.text}`,
+    return { tone: ms.state, status: ms.text,
       small: { label: "Остановить рассылку", attrs: `data-pipeline="stop" data-id="${ms.campaign}"` },
       extra: autoOn ? autoOff : null };
   }
   if (autoOn && cur?.progress?.kind === "prepare") {
     const pr = cur.progress;
-    return { tone: "active", status: `🤖 Пишу сегодняшнюю порцию: ${pr.done} из ${pr.total} — отправлю сам в рабочее время`,
+    return { tone: "active", status: `Пишу сегодняшнюю порцию: ${pr.done} из ${pr.total} — отправлю сам в рабочее время`,
       progress: pr.done / Math.max(1, pr.total), small: autoOff };
   }
   if (autoOn && cur?.pending && !cur.draft) {
     const today = new Date().toLocaleDateString("sv-SE"); // ГГГГ-ММ-ДД по вашему поясу, как batch_day
     const when = cur.batch_day === today ? "завтра" : "в ближайшие минуты";
     return { tone: "waiting",
-      status: `🤖 Автоматический режим: каждый день бот сам пишет и отправляет порцию. Следующая — ${when}; в очереди ${cur.pending.toLocaleString("ru-RU")}.`,
+      status: `Автоматический режим: каждый день бот сам пишет и отправляет порцию. Следующая — ${when}; в очереди ${cur.pending.toLocaleString("ru-RU")}.`,
       small: autoOff };
   }
   if (cur?.progress?.kind === "prepare") {
     const pr = cur.progress;
-    return { tone: "active", status: `✍️ Пишу письма: ${pr.done} из ${pr.total}`, progress: pr.done / Math.max(1, pr.total),
+    return { tone: "active", status: `Пишу письма: ${pr.done} из ${pr.total}`, progress: pr.done / Math.max(1, pr.total),
       small: { label: "Остановить", attrs: `data-pipeline="stop" data-id="${cur.id}"` } };
   }
   if (cur?.draft) {
@@ -1362,36 +2027,36 @@ function pipelineNext(o) {
         action: { label: "Подключить Gmail", attrs: `data-own-settings="settings-outreach"`, primary: true } };
     }
     return { status: `Готово ${cur.draft} ${plural(cur.draft, "письмо", "письма", "писем")}. Просмотрите — можно поправить или убрать — и отправьте.${o.auto_send && !cur.reviewed ? " Это первая порция: дальше в автоматическом режиме бот будет писать и отправлять сам." : ""}`,
-      action: { label: `👀 Просмотреть и отправить (${cur.draft})`, attrs: `data-pipeline="review"`, primary: true } };
+      action: { label: `Просмотреть и отправить (${cur.draft})`, attrs: `data-pipeline="review"`, primary: true } };
   }
   if (cur?.pending) {
     const n = Math.min(cur.pending, p.limit);
     return { status: `В очереди рассылки ${cur.pending} ${plural(cur.pending, "компания", "компании", "компаний")}. ${todayText(n)}${o.auto_send ? " Автоматический режим включён: первую порцию проверьте сами, дальше бот будет писать и отправлять сам." : ""}`,
-      action: { label: `✍️ Написать ${n} ${plural(n, "письмо", "письма", "писем")}`, attrs: `data-pipeline="prepare" data-id="${cur.id}"`, primary: true } };
+      action: { label: `Написать ${n} ${plural(n, "письмо", "письма", "писем")}`, attrs: `data-pipeline="prepare" data-id="${cur.id}"`, primary: true } };
   }
   if (o.available) {
     const n = Math.min(o.available, p.limit);
     return { status: `Можно написать ${o.available.toLocaleString("ru-RU")} ${plural(o.available, "компании", "компаниям", "компаниям")}. ${todayText(n)}${o.auto_send ? " Автоматический режим включён: первую порцию проверьте сами, дальше бот будет писать и отправлять сам." : ""}`,
-      action: { label: `✍️ Написать ${n} ${plural(n, "письмо", "письма", "писем")}`, attrs: `data-pipeline="create"`, primary: true } };
+      action: { label: `Написать ${n} ${plural(n, "письмо", "письма", "писем")}`, attrs: `data-pipeline="create"`, primary: true } };
   }
   return { status: "Всем компаниям из Базы уже написали. Загрузите новый список — бот напишет и им.",
-    action: { label: "📥 Загрузить список", attrs: `data-pipeline="upload"`, primary: true } };
+    action: { label: "Загрузить список", attrs: `data-pipeline="upload"`, primary: true } };
 }
 
 function pipelineCardHtml(o) {
   const next = pipelineNext(o);
   const a = o.added_week;
-  const settingsBtn = `<button type="button" class="icon-btn" data-own-settings="settings-outreach" title="Настройки почты и защиты" aria-label="Настройки почты">⚙</button>`;
+  const settingsBtn = `<button type="button" class="icon-btn" data-own-settings="settings-outreach" title="Настройки почты и защиты" aria-label="Настройки почты"><svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1"/></svg></button>`;
   if (next.kind === "empty") {
     return `<div class="source-card own-card pipeline-card">
-      <h3>🏢 Компании и рассылка ${settingsBtn}</h3>
+      <h3>Компании и рассылка ${settingsBtn}</h3>
       <ol class="pipeline-intro small">
         <li>Соберите компании — загрузите список или включите сбор с сайтов компаний.</li>
         <li>Бот напишет каждой компании личное письмо по вашему резюме.</li>
         <li>Письма уйдут с вашей почты Gmail — по одному, в рабочее время.</li>
       </ol>
       <div class="pipeline-actions">
-        <button type="button" class="btn btn-primary" data-pipeline="upload">📥 Загрузить список компаний</button>
+        <button type="button" class="btn btn-primary" data-pipeline="upload">Загрузить список компаний</button>
         <button type="button" class="btn btn-ghost btn-small" data-pipeline="prompt">Где взять список?</button>
       </div>
       <label class="checkbox-row small"><input type="checkbox" class="switch" id="pipeline-sites" ${o.sites_enabled ? "checked" : ""} /> Собирать компании с сайтов компаний сам</label>
@@ -1400,8 +2065,8 @@ function pipelineCardHtml(o) {
   const btn = (x) => x ? `<button type="button" class="btn ${x.primary ? "btn-primary" : "btn-ghost btn-small"}" ${x.attrs}>${escapeHtml(x.label)}</button>` : "";
   const ms = o.mail_status;
   return `<div class="source-card own-card pipeline-card${next.tone === "alert" ? " is-alert" : ""}">
-    <h3><span class="dot ${next.tone === "alert" ? "error" : next.tone === "active" ? "ok running" : next.tone === "waiting" ? "never_run" : "ok"}"></span> 🏢 Компании и рассылка
-      ${o.auto_send ? `<span class="auto-badge" title="Бот сам пишет и отправляет новые порции писем">🤖 авто</span>` : ""}${settingsBtn}</h3>
+    <h3><span class="dot ${next.tone === "alert" ? "error" : next.tone === "active" ? "ok running" : next.tone === "waiting" ? "never_run" : "ok"}"></span> Компании и рассылка
+      ${o.auto_send ? `<span class="auto-badge" title="Бот сам пишет и отправляет новые порции писем">авто</span>` : ""}${settingsBtn}</h3>
     <p class="pipeline-status${next.tone === "alert" ? " err-text" : ""}">${escapeHtml(next.status)}</p>
     ${next.progress !== undefined ? `<div class="progress"><div style="width:${Math.round(next.progress * 100)}%"></div></div>` : ""}
     <div class="pipeline-actions">${btn(next.action)}${btn(next.small)}${btn(next.extra)}</div>
@@ -1413,13 +2078,13 @@ function pipelineCardHtml(o) {
     <label class="checkbox-row small"><input type="checkbox" class="switch" id="pipeline-sites" ${o.sites_enabled ? "checked" : ""} /> Собирать компании с сайтов компаний сам</label>
     <details class="pipeline-more small">
       <summary>Подробнее</summary>
-      <div class="row"><span>Откуда за неделю</span><span>🏢 сайты +${a.sites} · ✈️ Telegram +${a.telegram} · 📄 файлы +${a.file}</span></div>
+      <div class="row"><span>Откуда за неделю</span><span>сайты +${a.sites} · Telegram +${a.telegram} · файлы +${a.file}</span></div>
       <div class="row"><span>Всего в Базе</span><span>${o.base_total.toLocaleString("ru-RU")}</span></div>
       ${ms?.last ? `<div class="row"><span>Последнее письмо</span><span>${fmtDay(ms.last.at)} → ${escapeHtml(ms.last.company)}</span></div>` : ""}
       <div class="row"><span>Всего отправлено</span><span>${o.sent} · ответили ${o.replied} · возвраты ${o.bounced}${o.followups ? ` · напоминаний готово ${o.followups}` : ""}</span></div>
       ${o.days_needed > 1 ? `<div class="row"><span>На всю Базу</span><span>≈ ${o.days_needed} ${plural(o.days_needed, "день", "дня", "дней")} отправки</span></div>` : ""}
       <div class="pipeline-links">
-        <button type="button" class="btn btn-ghost btn-small" data-pipeline="upload">📥 Загрузить список</button>
+        <button type="button" class="btn btn-ghost btn-small" data-pipeline="upload">Загрузить список</button>
         <button type="button" class="btn btn-ghost btn-small" data-own-go="contacts">Открыть Базу</button>
         <button type="button" class="btn btn-ghost btn-small" data-own-go="outreach">История рассылок</button>
         <button type="button" class="btn btn-ghost btn-small" data-own-settings="settings-direct">Сайты компаний: настроить</button>
@@ -1478,12 +2143,29 @@ function bindPipelineCard(el, o) {
 }
 
 // Боковая панель поверх Главной — та же, что у окна площадки.
-function openSideDrawer(title, bodyHtml) {
-  document.getElementById("platform-drawer-title").textContent = title;
+// Шторка справа — одна на всё приложение: площадка, письма рассылки,
+// промт для ИИ. Старый вызов openSideDrawer(title, html) тоже работает.
+function openSideDrawer(titleOrOpts, bodyHtml) {
+  const o = typeof titleOrOpts === "object" && titleOrOpts
+    ? titleOrOpts
+    : { title: escapeHtml(titleOrOpts), body: bodyHtml };
+  if (typeof titleOrOpts !== "object") {
+    openDrawerSource = null;
+    drawerDirty = false;
+  }
+  document.getElementById("platform-drawer-title").innerHTML = o.title;
+  const sub = document.getElementById("platform-drawer-sub");
+  sub.innerHTML = o.sub || "";
+  sub.hidden = !o.sub;
   const body = document.getElementById("platform-drawer-body");
-  body.innerHTML = bodyHtml;
-  document.getElementById("platform-drawer-overlay").style.display = "flex";
-  trapFocus(document.getElementById("platform-drawer"));
+  body.innerHTML = o.body;
+  const foot = document.getElementById("platform-drawer-foot");
+  foot.innerHTML = o.foot || "";
+  foot.hidden = !o.foot;
+  const overlay = document.getElementById("platform-drawer-overlay");
+  const wasOpen = overlay.style.display !== "none";
+  overlay.style.display = "flex";
+  if (!wasOpen) trapFocus(document.getElementById("platform-drawer"));
   return body;
 }
 
@@ -1492,8 +2174,8 @@ function openPromptDrawer() {
     <p class="small">Откройте ChatGPT в режиме <b>Deep Research</b> или Claude с <b>Research</b> — нужен поиск в интернете: обычный чат придумывает адреса. Вставьте промт, поменяйте то, что в [скобках], попросите сохранить таблицу в Excel или CSV и загрузите файл.</p>
     <textarea id="drawer-prompt" rows="16" readonly aria-label="Промт для ИИ">${escapeHtml(document.getElementById("ai-prompt").value)}</textarea>
     <div class="step-actions">
-      <button type="button" class="btn btn-secondary btn-small" id="drawer-prompt-copy">📋 Скопировать промт</button>
-      <button type="button" class="btn btn-primary btn-small" id="drawer-upload">📥 Загрузить файл</button>
+      <button type="button" class="btn btn-secondary btn-small" id="drawer-prompt-copy">Скопировать промт</button>
+      <button type="button" class="btn btn-primary btn-small" id="drawer-upload">Загрузить файл</button>
     </div>`);
   body.querySelector("#drawer-prompt-copy").addEventListener("click", async (e) => {
     try {
@@ -1523,12 +2205,12 @@ function openReviewDrawer() {
           ${resumes.map((r) => `<option value="${escapeHtml(r.name)}">${escapeHtml(r.name)}</option>`).join("")}
         </select>
       </label>
-      <button type="button" class="btn btn-primary" id="review-send">🚀 Начать отправку (${cur.draft})</button>
+      <button type="button" class="btn btn-primary" id="review-send">Начать отправку (${cur.draft})</button>
       <label class="checkbox-row small"><input type="checkbox" class="switch" id="review-auto" ${lastOutreach.auto_send ? "checked" : ""} />
         Дальше бот отправляет новые порции сам, без моего просмотра</label>
       <p class="muted small">${escapeHtml(mailPlanText(lastOutreach.plan))}. По одному, со случайными паузами — как человек; что не уйдёт сегодня, отправлю в следующие дни сам.</p>
     </div>
-    <p class="small review-about">✍️ Письма написаны по вашему резюме: обращение по имени, почему именно эта компания, 2–3 ваших достижения, 150–180 слов. Резюме — во вложении. Любое письмо можно поправить или убрать.</p>
+    <p class="small review-about">Письма написаны по вашему резюме: обращение по имени, почему именно эта компания, 2–3 ваших достижения, 150–180 слов. Резюме — во вложении. Любое письмо можно поправить или убрать.</p>
     <div class="letters">${cur.drafts
       .map(
         (i) => `<details class="letter">
@@ -1585,13 +2267,57 @@ function openReviewDrawer() {
   });
 }
 
-async function renderTodo() {
+// Кнопка действия у пункта «Нужно ваше решение» — по id пункта с сервера.
+const TODO_ACTIONS = {
+  campaign_drafts: "Просмотреть",
+  drafts: "Ответить",
+  replies: "Открыть",
+  interviews: "Подготовиться",
+  paused: "Исправить",
+  errors: "Открыть",
+  tg_login: "Войти",
+  watch_conn: "Журнал",
+  gateway_silent: "Проверить",
+  low_disk: "Подробнее",
+  linkedin_forms: "Посмотреть",
+  hh_reminders: "Напомнить",
+  tg_pending: "Открыть",
+  mail_stopped: "Исправить",
+};
+
+// Пункты, о которых сервер в /api/todo не знает, но они видны из
+// /api/status и сводки рассылки: очередь сообщений в Telegram,
+// молчащие работодатели на HH, сбои площадок, остановленная рассылка.
+function todoExtras(status) {
+  const extra = [];
+  if (!status) return extra;
+  if (status.pending_telegram_sends) {
+    const n = status.pending_telegram_sends;
+    extra.push({ id: "tg_pending", count: n, view: "telegram", text: `${plural(n, "сообщение ждёт", "сообщения ждут", "сообщений ждут")} отправки в Telegram — уйдут в рабочие часы` });
+  }
+  if (status.hh_reminders_due) {
+    const n = status.hh_reminders_due;
+    extra.push({ id: "hh_reminders", count: n, view: "replies", text: `${plural(n, "отклик", "отклика", "откликов")} на HH давно без ответа — можно напомнить о себе` });
+  }
+  const broken = status.sources.filter((s) => s.schedule_enabled && s.status === "error");
+  if (broken.length) {
+    extra.push({ id: "errors", count: broken.length, view: "overview", source: broken[0].name, text: `${plural(broken.length, "площадка", "площадки", "площадок")} с ошибкой: ${broken.map((s) => sourceLabel(s.name)).join(", ")}` });
+  }
+  const ms = lastOutreach?.mail_status;
+  if (ms?.state === "stopped") {
+    extra.push({ id: "mail_stopped", count: "!", view: ms.goto || "outreach", text: `Рассылка остановлена: ${stripLeadingEmoji(ms.text)}` });
+  }
+  return extra;
+}
+
+async function renderTodo(todo, status = lastStatus) {
   const el = document.getElementById("todo-panel");
-  let todo;
-  try {
-    todo = await api("/api/todo");
-  } catch (e) {
-    return false; // сеть моргнула — не прячем дашборд из-за этого
+  if (!todo) {
+    try {
+      todo = await api("/api/todo");
+    } catch (e) {
+      return false; // сеть моргнула — не прячем дашборд из-за этого
+    }
   }
   lastTodoBadges = todo.badges || {};
   applySubnavBadges();
@@ -1608,9 +2334,9 @@ async function renderTodo() {
     )
     .join("")}</ol>`;
   // Три состояния: 1) не настроено главное (резюме, ключ ИИ, площадка) —
-  // полный мастер для новичка; 2) главное есть, дополнительное нет — одна
-  // тихая строка, её можно раскрыть или скрыть ✕; 3) всё есть — ничего.
-  // Сломалось потом — отдельной строкой в «Что сделать сейчас», не мастером.
+  // чек-лист для новичка вместо подсказки-тура; 2) главное есть,
+  // дополнительное нет — одна тихая строка, её можно раскрыть или скрыть ✕;
+  // 3) всё есть — ничего. Сломалось потом — отдельным пунктом ниже.
   let setupHtml = "";
   const optionalKey = missing.map((c) => c.id).join(",");
   let dismissed = "";
@@ -1619,68 +2345,70 @@ async function renderTodo() {
   } catch (e) {}
   if (missingRequired.length) {
     const next = missingRequired[0];
-    setupHtml = `<div class="setup">
+    setupHtml = `<div class="setup" data-ui="home.setup">
         <div class="setup-head">
-          <h3 style="margin:0">Настройка: ${done} из ${setup.length}</h3>
+          <h3>Готовность: ${done} из ${setup.length}</h3>
           <div class="progress setup-progress"><div style="width:${Math.round((100 * done) / setup.length)}%"></div></div>
         </div>
         <div class="setup-next">
           <div><span class="muted small">Следующий шаг</span><div><b>${escapeHtml(next.label)}</b> — ${escapeHtml(next.hint)}</div></div>
-          ${next.goto ? `<button type="button" class="btn btn-primary" data-setup-goto="${escapeHtml(next.goto)}">Сделать →</button>` : ""}
+          ${next.goto ? `<button type="button" class="btn btn-primary" data-setup-goto="${escapeHtml(next.goto)}">Сделать</button>` : ""}
         </div>
         ${stepsHtml(next)}
       </div>`;
   } else if (missing.length && dismissed !== optionalKey) {
     setupHtml = `<details class="setup-slim">
-        <summary>✓ Всё главное настроено · можно ещё подключить: ${missing.map((c) => escapeHtml(c.label)).join(", ")}
+        <summary>Всё главное настроено · можно ещё подключить: ${missing.map((c) => escapeHtml(c.label)).join(", ")}
           <button type="button" class="icon-btn setup-dismiss" title="Скрыть — всё есть в Настройки → Подключения" aria-label="Скрыть">✕</button></summary>
         ${stepsHtml(null)}
       </details>`;
   }
-  const bindSetup = () => {
-    el.querySelector(".setup-dismiss")?.addEventListener("click", (e) => {
-      e.preventDefault(); // не раскрывать <details>
-      try {
-        // Запоминаем именно этот набор: появится новое — строка вернётся.
-        localStorage.setItem("cj-setup-dismissed", optionalKey);
-      } catch (err) {}
-      el.querySelector(".setup-slim")?.remove();
-    });
-    bindSetupSteps();
-  };
-  const bindSetupSteps = () =>
-    el.querySelectorAll("[data-setup-goto]").forEach((btn) =>
-      btn.addEventListener("click", () => {
-        const goto = btn.dataset.setupGoto;
-        if (goto.startsWith("settings-")) {
-          switchTab("settings");
-          switchSettingsTab(goto);
-          if (goto === "settings-tg-quick") loadTelegramWatch();
-        } else if (goto) {
-          switchTab(goto);
-        }
-      })
-    );
-  if (!todo.items.length) {
-    el.innerHTML = setupHtml + `<div class="todo-calm">✓ Сейчас ничего не ждёт вашего решения.</div>`;
-    bindSetup();
-    return !!missingRequired.length;
+  const items = [...todo.items, ...todoExtras(status)];
+  const badge = document.getElementById("overview-error-badge");
+  if (items.length) {
+    badge.textContent = String(items.length);
+    badge.style.display = "";
+  } else {
+    badge.style.display = "none";
   }
-  el.innerHTML = `${setupHtml}
-    <h3 style="margin:0 0 10px">Что сделать сейчас</h3>
-    ${todo.items
-      .map(
-        (i) => `
-      <button type="button" class="todo-item" data-todo-view="${i.view}">
-        <span class="todo-count">${i.count}</span>
-        <span class="todo-text">${escapeHtml(i.text)}</span>
-        <span class="todo-go" aria-hidden="true">→</span>
-      </button>`
-      )
-      .join("")}`;
+  const head = `<div class="card-head"><h3>Нужно ваше решение</h3><span class="muted small">всё остальное бот делает сам</span></div>`;
+  el.innerHTML = `${setupHtml}${head}${items.length
+    ? `<div class="todo-list">${items
+        .map(
+          (i, n) => `<div class="todo-row stagger-item" style="animation-delay:${staggerDelay(n, 40)}">
+            <span class="todo-count mono">${escapeHtml(String(i.count))}</span>
+            <span class="todo-text">${escapeHtml(stripLeadingEmoji(i.text))}</span>
+            <button type="button" class="btn btn-small" data-todo-view="${escapeHtml(i.view)}" data-todo-id="${escapeHtml(i.id || "")}" data-todo-source="${escapeHtml(i.source || "")}">${TODO_ACTIONS[i.id] || "Открыть"}</button>
+          </div>`
+        )
+        .join("")}</div>`
+    : `<div class="todo-calm"><span class="dot ok"></span>Сейчас ничего не ждёт вашего решения — бот справляется сам.</div>`}`;
+  el.querySelector(".setup-dismiss")?.addEventListener("click", (e) => {
+    e.preventDefault(); // не раскрывать <details>
+    try {
+      // Запоминаем именно этот набор: появится новое — строка вернётся.
+      localStorage.setItem("cj-setup-dismissed", optionalKey);
+    } catch (err) {}
+    el.querySelector(".setup-slim")?.remove();
+  });
+  el.querySelectorAll("[data-setup-goto]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const goto = btn.dataset.setupGoto;
+      if (goto.startsWith("settings-")) gotoSettings(goto);
+      else if (goto) switchTab(goto);
+    })
+  );
   el.querySelectorAll("[data-todo-view]").forEach((btn) => {
-    btn.addEventListener("click", () => switchTab(btn.dataset.todoView));
-  });  bindSetup();
+    btn.addEventListener("click", () => {
+      const view = btn.dataset.todoView;
+      if (btn.dataset.todoSource) openPlatform(btn.dataset.todoSource);
+      else if (btn.dataset.todoId === "paused") {
+        const paused = (lastStatus?.sources || []).find((s) => s.paused || s.status === "blocked");
+        if (paused) openPlatform(paused.name);
+      } else if (view.startsWith("settings-")) gotoSettings(view);
+      else switchTab(view);
+    });
+  });
   return !!missingRequired.length;
 }
 
@@ -1835,6 +2563,7 @@ function fillTelegramRules(settings) {
   document.getElementById("tg-hours-start").value = settings.active_hours_start ?? "";
   document.getElementById("tg-hours-end").value = settings.active_hours_end ?? "";
   document.getElementById("tg-rules-panel").dataset.loaded = "1";
+  document.getElementById("tg-source-auto").dataset.loaded = "1";
 }
 
 async function loadTelegramWatch() {
@@ -1845,17 +2574,17 @@ async function loadTelegramWatch() {
   if (line) {
     const state = w.running ? "on" : w.enabled ? "wait" : "off";
     line.className = `parser-state is-${state}`;
-    line.textContent = {
-      on: "● Парсер работает",
-      wait: w.daemon_running ? "● Парсер подключается…" : "● Парсер включён — заработает после «▶ Запустить»",
-      off: "● Парсер выключен — включите в «Настроить»",
-    }[state];
+    line.innerHTML = `<span class="dot ${state === "on" ? "ok" : state === "wait" ? "never_run" : "idle"}"></span>${escapeHtml({
+      on: `Telegram-парсер слушает ${w.channels} ${plural(w.channels, "канал", "канала", "каналов")}`,
+      wait: w.daemon_running ? "Telegram-парсер подключается…" : "Telegram-парсер заработает после «Запустить»",
+      off: "Telegram-парсер выключен — включается в «Правилах парсера»",
+    }[state])}`;
     document.getElementById("parser-numbers").innerHTML = [
       [w.channels, w.running ? "каналов слушаю" : "каналов в списке"],
       [w.matched, "вакансий найдено с запуска"],
       [w.contacts_collected, "контактов HR в базе"],
     ]
-      .map(([n, t]) => `<div><span class="results-big">${n}</span><span class="muted">${t}</span></div>`)
+      .map(([n, t]) => `<span><b class="mono">${n}</b> ${t}</span>`)
       .join("");
   }
   const pane = document.getElementById("settings-tg-quick");
@@ -1868,7 +2597,7 @@ async function loadTelegramWatch() {
     : w.enabled
       ? w.daemon_running
         ? "Подключаюсь к Telegram…"
-        : "Включено — заработает, когда нажмёте «Запустить» слева"
+        : "Включено — заработает, когда нажмёте «Запустить бота»"
       : "Выключено";
   const keywords = document.getElementById("tgq-keywords");
   keywords.value = w.keywords.join("\n");
@@ -1886,6 +2615,8 @@ async function loadTelegramWatch() {
   greeting.value = w.greeting;
   updateGreetingPreview();
   document.getElementById("tgq-auto-message").checked = w.auto_message;
+  document.getElementById("tgq-preview").checked = !!w.preview_before_send;
+  document.getElementById("tgq-night").checked = !!w.night_to_morning;
   document.getElementById("tgq-smart-greeting").checked = w.smart_greeting;
   document.getElementById("tgq-llm-vacancy-filter").checked =
     w.llm_vacancy_filter;
@@ -1896,13 +2627,13 @@ async function loadTelegramWatch() {
   document.getElementById("tgq-daily-limit").value = w.daily_message_limit;
   document.getElementById("tgq-backfill-days").value = w.channel_backfill_days;
   document.getElementById("tgq-pending-status").textContent = w.pending_sends
-    ? `⏳ В очереди на отправку: ${w.pending_sends}`
+    ? `В очереди на отправку: ${w.pending_sends}`
     : "Очередь пуста — нет отложенных сообщений";
   renderTelegramResumes(w.resumes);
-  document.getElementById("tgq-resume-route").innerHTML = `📎 <b>Автовыбор при отклике:</b> русская вакансия → ${w.resume_route_ru ? escapeHtml(w.resume_route_ru) : "⚠️ не найдено"}, зарубежная → ${w.resume_route_en ? escapeHtml(w.resume_route_en) : "⚠️ не найдено"}`;
+  document.getElementById("tgq-resume-route").innerHTML = `<b>Автовыбор при отклике:</b> русская вакансия → ${w.resume_route_ru ? escapeHtml(w.resume_route_ru) : "не найдено"}, зарубежная → ${w.resume_route_en ? escapeHtml(w.resume_route_en) : "не найдено"}`;
   document.getElementById("tgq-bot-state").innerHTML = w.bot_connected
-    ? "✅ В ваш CrossJob-бот — с кнопками быстрого ответа."
-    : `⚠️ Бот уведомлений не подключён — <a href="#" data-goto-settings="settings-notifications">подключить</a> (1 минута), иначе кнопок не будет.`;
+    ? "Приходят в ваш бот в Telegram — с кнопками быстрого ответа."
+    : `Бот уведомлений не подключён — <a href="#" data-goto-settings="settings-notifications">подключить</a> (1 минута), иначе кнопок не будет.`;
   bindGotoSettings(document.getElementById("tgq-bot-state"));
   return w;
 }
@@ -1931,7 +2662,7 @@ async function renderResumes() {
   }
   const fileCell = (f, missing) =>
     f.exists
-      ? `<span class="resume-file" title="${escapeHtml(f.name)}">📄 <span class="resume-name">${escapeHtml(f.name)}</span></span>
+      ? `<span class="resume-file" title="${escapeHtml(f.name)}"><span class="pdf-badge" aria-hidden="true">PDF</span><span class="resume-name">${escapeHtml(f.name)}</span></span>
          <span class="muted small">${Math.max(1, Math.round(f.size / 1024))} КБ · ${fmtDay(f.updated_at)}</span>`
       : `<span class="${missing === "err" ? "err-text" : "muted"} small">${missing === "err" ? "не загружено" : "не загружено — берётся основное"}</span>`;
   const row = (title, where, file, action) => `
@@ -1953,12 +2684,12 @@ async function renderResumes() {
       `<button type="button" class="btn btn-ghost btn-small" data-upload="linkedin">${r.linkedin.exists ? "Заменить" : "Загрузить"}</button>`)}
     ${r.extra
       .map((f) =>
-        row("Дополнительное", "своя кнопка «+ 📎» под вакансией в Telegram; можно выбрать в рассылке",
+        row("Дополнительное", "своя кнопка «+ резюме» под вакансией в Telegram; можно выбрать в рассылке",
           fileCell(f),
           `<button type="button" class="btn btn-ghost btn-small" data-delete-extra="${escapeHtml(f.name)}" aria-label="Удалить ${escapeHtml(f.name)}">Удалить</button>`)
       )
       .join("")}
-    ${r.extra.length ? "" : `<div class="resume-row resume-empty"><div class="muted small">Дополнительных пока нет — например, резюме под другую роль. Кнопка «📎 Добавить дополнительное» выше.</div></div>`}`;
+    ${r.extra.length ? "" : `<div class="resume-row resume-empty"><div class="muted small">Дополнительных пока нет — например, резюме под другую роль. Кнопка «Добавить резюме» выше.</div></div>`}`;
   el.querySelectorAll("[data-upload]").forEach((b) =>
     b.addEventListener("click", () => document.getElementById(`resume-upload-${b.dataset.upload}`).click())
   );
@@ -2003,7 +2734,7 @@ async function renderResumes() {
       try {
         const payload = Object.fromEntries(fields.map((field) => [field.dataset.resumeRoute, field.value]));
         await api("/api/resumes/routing", { method: "PUT", body: JSON.stringify(payload) });
-        status.textContent = "✅ Сохранено";
+        status.textContent = "Сохранено";
       } catch (err) {
         status.textContent = err.message.replace(/^\d+: /, "");
         showToast(status.textContent, "error");
@@ -2027,7 +2758,7 @@ async function uploadTelegramResumes(files) {
     }
     renderTelegramResumes((await response.json()).resumes);
   }
-  status.textContent = "✅ Сохранено";
+  status.textContent = "Сохранено";
 }
 
 async function saveTelegramWatch() {
@@ -2041,6 +2772,8 @@ async function saveTelegramWatch() {
         stop_words: tagItemsOf(document.getElementById("tgq-stop")),
         greeting: document.getElementById("tgq-greeting").value,
         auto_message: document.getElementById("tgq-auto-message").checked,
+        preview_before_send: document.getElementById("tgq-preview").checked,
+        night_to_morning: document.getElementById("tgq-night").checked,
         smart_greeting: document.getElementById("tgq-smart-greeting").checked,
         llm_vacancy_filter: document.getElementById("tgq-llm-vacancy-filter")
           .checked,
@@ -2053,7 +2786,7 @@ async function saveTelegramWatch() {
       }),
     });
     await loadTelegramWatch();
-    status.textContent = "✅ Сохранено — применяется сразу.";
+    status.textContent = "Сохранено — применяется сразу.";
   } catch (err) {
     status.textContent = err.message;
   }
@@ -2153,8 +2886,8 @@ async function importPreview(file, el = document.getElementById("import-preview"
         refreshOwnChannels();
         return;
       }
-      el.innerHTML = `<p class="ok-text">✅ Добавлено: компаний ${res.companies}, контактов ${res.contacts} из ${escapeHtml(res.filename)}. </p>
-        <button type="button" class="btn btn-primary btn-small" data-goto-outreach>✉️ Перейти к рассылке →</button>`;
+      el.innerHTML = `<p class="ok-text">Добавлено: компаний ${res.companies}, контактов ${res.contacts} из ${escapeHtml(res.filename)}. </p>
+        <button type="button" class="btn btn-primary btn-small" data-goto-outreach>Перейти к рассылке →</button>`;
       el.querySelector("[data-goto-outreach]").addEventListener("click", () => switchTab("outreach"));
       // Сразу показать новое: фильтр по этому файлу, подсветка строк.
       document.getElementById("contacts-filter-source").value = `file:${res.filename}`;
@@ -2170,38 +2903,38 @@ function stepHead(n, title, state) {
   return `<div class="step-head"><span class="step-num ${state}">${state === "done" ? "✓" : n}</span><h3>${title}</h3></div>`;
 }
 
-// Итог последнего захода площадки: «новых 0» — не поломка, а «всё уже
-// просмотрено»; без этой строки такой заход в интерфейсе невидим.
-function lastSummaryRowHtml(sum) {
-  const parts = [`новых ${sum.new}`];
-  if (sum.new) {
-    parts.push(`слабое совпадение ${sum.low_fit}`);
-    parts.push(`откликов ${sum.applied}`);
-  }
-  const title = `Проверено ${fmtTime(sum.at)}. «Новых» — вакансий, которых ещё не было в журнале.`;
-  return `<div class="row" title="${escapeHtml(title)}"><span>Итог захода</span><span>${parts.join(" · ")}</span></div>`;
-}
-
 // «Что бот делает сейчас»: последние значимые строки журнала без служебных.
+// «Что бот делает сейчас»: последние понятные строки журнала, или
+// «бот остановлен» с кнопкой запуска.
 async function renderLiveFeed() {
-  const box = document.getElementById("live-feed");
-  if (!box?.open) return;
+  const body = document.getElementById("live-feed-body");
+  const dot = document.getElementById("live-feed-dot");
+  if (!body) return;
+  const running = !!lastStatus?.daemon_running;
+  const busy = !!lastRunNow?.running;
+  dot.className = `dot ${running || busy ? "running" : "idle"}`;
+  if (!running && !busy) {
+    body.innerHTML = `<p class="feed-stopped">Бот остановлен. Площадки не ищут по расписанию; рассылка работает, пока открыто приложение.</p>
+      <button type="button" class="btn btn-small" id="feed-run">Запустить</button>`;
+    body.querySelector("#feed-run").addEventListener("click", () => document.getElementById("daemon-toggle").click());
+    return;
+  }
   try {
     const { lines } = await api("/api/logs?lines=120");
-    const rows = lines
+    const rows = (lines || [])
       .filter((l) => / (INFO|WARNING|ERROR) +\|/.test(l) && !l.includes("api.telegram.org"))
-      .slice(-10)
+      .slice(-8)
       .reverse()
-      .map((l) => {
+      .map((l, i) => {
         const [, time = "", level = "", , msg = l] = l.match(/^\S+ (\S+) \| (\w+) *\| ([^-]*) - (.*)$/) || [];
-        return `<div>${escapeHtml(time.slice(0, 8))} ${level === "INFO" ? "" : "⚠ "}${escapeHtml(msg.slice(0, 160))}</div>`;
+        return `<div class="feed-row stagger-item${level === "INFO" ? "" : " is-warn"}" style="animation-delay:${staggerDelay(i, 40)}"><span class="mono feed-time">${escapeHtml(time.slice(0, 5))}</span><span>${escapeHtml(msg.slice(0, 160))}</span></div>`;
       });
-    document.getElementById("live-feed-body").innerHTML = rows.join("") || "Пока тихо.";
+    body.innerHTML = rows.join("") || `<p class="feed-stopped">Пока тихо — бот ждёт следующего хода.</p>`;
   } catch (e) {
     /* лента необязательна */
   }
 }
-document.getElementById("live-feed")?.addEventListener("toggle", renderLiveFeed);
+
 
 // Пометки «не поддерживается»: по выбранным в «Что ищу» фильтрам — на каких
 // площадках каждый действует, а на каких нет (данные: /api/filters/support).
@@ -2324,7 +3057,7 @@ async function loadCampaigns() {
   // ① База
   const base = document.getElementById("step-base");
   base.innerHTML = `
-    ${stepHead(1, "База", data.available || cur ? "done" : "active")}
+    ${stepHead(1, "Кому писать", data.available || cur ? "done" : "active")}
     ${
       data.available
         ? `<p>Можно написать <b>${data.available}</b> ${plural(data.available, "компании", "компаниям", "компаниям")} с email, которым вы ещё не писали:</p>
@@ -2332,7 +3065,7 @@ async function loadCampaigns() {
         : `<p class="muted">${cur ? "Все новые адреса уже в текущей рассылке." : "Пока некому писать — загрузите свой список или подождите, пока бот соберёт контакты из Telegram и вакансий."}</p>`
     }
     <div class="step-actions">
-      <button type="button" class="btn btn-ghost btn-small" data-base-open>Открыть базу и загрузить свой файл →</button>
+      <button type="button" class="btn btn-small" data-base-open>Выбрать в Базе</button>
     </div>`;
   base.querySelector("[data-base-open]").addEventListener("click", () => switchTab("contacts"));
 
@@ -2348,18 +3081,18 @@ async function loadCampaigns() {
     const days = Math.ceil((cur.stats.pending + drafts.length) / Math.max(1, data.daily_limit));
     body = batch
       ? `<p>В очереди: <b>${cur.stats.pending}</b>. Письма пишутся порциями по дневному лимиту (${data.daily_limit}), следующие — сами на следующий день, придут в бот.</p>
-         <button type="button" class="btn btn-primary" data-campaign="${cur.id}" data-action="prepare">✍️ Написать ${batch} ${plural(batch, "письмо", "письма", "писем")}</button>`
+         <button type="button" class="btn btn-primary" data-campaign="${cur.id}" data-action="prepare">Написать ${batch} ${plural(batch, "письмо", "письма", "писем")}</button>`
       : `<p class="muted">Ещё в очереди: <b>${cur.stats.pending}</b> — следующая порция будет готова завтра, когда эти письма уйдут${days > 1 ? ` (≈ ${days} ${plural(days, "день", "дня", "дней")} на всю рассылку)` : ""}.</p>`;
   } else if (!cur && data.available) {
     const days = data.days_needed;
     body = `<p class="muted small">Для каждой компании — своё письмо: обращение по имени, почему именно она, 2–3 ваших достижения под её профиль, 150–180 слов, тема «[Должность] Application — Имя Фамилия».</p>
-      ${days > 1 ? `<p class="muted small">Сейчас можно ${data.daily_limit} писем в день${data.mail_plan.warmup && data.daily_limit < data.mail_plan.daily_limit ? ` (разогрев ящика — дальше больше, до ${data.mail_plan.daily_limit})` : ""}: вся база — ≈ ${days} ${plural(days, "день", "дня", "дней")} отправки. Письма пишутся порциями, каждый день новая порция приходит в бот. Быстрее — выберите нужные компании в Базе фильтрами и «✉️ Написать выбранным».</p>` : ""}
+      ${days > 1 ? `<p class="muted small">Сейчас можно ${data.daily_limit} писем в день${data.mail_plan.warmup && data.daily_limit < data.mail_plan.daily_limit ? ` (разогрев ящика — дальше больше, до ${data.mail_plan.daily_limit})` : ""}: вся база — ≈ ${days} ${plural(days, "день", "дня", "дней")} отправки. Письма пишутся порциями, каждый день новая порция приходит в бот. Быстрее — выберите нужные компании в Базе фильтрами и «Написать письма».</p>` : ""}
       <div class="step-actions">
         ${sources.length > 1 ? `<select id="campaign-source" aria-label="Кому писать">
           <option value="">всем (${data.available})</option>
           ${sources.map(([s, n]) => `<option value="${escapeHtml(s)}">${escapeHtml(s)} (${n})</option>`).join("")}
         </select>` : ""}
-        <button type="button" class="btn btn-primary" id="campaign-create">✍️ Подготовить письма</button>
+        <button type="button" class="btn btn-primary" id="campaign-create">Подготовить письма</button>
       </div>`;
   } else {
     body = drafts.length ? "" : `<p class="muted">Появится, когда в базе будут адреса.</p>`;
@@ -2388,9 +3121,9 @@ async function loadCampaigns() {
     sendBody = progressHtml(cur.progress.kind === "send" ? "Отправляю" : "Отправляю напоминания", cur.progress, cur.id);
   } else if (drafts.length && cur.sending) {
     // Отправка включена, но сейчас ждёт: вечер/выходные, лимит, возвраты.
-    sendBody = `<p>⏸ Отправка идёт по расписанию — ждут ещё <b>${drafts.length}</b>. ${escapeHtml(data.mail_plan.reason || "Следующее письмо — в течение 15 минут.")}</p>
+    sendBody = `<p>Отправка идёт по расписанию — ждут ещё <b>${drafts.length}</b>. ${escapeHtml(data.mail_plan.reason || "Следующее письмо — в течение 15 минут.")}</p>
       <div class="step-actions"><button type="button" class="btn btn-ghost btn-small" data-campaign="${cur.id}" data-action="stop">Остановить рассылку</button></div>
-      <p class="small">🛡 ${escapeHtml(mailPlanText(data.mail_plan))} · <a href="#" data-goto-settings="settings-outreach">настроить</a></p>`;
+      <p class="field-hint">${escapeHtml(mailPlanText(data.mail_plan))}</p>`;
   } else if (drafts.length) {
     sendBody = `<div class="step-actions">
         <label class="muted small">Резюме во вложении
@@ -2399,10 +3132,10 @@ async function loadCampaigns() {
             ${resumes.map((r) => `<option value="${escapeHtml(r.name)}">${escapeHtml(r.name)}</option>`).join("")}
           </select>
         </label>
-        <button type="button" class="btn btn-primary" data-campaign="${cur.id}" data-action="send">🚀 Начать отправку (${drafts.length})</button>
+        <button type="button" class="btn btn-primary" data-campaign="${cur.id}" data-action="send">Начать отправку (${drafts.length})</button>
       </div>
       <p class="muted small">Бот отправляет по одному, со случайными паузами в течение рабочего дня — как человек. Что не уйдёт сегодня, продолжит сам в следующее время отправки. Можно закрыть окно.</p>
-      <p class="small">🛡 ${escapeHtml(mailPlanText(data.mail_plan))} · <a href="#" data-goto-settings="settings-outreach">настроить</a></p>`;
+      <p class="field-hint">${escapeHtml(mailPlanText(data.mail_plan))}</p>`;
   } else {
     sendBody = `<p class="muted">Когда письма будут готовы — здесь одна кнопка отправки.</p>`;
   }
@@ -2420,7 +3153,7 @@ async function loadCampaigns() {
         const due = c.items.filter((i) => i.follow_up_text);
         if (!due.length) return "";
         return `<div class="followups">
-          <p><b>⏳ Молчат больше недели: ${due.length}</b> — короткое напоминание уйдёт в ту же ветку письма, без вложения.</p>
+          <p><b>Молчат больше недели: ${due.length}</b> — короткое напоминание уйдёт в ту же ветку письма, без вложения.</p>
           <div class="letters">${due
             .map(
               (i) => `<details class="letter">
@@ -2430,7 +3163,7 @@ async function loadCampaigns() {
               </details>`
             )
             .join("")}</div>
-          ${c.progress ? "" : `<div class="step-actions"><button type="button" class="btn btn-primary btn-small" data-campaign="${c.id}" data-action="followups">⏳ Отправить напоминания (${due.length})</button></div>`}
+          ${c.progress ? "" : `<div class="step-actions"><button type="button" class="btn btn-primary btn-small" data-campaign="${c.id}" data-action="followups">Отправить напоминания (${due.length})</button></div>`}
         </div>`;
       })()}
       ${(() => {
@@ -2447,6 +3180,7 @@ async function loadCampaigns() {
     stepHead(3, "Отправка и результат", drafts.length && data.email_connected ? "active" : all.some((c) => c.stats.sent) ? "done" : "locked") +
     sendBody +
     (all.length ? `<h4 class="muted small">Рассылки</h4>${all.map(statsFor).join("")}` : "");
+  renderMailGuard(data.mail_plan);
 
   const view = document.getElementById("view-outreach");
   bindGotoSettings(view);
@@ -2507,6 +3241,24 @@ async function loadCampaigns() {
   }
 }
 
+// «Защита почты»: сколько ушло сегодня из лимита, возвраты, разогрев,
+// часы отправки и почему сейчас пауза.
+function renderMailGuard(p) {
+  const el = document.getElementById("mail-guard");
+  if (!el || !p) return;
+  const pct = p.limit ? Math.round((100 * p.sent_today) / p.limit) : 0;
+  el.innerHTML = `<div class="card-head flat between"><h3 id="mail-guard-h">Защита почты</h3><button type="button" class="link-btn small" data-goto-settings="settings-outreach">настроить</button></div>
+    <div class="guard-row"><span>Сегодня</span><span class="mono">${p.sent_today} / ${p.limit}</span></div>
+    <div class="progress"><div style="width:${Math.min(100, pct)}%"></div></div>
+    <div class="kv-list flat">
+      <div class="kv"><span>Возвратов за сутки</span><span class="mono ${p.bounce_stopped ? "err-text" : ""}">${p.recent_bounces} · стоп после ${p.bounce_stop}</span></div>
+      ${p.warmup ? `<div class="kv"><span>Разогрев ящика</span><span>день ${p.warmup_day}${p.limit < p.daily_limit ? `, до ${p.daily_limit} — постепенно` : ""}</span></div>` : ""}
+      <div class="kv"><span>Когда отправляю</span><span>${p.weekdays_only ? "по будням" : "каждый день"}, ${p.send_from}:00–${p.send_to}:00</span></div>
+      <div class="kv"><span>Сейчас</span><span>${p.can_send ? "можно отправлять" : escapeHtml(p.reason || "пауза")}</span></div>
+    </div>`;
+  bindGotoSettings(el);
+}
+
 function progressHtml(label, progress, id) {
   const pct = Math.round((100 * progress.done) / Math.max(progress.total, 1));
   return `<p>${label}: <b>${progress.done}</b> из ${progress.total}</p>
@@ -2517,47 +3269,247 @@ function progressHtml(label, progress, id) {
 // Карточка на Главной — "постоянный цикл" был спрятан внутри
 // Настроек → Лимиты откликов, а это прямой ответ на "успею ли я в
 // первые 30 кандидатов", так что вынесен на самое видное место.
-function renderSpeedCard(enabled, pendingTelegram, hhRemindersDue) {
-  const el = document.getElementById("speed-card");
-  const queueBadges = [
-    pendingTelegram
-      ? `<a href="#" class="queue-badge" data-view="telegram">⏳ В очереди на отправку в Telegram: ${pendingTelegram}</a>`
-      : "",
-    hhRemindersDue
-      ? `<a href="#" class="queue-badge" data-view="replies">🔔 Молчат долго на HH: ${hhRemindersDue} ${plural(hhRemindersDue, "отклик", "отклика", "откликов")}</a>`
-      : "",
-  ]
-    .filter(Boolean)
-    .join("");
-  el.innerHTML = `
-    <div class="row" style="align-items:center">
-      <span>⚡ Работать без пауз между площадками</span>
-      <label class="checkbox-row" style="margin:0"><input type="checkbox" id="speed-card-toggle" class="switch" ${enabled ? "checked" : ""} /></label>
-    </div>
-    <p class="muted small" style="margin:6px 0 0">${enabled ? "Включено — площадки идут по кругу с короткой паузой, а не ждут часами." : "Выключено — у каждой площадки своё расписание (Настройки → Площадки)."} <a href="#" data-goto-settings="settings-limits">Подробнее в настройках</a></p>
-    ${queueBadges ? `<div class="filters" style="margin-top:10px">${queueBadges}</div>` : ""}
-  `;
-  document.getElementById("speed-card-toggle").addEventListener("change", async (e) => {
-    e.target.disabled = true;
-    try {
-      await api("/api/settings/limits", {
-        method: "POST",
-        body: JSON.stringify({ continuous_cycle_enabled: e.target.checked }),
-      });
-      renderSpeedCard(e.target.checked, pendingTelegram, hhRemindersDue);
-    } catch (err) {
-      showToast(err.message.replace(/^\d+: /, ""), "error");
-      e.target.checked = !e.target.checked;
-      e.target.disabled = false;
+// ---------- Главная: шапка, карточки, полоса источников ----------
+
+function renderDaemonState(status) {
+  const badge = document.getElementById("daemon-badge");
+  const runningLabel = status.daemon_started_at
+    ? `бот работает · ${formatElapsed(status.daemon_started_at)}`
+    : "бот работает";
+  const gw = status.telegram_gateway;
+  badge.title = gw?.alive ? (gw.connected ? "Telegram-шлюз на связи" : "Telegram-шлюз переподключается") : "";
+  const pausedAll = !!status.pause_all?.paused;
+  badge.innerHTML = `<span class="badge-dot"></span><span class="btn-label">${
+    pausedAll ? "пауза на всё" : status.daemon_running ? (status.daemon_paused ? "бот на паузе" : runningLabel) : "бот остановлен"
+  }${gw?.alive ? (gw.connected ? " · Telegram ✓" : " · Telegram …") : ""}</span>`;
+  badge.classList.toggle("on", status.daemon_running && !status.daemon_paused);
+  badge.classList.toggle("off", !status.daemon_running || !!status.daemon_paused);
+  document.getElementById("brand-dot")?.classList.toggle("is-live", !!status.daemon_running && !status.daemon_paused);
+  // Одна кнопка: «Запустить» ↔ «Остановить» (на паузе — «Возобновить»).
+  const toggleBtn = document.getElementById("daemon-toggle");
+  const isPauseAction = status.daemon_running && !status.daemon_paused;
+  toggleBtn.classList.toggle("is-pause-action", isPauseAction);
+  toggleBtn.classList.toggle("is-paused", !!status.daemon_paused);
+  const label = !status.daemon_running ? "Запустить" : status.daemon_paused ? "Возобновить" : "Остановить";
+  toggleBtn.querySelector(".btn-label").textContent = label;
+  toggleBtn.title = !status.daemon_running
+    ? "Запустить бота: площадки по расписанию, Telegram-парсер, проверка ответов"
+    : status.daemon_paused
+      ? "Возобновить работу бота"
+      : "Остановить бота";
+  const homeRun = document.getElementById("home-run");
+  if (homeRun) {
+    homeRun.textContent = !status.daemon_running ? "Запустить бота" : status.daemon_paused ? "Возобновить" : "Остановить бота";
+    homeRun.classList.toggle("btn-primary", !status.pause_all?.paused && (!status.daemon_running || !!status.daemon_paused));
+    homeRun.title = toggleBtn.title;
+  }
+}
+
+// Общий режим «Откликаться / Только искать» — тот же флаг auto_apply,
+// что «Откликаться автоматически» в Настройках, только на виду.
+function modeSources(status) {
+  return status.sources.filter((s) => s.schedule_enabled && !OWN_CHANNELS.has(s.name));
+}
+
+function renderHomeMode(status) {
+  const box = document.getElementById("home-mode");
+  if (!box) return;
+  const on = modeSources(status);
+  const auto = on.filter((s) => s.auto_apply);
+  const state = !on.length ? "none" : auto.length === on.length ? "apply" : auto.length === 0 ? "search" : "mixed";
+  box.dataset.state = state;
+  box.title = state === "mixed"
+    ? `Сейчас сами откликаются ${auto.length} из ${on.length} площадок — выберите один режим для всех`
+    : state === "none" ? "Ни одна площадка не включена" : "";
+  box.querySelectorAll("[data-mode]").forEach((b) => {
+    const sel = b.dataset.mode === state;
+    b.classList.toggle("on", sel);
+    b.setAttribute("aria-checked", sel ? "true" : "false");
+    b.disabled = state === "none";
+  });
+  positionSegmented(box);
+}
+
+function positionSegmented(box) {
+  const ind = box.querySelector(".segmented-ind");
+  const sel = box.querySelector("button.on");
+  if (!ind) return;
+  if (!sel) {
+    ind.style.opacity = "0";
+    return;
+  }
+  ind.style.opacity = "1";
+  ind.style.width = `${sel.offsetWidth}px`;
+  ind.style.transform = `translateX(${sel.offsetLeft - 3}px)`;
+}
+
+async function setHomeMode(mode) {
+  const status = await api("/api/status");
+  const on = modeSources(status);
+  if (!on.length) return;
+  const enable = mode === "apply";
+  const targets = on.filter((s) => !!s.auto_apply !== enable);
+  if (!targets.length) return;
+  if (enable && !(await showConfirm(`Бот начнёт сам отправлять отклики на ${targets.length} ${plural(targets.length, "площадке", "площадках", "площадках")} — до дневного лимита каждой. Включить?`))) return;
+  try {
+    for (const s of targets) {
+      await api("/api/settings", { method: "POST", body: JSON.stringify({ source: s.name, auto_apply: enable }) });
     }
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  }
+  showSavedToast(enable ? "Бот снова откликается сам" : "Только искать: вакансии копятся в «Вакансиях», откликаетесь вы", async () => {
+    for (const s of targets) {
+      await api("/api/settings", { method: "POST", body: JSON.stringify({ source: s.name, auto_apply: !enable }) });
+    }
+    lastOverviewSnapshot = "";
+    render.overview();
   });
-  bindGotoSettings(el);
-  el.querySelectorAll(".queue-badge").forEach((a) => {
-    a.addEventListener("click", (e) => {
-      e.preventDefault();
-      switchTab(a.dataset.view);
+  lastOverviewSnapshot = "";
+  render.overview();
+}
+
+function renderHomeLimit(status, stats) {
+  const el = document.getElementById("home-limit");
+  if (!el) return;
+  const on = modeSources(status);
+  const sum = on.reduce((acc, s) => acc + (s.daily_limit || 0), 0);
+  const total = status.total_daily_application_limit || 0;
+  const limit = total ? Math.min(total, sum || total) : sum;
+  el.textContent = limit ? `сегодня ${stats.day} из ${limit} откликов` : "";
+  el.title = limit ? (total ? "Общий дневной лимит по всем площадкам (Настройки → Лимиты и оценка)" : "Сумма дневных лимитов включённых площадок") : "";
+}
+
+function sparkPaths(values, w = 96, h = 32) {
+  if (!values.length) return { line: "", area: "" };
+  const max = Math.max(1, ...values);
+  const step = values.length > 1 ? w / (values.length - 1) : w;
+  const pts = values.map((v, i) => [i * step, h - 2 - (v / max) * (h - 4)]);
+  const line = pts.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
+  return { line, area: `${line} L${w} ${h} L0 ${h} Z` };
+}
+
+function kpiCardHtml({ label, help, value, prev, prevLabel, series, i }) {
+  const delta = value - prev;
+  const arrow = delta > 0 ? "↑" : delta < 0 ? "↓" : "·";
+  const tone = delta > 0 ? "good" : delta < 0 ? "bad" : "flat";
+  const text = delta === 0 ? `как ${prevLabel}` : `на ${Math.abs(delta)} ${delta > 0 ? "больше" : "меньше"}, чем ${prevLabel}`;
+  const sp = series ? sparkPaths(series) : null;
+  return `<div class="card kpi-card stagger-item" style="animation-delay:${staggerDelay(i, 40)}">
+    <div class="kpi-label tip" tabindex="0">${escapeHtml(label)}
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 7v4M8 5h.01" stroke-linecap="round"/></svg>
+      <span class="tiptext" role="tooltip">${escapeHtml(help)}</span>
+    </div>
+    <div class="kpi-main">
+      <span class="kpi-value mono" data-target="${value}">0</span>
+      ${sp ? `<svg class="spark" viewBox="0 0 96 32" aria-hidden="true"><path d="${sp.area}" class="spark-area"/><path d="${sp.line}" class="spark-line"/></svg>` : ""}
+    </div>
+    <div class="kpi-delta"><span class="trend-${tone}">${arrow}</span>${escapeHtml(text)}</div>
+  </div>`;
+}
+
+async function renderKpis(stats) {
+  const el = document.getElementById("stats-row");
+  let results = null;
+  try {
+    results = await api("/api/results");
+  } catch (e) {}
+  const daily = stats.daily || [];
+  const cards = [
+    { label: "Откликов сегодня", help: "Реально отправленные отклики с полуночи. Пропуски и тестовые прогоны не считаются.", value: stats.day, prev: stats.prev_day, prevLabel: "вчера", series: daily.slice(-7) },
+    { label: "За неделю", help: "Отклики за последние 7 дней, сравнение — с 7 днями до них.", value: stats.week, prev: stats.prev_week, prevLabel: "на прошлой неделе", series: daily.slice(-14) },
+    { label: "За месяц", help: "Отклики за последние 30 дней, сравнение — с 30 днями до них.", value: stats.month, prev: stats.prev_month, prevLabel: "в прошлом месяце", series: Array.from({ length: Math.ceil(daily.length / 3) }, (_, i) => daily.slice(i * 3, i * 3 + 3).reduce((a, b) => a + b, 0)) },
+  ];
+  if (results) {
+    cards.push({ label: "Ответов работодателей", help: "Ответы, приглашения и офферы за 7 дней — с площадок, из Telegram и на письма рассылки.", value: results.week.replies, prev: results.prev.replies, prevLabel: "неделей раньше", series: null });
+  }
+  el.innerHTML = cards.map((c, i) => kpiCardHtml({ ...c, i })).join("");
+  el.querySelectorAll(".kpi-value").forEach((v) => countUp(v, parseInt(v.dataset.target, 10)));
+}
+
+async function renderHomeSplit() {
+  const el = document.getElementById("home-split");
+  if (!el) return;
+  let r;
+  try {
+    r = await api("/api/results?days=30");
+  } catch (e) {
+    return;
+  }
+  const label = (src) => (src === "email_campaign" ? "Рассылка по почте" : sourceLabel(src));
+  const rows = r.by_source.filter((x) => x.applied > 0).sort((a, b) => b.applied - a.applied);
+  const total = rows.reduce((acc, x) => acc + x.applied, 0);
+  const top = rows.slice(0, 5);
+  const rest = rows.slice(5).reduce((acc, x) => acc + x.applied, 0);
+  const segs = top.map((x, i) => ({ name: label(x.source), value: x.applied, color: `var(--chart-${i + 1})`, replies: x.replies }));
+  if (rest) segs.push({ name: `Прочие: ${rows.slice(5).map((x) => label(x.source)).join(", ")}`, value: rest, color: "var(--chart-6)", replies: rows.slice(5).reduce((a, x) => a + x.replies, 0) });
+  el.innerHTML = `<div class="card-head flat between"><h3 id="home-split-h">Куда ушли отклики за месяц</h3><span class="mono small muted">${total}</span></div>
+    ${total
+      ? `<div class="segs" role="img" aria-label="${escapeHtml(segs.map((x) => `${x.name}: ${x.value}`).join(", "))}">${segs
+          .map((x, i) => `<div class="seg" data-i="${i}" style="flex:${x.value} 1 0;background:${x.color}"></div>`)
+          .join("")}</div>
+        <div class="seg-caption small muted" id="home-split-caption">Наведите на полосу, чтобы увидеть долю площадки</div>
+        <div class="seg-legend">${segs
+          .map((x) => `<div class="seg-key"><span class="seg-swatch" style="background:${x.color}"></span><span class="seg-name">${escapeHtml(x.name)}</span><span class="mono">${x.value}</span></div>`)
+          .join("")}</div>`
+      : `<p class="small muted">За 30 дней откликов пока нет — включите площадки ниже и запустите бота.</p>`}`;
+  const cap = el.querySelector("#home-split-caption");
+  el.querySelectorAll(".seg").forEach((seg) => {
+    seg.addEventListener("mouseenter", () => {
+      const x = segs[Number(seg.dataset.i)];
+      cap.textContent = `${x.name}: ${x.value} ${plural(x.value, "отклик", "отклика", "откликов")} (${Math.round((100 * x.value) / total)}%), ответов ${x.replies}`;
     });
+    seg.addEventListener("mouseleave", () => (cap.textContent = "Наведите на полосу, чтобы увидеть долю площадки"));
   });
+}
+
+// Вход в аккаунт Telegram (Настройки → Подключения) и значок
+// состояния в «Общении» — по /api/telegram/status.
+function applyTelegramAccountStatus(status) {
+  const badge = document.getElementById("telegram-status-badge");
+  const note = document.getElementById("telegram-status-note");
+  // Ключи уже есть — поля не показываем, чтобы не путали.
+  if (status.configured) {
+    document.getElementById("tg-keys-row").outerHTML = `<div id="tg-keys-row" class="ok-text small">✓ Ключи сохранены</div>`;
+  }
+  if (!status.configured) {
+    badge.className = "badge off";
+    badge.innerHTML = '<span class="badge-dot"></span>не настроено';
+    note.textContent =
+      "Сначала вставьте api_id и api_hash ниже.";
+  } else if (status.connected) {
+    // Вход нужен один раз — дальше блок подключения свёрнут.
+    document.getElementById("tg-connect-panel").open = false;
+    badge.className = "badge on";
+    badge.innerHTML = '<span class="badge-dot"></span>подключено';
+    note.textContent = "";
+  } else {
+    badge.className = "badge off";
+    badge.innerHTML = '<span class="badge-dot"></span>не авторизовано';
+    note.textContent = "Введите номер телефона и код ниже.";
+  }
+  // Форма входа (телефон/код/пароль) нужна только пока не
+  // подключено — если уже авторизовано, незачем занимать место и
+  // сбивать с толку полем для повторного ввода номера.
+  document.getElementById("telegram-login-row").style.display =
+    status.connected ? "none" : "";
+  const offRow = document.getElementById("tg-account-off-row");
+  if (offRow) offRow.hidden = !status.connected;
+  if (status.connected) {
+    document.getElementById("telegram-login-code-row").style.display =
+      "none";
+    document.getElementById("telegram-login-password-row").style.display =
+      "none";
+    document.getElementById("telegram-login-status").textContent = "";
+  }
+}
+
+async function refreshTelegramAccount() {
+  try {
+    applyTelegramAccountStatus(await api("/api/telegram/status"));
+  } catch (e) {
+    /* не критично */
+  }
 }
 
 const render = {
@@ -2575,248 +3527,58 @@ const render = {
   },
 
   async overview() {
-    const todoPromise = renderTodo();
-    renderLiveFeed();
-    renderOwnChannels();
+    const todoPromise = api("/api/todo").catch(() => null);
     if (!overviewLoaded) {
       document.getElementById("stats-row").innerHTML = skeletonStats();
-      document.getElementById("source-grid-ru").innerHTML = skeletonSourceGrid(5);
-      document.getElementById("source-grid-intl").innerHTML = skeletonSourceGrid(3);
+      document.getElementById("source-grid-ru").innerHTML = skeletonRowsList(4);
+      document.getElementById("source-grid-intl").innerHTML = skeletonRowsList(3);
     }
 
-    const [status, stats, runNow, isOnboarding] = await Promise.all([
+    const [status, stats, runNow, todo] = await Promise.all([
       api("/api/status"),
       api("/api/stats"),
       api("/api/run-now/status"),
       todoPromise,
     ]);
+    lastStatus = status;
+    lastRunNow = runNow;
+    const isOnboarding = todo ? await renderTodo(todo, status) : document.getElementById("dashboard-sections").style.display === "none";
+    renderOwnChannels();
+    renderLiveFeed();
     // Обязательные шаги (резюме/ключ ИИ/площадка) не пройдены — ниже
     // нечего показывать: пустая статистика и площадки без резюме
     // только отвлекают от чек-листа выше него. См. #dashboard-sections
     // в index.html.
     document.getElementById("dashboard-sections").style.display = isOnboarding ? "none" : "";
 
-    // ponytail: без этой проверки весь блок ниже (счётчики со
-    // start-anew анимацией, карточки площадок, чекбоксы) пересобирался
-    // на каждый опрос раз в 7с даже когда ничего не изменилось — визуально
-    // это и есть "мерцание", о котором сообщил пользователь.
+    // ponytail: без этой проверки весь блок ниже пересобирался на каждый
+    // опрос раз в 7с, даже когда ничего не изменилось — это и было
+    // «мерцание», о котором сообщил пользователь.
     const snapshot = JSON.stringify({ status, stats, runNow });
     const unchanged = overviewLoaded && snapshot === lastOverviewSnapshot;
     lastOverviewSnapshot = snapshot;
 
-    const badge = document.getElementById("daemon-badge");
-    const runningLabel = status.daemon_started_at
-      ? `бот работает · ${formatElapsed(status.daemon_started_at)}`
-      : "бот работает";
-    const gw = status.telegram_gateway;
-    badge.title = gw?.alive ? (gw.connected ? "Telegram-шлюз на связи" : "Telegram-шлюз переподключается") : "";
-    badge.innerHTML = `<span class="badge-dot"></span><span class="btn-label">${
-      status.daemon_running ? runningLabel : "бот остановлен"
-    }${gw?.alive ? (gw.connected ? " · Telegram ✓" : " · Telegram …") : ""}</span>`;
-    badge.classList.toggle("on", status.daemon_running);
-    badge.classList.toggle("off", !status.daemon_running);
-    // Одна кнопка вместо двух (Старт/Пауза): демон не запущен — это
-    // "Запустить"; запущен и активен — "Пауза"; запущен и на паузе —
-    // "Возобновить". is-pause-action переключает play/pause-иконку
-    // (см. style.css), is-paused — только цвет в состоянии "на паузе"
-    // (тот же класс/приём, что был у отдельной кнопки-паузы).
-    const toggleBtn = document.getElementById("daemon-toggle");
-    const isPauseAction = status.daemon_running && !status.daemon_paused;
-    toggleBtn.classList.toggle("is-pause-action", isPauseAction);
-    toggleBtn.classList.toggle("is-paused", !!status.daemon_paused);
-    // Одна кнопка: «Запустить» ↔ «Остановить». Пауза и отдельный «Стоп»
-    // для человека — одно и то же, лишний выбор только путал.
-    toggleBtn.querySelector(".btn-label").textContent = !status.daemon_running
-      ? "Запустить"
-      : status.daemon_paused
-        ? "Возобновить"
-        : "Остановить";
-    toggleBtn.title = !status.daemon_running
-      ? "Запустить бота: площадки по расписанию, Telegram-парсер, проверка ответов"
-      : status.daemon_paused
-        ? "Возобновить работу бота"
-        : "Остановить бота";
-
-    // Проблемные площадки видно только зайдя на "Обзор" — бейдж на
-    // самой вкладке (как непрочитанные в Telegram) сигналит о них,
-    // даже если человек сейчас смотрит Историю или Настройки.
-    const errorCount = status.sources.filter(
-      (s) => s.status === "error" || s.status === "blocked"
-    ).length;
-    const overviewBadge = document.getElementById("overview-error-badge");
-    if (errorCount > 0) {
-      overviewBadge.textContent = String(errorCount);
-      overviewBadge.style.display = "";
-    } else {
-      overviewBadge.style.display = "none";
-    }
+    renderDaemonState(status);
+    renderPauseAll(status);
+    renderHomeMode(status);
+    renderHomeLimit(status, stats);
 
     if (!unchanged) {
-
-      const statsRow = document.getElementById("stats-row");
-      statsRow.classList.remove("content-fade-in");
-      void statsRow.offsetWidth;
-      statsRow.classList.add("content-fade-in");
-      statsRow.innerHTML = `
-        <div class="stat-card"><div class="value" data-target="${stats.day}">0</div><div class="label">откликов сегодня</div>${statTrendHtml(stats.day, stats.prev_day)}</div>
-        <div class="stat-card"><div class="value" data-target="${stats.week}">0</div><div class="label">за неделю</div>${statTrendHtml(stats.week, stats.prev_week)}</div>
-        <div class="stat-card"><div class="value" data-target="${stats.month}">0</div><div class="label">за месяц</div>${statTrendHtml(stats.month, stats.prev_month)}</div>
-      `;
-      statsRow.querySelectorAll(".value").forEach((el) => {
-        countUp(el, parseInt(el.dataset.target, 10));
-      });
-      renderSpeedCard(
-        status.continuous_cycle_enabled,
-        status.pending_telegram_sends,
-        status.hh_reminders_due
-      );
-
-      // ponytail: чекбокс теперь ЕСТЬ schedule_enabled этой площадки —
-      // единственный переключатель "площадка участвует в демоне", вместо
-      // отдельной кнопки "Запустить выбранные" поверх отдельного тумблера
-      // в "Настройках". checked всегда берётся из свежих данных сервера
-      // (s.schedule_enabled), а не сохраняется вручную между опросами —
-      // рендер и так пропускается, пока status не изменится (см. unchanged
-      // выше), так что раньше поставленная галочка не мигает.
-      // Telegram и «Сайты компаний» — отдельными карточками в «Свои каналы».
+      renderKpis(stats);
+      renderHomeSplit();
+      // Telegram, «Сайты компаний», Talanto и Hirify — в «Свои каналы».
       const ruSources = status.sources.filter((s) => !INTL_SOURCES.has(s.name) && !OWN_CHANNELS.has(s.name));
       const intlSources = status.sources.filter((s) => INTL_SOURCES.has(s.name));
-      const renderSourceCard = (s, i) => {
-          const dot = STATUS_DOT[s.status] || "never_run";
-          const ratio = s.daily_limit
-            ? Math.min(1, s.applied_today / s.daily_limit)
-            : 0;
-          const barClass =
-            ratio >= 1 ? "full" : ratio >= 0.7 ? "warn" : "";
-          const ringC = 2 * Math.PI * 13;
-          const ringOffset = ringC * (1 - ratio);
-          // telegram отправляет (пишет контакту) только при
-          // auto_message; остальные площадки — при auto_apply. Раньше
-          // в режиме "только поиск" счётчик "Откликов сегодня" вообще
-          // пропадал с карточки (заменялся строкой "Режим") — снаружи
-          // это выглядело как будто лимит нигде не виден. Теперь
-          // счётчик остаётся всегда (он и так 0/N, пока автоотклик
-          // выключен, — не вводит в заблуждение), а "только поиск"
-          // идёт отдельной строкой поверх него как пояснение.
-          const isSearchOnly =
-            s.name === "telegram" ? !s.auto_message : !s.auto_apply;
-          const isRunning = runNow.running && runNow.current_source === s.name;
-          // Один понятный выбор вместо «расписание» + «автоотклик» + «только поиск».
-          // Вкл/выкл — переключатель, как у Telegram-парсера; что делать, когда
-          // включена, — две кнопки: откликаться самому или только искать.
-          // Режим меняют редко — на карточке спокойная метка, по клику
-          // окно площадки с пояснением (случайно включить автоотклик нельзя).
-          const modeRow = `<div class="row"><span>Режим</span>${
-            s.schedule_enabled
-              ? `<button type="button" class="mode-chip${isSearchOnly ? "" : " is-apply"}" data-open-platform="${s.name}" title="Изменить режим и фильтры">${isSearchOnly ? "🔍 только ищет" : "✉️ откликается сам"}</button>`
-              : `<span class="muted">выключена</span>`
-          }</div>`;
-          const responseRow = `<div class="row"><span>Откликов сегодня</span>
-              <span class="limit-ring-wrap">
-                <svg width="18" height="18" viewBox="0 0 32 32">
-                  <circle class="limit-ring-bg" cx="16" cy="16" r="13"></circle>
-                  <circle class="limit-ring-fill ${barClass}" cx="16" cy="16" r="13" style="stroke-dasharray:${ringC.toFixed(2)};stroke-dashoffset:${ringOffset.toFixed(2)}"></circle>
-                </svg>
-                ${s.applied_today}/${s.daily_limit}
-              </span></div>`;
-          return `
-          <div class="source-card stagger-item${isRunning ? " is-running" : ""}" data-source="${s.name}" draggable="true" style="animation-delay:${staggerDelay(i)}">
-            <div class="source-card-actions">
-              <button type="button" class="src-run-now${isRunning ? " is-stop" : ""}" data-source="${s.name}" data-running="${isRunning ? "1" : "0"}" title="${isRunning ? "Остановить (текущая заявка досылается, следующая не начнётся)" : "Запустить эту площадку прямо сейчас, не дожидаясь расписания"}" aria-label="${isRunning ? "Остановить" : "Запустить сейчас"} ${sourceLabel(s.name)}">
-                ${isRunning
-                  ? `<svg viewBox="0 0 20 20" fill="none"><rect x="5.5" y="5.5" width="9" height="9" rx="1.5" fill="currentColor"/></svg>`
-                  : `<svg viewBox="0 0 20 20" fill="none"><path d="M7 5.2v9.6l8-4.8-8-4.8Z" fill="currentColor"/></svg>`}
-              </button>
-              <button type="button" class="src-goto-history" data-source="${s.name}" title="История откликов этой площадки" aria-label="История откликов ${sourceLabel(s.name)}">
-                <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.6"/><path d="M10 5.8V10l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-              </button>
-              <button type="button" class="src-goto-logs" data-source="${s.name}" title="Логи этой площадки" aria-label="Логи ${sourceLabel(s.name)}">
-                <svg viewBox="0 0 20 20" fill="none"><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M5.5 7.5 8 10l-2.5 2.5M9.8 12.5h4.7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </button>
-            </div>
-            <h3>
-              <input type="checkbox" class="switch platform-toggle" data-source="${s.name}" title="Включить или выключить площадку" aria-label="Включить ${sourceLabel(s.name)}" ${s.schedule_enabled ? "checked" : ""} />
-              <span class="dot ${isRunning ? "running" : dot}"></span> ${sourceIconHtml(s.name)}${sourceLabel(s.name)}
-            </h3>
-            ${modeRow}
-            <div class="row" title="Следующая проверка: ${escapeHtml(fmtTime(s.next_run))}"><span>Последняя проверка</span><span>${s.schedule_enabled ? fmtDay(s.last_run) : "—"}</span></div>
-            ${s.schedule_enabled && s.duration_seconds != null ? `<div class="row"><span>Последний ход</span><span>${Math.max(1, Math.round(s.duration_seconds / 60))} мин</span></div>` : ""}
-            ${s.schedule_enabled && s.last_summary ? lastSummaryRowHtml(s.last_summary) : ""}
-            ${responseRow}
-            ${errorRowHtml(s.last_error)}
-          </div>`;
-      };
+      const rowOf = (s, i) => platformRowHtml(sourceRowModel(s, runNow), i);
       document.getElementById("source-grid-ru").innerHTML = applySourceOrder(ruSources, "name", "cj-source-order-ru")
-        .map(renderSourceCard)
+        .map(rowOf)
         .join("");
       document.getElementById("source-grid-intl").innerHTML = applySourceOrder(intlSources, "name", "cj-source-order-intl")
-        .map(renderSourceCard)
+        .map(rowOf)
         .join("");
-      const chatGrid = document.getElementById("chat-checks-grid");
-      if (chatGrid) chatGrid.innerHTML = applySourceOrder(status.chat_checks, "name", "cj-source-order")
-        .map((c, i) => {
-          const dot = STATUS_DOT[c.status] || "never_run";
-          return `
-          <div class="source-card stagger-item" data-source="${c.name}" draggable="true" style="animation-delay:${staggerDelay(i)}">
-            <div class="source-card-actions">
-              <button type="button" class="src-goto-history" data-source="${c.name}" title="История откликов этой площадки" aria-label="История откликов ${escapeHtml(c.label)}">
-                <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.6"/><path d="M10 5.8V10l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-              </button>
-              <button type="button" class="src-goto-logs" data-source="${c.name}" title="Логи этой площадки" aria-label="Логи ${escapeHtml(c.label)}">
-                <svg viewBox="0 0 20 20" fill="none"><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M5.5 7.5 8 10l-2.5 2.5M9.8 12.5h4.7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </button>
-            </div>
-            <h3>
-              <input type="checkbox" class="schedule-toggle switch" data-source="${c.name}" title="Бот проверяет по расписанию" ${c.schedule_enabled ? "checked" : ""} />
-              <span class="dot ${dot}"></span> ${c.label}
-            </h3>
-            <div class="row"><span>Проверяю</span><span>${c.schedule_enabled ? intervalLabel(c.interval_hours) : "выключено"}</span></div>
-            <div class="row"><span>Последняя проверка</span><span>${fmtTime(c.last_run)}</span></div>
-            <div class="row"><span>Следующая проверка</span><span>${fmtTime(c.next_run)}</span></div>
-            <p class="muted small" style="margin:6px 0 0">${c.note}</p>
-            ${errorRowHtml(c.last_error)}
-          </div>`;
-        })
-        .join("");
-
-      const savePlatform = async (source, body, label) => {
-        try {
-          await api("/api/settings", { method: "POST", body: JSON.stringify({ source, ...body }) });
-          showToast(`${sourceLabel(source)}: ${label}`, "success");
-        } catch (err) {
-          showToast(err.message.replace(/^\d+: /, ""), "error");
-        }
-        lastOverviewSnapshot = "";
-        render.overview();
-      };
-      document.querySelectorAll(".platform-toggle").forEach((box) =>
-        box.addEventListener("change", () => {
-          box.disabled = true;
-          savePlatform(box.dataset.source, { schedule_enabled: box.checked }, box.checked ? "включена" : "выключена");
-        })
-      );
-      document.querySelectorAll("[data-open-platform]").forEach((btn) =>
-        btn.addEventListener("click", () => {
-          pendingPlatformDrawer = btn.dataset.openPlatform;
-          switchTab("settings");
-        })
-      );
-      document.querySelectorAll(".schedule-toggle").forEach((box) => {
-        box.addEventListener("change", async () => {
-          box.disabled = true;
-          try {
-            await api("/api/settings", {
-              method: "POST",
-              body: JSON.stringify({
-                source: box.dataset.source,
-                schedule_enabled: box.checked,
-              }),
-            });
-          } finally {
-            box.disabled = false;
-          }
-        });
-      });
+      if (openDrawerSource && isPlatformDrawerOpen() && !drawerDirty) {
+        refreshSourceDrawerHead(openDrawerSource);
+      }
     }
 
     overviewLoaded = true;
@@ -2824,151 +3586,52 @@ const render = {
 
   async history() {
     const source = document.getElementById("filter-source").value;
-    const status = document.getElementById("filter-status").value;
     const q = document.getElementById("filter-query").value;
     const params = new URLSearchParams();
     if (source) params.set("source", source);
-    if (status) params.set("status", status);
     if (q) params.set("q", q);
 
     const tbody = document.getElementById("history-rows");
-    if (!historyLoaded) tbody.innerHTML = skeletonRows(6, 7);
+    if (!historyLoaded) tbody.innerHTML = skeletonRows(6, 5);
 
-    // Отказы по умолчанию скрыты — на виду живые отклики.
-    const showRejected = document.getElementById("filter-show-rejected").checked;
-    const entries = (await api(`/api/applications?${params}`)).filter(
-      (e) => showRejected || e.effective_stage !== "rejected"
-    );
+    const all = await api(`/api/applications?${params}`);
     historyLoaded = true;
+    if (!jobThresholds) {
+      api("/api/settings/limits")
+        .then((l) => (jobThresholds = { min: l.job_min_score, fit: l.job_suitability_score }))
+        .catch(() => {});
+    }
 
-    // ponytail: тот же фикс мерцания, что и на "Обзоре" — без этого
-    // таблица (и её fade-in анимация строк через observeReveal)
-    // пересобиралась с нуля на каждом опросе раз в 7с, даже если ни
-    // одной новой строки не появилось.
-    const historySnapshot = JSON.stringify({ params: params.toString(), entries });
+    const historySnapshot = JSON.stringify({ params: params.toString(), chip: historyChip, all });
     if (historySnapshot === lastHistorySnapshot) return;
     lastHistorySnapshot = historySnapshot;
 
+    renderHistoryChips(all);
+    const entries = all.filter(HISTORY_CHIPS[historyChip].test);
     lastHistoryEntries = entries;
+    const today = all.filter((e) => e.status === "applied" && (e.applied_at || "").slice(0, 10) === new Date().toISOString().slice(0, 10)).length;
+    document.getElementById("history-today").textContent = `сегодня ${today} ${plural(today, "отклик", "отклика", "откликов")}`;
+    document.getElementById("history-count").textContent = `показано ${entries.length}`;
     if (!entries.length) {
-      tbody.innerHTML = `<tr><td colspan="8">${emptyStateHtml("Ничего не найдено.")}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5">${emptyStateHtml("Ничего не нашлось. Сбросьте фильтр или поищите по другому слову.")}</td></tr>`;
       updateHistoryScrollHint();
       return;
     }
-    const reversed = entries.slice().reverse();
-    tbody.innerHTML = reversed
-      .map(
-        (e, i) => `
-      <tr class="reveal" style="transition-delay:${staggerDelay(i, 25)}">
-        <td>${fmtTime(e.applied_at)}</td>
-        <td>${sourceIconHtml(e.source)}${sourceLabel(e.source)}</td>
-        <td>${escapeHtml(e.company)}</td>
-        <td><a href="${escapeHtml(e.link)}" target="_blank" rel="noopener">${escapeHtml(e.title)}</a>${rowActionsHtml(e, i)}</td>
-        <td>${statusLabel(e.status)}${e.remote_region ? `<div class="muted small">${REGION_LABELS[e.remote_region] || ""}</div>` : ""}</td>
-        <td>${e.status === "applied" ? stageSelectHtml(e) : `<span class="muted small">—</span>`}</td>
-        <td title="${e.gaps && e.gaps.length ? escapeHtml(e.gaps.join("; ")) : ""}">
-          <span class="mono-cell">${e.score ?? ""}</span>
-          ${
-            e.gaps && e.gaps.length
-              ? `<div class="readiness-note">${escapeHtml(truncate(e.gaps[0], 70))}${e.gaps.length > 1 ? ` (+${e.gaps.length - 1})` : ""}</div>`
-              : ""
-          }
-        </td>
-        <td>
-          ${
-            e.cover_letter
-              ? `<button type="button" class="btn btn-secondary btn-small" data-cover-letter-btn data-row-index="${i}">📄 Читать письмо</button>`
-              : `<span class="muted small">—</span>`
-          }
-
-        </td>
-      </tr>`
-      )
+    historyRows = entries.slice().sort((a, b) => (b.applied_at || "").localeCompare(a.applied_at || ""));
+    tbody.innerHTML = historyRows
+      .map((e, i) => {
+        const stage = e.effective_stage ? STAGE_LABELS[e.effective_stage] : "";
+        const tone = e.status === "applied" ? (e.effective_stage === "rejected" ? "bad" : e.effective_stage ? "good" : "") : e.status === "dry_run" ? "" : "muted";
+        return `<tr class="job-row reveal" tabindex="0" data-row-index="${i}" style="transition-delay:${staggerDelay(i, 25)}">
+          <td class="mono small muted nowrap">${fmtDay(e.applied_at)}</td>
+          <td><div class="job-cell">${plogoHtml(e.source)}<span class="row-main"><span class="row-title">${escapeHtml(e.company || "—")}</span><span class="row-sub">${escapeHtml(e.title)}${e.remote_region ? ` · ${REGION_LABELS[e.remote_region] || ""}` : ""}</span></span></div></td>
+          <td class="small nowrap">${escapeHtml(e.salary || "—")}</td>
+          <td><span class="status-text ${tone}">${escapeHtml(statusLabel(e.status))}</span>${stage ? `<span class="stage-tag">${escapeHtml(stage)}</span>` : ""}${e.apply_anyway && isSkipped(e) ? `<span class="stage-tag">отклик запланирован</span>` : ""}${e.feedback ? `<span class="stage-tag" title="${escapeHtml(e.feedback.reason || "")}">ваша пометка</span>` : ""}</td>
+          <td class="num mono">${e.score ?? "—"}${e.score != null ? `<span class="muted"> / 10</span>` : ""}</td>
+        </tr>`;
+      })
       .join("");
     updateHistoryScrollHint();
-    tbody.querySelectorAll("[data-cover-letter-btn]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        openCoverLetterModal(reversed[parseInt(btn.dataset.rowIndex, 10)]);
-      });
-    });
-    tbody.querySelectorAll("[data-prep-btn]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const e = reversed[parseInt(btn.dataset.rowIndex, 10)];
-        btn.disabled = true;
-        btn.textContent = "Готовлю…";
-        try {
-          const { prep } = await api("/api/applications/prep", {
-            method: "POST",
-            body: JSON.stringify({ source: e.source, external_id: e.external_id }),
-          });
-          openTextModal(`Подготовка: ${e.company} — ${e.title}`, "Справка к интервью", prep.replace(/\*\*/g, ""));
-        } catch (err) {
-          showToast(err.message, "error");
-        } finally {
-          btn.disabled = false;
-          btn.textContent = "🎯 Подготовка";
-        }
-      });
-    });
-    tbody.querySelectorAll("[data-find-hr]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const e = reversed[parseInt(btn.dataset.rowIndex, 10)];
-        btn.disabled = true;
-        btn.textContent = "Ищу контакты…";
-        try {
-          const res = await api("/api/contacts/from-application", {
-            method: "POST",
-            body: JSON.stringify({ source: e.source, external_id: e.external_id }),
-          });
-          showToast(
-            res.message ||
-              (res.added ? `Найдено контактов: ${res.added}` : "Компания добавлена в «Контакты» — публичных контактов на сайте нет"),
-            res.added ? "success" : "info",
-            7000
-          );
-          focusContactKey = res.key;
-          switchTab("contacts");
-        } catch (err) {
-          showToast(err.message.replace(/^\d+: /, ""), "error");
-          btn.disabled = false;
-          btn.textContent = "👤 Найти HR этой компании";
-        }
-      });
-    });
-    tbody.querySelectorAll("[data-calendar-btn]").forEach((btn) => {
-      btn.addEventListener("click", () =>
-        openCalendarOverlay(reversed[parseInt(btn.dataset.rowIndex, 10)])
-      );
-    });
-    tbody.querySelectorAll("[data-trainer-btn]").forEach((btn) => {
-      btn.addEventListener("click", () =>
-        openTrainer(reversed[parseInt(btn.dataset.rowIndex, 10)])
-      );
-    });
-    tbody.querySelectorAll("[data-prefill-btn]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const e = reversed[parseInt(btn.dataset.rowIndex, 10)];
-        btn.disabled = true;
-        try {
-          const { filled } = await api("/api/direct/prefill", {
-            method: "POST",
-            body: JSON.stringify({ source: e.source, external_id: e.external_id }),
-          });
-          showToast(
-            filled.length
-              ? `Форма открыта в Chrome, заполнено: ${filled.join(", ")}. Ответьте на вопросы компании и нажмите Submit.`
-              : "Форма открыта в Chrome — эту разметку заполнить не удалось, заполните вручную.",
-            "success",
-            8000
-          );
-        } catch (err) {
-          showToast(err.message, "error");
-        } finally {
-          btn.disabled = false;
-        }
-      });
-    });
-    bindStageSelects(tbody);
     observeReveal(tbody);
   },
 
@@ -2978,6 +3641,7 @@ const render = {
 
     renderDraftsQueue();
     renderHhRemindersQueue();
+    render.telegram();
     const entries = await api("/api/inbox");
     // Конфетти — только на реально новый ответ, появившийся после
     // первой загрузки за сессию, не на каждое открытие вкладки с уже
@@ -2994,10 +3658,12 @@ const render = {
     lastRepliesSnapshot = repliesSnapshot;
     lastRepliesEntries = entries;
     renderRepliesRows();
+    renderTelegramPosts();
   },
 
   async analytics() {
     renderResults();
+    requestAnimationFrame(() => positionSegmented(document.getElementById("stats-period")));
     renderActivityHeatmap();
     const gapsEl = document.getElementById("gaps-list");
     const candidatesEl = document.getElementById("blacklist-candidates");
@@ -3014,14 +3680,16 @@ const render = {
     renderMarket(market);
     renderOffers();
 
+    const gapMax = gaps.length ? Math.max(...gaps.map(([, c]) => c)) : 1;
     gapsEl.innerHTML = gaps.length
       ? gaps
           .map(
             ([gap, count], i) =>
-              `<li class="stagger-item" style="animation-delay:${staggerDelay(i)}">${escapeHtml(gap)} — ${count}</li>`
+              `<li class="funnel-row stagger-item" style="animation-delay:${staggerDelay(i, 40)}"><span class="funnel-label">${escapeHtml(gap)}</span><span class="funnel-track"><span class="funnel-bar" style="width:${Math.round((count / gapMax) * 100)}%"></span></span><span class="funnel-value">${count}</span></li>`
           )
           .join("")
       : `<li>${emptyStateHtml("Пока нет данных.")}</li>`;
+    growFunnelBars(gapsEl);
 
     if (!candidates.length) {
       candidatesEl.innerHTML = emptyStateHtml("Нет кандидатов на чёрный список.");
@@ -3033,7 +3701,7 @@ const render = {
       <div class="candidate-row stagger-item" style="animation-delay:${staggerDelay(i)}">
         <input type="checkbox" value="${escapeHtml(c)}" class="blacklist-check" />
         <span>${escapeHtml(c)}</span>
-        <button class="btn btn-secondary btn-small block-hh-employer" data-company="${escapeHtml(c)}" title="Заблокировать работодателя на hh.ru (серверный бан, только для HeadHunter)">🔒 hh.ru</button>
+        <button class="btn btn-secondary btn-small block-hh-employer" data-company="${escapeHtml(c)}" title="Заблокировать работодателя на hh.ru (серверный бан, только для HeadHunter)">Скрыть на hh.ru</button>
       </div>`
       )
       .join("");
@@ -3042,6 +3710,7 @@ const render = {
   async settings() {
     loadOutreachSettings(); // заполняет и сводку, и фильтры удалёнки на других вкладках
     loadAccounts();
+    refreshTelegramAccount();
     const [status, salary, limits] = await Promise.all([
       api("/api/status"),
       api("/api/settings/salary"),
@@ -3089,6 +3758,7 @@ const render = {
       document.getElementById("llm-mode").value = llm.mode || "auto";
       document.getElementById("llm-fallback-enabled").checked =
         llm.fallback_enabled !== false;
+      renderFallbackOrder(llm);
     });
 
     api("/api/settings/llm/status").then(applyLLMProviderStatus);
@@ -3161,481 +3831,43 @@ const render = {
         : "none";
     });
 
-    // Карточка на площадку (тот же язык, что у "Обзора") + клик на
-    // "Настроить" открывает боковую панель со всеми полями — вместо
-    // одной широкой таблицы на 9 колонок, которая на узком окне не
-    // читалась (см. Stripe/Linear/Vercel: список карточек со статусом
-    // и быстрым тумблером снаружи, drawer с деталями по клику).
+    // Площадки — тем же списком, что на Главной; строка открывает ту же
+    // шторку. Готовность (чего не хватает) — в тексте строки.
+    lastStatus = status;
     const platformCards = document.getElementById("platform-cards");
-    // Telegram и «Сайты компаний» не откликаются как обычные площадки —
-    // у них уже есть свои полноценные вкладки (settings-tg-quick,
-    // settings-direct), дублировать их здесь карточкой с чужими для них
-    // ярлыками "Расписание"/"Автоотклик" только путает.
-    platformCards.innerHTML = status.sources
-      .filter((s) => !OWN_CHANNELS.has(s.name))
-      .map((s, i) => {
-        const missing = (s.readiness && s.readiness.missing) || [];
-        const ready = s.readiness && s.readiness.ready;
-        const readinessTitle = missing.length
-          ? "Не хватает: " + missing.join(", ")
-          : s.readiness && s.readiness.resume && s.readiness.resume.warning
-            ? s.readiness.resume.warning
-            : "Данных для подключения достаточно";
-        return `
-      <div class="source-card stagger-item" data-source="${s.name}" style="animation-delay:${staggerDelay(i, 25)}">
-        <h3 title="${readinessTitle}">${ready ? "✅" : "⚠️"} ${sourceIconHtml(s.name)}${sourceLabel(s.name)}</h3>
-        ${missing.length ? `<p class="muted small" style="margin:-6px 0 8px">${missing.join(", ")}</p>` : ""}
-        <div class="row"><span>Проверяю</span><span>${s.schedule_enabled ? intervalLabel(s.interval_hours) : "выключено"}</span></div>
-        <div class="row"><span>Автоотклик</span><span>${s.auto_apply ? "включён" : "выключен"}</span></div>
-        ${s.name === "headhunter" ? `<div class="row"><span>Автоответ в чате</span><span>${s.auto_reply ? "включён" : "выключен"}</span></div><div class="row"><span>Бамп резюме</span><span>${s.auto_bump_resume ? "включён" : "выключен"}</span></div>` : ""}
-        ${s.name === "djinni" ? `<div class="row"><span>Поднятие профиля</span><span>${s.auto_bump_resume ? "включено" : "выключено"}</span></div>` : ""}
-        <div class="platform-card-quick">
-          <label title="Бот проверяет по расписанию"><input type="checkbox" class="p-schedule-quick switch" data-source="${s.name}" ${s.schedule_enabled ? "checked" : ""} /> в расписании</label>
-          <button type="button" class="btn btn-secondary btn-small p-open-drawer" data-source="${s.name}">⚙ Настроить</button>
-        </div>
-      </div>`;
-      })
+    const rowFor = (src) => {
+      const m = sourceRowModel(src, lastRunNow);
+      const missing = (src.readiness && src.readiness.missing) || [];
+      if (missing.length) {
+        m.dot = "warn";
+        m.statusText = `не хватает: ${missing.join(", ")}`;
+      }
+      if (src.name === "direct") m.name = "Сайты компаний";
+      return m;
+    };
+    const groups = [
+      ["Свои каналы", status.sources.filter((x) => OWN_CHANNELS.has(x.name) && x.name !== "telegram")],
+      ["Русские площадки", status.sources.filter((x) => !INTL_SOURCES.has(x.name) && !OWN_CHANNELS.has(x.name))],
+      ["Зарубежные площадки", status.sources.filter((x) => INTL_SOURCES.has(x.name))],
+    ];
+    platformCards.innerHTML = groups
+      .map(([title, list]) => `<div class="grp">${title}</div>${list.map((x, i) => platformRowHtml(rowFor(x), i)).join("")}`)
       .join("");
+    platformCards.querySelectorAll(".platform-row-wrap").forEach((w) => w.setAttribute("draggable", "false"));
+    platformCards.querySelectorAll("[data-open-source]").forEach((btn) =>
+      btn.addEventListener("click", () => openPlatform(btn.dataset.openSource))
+    );
 
-    platformCards.querySelectorAll(".p-schedule-quick").forEach((box) => {
-      box.addEventListener("change", async () => {
-        box.disabled = true;
-        try {
-          await api("/api/settings", {
-            method: "POST",
-            body: JSON.stringify({
-              source: box.dataset.source,
-              schedule_enabled: box.checked,
-            }),
-          });
-          flashSaved(document.getElementById("settings-table"), null);
-        } finally {
-          box.disabled = false;
-        }
-      });
-    });
-
-    const linesOfEl = (el) =>
-      el.value
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean);
-
-    function renderDrawerBody(s) {
-      return `
-        <div class="drawer-section">
-          <h4>Расписание и отклик</h4>
-          <div class="limits-grid">
-            <label class="limit-field" style="justify-content:flex-end">
-              <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-schedule switch" ${s.schedule_enabled ? "checked" : ""} />Включена</span>
-            </label>
-            <label class="limit-field">
-              <span title="Минимум 3 минуты — почти реалтайм, но не выглядит ботом. Пока идут поиск и отклик, площадка проверяется по сути непрерывно: следующий заход стартует через этот интервал после конца предыдущего.">Интервал, минут</span>
-              <input type="number" class="d-interval" min="3" step="1" value="${Math.round((s.interval_hours ?? 3) * 60)}" ${s.continuous_cycle_active ? "disabled" : ""} />
-            </label>
-            ${
-              s.continuous_cycle_active
-                ? `<p class="muted small" style="margin:-6px 0 8px">⏱ Включён «Постоянный цикл» (Настройки → Лимиты откликов) — свой интервал этой площадки не действует, все идут по общему кругу.</p>`
-                : ""
-            }
-            <label class="limit-field" style="justify-content:flex-end">
-              <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto switch" ${s.auto_apply ? "checked" : ""} />Откликается сам</span>
-              <span class="muted small">Включено — бот сам отправляет отклики, до дневного лимита. Выключено — только ищет: вакансии появляются в «Вакансиях», откликаетесь вы.</span>
-            </label>
-            <label class="limit-field">
-              <span>Resume ID</span>
-              <input type="text" class="d-resume-id" value="${s.resume_id || ""}" placeholder="id резюме на площадке" />
-            </label>
-          </div>
-        </div>
-
-        <div class="drawer-section">
-          <h4>Лимиты — своё значение для этой площадки</h4>
-          <div class="limits-grid">
-            <div class="override-field">
-              <input type="number" class="d-max-applications" min="1"
-                value="${s.job_max_applications_override ? s.job_max_applications : ""}"
-                placeholder="${limits.job_max_applications}"
-                ${s.job_max_applications_override ? "" : "disabled"} />
-              <label class="override-toggle" title="Своё значение только для этой площадки — иначе используется дефолт из панели «Лимиты откликов»">
-                <input type="checkbox" class="d-max-applications-override" ${s.job_max_applications_override ? "checked" : ""} /> за один заход
-              </label>
-            </div>
-            <div class="override-field">
-              <input type="number" class="d-daily-limit" min="1"
-                value="${s.daily_limit_override ? s.daily_limit : ""}"
-                placeholder="${s.name === "linkedin" ? limits.linkedin_daily_application_limit : limits.daily_application_limit}"
-                ${s.daily_limit_override ? "" : "disabled"} />
-              <label class="override-toggle" title="Своё значение только для этой площадки — иначе используется дефолт из панели «Лимиты откликов»">
-                <input type="checkbox" class="d-daily-limit-override" ${s.daily_limit_override ? "checked" : ""} /> дневной лимит
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <div class="drawer-section">
-          <h4>Фильтры</h4>
-          <div class="limits-grid">
-            <label class="limit-field">
-              <span>Свои должности (пусто — общие из «Что ищу»)</span>
-              <textarea class="d-positions" rows="2" placeholder="оставить пустым — использовать общие">${(s.positions_override || []).join("\n")}</textarea>
-            </label>
-            <label class="limit-field">
-              <span>Свои локации (пусто — общие из «Что ищу»)</span>
-              <textarea class="d-locations" rows="2" placeholder="оставить пустым — использовать общие">${(s.locations_override || []).join("\n")}</textarea>
-            </label>
-            ${
-              s.name === "linkedin"
-                ? `<label class="limit-field">
-                <span>Зарплата для скрининга LinkedIn (USD/год)</span>
-                <input type="text" class="d-linkedin-salary" value="${salary.linkedin_salary_range_usd || ""}" placeholder="60000-80000" />
-                <span class="d-salary-hint muted small"></span>
-              </label>`
-                : ""
-            }
-            ${
-              s.name === "avito"
-                ? `${s.remote_only_managed ? "" : `<label class="limit-field" style="justify-content:flex-end"><span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-remote-only switch" ${s.remote_only ? "checked" : ""} />Только удалённые вакансии</span></label>`}
-              <label class="limit-field">
-                <span>Опыт работы (пусто — любой)</span>
-                <select class="d-hc-qualification">
-                  <option value="" ${!s.qualification ? "selected" : ""}>Любой</option>
-                  <option value="no_experience" ${s.qualification === "no_experience" ? "selected" : ""}>Без опыта</option>
-                  <option value="under_1_year" ${s.qualification === "under_1_year" ? "selected" : ""}>До 1 года</option>
-                  <option value="over_1_year" ${s.qualification === "over_1_year" ? "selected" : ""}>Более 1 года</option>
-                  <option value="over_3_years" ${s.qualification === "over_3_years" ? "selected" : ""}>Более 3 лет</option>
-                  <option value="over_5_years" ${s.qualification === "over_5_years" ? "selected" : ""}>Более 5 лет</option>
-                  <option value="over_10_years" ${s.qualification === "over_10_years" ? "selected" : ""}>Более 10 лет</option>
-                </select>
-              </label>
-              <label class="limit-field">
-                <span>Занятость (пусто — любая)</span>
-                <select class="d-hc-employment-type">
-                  <option value="" ${!s.employment_type ? "selected" : ""}>Любая</option>
-                  <option value="full_time" ${s.employment_type === "full_time" ? "selected" : ""}>Полная</option>
-                  <option value="part_time" ${s.employment_type === "part_time" ? "selected" : ""}>Частичная</option>
-                  <option value="temporary" ${s.employment_type === "temporary" ? "selected" : ""}>Временная</option>
-                </select>
-              </label>`
-                : ""
-            }
-            ${
-              s.name === "getmatch"
-                ? `${s.remote_only_managed ? "" : `<label class="limit-field" style="justify-content:flex-end"><span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-remote-only switch" ${s.remote_only ? "checked" : ""} />Только удалённые вакансии</span></label>`}
-              ${s.levels_managed ? "" : `<label class="limit-field">
-                <span>Уровень вакансии (пусто — любой)</span>
-                <select class="d-gm-experience-level" multiple size="4">
-                  <option value="junior" ${(s.experience_level || []).includes("junior") ? "selected" : ""}>Junior</option>
-                  <option value="middle" ${(s.experience_level || []).includes("middle") ? "selected" : ""}>Middle</option>
-                  <option value="senior" ${(s.experience_level || []).includes("senior") ? "selected" : ""}>Senior</option>
-                  <option value="lead" ${(s.experience_level || []).includes("lead") ? "selected" : ""}>Lead / Manager</option>
-                </select>
-              </label>`}`
-                : ""
-            }
-            ${
-              s.name === "habr_career"
-                ? `${s.remote_only_managed ? "" : `<label class="limit-field" style="justify-content:flex-end"><span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-remote-only switch" ${s.remote_only ? "checked" : ""} />Только удалённые вакансии</span></label>`}
-              ${s.levels_managed ? "" : `<label class="limit-field">
-                <span>Квалификация (пусто — любая)</span>
-                <select class="d-hc-qualification">
-                  <option value="" ${!s.qualification ? "selected" : ""}>Любая</option>
-                  <option value="intern" ${s.qualification === "intern" ? "selected" : ""}>Стажёр (Intern)</option>
-                  <option value="junior" ${s.qualification === "junior" ? "selected" : ""}>Младший (Junior)</option>
-                  <option value="middle" ${s.qualification === "middle" ? "selected" : ""}>Средний (Middle)</option>
-                  <option value="senior" ${s.qualification === "senior" ? "selected" : ""}>Старший (Senior)</option>
-                  <option value="lead" ${s.qualification === "lead" ? "selected" : ""}>Ведущий (Lead)</option>
-                </select>
-              </label>`}
-              <label class="limit-field">
-                <span>Тип занятости (пусто — любой)</span>
-                <select class="d-hc-employment-type">
-                  <option value="" ${!s.employment_type ? "selected" : ""}>Любой</option>
-                  <option value="full_time" ${s.employment_type === "full_time" ? "selected" : ""}>Полный рабочий день</option>
-                  <option value="part_time" ${s.employment_type === "part_time" ? "selected" : ""}>Неполный рабочий день</option>
-                </select>
-              </label>`
-                : ""
-            }
-          </div>
-          <p class="muted small">Сейчас реально ищет по: «${(s.effective_positions || []).join("», «") || "—"}»${
-        s.name === "linkedin"
-          ? " · локации LinkedIn настраиваются отдельно (linkedin.locations)"
-          : `, локации: «${(s.effective_locations || []).join("», «") || "любые"}»`
-      }.</p>
-        </div>
-
-        ${
-          s.name === "headhunter" || s.name === "djinni"
-            ? `<div class="drawer-section">
-          <h4>Автоматика в чате</h4>
-          <div class="limits-grid">
-            ${
-              s.name === "headhunter"
-                ? `<label class="limit-field" style="justify-content:flex-end">
-                <span style="display:flex;align-items:center;gap:8px" title="Одним переключателем: отвечает на рутинные вопросы в чате, досылает письмо, если отклик ушёл без него, и напоминает о себе молчащим работодателям"><input type="checkbox" class="d-auto-reply switch" ${s.auto_reply ? "checked" : ""} />Вести переписку в чате HH</span>
-              </label>
-              <label class="limit-field" style="justify-content:flex-end">
-                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto-bump switch" ${s.auto_bump_resume ? "checked" : ""} />Бамп резюме на HH</span>
-              </label>
-              <label class="limit-field">
-                <span title="0 — выключить напоминания. Список готовых напоминаний — во «Входящих»">Напомнить о себе, если молчат (не просмотрели или не ответили), через (дней)</span>
-                <input type="number" class="d-reminder-days" min="0" value="${s.reminder_follow_up_days ?? 7}" style="width:80px" />
-              </label>
-              <label class="limit-field">
-                <span>Зарплата для автоответа в чате HH</span>
-                <input type="text" class="d-hh-salary" value="${salary.hh_salary_expectations || ""}" placeholder="250000-300000 RUR" />
-                <span class="d-salary-hint muted small"></span>
-              </label>`
-                : `<label class="limit-field" style="justify-content:flex-end">
-                <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="d-auto-bump switch" ${s.auto_bump_resume ? "checked" : ""} />Поднимать профиль раз в 7 дней</span>
-                <span class="muted small">Кнопка «Bump My Profile» на Djinni — профиль снова наверху у рекрутеров. Бот нажимает её сам, как только Djinni разрешит.</span>
-              </label>`
-            }
-          </div>
-        </div>`
-            : ""
-        }
-
-        <div class="filters">
-          <button class="btn btn-primary" id="platform-drawer-save">Сохранить</button>
-          <span id="platform-drawer-status" class="muted small"></span>
-        </div>`;
-    }
-
-    // Пришли с карточки на Главной (метка режима) — сразу открываем окно площадки.
-    if (pendingPlatformDrawer) {
-      const source = pendingPlatformDrawer;
-      pendingPlatformDrawer = null;
-      switchSettingsTab("settings-table");
-      setTimeout(() => openPlatformDrawer(source));
-    }
-    function openPlatformDrawer(sourceName) {
-      const s = status.sources.find((x) => x.name === sourceName);
-      if (!s) return;
-      document.getElementById("platform-drawer-title").innerHTML =
-        `${sourceIconHtml(s.name)}${sourceLabel(s.name)}`;
-      const drawerBody = document.getElementById("platform-drawer-body");
-      drawerBody.innerHTML = renderDrawerBody(s);
-      drawerBody
-        .querySelectorAll(".d-positions, .d-locations")
-        .forEach(initTagInput);
-      // Поле раньше молчало о неверном формате — пользователь узнавал
-      // об этом только по факту, что автоответ в чате не сработал.
-      // Подсказка не блокирует сохранение (мало ли какой формат
-      // площадка реально примет), только предупреждает заранее.
-      drawerBody.querySelectorAll(".d-hh-salary, .d-linkedin-salary").forEach((input) => {
-        const hint = input.parentElement.querySelector(".d-salary-hint");
-        if (!hint) return;
-        let wasOk = true;
-        const validate = () => {
-          const v = input.value.trim();
-          const ok = !v || /^\d{4,}\s*[-–]\s*\d{4,}(\s*\S+)?$/.test(v);
-          hint.textContent = ok ? "" : `Ожидается диапазон вида «${input.placeholder}» — иначе бот может не понять сумму`;
-          hint.classList.toggle("warn-text", !ok);
-          // Один раз в момент, когда поле только что стало невалидным —
-          // не на каждую клавишу, пока человек ещё дописывает диапазон.
-          if (!ok && wasOk) {
-            input.classList.remove("field-shake");
-            void input.offsetWidth;
-            input.classList.add("field-shake");
-          }
-          wasOk = ok;
-        };
-        input.addEventListener("input", validate);
-        validate();
-      });
-      // Тот же паттерн inherited/override, что в Stripe/AWS для
-      // лимитов бюджета: чекбокс "своё" выключен → инпут задизейблен
-      // и показывает дефолт как placeholder, не как значение.
-      drawerBody
-        .querySelectorAll(
-          ".d-max-applications-override, .d-daily-limit-override"
-        )
-        .forEach((cb) => {
-          cb.addEventListener("change", () => {
-            const input = cb
-              .closest(".override-field")
-              .querySelector("input[type=number]");
-            input.disabled = !cb.checked;
-            if (cb.checked) input.focus();
-          });
-        });
-      drawerBody
-        .querySelector("#platform-drawer-save")
-        .addEventListener("click", async () => {
-          const jobMaxOverride = drawerBody.querySelector(
-            ".d-max-applications-override"
-          ).checked;
-          const dailyOverride = drawerBody.querySelector(
-            ".d-daily-limit-override"
-          ).checked;
-          const statusEl = drawerBody.querySelector("#platform-drawer-status");
-          const autoReplyEl = drawerBody.querySelector(".d-auto-reply");
-          const autoBumpEl = drawerBody.querySelector(".d-auto-bump");
-          const chatFollowupEl = drawerBody.querySelector(
-            ".d-chat-cover-letter-followup"
-          );
-          const reminderDaysEl = drawerBody.querySelector(".d-reminder-days");
-          const autoReminderEl = drawerBody.querySelector(".d-auto-reminder");
-          const remoteOnlyEl = drawerBody.querySelector(".d-remote-only");
-          const gmExperienceLevelEl = drawerBody.querySelector(
-            ".d-gm-experience-level"
-          );
-          const hcQualificationEl = drawerBody.querySelector(
-            ".d-hc-qualification"
-          );
-          const hcEmploymentTypeEl = drawerBody.querySelector(
-            ".d-hc-employment-type"
-          );
-          await api("/api/settings", {
-            method: "POST",
-            body: JSON.stringify({
-              source: sourceName,
-              schedule_enabled: drawerBody.querySelector(".d-schedule").checked,
-              interval_hours: Math.max(
-                3,
-                parseInt(drawerBody.querySelector(".d-interval").value, 10) || 3
-              ) / 60,
-              auto_apply: drawerBody.querySelector(".d-auto").checked,
-              resume_id: drawerBody.querySelector(".d-resume-id").value.trim(),
-              // "своё" выключено → clear_* удаляет override в YAML,
-              // площадка возвращается к общему дефолту (см.
-              // unset_source_field на бэкенде); включено → пишем
-              // введённое число как явное значение этой площадки.
-              clear_job_max_applications: !jobMaxOverride,
-              clear_daily_application_limit: !dailyOverride,
-              positions: linesOfEl(drawerBody.querySelector(".d-positions")),
-              locations: linesOfEl(drawerBody.querySelector(".d-locations")),
-              // «Вести переписку» — один переключатель на три настройки HH.
-              ...(autoReplyEl
-                ? {
-                    auto_reply: autoReplyEl.checked,
-                    chat_cover_letter_followup: autoReplyEl.checked,
-                    auto_reminder: autoReplyEl.checked,
-                  }
-                : {}),
-              ...(autoBumpEl ? { auto_bump_resume: autoBumpEl.checked } : {}),
-              ...(reminderDaysEl
-                ? {
-                    reminder_follow_up_days: Math.max(
-                      0,
-                      parseInt(reminderDaysEl.value, 10) || 0
-                    ),
-                  }
-                : {}),
-              ...(autoReminderEl
-                ? { auto_reminder: autoReminderEl.checked }
-                : {}),
-              ...(remoteOnlyEl
-                ? { remote_only: remoteOnlyEl.checked }
-                : {}),
-              ...(gmExperienceLevelEl
-                ? {
-                    experience_level: Array.from(
-                      gmExperienceLevelEl.selectedOptions
-                    ).map((o) => o.value),
-                  }
-                : {}),
-              ...(hcQualificationEl
-                ? { qualification: hcQualificationEl.value }
-                : {}),
-              ...(hcEmploymentTypeEl
-                ? { employment_type: hcEmploymentTypeEl.value }
-                : {}),
-              ...(jobMaxOverride
-                ? {
-                    job_max_applications: parseInt(
-                      drawerBody.querySelector(".d-max-applications").value,
-                      10
-                    ),
-                  }
-                : {}),
-              ...(dailyOverride
-                ? {
-                    daily_application_limit: parseInt(
-                      drawerBody.querySelector(".d-daily-limit").value,
-                      10
-                    ),
-                  }
-                : {}),
-            }),
-          });
-          const hhSalaryEl = drawerBody.querySelector(".d-hh-salary");
-          const liSalaryEl = drawerBody.querySelector(".d-linkedin-salary");
-          if (hhSalaryEl || liSalaryEl) {
-            await api("/api/settings/salary", {
-              method: "POST",
-              body: JSON.stringify({
-                ...(hhSalaryEl
-                  ? { hh_salary_expectations: hhSalaryEl.value.trim() }
-                  : {}),
-                ...(liSalaryEl
-                  ? { linkedin_salary_range_usd: liSalaryEl.value.trim() }
-                  : {}),
-              }),
-            });
-          }
-          statusEl.textContent = "Сохранено";
-          setTimeout(() => {
-            closePlatformDrawer();
-            render.settings();
-          }, 500);
-        });
-      const overlay = document.getElementById("platform-drawer-overlay");
-      overlay.style.display = "flex";
-      trapFocus(document.getElementById("platform-drawer"));
-    }
-
-    platformCards.querySelectorAll(".p-open-drawer").forEach((btn) => {
-      btn.addEventListener("click", () => openPlatformDrawer(btn.dataset.source));
-    });
   },
 
   async telegram() {
     loadTelegramWatch();
-    const [status, settings, conversations, inbox] = await Promise.all([
+    const [status, settings, conversations] = await Promise.all([
       api("/api/telegram/status"),
       api("/api/settings/telegram"),
       api("/api/telegram/conversations"),
-      api("/api/telegram/posts").catch(() => telegramInbox),
     ]);
-
-    const badge = document.getElementById("telegram-status-badge");
-    const note = document.getElementById("telegram-status-note");
-    // Ключи уже есть — поля не показываем, чтобы не путали.
-    if (status.configured) {
-      document.getElementById("tg-keys-row").outerHTML = `<div id="tg-keys-row" class="ok-text small">✓ Ключи сохранены</div>`;
-    }
-    if (!status.configured) {
-      badge.className = "badge off";
-      badge.innerHTML = '<span class="badge-dot"></span>не настроено';
-      note.textContent =
-        "Сначала шаг 1: вставьте api_id и api_hash ниже.";
-    } else if (status.connected) {
-      // Вход нужен один раз — дальше блок подключения свёрнут.
-      document.getElementById("tg-connect-panel").open = false;
-      badge.className = "badge on";
-      badge.innerHTML = '<span class="badge-dot"></span>подключено';
-      note.textContent = "";
-    } else {
-      badge.className = "badge off";
-      badge.innerHTML = '<span class="badge-dot"></span>не авторизовано';
-      note.textContent = "Введите номер телефона и код ниже.";
-    }
-    // Форма входа (телефон/код/пароль) нужна только пока не
-    // подключено — если уже авторизовано, незачем занимать место и
-    // сбивать с толку полем для повторного ввода номера.
-    document.getElementById("telegram-login-row").style.display =
-      status.connected ? "none" : "";
-    if (status.connected) {
-      document.getElementById("telegram-login-code-row").style.display =
-        "none";
-      document.getElementById("telegram-login-password-row").style.display =
-        "none";
-      document.getElementById("telegram-login-status").textContent = "";
-    }
-
+    applyTelegramAccountStatus(status);
     fillTelegramRules(settings);
 
     const unreadCount = conversations.filter((c) => c.unread).length;
@@ -3647,70 +3879,37 @@ const render = {
       navBadge.style.display = "none";
     }
 
-    telegramInbox = inbox;
-    document.getElementById("tg-sent-today").textContent =
-      `Написали сегодня ${inbox.sent_today} из ${inbox.daily_limit}`;
-
     const list = document.getElementById("tg-conv-list");
-    const posts = inbox.posts;
     // "Выберите диалог слева" в правой панели уместно, только пока
     // список слева не пуст — иначе получаются два взаимоисключающих
     // сообщения одновременно ("диалогов нет" + "выберите один из них").
     const chatEmpty = document.getElementById("tg-chat-empty");
-    if (!activeTelegramContact && !activeTelegramPost) {
-      chatEmpty.textContent = conversations.length || posts.length
-        ? "Выберите вакансию или диалог слева."
-        : "Пока пусто — новые вакансии из каналов и ответы HR появятся здесь.";
+    if (!activeTelegramContact) {
+      chatEmpty.textContent = conversations.length
+        ? "Выберите диалог слева."
+        : "Диалогов пока нет — появятся здесь, как только кто-то напишет.";
     }
-    const postBadge = (p) => {
-      if (p.status === "later") return `уйдёт ${formatChatTime(p.send_after)}`;
-      if (!p.contacts.some((c) => c.kind === "telegram")) return "нет контакта в Telegram";
-      return Object.values(p.notes || {})[0] || "черновик готов";
-    };
-    const postsHtml = posts.length
-      ? `<div class="conv-group">Новые вакансии · ${posts.length}</div>` +
-        posts
-          .map(
-            (p) => `
-        <div class="conv-item conv-post${p.id === activeTelegramPost ? " active" : ""}" data-post="${escapeHtml(p.id)}">
-          <span class="conv-contact">${escapeHtml(p.title)}</span>
-          <span class="conv-preview">@${escapeHtml(p.channel)} · ${formatChatTime(p.found_at)}</span>
-          <span class="conv-badge">${escapeHtml(postBadge(p))}</span>
-        </div>`
-          )
-          .join("")
-      : "";
-    const convHtml = conversations.length
-      ? `<div class="conv-group">Переписка</div>` +
-        conversations
-          .map(
-            (c) => `
-        <div class="conv-item${c.contact === activeTelegramContact ? " active" : ""}" data-contact="${escapeHtml(c.contact)}">
-          <span class="conv-contact">${c.unread ? '<span class="conv-unread-dot"></span>' : ""}@${escapeHtml(c.contact)}</span>
-          <span class="conv-preview">${c.last_message ? escapeHtml(c.last_message.text) : ""}</span>
-        </div>`
-          )
-          .join("")
-      : "";
-    list.innerHTML =
-      postsHtml + convHtml || '<p class="muted small">Пока нет вакансий и диалогов.</p>';
-    list.querySelectorAll(".conv-item[data-contact]").forEach((el) => {
-      el.addEventListener("click", () => openTelegramConversation(el.dataset.contact));
-    });
-    list.querySelectorAll(".conv-item[data-post]").forEach((el) => {
-      el.addEventListener("click", () => openTelegramPost(el.dataset.post));
-    });
-
-    if (activeTelegramPost && posts.some((p) => p.id === activeTelegramPost)) {
-      await openTelegramPost(activeTelegramPost);
+    if (!conversations.length) {
+      list.innerHTML = '<p class="muted small">Пока нет диалогов.</p>';
     } else {
-      activeTelegramPost = null;
-      document.getElementById("tg-post-panel").style.display = "none";
-      if (activeTelegramContact) {
-        await openTelegramConversation(activeTelegramContact);
-      } else {
-        chatEmpty.style.display = "";
-      }
+      list.innerHTML = conversations
+        .map(
+          (c) => `
+        <div class="conv-item${c.contact === activeTelegramContact ? " active" : ""}" data-contact="${c.contact}">
+          <span class="conv-contact">${c.unread ? '<span class="conv-unread-dot"></span>' : ""}@${c.contact}</span>
+          <span class="conv-preview">${c.last_message ? c.last_message.text : ""}</span>
+        </div>`
+        )
+        .join("");
+      list.querySelectorAll(".conv-item").forEach((el) => {
+        el.addEventListener("click", () =>
+          openTelegramConversation(el.dataset.contact)
+        );
+      });
+    }
+
+    if (activeTelegramContact) {
+      await openTelegramConversation(activeTelegramContact);
     }
   },
 
@@ -3754,7 +3953,7 @@ const render = {
 // который просто хочет знать, что бот сейчас делает. Человеческий вид
 // её прячет и убирает DEBUG, "Технические детали" возвращают как есть.
 const LOG_LINE_RE = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\.\d+ \| (\w+)\s*\| [^-]*- (.*)$/;
-const LOG_LEVEL_ICON = { WARNING: "⚠️ ", ERROR: "❌ ", CRITICAL: "❌ " };
+const LOG_LEVEL_ICON = { WARNING: "внимание · ", ERROR: "ошибка · ", CRITICAL: "ошибка · " };
 
 function humanizeLogLine(line) {
   const m = line.match(LOG_LINE_RE);
@@ -3791,108 +3990,180 @@ function renderLogLines() {
 // сервер под каждую букву поиска.
 // Что произошло — человеческими словами, по этапу заявки.
 const INBOX_KIND = {
-  interview: { title: "🎉 Приглашение на интервью", group: "interview" },
-  test_task: { title: "📝 Тестовое задание", group: "interview" },
-  offer: { title: "💼 Оффер", group: "interview" },
-  replied: { title: "💬 Ответили", group: "replied" },
+  interview: { title: "Приглашение на интервью", group: "interview" },
+  test_task: { title: "Тестовое задание", group: "interview" },
+  offer: { title: "Оффер", group: "interview" },
+  replied: { title: "Ответили", group: "replied" },
   rejected: { title: "Отказ", group: "rejected" },
 };
 let repliesKind = "";
+
+let selectedInboxIndex = -1;
+let talkEntries = [];
 
 function renderRepliesRows() {
   const list = document.getElementById("replies-rows");
   const query = document.getElementById("replies-filter-query").value.trim().toLowerCase();
   const groupOf = (e) => (INBOX_KIND[e.stage] || INBOX_KIND.replied).group;
-  const counts = { interview: 0, replied: 0, rejected: 0 };
-  lastRepliesEntries.forEach((e) => counts[groupOf(e)]++);
-  // По умолчанию — «Главное»: отказы не заслоняют приглашения и вопросы HR.
-  const chips = [["", "Главное", counts.interview + counts.replied], ["interview", "Интервью и офферы", counts.interview], ["replied", "Ответили", counts.replied], ["rejected", "Отказы", counts.rejected]];
+  const counts = { interview: 0, replied: 0, rejected: 0, telegram: 0 };
+  lastRepliesEntries.forEach((e) => {
+    counts[groupOf(e)]++;
+    if (e.channel === "telegram_dm") counts.telegram++;
+  });
+  const chips = [
+    ["", "Главное", counts.interview + counts.replied],
+    ["interview", "Интервью и офферы", counts.interview],
+    ["replied", "Ответили", counts.replied],
+    ["telegram", "Telegram", counts.telegram],
+    ["rejected", "Отказы", counts.rejected],
+  ];
   const chipBox = document.getElementById("replies-kind");
   chipBox.innerHTML = chips
-    .map(([k, label, n]) => `<button type="button" class="chip${k === repliesKind ? " active" : ""}" data-kind="${k}">${label} <b>${n}</b></button>`)
+    .map(([k, label, n]) => `<button type="button" class="chip${k === repliesKind ? " active" : ""}" data-kind="${k}" aria-pressed="${k === repliesKind}">${label} <b>${n}</b></button>`)
     .join("");
   chipBox.querySelectorAll("[data-kind]").forEach((b) =>
     b.addEventListener("click", () => {
       repliesKind = b.dataset.kind;
       renderRepliesRows();
+      lastTgPostsSnapshot = "";
+      renderTelegramPosts();
     })
   );
 
   const entries = lastRepliesEntries.filter((e) => {
-    if (repliesKind ? groupOf(e) !== repliesKind : groupOf(e) === "rejected") return false;
+    if (repliesKind === "telegram") {
+      if (e.channel !== "telegram_dm") return false;
+    } else if (repliesKind ? groupOf(e) !== repliesKind : groupOf(e) === "rejected") return false;
     if (!query) return true;
     return [e.company, e.title, e.text, e.contact].filter(Boolean).some((v) => v.toLowerCase().includes(query));
   });
+  talkEntries = entries;
   if (!lastRepliesEntries.length) {
-    list.innerHTML = emptyStateHtml("Пока нет ответов. Как только работодатель ответит на отклик, в Telegram или на письмо — он появится здесь, а бот пришлёт уведомление.");
+    list.innerHTML = emptyStateHtml("Пока нет ответов. Как только работодатель ответит на отклик, в Telegram или на письмо — он появится здесь.");
     return;
   }
   if (!entries.length) {
-    list.innerHTML = emptyStateHtml(
-      query ? "Ничего не найдено." : repliesKind ? "Здесь пока пусто." : "Сейчас нет новых приглашений и вопросов — бот сообщит, как только появятся. Отказы — в фильтре «Отказы»."
-    );
+    list.innerHTML = emptyStateHtml(query ? "Ничего не найдено." : repliesKind ? "Здесь пока пусто." : "Сейчас нет новых приглашений и вопросов — бот сообщит, когда появятся.");
     return;
   }
   const where = (e) =>
-    e.channel === "telegram_dm" ? `${sourceIconHtml("telegram")}Telegram @${escapeHtml(e.contact)}`
-    : e.channel === "email" ? `✉️ Письмо · ${escapeHtml(e.contact)}`
-    : `${sourceIconHtml(e.source)}${escapeHtml(sourceLabel(e.source))}`;
+    e.channel === "telegram_dm" ? `Telegram @${escapeHtml(e.contact)}`
+    : e.channel === "email" ? `Письмо · ${escapeHtml(e.contact)}`
+    : escapeHtml(sourceLabel(e.source));
+  const logo = (e) => (e.channel === "telegram_dm" ? plogoHtml("telegram") : e.channel === "email" ? plogoHtml("mail") : plogoHtml(e.source));
   list.innerHTML = entries
-    .map((e) => {
+    .map((e, i) => {
       const kind = INBOX_KIND[e.stage] || INBOX_KIND.replied;
-      // Статус hh («Приглашение», «Отказ») уже сказан заголовком — не дублируем.
-      const text = e.channel === "telegram_dm" || e.channel === "email" ? e.text : "";
-      const who = [e.company, e.title].filter(Boolean).join(" — ");
-      return `
-      <div class="inbox-item inbox-${kind.group}${e.unread ? " is-unread" : ""}">
-        <div class="inbox-top">
-          <strong>${kind.title}</strong>
-          <span class="muted small">${fmtTime(e.at)}${e.unread ? ` <span class="tab-badge">новое</span>` : ""}</span>
-        </div>
-        <div class="inbox-who">${e.link ? `<a href="${escapeHtml(e.link)}" target="_blank" rel="noopener">${escapeHtml(who || "Открыть")}</a>` : escapeHtml(who)}</div>
-        <div class="muted small">${where(e)}${e.label ? ` · ${escapeHtml(e.label)}` : ""}</div>
-        ${text ? `<p class="inbox-text">${escapeHtml(truncate(text, 280))}</p>` : ""}
-        ${e.draft ? `<div class="ok-text small">✍️ Черновик ответа готов — вверху, в «Ждут вашего решения»</div>` : ""}
-        <div class="inbox-actions">
-          ${e.channel === "telegram_dm" ? `<button type="button" class="btn btn-secondary btn-small" data-open-dialog="${escapeHtml(e.contact)}">Открыть диалог</button>` : ""}
-          ${e.channel === "email" ? `<a class="btn btn-secondary btn-small" href="${escapeHtml(e.link)}" target="_blank" rel="noopener">Открыть в Gmail</a>` : ""}
-          ${kind.group === "interview" && e.external_id ? `<button type="button" class="btn btn-secondary btn-small" data-prep-source="${escapeHtml(e.source)}" data-prep-id="${escapeHtml(e.external_id)}" data-prep-title="${escapeHtml(who)}">🎯 Подготовиться к интервью</button>` : ""}
-          ${e.external_id ? `<label class="muted small inbox-stage">Этап ${stageSelectHtml({ ...e, effective_stage: e.stage })}</label>` : ""}
-        </div>
-      </div>`;
+      const preview = e.channel === "telegram_dm" || e.channel === "email" ? e.text : e.title;
+      return `<button type="button" class="row talk-row inbox-${kind.group}${e.unread ? " is-unread" : ""}${i === selectedInboxIndex ? " is-selected" : ""}" data-inbox-index="${i}">
+        ${logo(e)}
+        <span class="row-main">
+          <span class="talk-row-top"><span class="row-title">${escapeHtml(e.company || (e.contact ? "@" + e.contact : "—"))}</span><span class="muted small nowrap">${fmtDay(e.at)}</span></span>
+          <span class="row-sub"><span class="talk-kind kind-${kind.group}">${escapeHtml(kind.title)}</span>${e.unread ? `<span class="tab-badge">новое</span>` : ""}${e.draft ? `<span class="stage-tag">черновик готов</span>` : ""}</span>
+          <span class="talk-preview small muted">${escapeHtml(truncate(preview || where(e), 110))}</span>
+        </span>
+      </button>`;
     })
     .join("");
-  list.querySelectorAll("[data-open-dialog]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      switchTab("telegram");
-      openTelegramConversation(btn.dataset.openDialog);
-    });
-  });
-  list.querySelectorAll("[data-prep-id]").forEach((btn) =>
+  list.querySelectorAll("[data-inbox-index]").forEach((btn) =>
+    btn.addEventListener("click", () => selectInboxItem(Number(btn.dataset.inboxIndex)))
+  );
+}
+
+function talkContextHtml(e) {
+  const where = e.channel === "telegram_dm" ? `Telegram · @${escapeHtml(e.contact)}` : e.channel === "email" ? `Письмо · ${escapeHtml(e.contact)}` : escapeHtml(sourceLabel(e.source));
+  const stage = e.external_id ? `<div class="field-block"><div class="field-title">Этап</div><label class="inbox-stage">${stageSelectHtml({ ...e, effective_stage: e.stage })}</label><div class="field-hint">Ставится сам по ответу площадки; поправьте, если бот ошибся.</div></div>` : "";
+  const interview = (INBOX_KIND[e.stage] || {}).group === "interview" && e.external_id;
+  return `<div class="field-block"><div class="field-title">${escapeHtml(e.company || "—")}</div>
+      <div class="field-hint">${escapeHtml(e.title || "")}</div>
+      <div class="field-hint">${where}${e.label ? " · " + escapeHtml(e.label) : ""}</div></div>
+    ${stage}
+    <div class="talk-actions">
+      ${e.channel === "email" && e.link ? `<a class="btn btn-small" href="${escapeHtml(e.link)}" target="_blank" rel="noopener">Открыть в Gmail ↗</a>` : ""}
+      ${e.channel === "telegram_dm" ? `<a class="btn btn-small" href="https://t.me/${encodeURIComponent(e.contact)}" target="_blank" rel="noopener">Открыть в Telegram ↗</a>` : ""}
+      ${e.link && e.channel !== "email" ? `<a class="btn btn-small btn-ghost" href="${escapeHtml(e.link)}" target="_blank" rel="noopener">Открыть вакансию ↗</a>` : ""}
+      ${interview ? `<button type="button" class="btn btn-small" data-talk-action="prep">Подготовка к интервью</button>` : ""}
+      ${interview ? `<button type="button" class="btn btn-small btn-ghost" data-talk-action="calendar">Интервью в календарь</button>` : ""}
+      ${e.contact ? blockContactButtonHtml(e.contact) : ""}
+    </div>`;
+}
+
+function showTalkContext(e) {
+  const body = document.getElementById("talk-context-body");
+  body.classList.remove("muted", "small");
+  body.innerHTML = e ? talkContextHtml(e) : "";
+  bindStageSelects(body);
+  body.querySelectorAll("[data-talk-action]").forEach((btn) =>
     btn.addEventListener("click", async () => {
+      if (btn.dataset.talkAction === "block") return; // см. initTalkExtras
+      if (btn.dataset.talkAction === "calendar") {
+        openCalendarOverlay({ ...e, title: e.title || "" });
+        return;
+      }
       btn.disabled = true;
       btn.textContent = "Готовлю справку…";
       try {
-        const { prep } = await api("/api/applications/prep", {
-          method: "POST",
-          body: JSON.stringify({ source: btn.dataset.prepSource, external_id: btn.dataset.prepId }),
-        });
-        openTextModal(`Подготовка: ${btn.dataset.prepTitle}`, "Справка к интервью", prep.replace(/\*\*/g, ""));
+        const { prep } = await api("/api/applications/prep", { method: "POST", body: JSON.stringify({ source: e.source, external_id: e.external_id }) });
+        const panel = document.getElementById("talk-item-panel");
+        document.getElementById("tg-chat-panel").style.display = "none";
+        document.getElementById("tg-chat-empty").style.display = "none";
+        panel.hidden = false;
+        panel.innerHTML = `<div class="thread-head"><h3 class="m0">Подготовка: ${escapeHtml(e.company)}</h3><span class="muted small">справка к интервью</span></div><div class="letter-text">${escapeHtml(prep.replace(/\*\*/g, ""))}</div>`;
       } catch (err) {
         showToast(err.message.replace(/^\d+: /, ""), "error");
       } finally {
         btn.disabled = false;
-        btn.textContent = "🎯 Подготовиться к интервью";
+        btn.textContent = "Подготовка к интервью";
       }
     })
   );
-  bindStageSelects(list);
+  document.getElementById("tg-chat-delete").hidden = !(e && e.channel === "telegram_dm") && !activeTelegramContact;
 }
 
-async function openTelegramConversation(contact) {
+function selectInboxItem(i) {
+  const e = talkEntries[i];
+  if (!e) return;
+  selectedInboxIndex = i;
+  document.querySelectorAll("#replies-rows .talk-row").forEach((r, n) => r.classList.toggle("is-selected", n === i));
+  showTalkContext(e);
+  if (e.channel === "telegram_dm") {
+    openTelegramConversation(e.contact, true);
+    return;
+  }
+  activeTelegramContact = null;
+  closeTelegramPost();
+  document.querySelectorAll("#tg-conv-list .conv-item").forEach((el) => el.classList.remove("active"));
+  document.getElementById("tg-chat-panel").style.display = "none";
+  document.getElementById("tg-chat-empty").style.display = "none";
+  document.getElementById("tg-chat-delete").hidden = true;
+  const kind = INBOX_KIND[e.stage] || INBOX_KIND.replied;
+  const panel = document.getElementById("talk-item-panel");
+  panel.hidden = false;
+  panel.innerHTML = `<div class="thread-head"><h3 class="m0">${escapeHtml(kind.title)}</h3><span class="muted small">${fmtTime(e.at)}</span></div>
+    <div class="field-hint">${escapeHtml([e.company, e.title].filter(Boolean).join(" — "))}</div>
+    ${e.text ? `<div class="chat-bubble in">${escapeHtml(e.text)}</div>` : `<div class="letter-text muted">Текст ответа — на сайте площадки. Этап выставлен по статусу отклика.</div>`}
+    ${e.draft ? `<div class="fix is-warn"><span class="dot warn"></span><div class="fix-body">Черновик ответа готов — вверху, в «Ждут вашего решения».</div></div>` : ""}`;
+}
+
+async function openTelegramConversation(contact, fromInbox = false) {
+  if (activeTelegramContact !== contact) {
+    document.getElementById("tg-chat-suggestions").innerHTML = "";
+    document.getElementById("tg-chat-input").value = "";
+  }
   activeTelegramContact = contact;
-  activeTelegramPost = null;
-  document.getElementById("tg-post-panel").style.display = "none";
+  closeTelegramPost();
+  document.getElementById("talk-item-panel").hidden = true;
+  if (!fromInbox) {
+    selectedInboxIndex = -1;
+    document.querySelectorAll("#replies-rows .talk-row").forEach((r) => r.classList.remove("is-selected"));
+    const match = lastRepliesEntries.find((x) => x.channel === "telegram_dm" && x.contact === contact);
+    if (match) showTalkContext(match);
+    else {
+      const body = document.getElementById("talk-context-body");
+      body.innerHTML = `<div class="field-block"><div class="field-title">@${escapeHtml(contact)}</div><div class="field-hint">Telegram · ответов пока нет</div></div><div class="talk-actions"><a class="btn btn-small" href="https://t.me/${encodeURIComponent(contact)}" target="_blank" rel="noopener">Открыть в Telegram ↗</a>${blockContactButtonHtml(contact)}</div>`;
+    }
+  }
+  document.getElementById("tg-chat-delete").hidden = false;
   document
     .querySelectorAll("#tg-conv-list .conv-item")
     .forEach((el) =>
@@ -3903,20 +4174,21 @@ async function openTelegramConversation(contact) {
   document.getElementById("tg-chat-empty").style.display = "none";
   document.getElementById("tg-chat-panel").style.display = "";
   document.getElementById("tg-chat-contact").textContent = `@${contact}`;
-  const jobLink = [...conv.messages].reverse().find((m) => m.job_link)?.job_link;
-  const job = document.getElementById("tg-chat-job");
-  job.style.display = jobLink ? "" : "none";
-  if (jobLink) job.href = jobLink;
 
   const messages = document.getElementById("tg-chat-messages");
-  messages.innerHTML = chatBubblesHtml(conv.messages);
+  const bubbles = (list) =>
+    list
+      .map((m) => `<div class="chat-bubble ${m.direction === "out" ? "out" : "in"}">${escapeHtml(m.text || "")}<span class="chat-bubble-time">${formatChatTime(m.at)}</span></div>`)
+      .join("");
+  messages.innerHTML = bubbles(conv.messages);
   messages.scrollTop = messages.scrollHeight;
-  // Полная переписка из самого Telegram — с тем, что писали через бота
-  // и руками в Telegram (локальный журнал знает только своё).
-  api(`/api/telegram/history/${contact}`)
+  // Полная переписка из самого Telegram — и то, что писали через бота, и
+  // руками в Telegram (журнал приложения знает только своё). Есть, пока
+  // работает шлюз; иначе остаётся журнал приложения.
+  api(`/api/telegram/history/${encodeURIComponent(contact)}`)
     .then((h) => {
       if (activeTelegramContact !== contact || h.source !== "telegram" || !h.messages.length) return;
-      messages.innerHTML = chatBubblesHtml(h.messages);
+      messages.innerHTML = bubbles(h.messages);
       messages.scrollTop = messages.scrollHeight;
     })
     .catch(() => {});
@@ -3939,195 +4211,6 @@ async function openTelegramConversation(contact) {
     } else {
       navBadge.style.display = "none";
     }
-  }
-}
-
-// --- Пост из Telegram-парсера как диалог: черновик → отправка ---------
-
-async function openTelegramPost(id) {
-  const post = telegramInbox.posts.find((p) => p.id === id);
-  if (!post) return;
-  activeTelegramPost = id;
-  activeTelegramContact = null;
-  document
-    .querySelectorAll("#tg-conv-list .conv-item")
-    .forEach((el) => el.classList.toggle("active", el.dataset.post === id));
-  document.getElementById("tg-chat-empty").style.display = "none";
-  document.getElementById("tg-chat-panel").style.display = "none";
-  document.getElementById("tg-post-panel").style.display = "";
-  document.getElementById("tg-post-status").textContent = "";
-
-  document.getElementById("tg-post-meta").textContent =
-    `@${post.channel} · ${formatChatTime(post.found_at)}` +
-    (post.unverified ? " · ИИ не проверил, вакансия ли это" : "");
-  document.getElementById("tg-post-link").href = post.link;
-  document.getElementById("tg-post-title").textContent = post.title;
-  document.getElementById("tg-post-body").textContent = post.text;
-  const tgContacts = post.contacts.filter((c) => c.kind === "telegram");
-  const others = post.contacts.filter((c) => c.kind !== "telegram");
-  const withNote = (c, prefix) =>
-    prefix + c.value + (post.notes?.[c.value] ? ` (${post.notes[c.value]})` : "");
-  document.getElementById("tg-post-note").textContent = [
-    tgContacts.length
-      ? `Контакт: ${tgContacts.map((c) => withNote(c, "@")).join(", ")}`
-      : "В посте нет контакта в Telegram — откликнитесь по ссылке в посте",
-    others.length ? `Ещё: ${others.map((c) => withNote(c, "")).join(", ")}` : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
-
-  const isLater = post.status === "later";
-  document.getElementById("tg-post-compose").style.display =
-    tgContacts.length && !isLater ? "" : "none";
-  document.getElementById("tg-post-later-box").style.display = isLater ? "" : "none";
-  if (isLater) {
-    document.getElementById("tg-post-later-text").textContent =
-      `Сообщение @${post.contact} уйдёт ${formatChatTime(post.send_after)}`;
-  }
-  const history = document.getElementById("tg-post-history");
-  history.style.display = "none";
-  history.innerHTML = "";
-  if (tgContacts.length) loadTelegramPostHistory(id, isLater ? post.contact : tgContacts[0].value);
-  if (!tgContacts.length || isLater) return;
-
-  const contactSel = document.getElementById("tg-post-contact");
-  contactSel.innerHTML = tgContacts
-    .map((c) => `<option value="${escapeHtml(c.value)}">@${escapeHtml(c.value)}</option>`)
-    .join("");
-  contactSel.parentElement.style.display = tgContacts.length > 1 ? "" : "none";
-  const resumeSel = document.getElementById("tg-post-resume");
-  resumeSel.innerHTML =
-    '<option value="">Без резюме</option>' +
-    telegramInbox.resumes
-      .map((r) => `<option value="${escapeHtml(r.value)}">${escapeHtml(r.name)}</option>`)
-      .join("");
-  const later = document.getElementById("tg-post-later");
-  later.disabled = !telegramInbox.can_schedule;
-  later.title = telegramInbox.can_schedule
-    ? "К началу рабочих часов из правил парсера"
-    : "Отложенная отправка работает с ботом уведомлений: Настройки → Уведомления";
-  const cached = telegramDrafts[id];
-  if (cached) {
-    // Черновик другого поста мог ещё грузиться и выключить поле/кнопку.
-    document.getElementById("tg-post-input").disabled = false;
-    document.getElementById("tg-post-send").disabled = false;
-    document.getElementById("tg-post-input").value = cached.text;
-    resumeSel.value = cached.resume;
-    return;
-  }
-  await loadTelegramDraft(id);
-}
-
-async function loadTelegramDraft(id) {
-  const input = document.getElementById("tg-post-input");
-  const status = document.getElementById("tg-post-status");
-  const send = document.getElementById("tg-post-send");
-  input.value = "";
-  input.placeholder = "ИИ пишет черновик под вакансию…";
-  input.disabled = true;
-  send.disabled = true;
-  try {
-    const d = await api(`/api/telegram/posts/${id}/draft`, { method: "POST" });
-    telegramDrafts[id] = { text: d.text, resume: d.resume };
-    if (activeTelegramPost !== id) return;
-    input.value = d.text;
-    document.getElementById("tg-post-resume").value = d.resume;
-    status.textContent =
-      d.source === "ai" ? "" : "ИИ недоступен — подставлен шаблон из правил парсера.";
-  } catch (e) {
-    if (activeTelegramPost === id) status.textContent = `Черновик не получился: ${apiErrorText(e)}`;
-  } finally {
-    if (activeTelegramPost === id) {
-      input.disabled = false;
-      send.disabled = false;
-      input.placeholder = "Текст сообщения HR";
-    }
-  }
-}
-
-async function loadTelegramPostHistory(id, contact) {
-  const box = document.getElementById("tg-post-history");
-  box.style.display = "none";
-  box.innerHTML = "";
-  try {
-    const h = await api(`/api/telegram/history/${contact}`);
-    if (activeTelegramPost !== id || !h.messages.length) return;
-    box.innerHTML =
-      `<p class="muted small m0">Вы уже переписывались с @${escapeHtml(contact)}:</p>` +
-      chatBubblesHtml(h.messages);
-    box.style.display = "";
-    box.scrollTop = box.scrollHeight;
-  } catch {
-    // Истории нет — просто не показываем блок.
-  }
-}
-
-async function sendTelegramPost(later) {
-  const id = activeTelegramPost;
-  if (!id) return;
-  const status = document.getElementById("tg-post-status");
-  const text = document.getElementById("tg-post-input").value.trim();
-  if (!text) {
-    status.textContent = "Текст сообщения пустой.";
-    return;
-  }
-  if (!later && telegramInbox.sent_today >= telegramInbox.daily_limit) {
-    const ok = await showConfirm(
-      `Сегодня уже ${telegramInbox.sent_today} сообщений из ${telegramInbox.daily_limit}. Лимит бережёт ваш личный аккаунт от ограничений Telegram. Отправить всё равно?`
-    );
-    if (!ok) return;
-  }
-  const body = {
-    contact: document.getElementById("tg-post-contact").value,
-    text,
-    resume: document.getElementById("tg-post-resume").value,
-  };
-  const buttons = ["tg-post-send", "tg-post-later"].map((b) => document.getElementById(b));
-  buttons.forEach((b) => (b.disabled = true));
-  status.textContent = later ? "Ставлю в очередь…" : "Отправка…";
-  try {
-    const res = await api(`/api/telegram/posts/${id}/${later ? "later" : "send"}`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    if (later) {
-      showToast(`Уйдёт ${formatChatTime(res.send_after)}`, "success");
-    } else {
-      delete telegramDrafts[id];
-      showToast(res.warning || `Отправлено @${res.contact}`, res.warning ? "error" : "success");
-      activeTelegramPost = null;
-      activeTelegramContact = res.contact;
-    }
-    await render.telegram();
-  } catch (e) {
-    status.textContent = apiErrorText(e);
-  } finally {
-    document.getElementById("tg-post-send").disabled = false;
-    document.getElementById("tg-post-later").disabled = !telegramInbox.can_schedule;
-  }
-}
-
-async function setTelegramPostStatus(status) {
-  const id = activeTelegramPost;
-  if (!id) return;
-  try {
-    await api(`/api/telegram/posts/${id}/status`, {
-      method: "POST",
-      body: JSON.stringify({ status }),
-    });
-    const done = {
-      hidden: "Вакансия скрыта",
-      blocked: "Больше не пишем этой компании — отмечено в Базе",
-      new: "Отложенная отправка отменена",
-    };
-    showToast(done[status], "success");
-    if (status !== "new") {
-      activeTelegramPost = null;
-      delete telegramDrafts[id];
-    }
-    await render.telegram();
-  } catch (e) {
-    document.getElementById("tg-post-status").textContent = apiErrorText(e);
   }
 }
 
@@ -4205,15 +4288,16 @@ async function pollResumeAuditStatus() {
   }
 }
 
-async function startResumeAudit() {
+async function startResumeAudit(general = false) {
   const statusEl = document.getElementById("gen-status");
   const downloadEl = document.getElementById("gen-download");
   const progressEl = document.getElementById("gen-progress");
-  const jobUrl = document.getElementById("gen-job-url").value.trim() || null;
-  if (!jobUrl) {
-    showToast("Укажите ссылку на вакансию.", "error");
+  const jobUrl = general ? null : document.getElementById("gen-job-url").value.trim() || null;
+  if (!jobUrl && !general) {
+    showToast("Вставьте ссылку на вакансию — или «Проверить резюме» ниже, без вакансии.", "error");
     return;
   }
+  if (general) document.getElementById("gen-status").scrollIntoView({ block: "center", behavior: REDUCE_MOTION ? "auto" : "smooth" });
   downloadEl.style.display = "none";
   statusEl.textContent = "Запуск…";
   progressEl.classList.add("active");
@@ -4317,17 +4401,18 @@ function openResumeAuditModal(result) {
   document.getElementById("resume-audit-rewrite-body").textContent =
     result.rewritten_experience || "";
 
-  const overlay = document.getElementById("resume-audit-overlay");
-  overlay.style.display = "flex";
-  trapFocus(overlay);
+  // Разбор — на самой странице «Мои резюме», под кнопками, а не окном.
+  const panel = document.getElementById("resume-audit-overlay");
+  panel.hidden = false;
+  panel.scrollIntoView({ block: "start", behavior: REDUCE_MOTION ? "auto" : "smooth" });
 }
 
 function closeResumeAuditModal() {
-  hideOverlay(document.getElementById("resume-audit-overlay"));
+  document.getElementById("resume-audit-overlay").hidden = true;
 }
 
 function isResumeAuditModalOpen() {
-  return document.getElementById("resume-audit-overlay").style.display !== "none";
+  return false;
 }
 
 // Настройки → «Сайты компаний»: переключатели и список компаний.
@@ -4346,7 +4431,7 @@ async function loadBackups() {
     .map(
       (b) => `
     <div class="account-row">
-      <span class="account-text"><b>${escapeHtml(b.date)}</b><span class="muted small">${b.files} ${plural(b.files, "файл", "файла", "файлов")} · ${Math.max(1, Math.round(b.size_bytes / 1024))} КБ</span></span>
+      <span class="account-text"><b>${escapeHtml(backupLabel(b))}</b><span class="muted small">${b.manual ? "вручную · " : ""}${b.files} ${plural(b.files, "файл", "файла", "файлов")} · ${Math.max(1, Math.round(b.size_bytes / 1024))} КБ</span></span>
       <button type="button" class="btn btn-secondary btn-small" data-restore-backup="${escapeHtml(b.date)}">Восстановить</button>
     </div>`
     )
@@ -4355,7 +4440,7 @@ async function loadBackups() {
     btn.addEventListener("click", async () => {
       const date = btn.dataset.restoreBackup;
       const ok = await showConfirm(
-        `Восстановить данные на состояние ${date}? База компаний, рассылки, отклики, переписка и черновики будут заменены копией за эту дату — текущее состояние тоже сохранится отдельным снимком, но проверьте дату перед подтверждением.`
+        `Восстановить данные на состояние ${backupLabel({ date })}? База компаний, рассылки, отклики, переписка и черновики будут заменены копией за эту дату — текущее состояние тоже сохранится отдельным снимком, но проверьте дату перед подтверждением.`
       );
       if (!ok) return;
       btn.disabled = true;
@@ -4443,8 +4528,14 @@ async function addDirectCompany() {
 }
 
 function switchSettingsTab(paneId) {
+  if (!document.getElementById(paneId)) paneId = "settings-search";
   if (paneId === "settings-direct") loadDirectSettings().catch(() => {});
   if (paneId === "settings-backups") loadBackups().catch(() => {});
+  if (paneId === "settings-auto") loadAutoPane().catch(() => {});
+  if (paneId === "settings-resume-short") renderSettingsResumeSummary().catch(() => {});
+  if (paneId === "settings-look") fillLookPane();
+  if (paneId === "settings-tg-quick") loadTelegramWatch();
+  hideSettingsSearch();
   document.querySelectorAll("#settings-jump button").forEach((b) => {
     const isTarget = b.dataset.settingsTab === paneId;
     b.classList.toggle("active", isTarget);
@@ -4538,7 +4629,16 @@ function emptyStateHtml(message) {
   </div>`;
 }
 
+// Всплывающие сообщения этого окна — в «Уведомлениях» (вкладка «В окне»):
+// пропустили уведомление — его можно перечитать.
+const toastLog = [];
+function logToast(message, type) {
+  toastLog.unshift({ at: new Date().toISOString(), text: String(message), kind: type === "error" ? "failure" : "activity", status: "window" });
+  toastLog.length = Math.min(toastLog.length, 50);
+}
+
 function showToast(message, type = "info", duration = 3500) {
+  logToast(message, type);
   const container = document.getElementById("toast-container");
   if (!container) return;
   const el = document.createElement("div");
@@ -4555,6 +4655,28 @@ function showToast(message, type = "info", duration = 3500) {
       el.remove();
     }
   }, duration);
+}
+
+// «Сохранено» с кнопкой «Отменить»: изменение уже записано, отмена
+// возвращает прежнее значение.
+function showSavedToast(message, undo = null, duration = 6000) {
+  logToast(message, "success");
+  const container = document.getElementById("toast-container");
+  if (!container) return;
+  const el = document.createElement("div");
+  el.className = "toast success";
+  el.innerHTML = `<svg class="toast-check" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>${escapeHtml(message)}</span>${undo ? `<button type="button" class="toast-action">Отменить</button>` : ""}`;
+  container.appendChild(el);
+  const timer = setTimeout(() => el.remove(), duration);
+  el.querySelector(".toast-action")?.addEventListener("click", async () => {
+    clearTimeout(timer);
+    el.remove();
+    try {
+      await undo();
+    } catch (err) {
+      showToast(err.message.replace(/^\d+: /, ""), "error");
+    }
+  });
 }
 
 // Общий плавающий индикатор для sidebar-nav и вкладок настроек — вместо
@@ -4613,44 +4735,291 @@ function flashSaved(pane, btn) {
 // Автосохранение: любое изменение в разделе сохраняется само через
 // секунду — кнопкой «Сохранить» этого раздела. Ключи и пароли (ИИ,
 // Telegram) — с явной кнопкой, их вводят один раз и ждут подтверждения.
+// Разделы, которые сохраняются сами: [контейнер, скрытая кнопка
+// «Сохранить», которую нажимает автосохранение]. Кнопки читают значения
+// полей по id, поэтому «Отменить» просто возвращает полям прежние
+// значения и сохраняет ещё раз.
 const AUTOSAVE = [
   ["settings-search", "search-save"],
+  ["settings-exclude", "search-save"],
   ["settings-limits", "limits-save"],
+  ["settings-llm-costs", "limits-save"],
   ["settings-tg-quick", "tgq-save"],
   ["settings-outreach", "outreach-save"],
   ["tg-rules-panel", "tg-settings-save"],
+  ["tg-source-auto", "tg-settings-save"],
+  ["settings-llm-provider-block", "llm-provider-save"],
 ];
+
+function snapshotFields(container) {
+  const snap = {};
+  container.querySelectorAll("input[id], select[id], textarea[id]").forEach((el) => {
+    if (el.type === "file" || el.type === "password") return;
+    if (el.type === "checkbox" || el.type === "radio") snap[el.id] = el.checked;
+    else if (el.multiple) snap[el.id] = Array.from(el.selectedOptions).map((o) => o.value);
+    else snap[el.id] = el.value;
+  });
+  const active = container.querySelector("#provider-grid .provider-card.active");
+  if (active) snap.__provider = active.dataset.provider;
+  return snap;
+}
+
+function restoreFields(container, snap) {
+  if (snap.__provider) applyLLMSelection(snap.__provider, snap["llm-model"]);
+  Object.entries(snap).forEach(([id, value]) => {
+    const el = document.getElementById(id);
+    if (!el || id.startsWith("__")) return;
+    if (el.type === "checkbox" || el.type === "radio") el.checked = value;
+    else if (el.multiple) Array.from(el.options).forEach((o) => (o.selected = value.includes(o.value)));
+    else el.value = value;
+    if (el.tagName === "TEXTAREA" && el.dataset.tagInputInit) renderTagChips(el);
+  });
+}
 
 function initAutosave() {
   AUTOSAVE.forEach(([paneId, btnId]) => {
     const pane = document.getElementById(paneId);
     const btn = document.getElementById(btnId);
     if (!pane || !btn) return;
-    btn.hidden = true;
-    const note = document.createElement("span");
-    note.className = "muted small autosave-note";
-    note.textContent = "Изменения сохраняются сами";
-    btn.after(note);
+    let before = null;
     let timer = null;
+    const loaded = () => !pane.dataset.needsLoad || pane.dataset.loaded === "1";
+    // Снимок «как было» — до первой правки: фокус или нажатие в разделе.
+    const remember = () => {
+      if (!before && loaded()) before = snapshotFields(pane);
+    };
+    pane.addEventListener("focusin", remember);
+    pane.addEventListener("pointerdown", remember);
     pane.addEventListener("change", (e) => {
-      if (e.target.type === "file") return;
-      if (pane.dataset.needsLoad && pane.dataset.loaded !== "1") return; // ещё не загрузили
+      if (e.target.type === "file" || e.target.type === "password") return;
+      if (!loaded()) return; // ещё не загрузили — не затираем пустым
+      if (e.target.closest(".no-autosave")) return;
       clearTimeout(timer);
-      note.textContent = "Сохраняю…";
       const field = e.target;
-      timer = setTimeout(() => {
+      const prev = before;
+      timer = setTimeout(async () => {
         btn.click();
-        setTimeout(() => {
-          note.textContent = "✓ Сохранено";
-          // Раньше "сохранено" было видно только далёкой надписью у
-          // кнопки — само поле, которое человек только что поправил,
-          // никак не подтверждало это на месте.
+        await new Promise((r) => setTimeout(r, 700));
+        const statusEl = btn.parentElement.querySelector('[id$="-status"]');
+        if (statusEl && /ошибка/i.test(statusEl.textContent || "")) {
+          showToast(statusEl.textContent, "error", 6000);
+          return;
+        }
+        before = snapshotFields(pane);
+        showSavedToast("Сохранено", prev
+          ? async () => {
+              restoreFields(pane, prev);
+              btn.click();
+              before = prev;
+              showToast("Вернул как было", "info");
+            }
+          : null);
+        if (field.classList) {
           field.classList.remove("save-flash");
           void field.offsetWidth;
           field.classList.add("save-flash");
-        }, 700);
-      }, 900);
+        }
+      }, 700);
     });
+  });
+}
+
+// ---------- Настройки: «Отклики и переписка», «Мои резюме», «Вид» ----------
+
+async function loadAutoPane() {
+  const [status, salary, search] = await Promise.all([
+    api("/api/status"),
+    api("/api/settings/salary"),
+    api("/api/settings/search"),
+  ]);
+  lastStatus = status;
+  renderAutoAll(status);
+  renderAutoChat(status);
+  const hh = status.sources.find((x) => x.name === "headhunter") || {};
+  const set = (id, prop, value) => {
+    const el = document.getElementById(id);
+    if (el) el[prop] = value;
+  };
+  set("hh-auto-reply", "checked", !!hh.auto_reply);
+  set("hh-cover-to-chat", "checked", !!hh.chat_cover_letter_followup);
+  set("hh-auto-bump", "checked", !!hh.auto_bump_resume);
+  set("hh-auto-reminder", "checked", !!hh.auto_reminder);
+  set("hh-reminder-days", "value", hh.reminder_follow_up_days ?? 7);
+  set("hh-salary-expectations", "value", salary.hh_salary_expectations || "");
+  set("search-once-per-company", "checked", !!search.apply_once_at_company);
+}
+
+function initAutoPane() {
+  const hhSwitch = (id, field, on, off) => {
+    const box = document.getElementById(id);
+    box?.addEventListener("change", async () => {
+      const v = box.checked;
+      await saveSourceSettings("headhunter", { [field]: v }, v ? on : off, { [field]: !v });
+      loadAutoPane();
+    });
+  };
+  hhSwitch("hh-auto-reply", "auto_reply", "автоответ в чате включён", "автоответ в чате выключен");
+  hhSwitch("hh-cover-to-chat", "chat_cover_letter_followup", "письмо в чат после отклика включено", "письмо в чат после отклика выключено");
+  hhSwitch("hh-auto-bump", "auto_bump_resume", "поднимать резюме", "не поднимать резюме");
+  hhSwitch("hh-auto-reminder", "auto_reminder", "напоминания уходят сами", "напоминания ждут вашего «Отправить»");
+  document.getElementById("hh-reminder-days")?.addEventListener("change", (e) => {
+    saveSourceSettings("headhunter", { reminder_follow_up_days: Math.max(0, parseInt(e.target.value, 10) || 0) }, "напоминание · сохранено");
+  });
+  const salary = document.getElementById("hh-salary-expectations");
+  salary?.addEventListener("change", async () => {
+    try {
+      await api("/api/settings/salary", { method: "POST", body: JSON.stringify({ hh_salary_expectations: salary.value.trim() }) });
+      showSavedToast("Зарплата для ответов HR · сохранено");
+    } catch (err) {
+      showToast(err.message.replace(/^\d+: /, ""), "error");
+    }
+  });
+  const once = document.getElementById("search-once-per-company");
+  once?.addEventListener("change", async () => {
+    const v = once.checked;
+    const post = (value) => api("/api/settings/search", { method: "POST", body: JSON.stringify({ apply_once_at_company: value }) });
+    try {
+      await post(v);
+      showSavedToast(v ? "Один отклик в одну компанию" : "Можно несколько откликов в одну компанию", async () => {
+        await post(!v);
+        once.checked = !v;
+      });
+    } catch (err) {
+      showToast(err.message.replace(/^\d+: /, ""), "error");
+      once.checked = !v;
+    }
+  });
+}
+
+async function renderSettingsResumeSummary() {
+  const el = document.getElementById("settings-resume-summary");
+  if (!el) return;
+  const r = await api("/api/resumes");
+  const file = (f, fallback) => (f.exists ? `<span class="mono small">${escapeHtml(f.name)}</span>` : `<span class="${fallback ? "muted" : "err-text"} small">${fallback || "не загружено"}</span>`);
+  el.innerHTML = `
+    <div class="kv"><span>Резюме на русском — HH, GetMatch, Habr, Telegram</span>${file(r.primary)}</div>
+    <div class="kv"><span>Резюме на английском — LinkedIn и зарубежные</span>${file(r.linkedin, "берётся основное")}</div>
+    <div class="kv"><span>Дополнительные — выбор в чате и рассылке</span><span class="mono small">${r.extra.length || "нет"}</span></div>`;
+}
+
+function fillLookPane() {
+  let theme = "system";
+  let density = "comfortable";
+  let motion = "system";
+  try {
+    theme = localStorage.getItem("cj-theme") || "system";
+    density = localStorage.getItem("cj-density") || "comfortable";
+    motion = localStorage.getItem("cj-motion") || "system";
+  } catch (e) {}
+  document.getElementById("look-theme").value = theme;
+  document.getElementById("look-density").value = density;
+  document.getElementById("look-motion").value = motion;
+}
+
+function initLookPane() {
+  document.getElementById("look-theme").addEventListener("change", (e) => {
+    setTheme(e.target.value, e.target);
+    showSavedToast("Тема сохранена");
+  });
+  document.getElementById("look-density").addEventListener("change", (e) => {
+    const compact = e.target.value === "compact";
+    if (compact) document.documentElement.dataset.density = "compact";
+    else delete document.documentElement.dataset.density;
+    try {
+      localStorage.setItem("cj-density", e.target.value);
+    } catch (err) {}
+    showSavedToast(compact ? "Компактная плотность" : "Обычная плотность");
+  });
+  document.getElementById("look-motion").addEventListener("change", (e) => {
+    const reduce = e.target.value === "reduce";
+    if (reduce) document.documentElement.dataset.motion = "reduce";
+    else delete document.documentElement.dataset.motion;
+    REDUCE_MOTION = reduce || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    try {
+      localStorage.setItem("cj-motion", e.target.value);
+    } catch (err) {}
+    showSavedToast(reduce ? "Анимации выключены" : "Анимации как в системе");
+  });
+}
+
+// ---------- Поиск по настройкам ----------
+
+function settingsSearchIndex() {
+  const items = [];
+  let group = "";
+  const groupOf = {};
+  document.querySelectorAll("#settings-jump > *").forEach((el) => {
+    if (el.classList.contains("settings-jump-label")) group = el.textContent.trim();
+    else if (el.dataset.settingsTab) groupOf[el.dataset.settingsTab] = { group, name: el.textContent.trim() };
+  });
+  document.querySelectorAll(".settings-pane").forEach((pane) => {
+    const where = groupOf[pane.id] || { group: "", name: pane.querySelector("h3")?.textContent || "" };
+    pane.querySelectorAll(".field-row, .field-block").forEach((field, i) => {
+      const title = field.querySelector(".field-title")?.textContent.trim();
+      if (!title) return;
+      const hint = field.querySelector(".field-hint")?.textContent.trim() || "";
+      items.push({ pane: pane.id, field, title, hint, path: `${where.group} → ${where.name}`, key: `${pane.id}:${i}` });
+    });
+  });
+  return items;
+}
+
+function hideSettingsSearch() {
+  const box = document.getElementById("settings-search-results");
+  if (!box || box.hidden) return;
+  box.hidden = true;
+  document.querySelector(".settings-content")?.classList.remove("is-searching");
+}
+
+function renderSettingsSearch(query) {
+  const box = document.getElementById("settings-search-results");
+  const q = query.trim().toLowerCase();
+  if (!q) {
+    hideSettingsSearch();
+    return;
+  }
+  const words = q.split(/\s+/);
+  const found = settingsSearchIndex().filter((it) => {
+    const text = `${it.title} ${it.hint} ${it.path}`.toLowerCase();
+    return words.every((w) => text.includes(w));
+  });
+  box.hidden = false;
+  document.querySelector(".settings-content").classList.add("is-searching");
+  box.innerHTML = `<div class="card-head"><h3>${found.length ? `Найдено настроек: ${found.length}` : "Ничего не нашлось"}</h3><span class="muted small">${found.length ? "нажмите — откроется раздел, и поле подсветится" : "попробуйте «лимит», «резюме» или «Telegram»"}</span></div>
+    <div class="settings-hits">${found
+      .slice(0, 40)
+      .map((it, i) => `<button type="button" class="row settings-hit" data-hit="${i}"><span class="row-main"><span class="row-title">${escapeHtml(it.title)}</span><span class="row-sub">${escapeHtml(it.path)}${it.hint ? " · " + escapeHtml(truncate(it.hint, 90)) : ""}</span></span>${CHEVRON_SVG}</button>`)
+      .join("")}</div>`;
+  box.querySelectorAll("[data-hit]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const it = found[Number(b.dataset.hit)];
+      document.getElementById("settings-find-input").value = "";
+      switchSettingsTab(it.pane);
+      let parent = it.field.parentElement;
+      while (parent) {
+        if (parent.tagName === "DETAILS") parent.open = true;
+        parent = parent.parentElement;
+      }
+      it.field.scrollIntoView({ block: "center", behavior: REDUCE_MOTION ? "auto" : "smooth" });
+      it.field.classList.remove("field-found");
+      void it.field.offsetWidth;
+      it.field.classList.add("field-found");
+      it.field.querySelector("input, select, textarea, button")?.focus({ preventScroll: true });
+    })
+  );
+}
+
+function initSettingsSearch() {
+  const input = document.getElementById("settings-find-input");
+  if (!input) return;
+  input.addEventListener("input", () => renderSettingsSearch(input.value));
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      input.value = "";
+      hideSettingsSearch();
+    } else if (e.key === "Enter") {
+      document.querySelector("#settings-search-results [data-hit]")?.click();
+    }
   });
 }
 
@@ -4741,6 +5110,27 @@ let commandActiveIndex = 0;
 
 function collectCommandItems(query) {
   const items = [];
+  const status = lastStatus;
+  if (status) {
+    status.sources
+      .filter((s) => s.name !== "telegram")
+      .forEach((s) => items.push({ label: `${s.name === "direct" ? "Сайты компаний" : sourceLabel(s.name)}: настройки`, hint: "Площадка", action: () => { switchTab("overview"); openPlatform(s.name); } }));
+  }
+  items.push(
+    { label: "Telegram-парсер: состояние", hint: "Площадка", action: () => { switchTab("overview"); openTelegramDrawer(); } },
+    { label: "Рассылка по почте: что сейчас", hint: "Площадка", action: () => { switchTab("overview"); openMailDrawer(); } },
+    { label: "Только искать, без откликов", hint: "Режим", action: () => setHomeMode("search") },
+    { label: "Снова откликаться", hint: "Режим", action: () => setHomeMode("apply") },
+    { label: status?.daemon_running ? "Остановить бота" : "Запустить бота", hint: "Действие", action: () => document.getElementById("daemon-toggle").click() },
+    { label: status?.pause_all?.paused ? "Снять паузу" : "Пауза на всё", hint: "Действие", action: () => setPauseAll(!status?.pause_all?.paused) },
+    { label: "Уведомления", hint: "История", action: () => openNotifications() },
+    { label: "Сделать резервную копию сейчас", hint: "Настройки", action: () => { gotoSettings("settings-backups"); document.getElementById("backup-now")?.click(); } },
+    { label: "Тема: светлая", hint: "Вид", ui: "shell.theme", action: () => setTheme("light") },
+    { label: "Тема: тёмная", hint: "Вид", ui: "shell.theme", action: () => setTheme("dark") },
+    { label: "Тема: как в системе", hint: "Вид", ui: "shell.theme", action: () => setTheme("system") },
+    { label: "Как пользоваться", hint: "Помощь", action: () => document.getElementById("help-dialog").showModal() },
+    { label: "Горячие клавиши", hint: "Помощь", action: () => openShortcutsOverlay() }
+  );
   Object.values(NAV_GROUPS)
     .flat()
     .forEach(([view, label]) => {
@@ -4984,10 +5374,6 @@ function initCommandPalette() {
     .getElementById("cover-letter-close")
     .addEventListener("click", closeCoverLetterModal);
 
-  const resumeAuditOverlay = document.getElementById("resume-audit-overlay");
-  resumeAuditOverlay.addEventListener("click", (e) => {
-    if (e.target === resumeAuditOverlay) closeResumeAuditModal();
-  });
   document
     .getElementById("resume-audit-close")
     .addEventListener("click", closeResumeAuditModal);
@@ -5011,11 +5397,404 @@ function closePlatformDrawer() {
   const overlay = document.getElementById("platform-drawer-overlay");
   if (overlay.style.display === "none") return;
   overlay.style.display = "none";
+  openDrawerSource = null;
+  drawerDirty = false;
   releaseFocusTrap(document.getElementById("platform-drawer"));
 }
 
 function isPlatformDrawerOpen() {
   return document.getElementById("platform-drawer-overlay").style.display !== "none";
+}
+
+// ---------- Вакансии: чипы, шторка «Почему бот так решил», клавиши ----------
+
+let historyChip = "all";
+let historyRows = [];
+let historySelected = -1;
+let jobThresholds = null;
+const isSkipped = (e) => (e.status || "").startsWith("skipped");
+const HISTORY_CHIPS = {
+  all: { label: "Все", test: (e) => e.effective_stage !== "rejected" },
+  applied: { label: "Отправлено", test: (e) => e.status === "applied" && !e.effective_stage },
+  replied: { label: "Ответили", test: (e) => e.effective_stage === "replied" },
+  interview: { label: "Интервью", test: (e) => ["interview", "test_task", "offer"].includes(e.effective_stage) },
+  skipped: { label: "Пропущено", test: isSkipped },
+  dry_run: { label: "Тестовый прогон", test: (e) => e.status === "dry_run" },
+  rejected: { label: "Отказ", test: (e) => e.effective_stage === "rejected" },
+};
+
+function renderHistoryChips(all) {
+  const box = document.getElementById("history-chips");
+  box.innerHTML = Object.entries(HISTORY_CHIPS)
+    .map(([k, c]) => {
+      const n = all.filter(c.test).length;
+      if (!n && k !== "all" && k !== historyChip) return "";
+      return `<button type="button" class="chip${k === historyChip ? " active" : ""}" data-chip="${k}" aria-pressed="${k === historyChip}">${c.label} <b>${n}</b></button>`;
+    })
+    .join("");
+  box.querySelectorAll("[data-chip]").forEach((b) =>
+    b.addEventListener("click", () => {
+      historyChip = b.dataset.chip;
+      // Старые фильтры — для совместимости со ссылками на «Вакансии».
+      document.getElementById("filter-show-rejected").checked = historyChip === "rejected";
+      lastHistorySnapshot = "";
+      render.history();
+    })
+  );
+}
+
+function jobVerdict(e) {
+  if (e.score == null) return { tone: "flat", text: "Оценки нет — площадка не отдала описание или ИИ был недоступен" };
+  const t = jobThresholds || { min: 4, fit: 7 };
+  if (e.score >= t.fit) return { tone: "good", text: "Уверенное совпадение — отклик с письмом" };
+  if (e.score >= t.min) return { tone: "warn", text: "Среднее совпадение — отклик помечен как слабый" };
+  return { tone: "bad", text: "Слабое совпадение — бот не откликался" };
+}
+
+function jobStageButtons(e) {
+  if (!e.external_id || e.status !== "applied") return "";
+  const current = e.effective_stage ?? "";
+  const opts = [["", "Без ответа"], ...Object.entries(STAGE_LABELS)];
+  return `<div class="field-block" data-ui="jobs.stage"><div class="field-title">Этап</div>
+    <div class="stage-buttons" role="radiogroup" aria-label="Этап">${opts
+      .map(([v, l]) => `<button type="button" class="chip${v === current ? " active" : ""}" role="radio" aria-checked="${v === current}" data-set-stage="${v}">${l[0].toUpperCase() + l.slice(1)}</button>`)
+      .join("")}</div>
+    <div class="field-hint">Ставится сам по ответу площадки. Поправьте, если бот ошибся; «Без ответа» снимает ручную отметку.</div></div>`;
+}
+
+function jobDrawerBody(e, tab) {
+  const v = jobVerdict(e);
+  const t = jobThresholds || { min: 4, fit: 7 };
+  if (tab === "letter") {
+    return `<div class="field-block" data-ui="jobs.letter">
+      <div class="field-hint">${e.status === "applied" ? `Это письмо ушло вместе с откликом ${fmtTime(e.applied_at)}.` : "Письмо не отправлялось — так бы оно выглядело."}</div>
+      <div class="letter-text">${e.cover_letter ? escapeHtml(e.cover_letter) : `<span class="muted">Письма нет: отклик без письма или запись старше срока хранения.</span>`}</div>
+      ${e.cover_letter ? `<div class="fix-actions"><button type="button" class="btn btn-small" data-job-action="copy-letter">Скопировать</button></div>` : ""}
+    </div>`;
+  }
+  if (tab === "prep") {
+    const prefill = e.source === "direct" && e.status === "dry_run" && /greenhouse\.io|lever\.co/.test(e.link);
+    return `<div class="field-stack">
+      ${e.external_id ? `<button type="button" class="btn" data-job-action="prep" data-ui="jobs.prep">Справка к интервью: что спросят и что подтянуть</button>` : ""}
+      <div id="job-prep-body" class="letter-text" hidden></div>
+      ${e.external_id ? `<div class="fix-actions">
+        <button type="button" class="btn btn-small" data-job-action="trainer" data-ui="jobs.trainer">Тренажёр вопросов</button>
+        <button type="button" class="btn btn-small" data-job-action="calendar" data-ui="jobs.calendar">Интервью в календарь</button>
+      </div>` : ""}
+      ${prefill ? `<button type="button" class="btn btn-small" data-job-action="prefill" data-ui="jobs.prefill">Заполнить форму отклика</button>` : ""}
+      ${e.gaps && e.gaps.length ? `<div class="field-block"><div class="field-title">Что подтянуть</div><div class="field-hint">То, чего нет в резюме, но есть в вакансии:</div><ul class="plain-list">${e.gaps.map((g) => `<li>${escapeHtml(g)}</li>`).join("")}</ul></div>` : ""}
+    </div>`;
+  }
+  return `<div class="verdict" data-ui="jobs.score">
+      <div class="verdict-score"><span class="mono">${e.score ?? "—"}</span><span class="muted"> / 10</span></div>
+      <div class="verdict-text"><span class="dot ${v.tone === "good" ? "ok" : v.tone === "warn" ? "warn" : v.tone === "bad" ? "error" : "idle"}"></span>${escapeHtml(v.text)}</div>
+      <div class="field-hint">ниже ${t.min} — пропуск · от ${t.fit} — уверенное совпадение (Настройки → Лимиты и оценка)</div>
+    </div>
+    ${e.skills && e.skills.length ? `<div class="field-block"><div class="field-title">Навыки из вакансии</div><div class="tag-row">${e.skills.map((x) => `<span class="tag">${escapeHtml(x)}</span>`).join("")}</div></div>` : ""}
+    <div class="field-block"><div class="field-title">Не хватает</div>${e.gaps && e.gaps.length ? `<ul class="plain-list">${e.gaps.map((g) => `<li>${escapeHtml(g)}</li>`).join("")}</ul>` : `<div class="field-hint">всё основное в резюме есть</div>`}</div>
+    ${jobStageButtons(e)}
+    ${jobMistakeHtml(e)}
+    ${e.contacts && e.contacts.length ? `<div class="field-block" data-ui="jobs.contacts"><div class="field-title">Контакты из вакансии</div>${e.contacts.map((c) => `<a href="mailto:${escapeHtml(c)}">${escapeHtml(c)}</a>`).join("<br>")}</div>` : ""}`;
+}
+
+function openJobDrawer(e, tab = "decision") {
+  const site = (() => {
+    try {
+      return new URL(e.link).hostname.replace(/^www\./, "");
+    } catch (err) {
+      return "сайте";
+    }
+  })();
+  const tabs = [["decision", "Решение"], ["letter", "Письмо"], ["prep", "Подготовка"]];
+  const body = openSideDrawer({
+    title: `${plogoHtml(e.source)}<span>${escapeHtml(e.company || "—")}</span>`,
+    sub: `<span>${escapeHtml(e.title)}${e.salary ? " · " + escapeHtml(e.salary) : ""} · ${escapeHtml(statusLabel(e.status))}</span>`,
+    body: `<div class="segmented drawer-tabs" role="tablist" data-ui="jobs.drawer"><span class="segmented-ind" aria-hidden="true"></span>${tabs
+      .map(([k, l]) => `<button type="button" role="tab" class="${k === tab ? "on" : ""}" aria-selected="${k === tab}" data-job-tab="${k}">${l}</button>`)
+      .join("")}</div><div id="job-tab-body" class="field-stack">${jobDrawerBody(e, tab)}</div>`,
+    foot: jobDrawerFoot(e, site),
+  });
+  jobMistakeOpen = false;
+  openDrawerSource = null;
+  const seg = body.querySelector(".drawer-tabs");
+  requestAnimationFrame(() => positionSegmented(seg));
+  seg.querySelectorAll("[data-job-tab]").forEach((b) =>
+    b.addEventListener("click", () => {
+      seg.querySelectorAll("[data-job-tab]").forEach((x) => {
+        x.classList.toggle("on", x === b);
+        x.setAttribute("aria-selected", x === b ? "true" : "false");
+      });
+      positionSegmented(seg);
+      body.querySelector("#job-tab-body").innerHTML = jobDrawerBody(e, b.dataset.jobTab);
+      bindJobDrawer(body, e);
+    })
+  );
+  bindJobDrawer(body, e);
+  const drawer = document.getElementById("platform-drawer");
+  drawer.onclick = null;
+  drawer.querySelectorAll("[data-job-action]").forEach(() => {});
+  currentJobEntry = e;
+}
+
+let currentJobEntry = null;
+let jobMistakeOpen = false;
+
+// «Это была ошибка»: причины — как в демо; пометка уходит в оценку
+// следующих вакансий (job_fit.score_job_fit).
+const MISTAKE_REASONS = {
+  should_apply: ["Стоило откликнуться", "Требование не обязательное", "Неверно понял формат работы"],
+  should_skip: ["Не стоило откликаться", "Не мой стек", "Зарплата ниже ожиданий", "Не та география"],
+};
+const canApplyAnyway = (e) => isSkipped(e) && !!e.external_id;
+
+function jobMistakeHtml(e) {
+  const fb = e.feedback;
+  if (fb && !jobMistakeOpen) {
+    return `<div class="field-block mistake-note" data-ui="jobs.mistake"><div class="field-title">Ваша пометка</div>
+      <div>«${escapeHtml(fb.reason || (fb.verdict === "should_apply" ? "Стоило откликнуться" : "Не стоило откликаться"))}» — бот учитывает её, когда оценивает похожие вакансии.</div>
+      <div class="fix-actions"><button type="button" class="btn btn-small btn-ghost" data-job-action="mistake-clear">Снять пометку</button></div></div>`;
+  }
+  if (!jobMistakeOpen) return "";
+  const verdict = isSkipped(e) ? "should_apply" : "should_skip";
+  return `<div class="mistake-panel" data-ui="jobs.mistake"><div class="field-title">Что не так с этим решением?</div>
+    <div class="chip-row">${MISTAKE_REASONS[verdict]
+      .map((r) => `<button type="button" class="chip" data-mistake-reason="${escapeHtml(r)}" data-verdict="${verdict}">${escapeHtml(r)}</button>`)
+      .join("")}</div>
+    <form class="field-row-inline" data-mistake-form data-verdict="${verdict}"><input type="text" maxlength="300" placeholder="Или своими словами" aria-label="Своя причина" /><button type="submit" class="btn btn-small">Запомнить</button></form></div>`;
+}
+
+function jobDrawerFoot(e, site) {
+  const anyway = canApplyAnyway(e);
+  const planned = anyway && e.apply_anyway;
+  return `${anyway ? `<button type="button" class="btn${planned ? "" : " btn-primary"}" data-job-action="apply-anyway" data-ui="jobs.apply-anyway" aria-pressed="${planned ? "true" : "false"}">${planned ? "Отклик запланирован · отменить" : "Откликнуться всё равно"}</button>` : ""}
+    ${e.link ? `<a class="btn${anyway ? "" : " btn-primary"}" href="${escapeHtml(e.link)}" target="_blank" rel="noopener" data-ui="jobs.open">Открыть на ${escapeHtml(site)} ↗</a>` : ""}
+    ${e.company ? `<button type="button" class="btn btn-ghost" data-job-action="find-hr" data-ui="jobs.find-hr">Найти HR компании</button>` : ""}
+    ${e.external_id ? `<button type="button" class="btn btn-ghost foot-end" data-job-action="mistake" aria-expanded="${jobMistakeOpen}">Это была ошибка</button>` : ""}`;
+}
+
+function refreshJobDrawer(e) {
+  const tabBody = document.getElementById("job-tab-body");
+  if (!tabBody || currentJobEntry !== e) return;
+  const active = document.querySelector("#platform-drawer [data-job-tab].on")?.dataset.jobTab || "decision";
+  tabBody.innerHTML = jobDrawerBody(e, active);
+  bindJobDrawer(tabBody, e);
+  const site = (() => {
+    try {
+      return new URL(e.link).hostname.replace(/^www\./, "");
+    } catch (err) {
+      return "сайте";
+    }
+  })();
+  document.getElementById("platform-drawer-foot").innerHTML = jobDrawerFoot(e, site);
+  lastHistorySnapshot = "";
+  render.history();
+}
+
+async function saveJobFeedback(e, verdict, reason) {
+  const prev = e.feedback || null;
+  const post = (v, r) =>
+    api("/api/applications/feedback", { method: "POST", body: JSON.stringify({ source: e.source, external_id: e.external_id, verdict: v || "", reason: r || "" }) });
+  try {
+    const saved = await post(verdict, reason);
+    e.feedback = saved.feedback || null;
+    jobMistakeOpen = false;
+    refreshJobDrawer(e);
+    showSavedToast(
+      verdict ? `Запомнил: «${reason}». Похожие вакансии буду оценивать иначе` : "Пометка снята",
+      async () => {
+        const back = await post(prev?.verdict, prev?.reason);
+        e.feedback = back.feedback || null;
+        refreshJobDrawer(e);
+      }
+    );
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  }
+}
+
+async function toggleApplyAnyway(e) {
+  const on = !e.apply_anyway;
+  const post = (v) =>
+    api("/api/applications/apply-anyway", { method: "POST", body: JSON.stringify({ source: e.source, external_id: e.external_id, on: v }) });
+  try {
+    await post(on);
+    e.apply_anyway = on;
+    refreshJobDrawer(e);
+    showSavedToast(
+      on
+        ? `Откликнусь, когда ${sourceLabel(e.source)} снова покажет вакансию — без оценки ИИ, с письмом и в пределах лимита`
+        : "Отклик отменён",
+      async () => {
+        await post(!on);
+        e.apply_anyway = !on;
+        refreshJobDrawer(e);
+      },
+      9000
+    );
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  }
+}
+
+function bindJobDrawer(root, e) {
+  root.querySelectorAll("[data-mistake-reason]").forEach((b) =>
+    b.addEventListener("click", () => saveJobFeedback(e, b.dataset.verdict, b.dataset.mistakeReason))
+  );
+  root.querySelectorAll("[data-mistake-form]").forEach((f) =>
+    f.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const text = f.querySelector("input").value.trim();
+      if (text) saveJobFeedback(e, f.dataset.verdict, text);
+    })
+  );
+  root.querySelectorAll("[data-set-stage]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      try {
+        await api("/api/applications/stage", {
+          method: "POST",
+          body: JSON.stringify({ source: e.source, external_id: e.external_id, stage: b.dataset.setStage }),
+        });
+        const prev = e.effective_stage;
+        e.effective_stage = b.dataset.setStage || null;
+        root.querySelectorAll("[data-set-stage]").forEach((x) => {
+          x.classList.toggle("active", x === b);
+          x.setAttribute("aria-checked", x === b ? "true" : "false");
+        });
+        showSavedToast(`Этап: ${b.textContent}`, async () => {
+          await api("/api/applications/stage", { method: "POST", body: JSON.stringify({ source: e.source, external_id: e.external_id, stage: prev || "" }) });
+          e.effective_stage = prev;
+          lastHistorySnapshot = "";
+          render.history();
+        });
+        lastHistorySnapshot = "";
+        render.history();
+      } catch (err) {
+        showToast(`Не удалось сохранить этап: ${err.message}`, "error");
+      }
+    })
+  );
+}
+
+async function handleJobAction(btn) {
+  const e = currentJobEntry;
+  if (!e) return;
+  const action = btn.dataset.jobAction;
+  if (action === "mistake") {
+    jobMistakeOpen = !jobMistakeOpen;
+    const decision = document.querySelector('#platform-drawer [data-job-tab="decision"]');
+    if (decision && !decision.classList.contains("on")) decision.click();
+    refreshJobDrawer(e);
+    document.querySelector("#platform-drawer .mistake-panel .chip")?.focus();
+    return;
+  }
+  if (action === "mistake-clear") {
+    saveJobFeedback(e, null, "");
+    return;
+  }
+  if (action === "apply-anyway") {
+    toggleApplyAnyway(e);
+    return;
+  }
+  if (action === "copy-letter") {
+    copyToClipboard(e.cover_letter || "", btn);
+    showToast("Письмо скопировано", "success");
+  } else if (action === "prep") {
+    btn.disabled = true;
+    btn.textContent = "Готовлю справку…";
+    try {
+      const { prep } = await api("/api/applications/prep", { method: "POST", body: JSON.stringify({ source: e.source, external_id: e.external_id }) });
+      const box = document.getElementById("job-prep-body");
+      box.hidden = false;
+      box.textContent = prep.replace(/\*\*/g, "");
+      btn.remove();
+    } catch (err) {
+      showToast(err.message.replace(/^\d+: /, ""), "error");
+      btn.disabled = false;
+      btn.textContent = "Справка к интервью: что спросят и что подтянуть";
+    }
+  } else if (action === "trainer") {
+    openTrainer(e);
+  } else if (action === "calendar") {
+    openCalendarOverlay(e);
+  } else if (action === "prefill") {
+    btn.disabled = true;
+    try {
+      const { filled } = await api("/api/direct/prefill", { method: "POST", body: JSON.stringify({ source: e.source, external_id: e.external_id }) });
+      showToast(filled.length ? `Форма открыта в Chrome, заполнено: ${filled.join(", ")}. Ответьте на вопросы компании и нажмите Submit.` : "Форма открыта в Chrome — эту разметку заполнить не удалось, заполните вручную.", "success", 8000);
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      btn.disabled = false;
+    }
+  } else if (action === "find-hr") {
+    btn.disabled = true;
+    btn.textContent = "Ищу контакты…";
+    try {
+      const res = await api("/api/contacts/from-application", { method: "POST", body: JSON.stringify({ source: e.source, external_id: e.external_id }) });
+      showToast(res.message || (res.added ? `Найдено контактов: ${res.added}` : "Компания добавлена в Базу — публичных контактов на сайте нет"), res.added ? "success" : "info", 7000);
+      focusContactKey = res.key;
+      closePlatformDrawer();
+      switchTab("contacts");
+    } catch (err) {
+      showToast(err.message.replace(/^\d+: /, ""), "error");
+      btn.disabled = false;
+      btn.textContent = "Найти HR компании";
+    }
+  }
+}
+
+function selectHistoryRow(i, open = false) {
+  const rows = document.querySelectorAll("#history-rows .job-row");
+  if (!rows.length) return;
+  historySelected = Math.max(0, Math.min(rows.length - 1, i));
+  rows.forEach((r, n) => r.classList.toggle("is-selected", n === historySelected));
+  rows[historySelected].focus({ preventScroll: false });
+  if (open) openJobDrawer(historyRows[historySelected]);
+}
+
+function initJobsView() {
+  const tbody = document.getElementById("history-rows");
+  tbody.addEventListener("click", (ev) => {
+    const row = ev.target.closest(".job-row");
+    if (!row || ev.target.closest("a")) return;
+    selectHistoryRow(Number(row.dataset.rowIndex), true);
+  });
+  tbody.addEventListener("keydown", (ev) => {
+    const row = ev.target.closest(".job-row");
+    if (!row) return;
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      selectHistoryRow(Number(row.dataset.rowIndex), true);
+    }
+  });
+  document.getElementById("platform-drawer").addEventListener("click", (ev) => {
+    const btn = ev.target.closest("[data-job-action]");
+    if (btn) handleJobAction(btn);
+  });
+  // j/k — по строкам, пока открыт раздел «Вакансии» и курсор не в поле.
+  document.addEventListener("keydown", (ev) => {
+    if (currentView !== "history" || isCommandPaletteOpen()) return;
+    const tag = (ev.target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return;
+    if (ev.key === "j" || ev.key === "k") {
+      ev.preventDefault();
+      selectHistoryRow(historySelected + (ev.key === "j" ? 1 : -1), isPlatformDrawerOpen());
+    }
+  });
+  ["filter-source"].forEach((id) =>
+    document.getElementById(id).addEventListener("change", () => {
+      lastHistorySnapshot = "";
+      render.history();
+    })
+  );
+  let qTimer = null;
+  document.getElementById("filter-query").addEventListener("input", () => {
+    clearTimeout(qTimer);
+    qTimer = setTimeout(() => {
+      lastHistorySnapshot = "";
+      render.history();
+    }, 250);
+  });
 }
 
 // Дополнительные действия строки "Истории" — в одном выпадающем меню,
@@ -5024,20 +5803,20 @@ function rowActionsHtml(e, i) {
   const actions = [];
   if (e.effective_stage === "interview") {
     actions.push(
-      `<button type="button" data-prep-btn data-row-index="${i}">🎯 Подготовка к интервью</button>`,
-      `<button type="button" data-trainer-btn data-row-index="${i}">🎤 Тренажёр</button>`,
-      `<button type="button" data-calendar-btn data-row-index="${i}">📅 В календарь</button>`
+      `<button type="button" data-prep-btn data-row-index="${i}">Подготовка к интервью</button>`,
+      `<button type="button" data-trainer-btn data-row-index="${i}">Тренажёр вопросов</button>`,
+      `<button type="button" data-calendar-btn data-row-index="${i}">Интервью в календарь</button>`
     );
   }
   if (e.source === "direct" && e.status === "dry_run" && /greenhouse\.io|lever\.co/.test(e.link)) {
-    actions.push(`<button type="button" data-prefill-btn data-row-index="${i}">✍️ Заполнить форму отклика</button>`);
+    actions.push(`<button type="button" data-prefill-btn data-row-index="${i}">Заполнить форму отклика</button>`);
   }
   if (e.company) {
-    actions.push(`<button type="button" data-find-hr data-row-index="${i}">👤 Найти HR этой компании</button>`);
+    actions.push(`<button type="button" data-find-hr data-row-index="${i}">Найти HR компании</button>`);
   }
   if (e.contacts && e.contacts.length) {
     actions.push(
-      ...e.contacts.map((c) => `<a href="mailto:${escapeHtml(c)}">✉️ ${escapeHtml(c)}</a>`)
+      ...e.contacts.map((c) => `<a href="mailto:${escapeHtml(c)}">${escapeHtml(c)}</a>`)
     );
   }
   if (!actions.length) return "";
@@ -5130,16 +5909,16 @@ async function renderDraftsQueue() {
     text: d.text,
     rows: 4,
     sendLabel: "Отправить",
-    headlineHtml: `${d.channel === "email" ? "✉️" : "✈️"} ${KIND[d.kind] || "Сообщение"} →
+    headlineHtml: `${KIND[d.kind] || "Сообщение"} ${d.channel === "email" ? "по почте" : "в Telegram"} →
       ${d.channel === "email" ? escapeHtml(d.contact) : "@" + escapeHtml(d.contact)}
       ${d.company ? ` · ${escapeHtml(d.company)}${d.title ? " — " + escapeHtml(d.title) : ""}` : ""}
       ${d.job_link ? ` · <a href="${escapeHtml(d.job_link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">вакансия</a>` : ""}`,
     detailHtml: d.resume_file
-      ? `<div class="muted small">📎 Приложится резюме: <b>${escapeHtml(d.resume_file)}</b>${
+      ? `<div class="muted small">Приложится резюме: <b>${escapeHtml(d.resume_file)}</b>${
           d.resume_russian === true ? " (для русской вакансии)" : d.resume_russian === false ? " (для зарубежной вакансии)" : ""
         }</div>`
       : d.channel === "email" && d.kind !== "follow_up"
-      ? `<div class="err-text small">⚠️ Резюме для вложения не найдено — загрузите в «Мои резюме», иначе письмо не уйдёт</div>`
+      ? `<div class="err-text small">Резюме для вложения не найдено — загрузите в «Мои резюме», иначе письмо не уйдёт</div>`
       : "",
     send: async (text) => {
       const res = await api(`/api/hr-drafts/${d.code}/send`, {
@@ -5154,7 +5933,7 @@ async function renderDraftsQueue() {
   }));
   el.innerHTML = `
     <div class="hr-draft-queue-head">
-      <h3 style="margin:0">Ждут вашего решения · ${drafts.length}</h3>
+      <h3 class="m0"><span class="dot warn"></span> Ждут вашего «Отправить» · ${drafts.length}</h3>
       <button type="button" class="btn btn-secondary btn-small" id="drafts-send-all">Отправить все как есть</button>
     </div>
     <p class="muted small" id="drafts-send-all-status" role="status"></p>
@@ -5187,12 +5966,13 @@ async function renderHhRemindersQueue() {
     return;
   }
   el.style.display = "";
+  document.getElementById("hh-reminders-count").textContent = `· ${reminders.length} ${plural(reminders.length, "отклик", "отклика", "откликов")}`;
   const items = reminders.map((r) => ({
     code: r.external_id,
     text: r.text,
     rows: 3,
-    sendLabel: "🔔 Напомнить",
-    headlineHtml: `🔔 ${escapeHtml(r.company)}${r.title ? " — " + escapeHtml(r.title) : ""} · откликнулись ${fmtDay(r.applied_at)}
+    sendLabel: "Напомнить",
+    headlineHtml: `${escapeHtml(r.company)}${r.title ? " — " + escapeHtml(r.title) : ""} · откликнулись ${fmtDay(r.applied_at)}
       · <a href="${escapeHtml(r.link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">вакансия</a>`,
     detailHtml: "",
     send: async (text) => {
@@ -5263,7 +6043,7 @@ function mailPlanText(p) {
   if (!p) return "";
   const warm = p.warmup && p.limit < p.daily_limit ? ` (разогрев, день ${p.warmup_day} — до ${p.daily_limit} дойдёт постепенно)` : "";
   const when = `${p.weekdays_only ? "будни" : "каждый день"} ${p.send_from}:00–${p.send_to}:00`;
-  return `Сегодня отправлено ${p.sent_today} из ${p.limit}${warm} · отправка: ${when}${p.can_send ? "" : ` · ⏸ ${p.reason}`}`;
+  return `Сегодня отправлено ${p.sent_today} из ${p.limit}${warm} · отправка: ${when}${p.can_send ? "" : ` · пауза: ${p.reason}`}`;
 }
 
 async function loadOutreachSettings() {
@@ -5274,7 +6054,7 @@ async function loadOutreachSettings() {
     ? "Пароль сохранён — введите новый, чтобы заменить"
     : "Пароль приложения (16 символов)";
   document.getElementById("outreach-email-status").textContent = s.email_connected
-    ? `✅ Почта подключена: ${s.email_address}`
+    ? `Почта подключена: ${s.email_address}`
     : "Почта не подключена — письма HR будут только черновиками для ручной отправки.";
   document.getElementById("outreach-hunter-status").textContent = s.hunter_preview
     ? `сохранён: ${s.hunter_preview}`
@@ -5291,15 +6071,19 @@ async function loadOutreachSettings() {
   document.getElementById("outreach-digest").checked = s.digest_enabled;
   document.getElementById("outreach-digest-hour").value = s.digest_hour;
   document.getElementById("digest-quiet").checked = s.digest_quiet;
+  document.getElementById("notify-activity").checked = s.notify_activity !== false;
+  document.getElementById("notify-failures").checked = s.notify_failures !== false;
+  document.getElementById("outreach-letter-instructions").value = s.letter_instructions || "";
+  renderLetterInstructions(s.letter_instructions || "");
   document.getElementById("outreach-skip-us").checked = s.skip_us_only;
   document.getElementById("outreach-skip-eu").checked = s.skip_europe_only;
   document.getElementById("outreach-candidate-telegram").value = s.candidate_telegram;
   document.getElementById("outreach-candidate-whatsapp").value = s.candidate_whatsapp;
   document.getElementById("outreach-candidate-linkedin").value = s.candidate_linkedin;
   document.getElementById("outreach-resume-route").innerHTML =
-    `📎 <b>Автовыбор при отправке письма:</b> компания РФ/СНГ → ${
-      s.resume_route_ru ? escapeHtml(s.resume_route_ru) : "⚠️ не найдено"
-    }, зарубежная → ${s.resume_route_en ? escapeHtml(s.resume_route_en) : "⚠️ не найдено"}`;
+    `<b>Автовыбор при отправке письма:</b> компания РФ/СНГ → ${
+      s.resume_route_ru ? escapeHtml(s.resume_route_ru) : "не найдено"
+    }, зарубежная → ${s.resume_route_en ? escapeHtml(s.resume_route_en) : "не найдено"}`;
 }
 
 async function saveOutreachSettings() {
@@ -5322,6 +6106,7 @@ async function saveOutreachSettings() {
     candidate_telegram: document.getElementById("outreach-candidate-telegram").value.trim(),
     candidate_whatsapp: document.getElementById("outreach-candidate-whatsapp").value.trim(),
     candidate_linkedin: document.getElementById("outreach-candidate-linkedin").value.trim(),
+    letter_instructions: document.getElementById("outreach-letter-instructions").value.trim(),
   };
   const password = document.getElementById("outreach-app-password").value.trim();
   if (password) body.email_app_password = password;
@@ -5347,10 +6132,10 @@ async function updateActivity() {
     return;
   }
   const el = document.getElementById("activity");
-  // state: нет/active — крутится; waiting — ⏸ спокойно; stopped — красным, нужны вы.
+  // state: нет/active — крутится; waiting — жёлтая точка; stopped — красная, нужны вы.
   const icon = (a) =>
-    a.state === "waiting" ? `<span class="activity-icon" aria-hidden="true">⏸</span>`
-      : a.state === "stopped" ? `<span class="activity-icon" aria-hidden="true">⛔</span>`
+    a.state === "waiting" ? `<span class="dot warn activity-icon" aria-hidden="true"></span>`
+      : a.state === "stopped" ? `<span class="dot error activity-icon" aria-hidden="true"></span>`
       : `<span class="activity-spin" aria-hidden="true"></span>`;
   el.innerHTML = items
     .map(
@@ -5376,7 +6161,7 @@ async function updateActivity() {
 // «Откликаться автоматически» разом для всех включённых площадок —
 // большинству не нужно настраивать режим каждой отдельно.
 function renderAutoAll(status) {
-  const on = status.sources.filter((s) => s.schedule_enabled && s.name !== "telegram");
+  const on = modeSources(status);
   const auto = on.filter((s) => s.auto_apply);
   const box = document.getElementById("search-auto-all");
   box.checked = on.length > 0 && auto.length === on.length;
@@ -5507,7 +6292,13 @@ async function loadAccounts() {
       const goto = b.dataset.accountGoto;
       if (goto.startsWith("settings-")) {
         switchSettingsTab(goto);
-        if (b.dataset.anchor) document.getElementById(b.dataset.anchor)?.scrollIntoView({ block: "center" });
+        // «Вход в Telegram» — блок входа здесь же, в Подключениях.
+        const anchor = b.dataset.anchor || (goto === "settings-accounts" ? "tg-connect-panel" : "");
+        const target = anchor && document.getElementById(anchor);
+        if (target) {
+          if (target.tagName === "DETAILS") target.open = true;
+          target.scrollIntoView({ block: "center", behavior: REDUCE_MOTION ? "auto" : "smooth" });
+        }
         if (goto === "settings-tg-quick") loadTelegramWatch();
       } else {
         switchTab(goto);
@@ -5527,9 +6318,11 @@ async function saveDigest() {
         digest_enabled: document.getElementById("outreach-digest").checked || document.getElementById("digest-quiet").checked,
         digest_hour: parseInt(document.getElementById("outreach-digest-hour").value, 10) || 9,
         digest_quiet: document.getElementById("digest-quiet").checked,
+        notify_activity: document.getElementById("notify-activity").checked,
+        notify_failures: document.getElementById("notify-failures").checked,
       }),
     });
-    showToast("Сводка сохранена", "success");
+    showToast("Уведомления сохранены", "success");
   } catch (err) {
     showToast(err.message.replace(/^\d+: /, ""), "error");
   }
@@ -5541,9 +6334,9 @@ async function testOutreachEmail() {
   status.textContent = "Отправляю письмо себе…";
   try {
     await api("/api/settings/outreach/test-email", { method: "POST" });
-    status.textContent = "✅ Письмо отправлено — проверьте почту. Всё работает.";
+    status.textContent = "Письмо отправлено — проверьте почту. Всё работает.";
   } catch (err) {
-    status.textContent = `❌ ${err.message.replace(/^\d+: /, "")}`;
+    status.textContent = `Ошибка: ${err.message.replace(/^\d+: /, "")}`;
   }
 }
 
@@ -5785,7 +6578,7 @@ function initKeyboardShortcuts() {
       else closeShortcutsOverlay();
       return;
     }
-    if (/^[1-8]$/.test(e.key)) {
+    if (/^[1-6]$/.test(e.key)) {
       const buttons = document.querySelectorAll("nav.tabs button[data-tab]");
       const idx = parseInt(e.key, 10) - 1;
       if (buttons[idx]) switchTab(buttons[idx].dataset.tab);
@@ -5990,7 +6783,7 @@ function renderMarket(market) {
       <div class="funnel-row" title="${escapeHtml(s.skill)}: ${s.count} вакансий, ${s.share}%${s.in_resume ? "" : " — нет в резюме"}">
         <span class="funnel-label">${escapeHtml(s.skill)}</span>
         <span class="funnel-track"><span class="funnel-bar" style="width:${s.share}%"></span></span>
-        <span class="funnel-value">${s.share}% ${s.in_resume ? "✓" : "✗"}</span>
+        <span class="funnel-value">${s.share}%${s.in_resume ? "" : ` <span class="tag-miss">нет в резюме</span>`}</span>
       </div>`
         )
         .join("")
@@ -6033,8 +6826,10 @@ async function renderActivityHeatmap() {
   const el = document.getElementById("activity-heatmap");
   if (!el) return;
   const entries = await api("/api/applications");
+  renderWeeklyChart(entries);
   const counts = new Map();
   entries.forEach((e) => {
+    if (e.status !== "applied") return;
     const day = (e.applied_at || "").slice(0, 10);
     if (day) counts.set(day, (counts.get(day) || 0) + 1);
   });
@@ -6048,11 +6843,16 @@ async function renderActivityHeatmap() {
     const key = d.toISOString().slice(0, 10);
     const count = counts.get(key) || 0;
     const level = count === 0 ? 0 : count >= 5 ? 3 : count >= 2 ? 2 : 1;
-    cells.push(
-      `<div class="heatmap-cell" data-level="${level}" title="${key}: ${count} откл."></div>`
-    );
+    const human = d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", weekday: "short" });
+    cells.push(`<div class="heatmap-cell" data-level="${level}" data-label="${human}: ${count} ${plural(count, "отклик", "отклика", "откликов")}" title="${human}: ${count}"></div>`);
   }
   el.innerHTML = cells.join("");
+  const readout = document.getElementById("heatmap-readout");
+  el.onmouseover = (e) => {
+    const c = e.target.closest(".heatmap-cell");
+    if (c && readout) readout.textContent = c.dataset.label;
+  };
+  el.onmouseleave = () => readout && (readout.textContent = "отклики за 13 недель");
 }
 
 function copyToClipboard(text, btn) {
@@ -6098,54 +6898,88 @@ function initDragReorder(gridId, storageKey) {
   const grid = document.getElementById(gridId);
   let dragged = null;
   grid.addEventListener("dragstart", (e) => {
-    const card = e.target.closest(".source-card");
-    if (!card) return;
-    dragged = card;
+    const row = e.target.closest(".platform-row-wrap");
+    if (!row) return;
+    dragged = row;
+    row.classList.add("is-dragging");
     e.dataTransfer.effectAllowed = "move";
   });
   grid.addEventListener("dragover", (e) => {
     if (!dragged) return;
     e.preventDefault();
-    const target = e.target.closest(".source-card");
-    if (!target || target === dragged) return;
+    const target = e.target.closest(".platform-row-wrap");
+    if (!target || target === dragged || target.parentElement !== grid) return;
     const rect = target.getBoundingClientRect();
-    const before = e.clientX < rect.left + rect.width / 2;
-    target.parentElement.insertBefore(dragged, before ? target : target.nextSibling);
+    const before = e.clientY < rect.top + rect.height / 2;
+    grid.insertBefore(dragged, before ? target : target.nextSibling);
   });
   grid.addEventListener("dragend", () => {
     if (!dragged) return;
+    dragged.classList.remove("is-dragging");
     dragged = null;
-    const order = [...grid.querySelectorAll(".source-card")].map((c) => c.dataset.source);
+    const order = [...grid.querySelectorAll(".platform-row-wrap")].map((c) => c.dataset.source);
     saveSourceOrder(storageKey, order);
   });
 }
 
+// Тема: "light", "dark" или "system" (как в системе — ничего не
+// сохраняем, берём из ОС).
+function setTheme(mode, originEl = null) {
+  const resolved = mode === "system"
+    ? (window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark")
+    : mode;
+  const apply = () => {
+    document.documentElement.dataset.theme = resolved;
+    try {
+      if (mode === "system") localStorage.removeItem("cj-theme");
+      else localStorage.setItem("cj-theme", mode);
+    } catch (e) {}
+  };
+  if (originEl) {
+    const rect = originEl.getBoundingClientRect();
+    document.documentElement.style.setProperty("--theme-toggle-x", `${rect.left + rect.width / 2}px`);
+    document.documentElement.style.setProperty("--theme-toggle-y", `${rect.top + rect.height / 2}px`);
+  }
+  if (document.startViewTransition && !REDUCE_MOTION) document.startViewTransition(apply);
+  else apply();
+}
+
 // ---------- Changelog popover ----------
 
-const CHANGELOG_VERSION = "2026-09-24-tg-quick";
+const CHANGELOG_VERSION = "2026-10-08-new-ui";
 const CHANGELOG_ITEMS = [
-  "✈️ Telegram-парсер: вакансия из каналов через секунды в вашем боте — кнопки «Здравствуйте», «+ резюме», «сопроводительное под вакансию»; контакты HR из постов — сразу в «Базу компаний». Настройки → «Telegram-парсер»",
-  "Меню стало проще: 5 разделов — Главная, Вакансии, Общение, Аналитика, Настройки",
-  "На Главной — «Что сделать сейчас»: черновики, новые ответы, интервью, контакты HR",
-  "У любой вакансии «Действия» → «Найти HR этой компании»",
-  "«Входящие»: ответы hh и HR из Telegram в одном месте + черновики ответов на подтверждение",
-  "Этап у каждого отклика и воронка до оффера в Аналитике",
-  "Настройки → «Контакты и письма»: почта Gmail, Hunter, сводка, напоминания HR",
-  "🏢 «Сайты компаний» в «Свои каналы»: сами собирают компании с email HR в Базу — дальше рассылка одной кнопкой",
-  "У интервью в Истории → «Действия»: подготовка, тренажёр, событие в календарь",
-  "Аналитика: спрос на навыки, зарплаты на рынке, сравнение офферов",
+  "Новый вид: спокойная тёмная и светлая темы, цвет — только у состояний. Все функции на месте: редкие настройки — в шторке справа, на один клик ниже",
+  "Главная: «Нужно ваше решение» первым блоком, итоги с трендом, площадки списком — нажмите на строку, и настройки откроются справа",
+  "Режим «Откликаться / Только искать» для всех площадок разом — в шапке Главной",
+  "Площадка на паузе после капчи — в её шторке кнопка «Я прошёл проверку — снять паузу» (то же, что /resume в боте)",
+  "Изменения в шторке площадки сохраняются сразу — с кнопкой «Отменить» в уведомлении",
+  "Палитра ⌘K ищет разделы, настройки, площадки и действия",
+  "«Пауза на всё» в шапке Главной: отклики, рассылка и переписка от вашего имени стоят разом (в боте — /pause all)",
+  "У каждой вакансии — «Почему бот так решил»; «Это была ошибка» запоминается и учитывается при оценке похожих, а пропущенную можно «Откликнуться всё равно»",
+  "Вакансии из Telegram-каналов — прямо в «Общении», с черновиком от ИИ, выбором резюме и «Утром, в 10:00»",
+  "«Уведомления» в меню: всё, что бот сообщал, даже без подключённого бота; в Настройках — что присылать",
 ];
 
 function initChangelogPopover() {
-  if (localStorage.getItem("cj-seen-changelog") === CHANGELOG_VERSION) return;
-  // Не показываем поверх онбординг-тура на самом первом запуске —
-  // одновременно два оверлея это перегруз, а не "круто". Чейнджлог
-  // подождёт следующего открытия, когда тур уже пройден.
-  if (localStorage.getItem("cj-seen-tour") !== "1") return;
+  let seen = null;
+  try {
+    seen = localStorage.getItem("cj-seen-changelog");
+    // Новичку «что нового» не нужно — запоминаем версию молча; окно
+    // увидят только те, кто пользовался приложением до обновления.
+    if (seen === null && localStorage.getItem("cj-seen-tour") !== "1") {
+      localStorage.setItem("cj-seen-changelog", CHANGELOG_VERSION);
+      return;
+    }
+  } catch (e) {
+    return;
+  }
+  if (seen === CHANGELOG_VERSION) return;
   const el = document.createElement("div");
   el.className = "changelog-popover";
+  el.setAttribute("role", "dialog");
+  el.setAttribute("aria-label", "Что нового");
   el.innerHTML = `
-    <h4>✨ Что нового</h4>
+    <h4 data-ui="shell.changelog">Что нового</h4>
     <ul>${CHANGELOG_ITEMS.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}</ul>
     <button class="btn btn-primary" type="button">Понятно</button>
   `;
@@ -6181,21 +7015,11 @@ function initDashboard() {
     b.addEventListener("click", () => switchTab(b.dataset.tab));
   });
 
-  document.getElementById("theme-toggle").addEventListener("click", (ev) => {
+  document.getElementById("theme-toggle")?.addEventListener("click", (ev) => {
     const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
-    const apply = () => {
-      document.documentElement.dataset.theme = next;
-      localStorage.setItem("cj-theme", next);
-    };
-    const rect = ev.currentTarget.getBoundingClientRect();
-    document.documentElement.style.setProperty("--theme-toggle-x", `${rect.left + rect.width / 2}px`);
-    document.documentElement.style.setProperty("--theme-toggle-y", `${rect.top + rect.height / 2}px`);
-    if (document.startViewTransition && !REDUCE_MOTION) {
-      document.startViewTransition(apply);
-    } else {
-      apply();
-    }
+    setTheme(next, ev.currentTarget);
   });
+
 
   document.querySelectorAll("#settings-jump button").forEach((b) => {
     b.addEventListener("click", () => switchSettingsTab(b.dataset.settingsTab));
@@ -6213,6 +7037,21 @@ function initDashboard() {
   setInterval(updateActivity, 4000);
   initSettingsDirtyTracking();
   initAutosave();
+  initAutoPane();
+  initLookPane();
+  initSettingsSearch();
+  initJobsView();
+  document.querySelectorAll("#stats-period [data-days]").forEach((b) =>
+    b.addEventListener("click", () => {
+      statsPeriodDays = Number(b.dataset.days);
+      document.querySelectorAll("#stats-period [data-days]").forEach((x) => {
+        x.classList.toggle("on", x === b);
+        x.setAttribute("aria-checked", x === b ? "true" : "false");
+      });
+      positionSegmented(document.getElementById("stats-period"));
+      renderResults();
+    })
+  );
   initCommandPalette();
   initKeyboardShortcuts();
 
@@ -6228,95 +7067,30 @@ function initDashboard() {
     const input = document.getElementById("telegram-bot-token");
     input.type = input.type === "password" ? "text" : "password";
   });
+  initDragReorder("own-channels", "cj-source-order-own");
   initDragReorder("source-grid-ru", "cj-source-order-ru");
   initDragReorder("source-grid-intl", "cj-source-order-intl");
   initChangelogPopover();
   initPointerEffects();
-  initOnboardingTour();
 
-  function handleSourceCardActionClick(e) {
-    const runBtn = e.target.closest(".src-run-now");
-    const historyBtn = e.target.closest(".src-goto-history");
-    const logsBtn = e.target.closest(".src-goto-logs");
-    if (runBtn) {
-      if (runBtn.dataset.running === "1") {
-        stopSourceNow(runBtn);
-      } else {
-        runSourceNow(runBtn);
-      }
-    } else if (historyBtn) {
-      document.getElementById("filter-source").value = historyBtn.dataset.source;
-      switchTab("history");
-    } else if (logsBtn) {
-      document.getElementById("log-source").value = logsBtn.dataset.source;
-      switchTab("logs");
-    }
-  }
-
-  // Запускает одну конкретную площадку прямо сейчас (реальный прогон, с
-  // её собственным auto_apply — не форсированный dry-run, как у общей
-  // кнопки "Тестовый прогон") — чтобы не ждать next_run при отладке/
-  // ручной проверке. Переиспользует тот же /api/run-now, что и общая
-  // кнопка, просто с одним источником в списке.
-  //
-  // ponytail: раньше withButtonLoading держал is-loading на кнопке на
-  // ВСЁ время прогона (иногда минуты), пока рядом отдельный опрос
-  // overview (render.overview, раз в 7с) параллельно перерисовывал ту
-  // же карточку по server-side isRunning — два независимых источника
-  // правды дрались за один DOM-узел, и после пересборки innerHTML
-  // ссылка btn протухала, а visible-состояние "зависало". Теперь
-  // is-loading висит только на быстром POST-запуске, а "идёт/не идёт"
-  // всегда только из уже существующего опроса overview (пульс точки +
-  // свечение карточки) — второго индикатора больше нет.
-  async function runSourceNow(btn) {
-    const name = btn.dataset.source;
-    if (
-      !(await showConfirm(
-        `Запустить ${sourceLabel(name)} прямо сейчас? Это реальный прогон, ` +
-          `не тест — если у площадки включён автоотклик, заявки уйдут по-настоящему.`
-      ))
-    ) {
-      return;
-    }
-    try {
-      await withButtonLoading(btn, () =>
-        api("/api/run-now", {
-          method: "POST",
-          body: JSON.stringify({ sources: [name] }),
-        })
-      );
-    } catch (e) {
-      showToast(`Не удалось запустить ${sourceLabel(name)}: ${e.message}`, "error");
-      return;
-    }
-    render.overview();
-    watchSourceRunCompletion(name);
-  }
-
-  async function watchSourceRunCompletion(name) {
-    for (;;) {
-      await new Promise((r) => setTimeout(r, 3000));
-      const runStatus = await api("/api/run-now/status");
-      if (!runStatus.running || runStatus.current_source !== name) break;
-    }
-    showToast(`${sourceLabel(name)}: прогон завершён — см. Историю`, "success");
-    render.overview();
-  }
-
-  // Мягкий стоп: текущая уже начатая заявка досылается (см. main.py —
-  // stop_event проверяется между вакансиями, не посреди клика
-  // "Откликнуться"), следующая не начинается.
-  async function stopSourceNow(btn) {
-    const name = btn.dataset.source;
-    try {
-      await withButtonLoading(btn, () => api("/api/run-now/stop", { method: "POST" }));
-      showToast(`${sourceLabel(name)}: остановка запрошена`, "success");
-    } catch (e) {
-      showToast(`Не удалось остановить ${sourceLabel(name)}: ${e.message}`, "error");
-    }
-  }
-  document.getElementById("source-grid-ru").addEventListener("click", handleSourceCardActionClick);
-  document.getElementById("source-grid-intl").addEventListener("click", handleSourceCardActionClick);
+  // Строка площадки на Главной открывает её шторку; кнопки внутри
+  // шторки — запуск хода, журнал, переходы (см. handleDrawerAction).
+  document.getElementById("dashboard-sections").addEventListener("click", (e) => {
+    const row = e.target.closest("[data-open-source]");
+    if (row) openPlatform(row.dataset.openSource);
+  });
+  document.getElementById("platform-drawer").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-drawer-action]");
+    if (btn) handleDrawerAction(btn);
+  });
+  document.querySelectorAll("#home-mode [data-mode]").forEach((b) =>
+    b.addEventListener("click", () => setHomeMode(b.dataset.mode))
+  );
+  document.getElementById("home-run").addEventListener("click", () => document.getElementById("daemon-toggle").click());
+  document.getElementById("home-pause-all").addEventListener("click", () => setPauseAll(!pauseAllState.paused));
+  document.getElementById("home-palette").addEventListener("click", openCommandPalette);
+  document.getElementById("palette-open").addEventListener("click", openCommandPalette);
+  window.addEventListener("resize", () => positionSegmented(document.getElementById("home-mode")));
   requestAnimationFrame(repositionTabIndicators);
   window.addEventListener("resize", repositionTabIndicators);
 
@@ -6424,7 +7198,7 @@ function initDashboard() {
         });
         toggle.checked = result.enabled;
         note.textContent = result.enabled
-          ? "✅ Будет запускаться при входе в систему."
+          ? "Будет запускаться при входе в систему."
           : "Автозапуск выключен.";
       } catch (e) {
         toggle.checked = !wanted;
@@ -6449,7 +7223,7 @@ function initDashboard() {
         });
         toggle.checked = result.enabled;
         note.textContent = result.enabled
-          ? "✅ Бот работает в фоне, даже когда окно закрыто."
+          ? "Бот работает в фоне, даже когда окно закрыто."
           : "Фоновый сервис выключен.";
       } catch (e) {
         toggle.checked = !wanted;
@@ -6556,22 +7330,11 @@ function initDashboard() {
   );
   window.addEventListener("resize", updateAllTableScrollHints);
 
+  // Фильтры «Вакансий» применяются сразу (initJobsView); скрытая кнопка
+  // «Применить» осталась для старых ссылок.
   document
     .getElementById("history-apply-filters")
     .addEventListener("click", () => render.history());
-  // Согласовано с "Логи" ниже: смена площадки/статуса фильтрует
-  // сразу, а не только по клику "Применить" — раньше эти два похожих
-  // выпадающих списка в одном приложении вели себя по-разному.
-  document
-    .getElementById("filter-source")
-    .addEventListener("change", () => render.history());
-  document
-    .getElementById("filter-status")
-    .addEventListener("change", () => render.history());
-  document.getElementById("filter-show-rejected").addEventListener("change", () => render.history());
-  document.getElementById("filter-query").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") render.history();
-  });
   document
     .getElementById("log-source")
     .addEventListener("change", () => render.logs());
@@ -6654,16 +7417,16 @@ function initDashboard() {
     select.innerHTML = styles
       .map((s) => {
         const risks = atsReport[s] || [];
-        const warn = risks.length ? "⚠️ " : "";
+        const warn = risks.length ? "· есть замечания ATS" : "";
         const title = risks.length ? ` title="${escapeHtml(risks.join(" "))}"` : "";
-        return `<option value="${s}"${title}>${warn}${escapeHtml(s)}</option>`;
+        return `<option value="${s}"${title}>${escapeHtml(s)}${warn ? " " + warn : ""}</option>`;
       })
       .join("");
     const updateNote = () => {
       const risks = atsReport[select.value] || [];
       note.innerHTML = risks.length
-        ? `⚠️ Возможные проблемы с ATS у стиля «${escapeHtml(select.value)}»: ${risks.map(escapeHtml).join(" ")}`
-        : `✅ У стиля «${escapeHtml(select.value)}» известных проблем с ATS не найдено (проверка эвристическая, не гарантия).`;
+        ? `Возможные проблемы с ATS у стиля «${escapeHtml(select.value)}»: ${risks.map(escapeHtml).join(" ")}`
+        : `У стиля «${escapeHtml(select.value)}» известных проблем с ATS не найдено (проверка эвристическая, не гарантия).`;
     };
     select.addEventListener("change", updateNote);
     if (styles.length) updateNote();
@@ -6679,7 +7442,10 @@ function initDashboard() {
     .addEventListener("click", () => startGenerate("cover-letter"));
   document
     .getElementById("gen-resume-audit")
-    .addEventListener("click", startResumeAudit);
+    .addEventListener("click", () => startResumeAudit(false));
+  document
+    .getElementById("gen-resume-audit-general")
+    .addEventListener("click", () => startResumeAudit(true));
 
   ["primary", "linkedin"].forEach((kind) => {
     const input = document.getElementById(`resume-upload-${kind}`);
@@ -6695,12 +7461,12 @@ function initDashboard() {
         renderResumes();
         if (kind === "primary") {
           // ИИ перечитывает новое резюме — из него берутся имя, опыт и навыки для писем.
-          status.textContent = "✅ Загружено. ИИ перечитывает резюме…";
+          status.textContent = "Загружено. ИИ перечитывает резюме…";
           api("/api/resume/refresh-plain-text", { method: "POST" })
-            .then(() => (status.textContent = "✅ Резюме обновлено — письма пойдут уже по нему"))
+            .then(() => (status.textContent = "Резюме обновлено — письма пойдут уже по нему"))
             .catch((e) => (status.textContent = `Загружено, но ИИ не смог его прочитать: ${e.message.replace(/^\d+: /, "")}`));
         } else {
-          status.textContent = "✅ Резюме обновлено";
+          status.textContent = "Резюме обновлено";
         }
       } catch (e) {
         status.textContent = `Ошибка: ${e.message.replace(/^\d+: /, "")}`;
@@ -6866,6 +7632,7 @@ function initDashboard() {
       // провайдера, а не оставляет значения от предыдущего (иначе,
       // например, gpt-4o-mini тихо отправился бы в запрос к Groq).
       applyLLMSelection(card.dataset.provider, null);
+      card.dispatchEvent(new Event("change", { bubbles: true }));
     });
   });
 
@@ -6979,7 +7746,7 @@ function initDashboard() {
             "telegram-login-password-row"
           ).style.display = "";
         } else {
-          status.textContent = "✅ Вход выполнен.";
+          status.textContent = "Вход выполнен.";
           document.getElementById("telegram-login-code-row").style.display =
             "none";
           await render.telegram();
@@ -7006,7 +7773,7 @@ function initDashboard() {
           method: "POST",
           body: JSON.stringify({ password }),
         });
-        status.textContent = "✅ Вход выполнен.";
+        status.textContent = "Вход выполнен.";
         document.getElementById("telegram-login-password-row").style.display =
           "none";
         await render.telegram();
@@ -7059,7 +7826,7 @@ function initDashboard() {
       );
       input.value = "";
       status.textContent = "";
-      await openTelegramConversation(activeTelegramContact);
+      await openTelegramConversation(activeTelegramContact, true);
     } catch (e) {
       status.textContent = `Ошибка: ${e.message}`;
     }
@@ -7068,39 +7835,11 @@ function initDashboard() {
   document
     .getElementById("tg-chat-send")
     .addEventListener("click", sendTelegramMessage);
-
-  // Пост из парсера: отправка, «утром», переписать, скрыть, не писать.
-  document.getElementById("tg-post-send").addEventListener("click", () => sendTelegramPost(false));
-  document.getElementById("tg-post-later").addEventListener("click", () => sendTelegramPost(true));
-  document.getElementById("tg-post-rewrite").addEventListener("click", () => {
-    if (!activeTelegramPost) return;
-    delete telegramDrafts[activeTelegramPost];
-    loadTelegramDraft(activeTelegramPost);
-  });
-  document.getElementById("tg-post-hide").addEventListener("click", () => setTelegramPostStatus("hidden"));
-  document.getElementById("tg-post-block").addEventListener("click", () => setTelegramPostStatus("blocked"));
-  document.getElementById("tg-post-unlater").addEventListener("click", () => setTelegramPostStatus("new"));
-  const tgPostInput = document.getElementById("tg-post-input");
-  tgPostInput.addEventListener("input", () => {
-    if (!activeTelegramPost) return;
-    telegramDrafts[activeTelegramPost] = {
-      text: tgPostInput.value,
-      resume: document.getElementById("tg-post-resume").value,
-    };
-  });
-  tgPostInput.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) sendTelegramPost(false);
-  });
-  document.getElementById("tg-post-resume").addEventListener("change", (ev) => {
-    const draft = telegramDrafts[activeTelegramPost];
-    if (draft) draft.resume = ev.target.value;
-  });
-  document.getElementById("tg-post-contact").addEventListener("change", (ev) => {
-    if (activeTelegramPost) loadTelegramPostHistory(activeTelegramPost, ev.target.value);
-  });
   document.getElementById("tg-chat-input").addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") sendTelegramMessage();
   });
+  document.getElementById("tg-chat-later").addEventListener("click", sendTelegramMessageLater);
+  document.getElementById("tg-chat-suggest").addEventListener("click", suggestTelegramReplies);
 
   document
     .getElementById("tg-chat-attach-resume")
@@ -7114,7 +7853,7 @@ function initDashboard() {
           { method: "POST" }
         );
         status.textContent = "";
-        await openTelegramConversation(activeTelegramContact);
+        await openTelegramConversation(activeTelegramContact, true);
       } catch (e) {
         status.textContent = `Ошибка: ${e.message}`;
       }
@@ -7135,6 +7874,9 @@ function initDashboard() {
         activeTelegramContact = null;
         document.getElementById("tg-chat-panel").style.display = "none";
         document.getElementById("tg-chat-empty").style.display = "";
+        document.getElementById("tg-chat-delete").hidden = true;
+        document.getElementById("talk-context-body").innerHTML = "";
+        showToast("Диалог удалён", "info");
         await render.telegram();
       } catch (e) {
         document.getElementById("tg-chat-status").textContent = `Ошибка: ${e.message}`;
@@ -7255,7 +7997,15 @@ function initDashboard() {
 
   const knownTabs = new Set(Object.keys(VIEW_GROUP));
   const initialTab = location.hash.replace("#", "");
-  switchTab(knownTabs.has(initialTab) ? initialTab : "overview");
+  switchTab(knownTabs.has(initialTab) || initialTab === "telegram" ? initialTab : "overview");
+  // Ссылка вида #outreach из другого места (закладка, назад/вперёд).
+  window.addEventListener("hashchange", () => {
+    const tab = location.hash.replace("#", "");
+    if ((knownTabs.has(tab) || tab === "telegram") && tab !== currentView) {
+      closePlatformDrawer();
+      switchTab(tab);
+    }
+  });
   // ponytail: раньше опрос гонял только вкладку "Обзор" — история
   // откликов/ответы/логи обновлялись только вручную (кнопка "Применить"
   // или смена вкладки), из-за чего прогресс запущенного отклика был не
@@ -7335,11 +8085,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     .addEventListener("click", addDirectCompany);
   document.getElementById("settings-direct").addEventListener("change", saveDirectSetting);
   document.getElementById("offer-add").addEventListener("click", addOffer);
+  document.getElementById("ai-prompt-open").addEventListener("click", openPromptDrawer);
   document.getElementById("ai-prompt-copy").addEventListener("click", async (e) => {
     try {
       await navigator.clipboard.writeText(document.getElementById("ai-prompt").value);
       e.target.textContent = "✓ Скопировано";
-      setTimeout(() => (e.target.textContent = "📋 Скопировать промт"), 2000);
+      setTimeout(() => (e.target.textContent = "Скопировать промт"), 2000);
     } catch (err) {
       document.getElementById("ai-prompt").select(); // без доступа к буферу — выделить для Cmd+C
     }
@@ -7369,7 +8120,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   document
     .querySelector('[data-settings-tab="settings-tg-quick"]')
     .addEventListener("click", loadTelegramWatch);
-  bindGotoSettings(document.getElementById("view-telegram"));
+  bindGotoSettings(document.getElementById("view-replies"));
   document.querySelectorAll("[data-goto-view]").forEach((a) =>
     a.addEventListener("click", (e) => {
       e.preventDefault();
@@ -7411,7 +8162,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   );
   document.getElementById("contacts-filter-query").addEventListener("input", resetPage);
   document.getElementById("outreach-email-test").addEventListener("click", testOutreachEmail);
-  ["outreach-digest", "outreach-digest-hour", "digest-quiet"].forEach((id) => document.getElementById(id).addEventListener("change", saveDigest));
+  ["outreach-digest", "outreach-digest-hour", "digest-quiet", "notify-activity", "notify-failures"].forEach((id) => document.getElementById(id).addEventListener("change", saveDigest));
   // Фильтры удалёнки — в «Что ищу», сохраняются сразу.
   ["outreach-skip-us", "outreach-skip-eu"].forEach((id) =>
     document.getElementById(id).addEventListener("change", async () => {
@@ -7442,5 +8193,624 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.querySelectorAll("[data-close-overlay]").forEach((btn) => {
     btn.addEventListener("click", () => hideOverlay(btn.closest(".command-overlay")));
   });
-
+  initSettingsExtras();
+  initNotifications();
+  initTalkExtras();
 });
+
+
+// --- Доработки из раздела 11 карты интерфейса (docs/UI_MAP.md) -------------
+
+// «2026-10-08» → «8 октября», ручная копия «2026-10-08-153012» → «8 октября, 15:30».
+function backupLabel(b) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:-(\d{2})(\d{2})\d{2})?$/.exec(b.date || "");
+  if (!m) return b.date;
+  const day = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const text = day.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+  return m[4] ? `${text}, ${m[4]}:${m[5]}` : text;
+}
+
+async function backupNow(btn) {
+  btn.disabled = true;
+  try {
+    const res = await api("/api/backups/now", { method: "POST" });
+    showToast(`Копия сохранена: ${backupLabel({ date: res.date })}`, "success");
+    loadBackups();
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderLetterInstructions(text) {
+  const el = document.getElementById("outreach-letter-current");
+  if (!el) return;
+  el.textContent = text ? `Ваши правила: ${text.replace(/\s*\n\s*/g, "; ")}` : "Своих правил нет — бот пишет по основе.";
+}
+
+// «Запасные — пробуются по порядку»: провайдеры с сохранёнными ключами,
+// кроме основного; порядок меняется стрелками и сохраняется сразу.
+let fallbackOrderState = [];
+function providerTitle(p) {
+  const card = document.querySelector(`#provider-grid .provider-card[data-provider="${p}"] span`);
+  return card ? card.textContent : p;
+}
+function renderFallbackOrder(llm) {
+  const list = document.getElementById("llm-fallback-order");
+  if (!list) return;
+  const withKeys = Object.keys(llm.api_key_previews || {}).filter((p) => p !== llm.provider);
+  const order = (llm.fallback_order || []).filter((p) => withKeys.includes(p));
+  fallbackOrderState = [...order, ...withKeys.filter((p) => !order.includes(p))];
+  if (!fallbackOrderState.length) {
+    list.innerHTML = `<li class="order-empty muted small">Ключей других провайдеров нет — запасных не будет. Добавьте ключ ниже, выбрав провайдера.</li>`;
+    return;
+  }
+  list.innerHTML = fallbackOrderState
+    .map(
+      (p, i) => `<li class="order-item"><span class="order-num">${i + 1}</span><span class="order-name">${escapeHtml(providerTitle(p))}</span>
+        <button type="button" class="btn btn-ghost btn-icon btn-small" data-order-move="-1" data-order-index="${i}" aria-label="Поднять ${escapeHtml(providerTitle(p))}" ${i === 0 ? "disabled" : ""}>↑</button>
+        <button type="button" class="btn btn-ghost btn-icon btn-small" data-order-move="1" data-order-index="${i}" aria-label="Опустить ${escapeHtml(providerTitle(p))}" ${i === fallbackOrderState.length - 1 ? "disabled" : ""}>↓</button></li>`
+    )
+    .join("");
+}
+
+async function moveFallback(index, delta) {
+  const before = [...fallbackOrderState];
+  const to = index + delta;
+  if (to < 0 || to >= fallbackOrderState.length) return;
+  const order = [...fallbackOrderState];
+  [order[index], order[to]] = [order[to], order[index]];
+  try {
+    const llm = await api("/api/settings/llm", { method: "POST", body: JSON.stringify({ fallback_order: order }) });
+    renderFallbackOrder(llm);
+    const btn = document.querySelector(`#llm-fallback-order [data-order-index="${to}"][data-order-move="${delta}"]`)
+      || document.querySelector(`#llm-fallback-order [data-order-index="${to}"]`);
+    btn?.focus();
+    showSavedToast("Порядок запасных сохранён", async () => {
+      renderFallbackOrder(await api("/api/settings/llm", { method: "POST", body: JSON.stringify({ fallback_order: before }) }));
+    });
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  }
+}
+
+async function disconnectTelegramAccount() {
+  const ok = await showConfirm(
+    "Отключить Telegram-аккаунт? Парсер и сообщения HR с вашего имени остановятся, сеанс закроется и в самом Telegram. Переписка, База и ключи останутся — подключить снова можно по номеру и коду."
+  );
+  if (!ok) return;
+  try {
+    const res = await api("/api/telegram/logout", { method: "POST" });
+    showToast(res.logged_out ? "Telegram-аккаунт отключён" : "Отключено здесь. Если сеанс остался — завершите его в Telegram: Настройки → Устройства", "success", 7000);
+    document.getElementById("tg-connect-panel").open = true;
+    refreshTelegramAccount();
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  }
+}
+
+function initSettingsExtras() {
+  document.getElementById("tg-account-off")?.addEventListener("click", disconnectTelegramAccount);
+  document.getElementById("backup-now")?.addEventListener("click", (e) => backupNow(e.currentTarget));
+  document.getElementById("llm-fallback-order")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-order-move]");
+    if (btn) moveFallback(Number(btn.dataset.orderIndex), Number(btn.dataset.orderMove));
+  });
+  const edit = document.getElementById("outreach-letter-edit");
+  const box = document.getElementById("outreach-letter-box");
+  edit?.addEventListener("click", () => {
+    box.hidden = !box.hidden;
+    edit.setAttribute("aria-expanded", String(!box.hidden));
+    edit.textContent = box.hidden ? "Изменить" : "Свернуть";
+    if (!box.hidden) document.getElementById("outreach-letter-instructions").focus();
+  });
+  document.getElementById("outreach-letter-instructions")?.addEventListener("change", (e) =>
+    renderLetterInstructions(e.target.value.trim())
+  );
+}
+
+// --- Уведомления: история того, что бот сообщал (колокольчик) --------------
+
+const NOTIF_SEEN_KEY = "cj-notif-seen";
+const NOTIF_STATUS = {
+  sent: "в Telegram",
+  queued: "ждёт связи с Telegram",
+  app: "только здесь — бот не подключён",
+  muted: "не отправлено — этот вид выключен",
+  digest: "в утренней сводке",
+  window: "сообщение в этом окне",
+};
+let notifItems = [];
+
+function notifSeenAt() {
+  try {
+    return localStorage.getItem(NOTIF_SEEN_KEY) || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+function renderNotifCount() {
+  const badge = document.getElementById("notif-count");
+  if (!badge) return;
+  const seen = notifSeenAt();
+  const unread = notifItems.filter((n) => n.at > seen).length;
+  badge.hidden = !unread;
+  badge.textContent = unread > 99 ? "99+" : String(unread);
+  document.getElementById("notif-open")?.setAttribute("aria-label", unread ? `Уведомления: новых ${unread}` : "Уведомления");
+}
+
+async function refreshNotifications() {
+  if (document.visibilityState !== "visible") return;
+  try {
+    notifItems = (await api("/api/notifications?limit=100")).items || [];
+  } catch (e) {
+    return;
+  }
+  renderNotifCount();
+}
+
+function notifRowHtml(n) {
+  const failure = n.kind === "failure";
+  const time = n.at ? fmtDay(n.at) : "";
+  const topic = SOURCE_LABELS[n.category] ? sourceLabel(n.category) : n.category;
+  return `<li class="notif-row${failure ? " is-failure" : ""}">
+    <span class="dot ${failure ? "error" : "ok"}" aria-hidden="true"></span>
+    <div class="notif-body"><div class="notif-text">${escapeHtml(n.text)}</div>
+      <div class="muted small">${escapeHtml(time)}${topic ? ` · ${escapeHtml(topic)}` : ""} · ${escapeHtml(NOTIF_STATUS[n.status] || n.status)}</div></div></li>`;
+}
+
+async function openNotifications() {
+  await refreshNotifications();
+  const filters = [["all", "Все"], ["failure", "Сбои"], ["activity", "Отклики и ответы"], ["window", "В окне"]];
+  const body = openSideDrawer({
+    title: "Уведомления",
+    sub: "Что бот сообщал. Что присылать в Telegram — в Настройках → Уведомления",
+    body: `<div class="subnav notif-filter" role="group" aria-label="Какие уведомления показать">${filters
+      .map(([v, t], i) => `<button type="button" class="${i ? "" : "active"}" data-notif-filter="${v}" aria-pressed="${i ? "false" : "true"}">${t}</button>`)
+      .join("")}</div><ul class="notif-list" id="notif-list"></ul>`,
+    foot: `<button type="button" class="btn btn-small" id="notif-settings">Что присылать</button>`,
+  });
+  openDrawerSource = null;
+  const list = body.querySelector("#notif-list");
+  const show = (kind) => {
+    const items = kind === "window" ? toastLog : notifItems.filter((n) => kind === "all" || n.kind === kind);
+    list.innerHTML = items.length
+      ? items.map(notifRowHtml).join("")
+      : `<li>${emptyStateHtml(kind === "failure" ? "Сбоев не было." : kind === "window" ? "В этом окне сообщений ещё не было." : "Пока бот ничего не сообщал.")}</li>`;
+  };
+  show("all");
+  body.querySelectorAll("[data-notif-filter]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      body.querySelectorAll("[data-notif-filter]").forEach((b) => {
+        b.classList.toggle("active", b === btn);
+        b.setAttribute("aria-pressed", String(b === btn));
+      });
+      show(btn.dataset.notifFilter);
+    })
+  );
+  document.getElementById("notif-settings").addEventListener("click", () => {
+    closePlatformDrawer();
+    gotoSettings("settings-notifications");
+  });
+  if (notifItems.length) {
+    try {
+      localStorage.setItem(NOTIF_SEEN_KEY, notifItems[0].at);
+    } catch (e) {}
+  }
+  renderNotifCount();
+}
+
+function initNotifications() {
+  document.getElementById("notif-open")?.addEventListener("click", openNotifications);
+  refreshNotifications();
+  setInterval(refreshNotifications, 30000);
+}
+
+
+// --- «Пауза на всё»: отклики, рассылка и переписка от вашего имени разом ---
+
+let pauseAllState = { paused: false, since: "" };
+
+function renderPauseAll(status) {
+  pauseAllState = status.pause_all || { paused: false, since: "" };
+  const paused = pauseAllState.paused;
+  const btn = document.getElementById("home-pause-all");
+  if (btn) {
+    btn.textContent = paused ? "Снять паузу" : "Пауза на всё";
+    btn.classList.toggle("btn-primary", paused);
+    btn.setAttribute("aria-pressed", String(paused));
+  }
+  const banner = document.getElementById("pause-banner");
+  if (!banner) return;
+  banner.hidden = !paused;
+  if (!paused) return;
+  const since = pauseAllState.since ? fmtDay(pauseAllState.since) : "";
+  banner.innerHTML = `<span class="dot warn" aria-hidden="true"></span>
+    <span class="pause-text"><b>Всё на паузе${since ? ` с ${escapeHtml(since.replace(/^сегодня /, ""))}` : ""}.</b> Отклики, рассылка и переписка от вашего имени стоят. Ответы HR и команды боту приходят как обычно.</span>
+    <button type="button" class="btn btn-small" data-pause-resume>Снять паузу</button>`;
+  banner.querySelector("[data-pause-resume]").addEventListener("click", () => setPauseAll(false));
+}
+
+async function setPauseAll(paused) {
+  try {
+    const state = await api("/api/pause-all", { method: "POST", body: JSON.stringify({ paused }) });
+    pauseAllState = state;
+    lastOverviewSnapshot = "";
+    if (currentView === "overview") render.overview();
+    showSavedToast(
+      paused ? "Всё на паузе: ничего не уходит от вашего имени" : "Пауза снята — бот продолжает",
+      async () => {
+        await api("/api/pause-all", { method: "POST", body: JSON.stringify({ paused: !paused }) });
+        lastOverviewSnapshot = "";
+        if (currentView === "overview") render.overview();
+      }
+    );
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  }
+}
+
+
+// --- Общение: вакансии из Telegram с черновиком от ИИ (talk.tg.posts) ------
+
+let tgPostsData = { posts: [], resume_options: [], sent_today: 0, daily_limit: 15 };
+let activeTgPostId = null;
+let lastTgPostsSnapshot = "";
+const tgPostResume = {}; // выбор «Резюме:» по посту, пока не отправили
+
+// Время в будущем: «сегодня в 10:00», «завтра в 10:00», «9 окт. в 10:00».
+function fmtWhen(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const days = Math.round((new Date(d).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 864e5);
+  const time = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  if (days === 0) return `сегодня в ${time}`;
+  if (days === 1) return `завтра в ${time}`;
+  return `${d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })} в ${time}`;
+}
+
+function tgPostBadge(post) {
+  if (post.scheduled) return { dot: "idle", text: `уйдёт ${fmtWhen(post.scheduled.send_after)}` };
+  if (!post.contacts.length) return { dot: "idle", text: "контакта нет" };
+  if (post.contacts.some((c) => (c.note || "").startsWith("писали"))) return { dot: "warn", text: "уже писали" };
+  if (post.draft) return { dot: "ok", text: "черновик готов" };
+  return { dot: "", text: "новая" };
+}
+
+async function renderTelegramPosts() {
+  const block = document.getElementById("tg-posts-block");
+  if (!block) return;
+  let data;
+  try {
+    data = await api("/api/telegram/posts?limit=50");
+  } catch (e) {
+    return;
+  }
+  tgPostsData = data;
+  const laterBtn = document.getElementById("tg-chat-later");
+  if (laterBtn) laterBtn.textContent = `Утром, в ${data.morning_hour ?? 10}:00`;
+  const showAll = !repliesKind || repliesKind === "telegram";
+  block.hidden = !data.posts.length || !showAll;
+  const snapshot = JSON.stringify([data.posts.map((p) => [p.id, p.draft?.code, p.scheduled?.id, p.contacts.map((c) => c.note)]), activeTgPostId, showAll]);
+  if (snapshot === lastTgPostsSnapshot) return;
+  lastTgPostsSnapshot = snapshot;
+  document.getElementById("tg-posts-count").textContent = `· ${data.posts.length}`;
+  document.getElementById("tg-posts-list").innerHTML = data.posts
+    .slice(0, 30)
+    .map((p) => {
+      const b = tgPostBadge(p);
+      return `<button type="button" class="row talk-row${p.id === activeTgPostId ? " is-selected" : ""}" data-tg-post="${escapeHtml(p.id)}">
+        ${plogoHtml("telegram")}
+        <span class="row-main">
+          <span class="talk-row-top"><span class="row-title">@${escapeHtml(p.channel)}</span><span class="muted small nowrap">${p.found_at ? fmtDay(p.found_at) : ""}</span></span>
+          <span class="talk-preview small">${escapeHtml(truncate(p.title, 90))}</span>
+          <span class="row-sub small muted">${b.dot ? `<span class="dot ${b.dot}" aria-hidden="true"></span>` : ""}${escapeHtml(b.text)}</span>
+        </span>
+      </button>`;
+    })
+    .join("");
+}
+
+function closeTelegramPost() {
+  activeTgPostId = null;
+  const panel = document.getElementById("tg-post-panel");
+  if (panel) {
+    panel.hidden = true;
+    panel.innerHTML = "";
+  }
+  document.querySelectorAll("#tg-posts-list .talk-row").forEach((r) => r.classList.remove("is-selected"));
+}
+
+function tgPostContact(post) {
+  return post.draft
+    ? post.contacts.find((c) => c.value === post.draft.contact) || post.contacts[0]
+    : post.contacts.find((c) => c.kind === "telegram") || post.contacts[0];
+}
+
+function tgPostResumeChoice(post) {
+  if (post.id in tgPostResume) return tgPostResume[post.id];
+  const fit = tgPostsData.resume_options.find((r) => r.russian === post.russian || r.russian === null);
+  return fit ? fit.name : "";
+}
+
+function tgPostPanelHtml(post) {
+  const contact = tgPostContact(post);
+  const isEmail = contact?.kind === "email";
+  const resume = tgPostResumeChoice(post);
+  const full = !isEmail && tgPostsData.sent_today >= tgPostsData.daily_limit;
+  const head = `<div class="thread-head"><h3 class="m0">${escapeHtml(truncate(post.title, 80))}</h3>
+    <span class="muted small">@${escapeHtml(post.channel)}${post.found_at ? " · " + escapeHtml(fmtDay(post.found_at)) : ""}</span></div>
+    <details class="post-text"><summary>Текст поста</summary><div class="letter-text">${escapeHtml(post.text)}</div></details>`;
+  if (!contact) {
+    return `${head}<div class="composer-empty"><span>В посте нет контакта — отклик, скорее всего, через форму на сайте.</span>
+      <a class="btn btn-small" href="${escapeHtml(post.link)}" target="_blank" rel="noopener">Открыть пост ↗</a></div>`;
+  }
+  const notes = post.contacts.filter((c) => c.note).map((c) => `${c.kind === "telegram" ? "@" : ""}${c.value}: ${c.note}`);
+  const contactChips = post.contacts.length > 1
+    ? `<div class="chip-row" role="radiogroup" aria-label="Кому писать">${post.contacts
+        .map((c) => `<button type="button" class="chip${c.value === contact.value ? " active" : ""}" role="radio" aria-checked="${c.value === contact.value}" data-post-contact="${escapeHtml(c.value)}">${c.kind === "telegram" ? "@" : ""}${escapeHtml(c.value)}</button>`)
+        .join("")}</div>`
+    : "";
+  const scheduled = post.scheduled
+    ? `<div class="fix is-info"><span class="dot idle"></span><div class="fix-body">Сообщение уйдёт ${escapeHtml(fmtWhen(post.scheduled.send_after))} — ночью HR не беспокоим.</div><button type="button" class="btn btn-small" data-post-action="unschedule">Отменить</button></div>`
+    : "";
+  if (post.scheduled && !post.draft) return `${head}${contactChips}${scheduled}`;
+  const draftBlock = post.draft
+    ? `<div class="draft-note"><span class="small">Черновик от ИИ под эту вакансию — можно править</span><button type="button" class="btn btn-ghost btn-small" data-post-action="rewrite">Переписать</button></div>
+       <textarea id="tg-post-text" rows="7" aria-label="Текст сообщения">${escapeHtml(post.draft.text)}</textarea>`
+    : `<div class="composer-empty"><span>Черновика пока нет. ИИ напишет его под эту вакансию и ваше резюме — ничего не уйдёт без вашего «Отправить».</span>
+       <button type="button" class="btn btn-primary btn-small" data-post-action="draft">Написать черновик</button></div>`;
+  const resumes = [{ name: "", label: "без резюме" }, ...tgPostsData.resume_options];
+  const resumeRow = post.draft
+    ? `<div class="composer-row"><span class="muted small">Резюме:</span><div class="chip-row" role="radiogroup" aria-label="Резюме">${resumes
+        .map((r) => `<button type="button" class="chip${r.name === resume ? " active" : ""}" role="radio" aria-checked="${r.name === resume}" data-post-resume="${escapeHtml(r.name)}">${escapeHtml(r.label)}</button>`)
+        .join("")}</div>
+       <span class="composer-actions">${!isEmail && !post.scheduled ? `<button type="button" class="btn btn-small" data-post-action="later">Утром, в ${tgPostsData.morning_hour ?? 10}:00</button>` : ""}
+       <button type="button" class="btn btn-primary btn-small" data-post-action="send" ${full ? "disabled" : ""}>${full ? "Лимит на сегодня" : resume ? "Отправить с резюме" : "Отправить"}</button></span></div>
+       <span class="muted small">${isEmail ? "Уйдёт письмом через ваш Gmail" : `Уйдёт с вашего личного аккаунта Telegram · сегодня ${tgPostsData.sent_today} из ${tgPostsData.daily_limit}`} · Ctrl/⌘ + Enter — отправить</span>`
+    : "";
+  return `${head}${notes.length ? `<div class="fix is-warn"><span class="dot warn"></span><div class="fix-body">${escapeHtml(notes.join(" · "))}</div></div>` : ""}
+    ${contactChips}${scheduled}<div class="post-composer">${draftBlock}${resumeRow}</div>`;
+}
+
+function tgPostContextHtml(post) {
+  const contact = tgPostContact(post);
+  return `<div class="field-block"><div class="field-title">Вакансия из @${escapeHtml(post.channel)}</div>
+      <div class="field-hint">${escapeHtml(post.title)}</div>
+      ${post.unverified ? `<div class="field-hint">ИИ не проверил, вакансия ли это — автоотправки не было</div>` : ""}</div>
+    <div class="field-block"><div class="field-title">Контакт</div><div class="field-hint">${contact ? `${contact.kind === "telegram" ? "@" : ""}${escapeHtml(contact.value)}` : "не найден"}</div></div>
+    <div class="talk-actions">
+      <a class="btn btn-small" href="${escapeHtml(post.link)}" target="_blank" rel="noopener">Открыть пост ↗</a>
+      <button type="button" class="btn btn-small btn-ghost" data-post-action="hide">Скрыть вакансию</button>
+      ${contact ? `<button type="button" class="btn btn-small btn-ghost is-danger" data-post-action="block" data-ui="talk.block-company">Не писать компании</button>` : ""}
+    </div>`;
+}
+
+function openTelegramPost(postId) {
+  const post = tgPostsData.posts.find((p) => p.id === postId);
+  if (!post) return;
+  activeTgPostId = postId;
+  activeTelegramContact = null;
+  selectedInboxIndex = -1;
+  document.querySelectorAll("#replies-rows .talk-row, #tg-conv-list .conv-item").forEach((r) => r.classList.remove("is-selected", "active"));
+  document.querySelectorAll("#tg-posts-list .talk-row").forEach((r) => r.classList.toggle("is-selected", r.dataset.tgPost === postId));
+  document.getElementById("tg-chat-panel").style.display = "none";
+  document.getElementById("tg-chat-empty").style.display = "none";
+  document.getElementById("talk-item-panel").hidden = true;
+  document.getElementById("tg-chat-delete").hidden = true;
+  const panel = document.getElementById("tg-post-panel");
+  panel.hidden = false;
+  panel.innerHTML = tgPostPanelHtml(post);
+  const ctxBody = document.getElementById("talk-context-body");
+  ctxBody.classList.remove("muted", "small");
+  ctxBody.innerHTML = tgPostContextHtml(post);
+}
+
+async function refreshTelegramPost(postId = activeTgPostId) {
+  lastTgPostsSnapshot = "";
+  await renderTelegramPosts();
+  if (postId && tgPostsData.posts.some((p) => p.id === postId)) openTelegramPost(postId);
+  else closeTelegramPost();
+}
+
+async function tgPostAction(action, btn) {
+  const post = tgPostsData.posts.find((p) => p.id === activeTgPostId);
+  if (!post) return;
+  const textEl = document.getElementById("tg-post-text");
+  const text = textEl ? textEl.value.trim() : "";
+  const resume = tgPostResumeChoice(post);
+  const busy = (label) => {
+    btn.disabled = true;
+    btn.textContent = label;
+  };
+  try {
+    if (action === "draft" || action === "rewrite") {
+      busy(action === "draft" ? "Пишу черновик…" : "Переписываю…");
+      const contact = tgPostContact(post);
+      await api(`/api/telegram/posts/${post.id}/draft`, { method: "POST", body: JSON.stringify({ contact: contact?.value || "" }) });
+      await refreshTelegramPost(post.id);
+    } else if (action === "send") {
+      if (!text) return;
+      busy("Отправляю…");
+      const contact = tgPostContact(post);
+      if (contact.kind === "email") {
+        const res = await api(`/api/hr-drafts/${post.draft.code}/send`, { method: "POST", body: JSON.stringify({ text, resume }) });
+        showToast(res.message, "success");
+      } else {
+        // Отправлено — пост становится обычной перепиской в списке ниже.
+        const res = await api(`/api/telegram/posts/${post.id}/send`, { method: "POST", body: JSON.stringify({ contact: contact.value, text, resume }) });
+        showToast(res.warning || `Отправлено @${res.contact}${resume ? " + резюме" : ""}`, res.warning ? "error" : "success");
+        delete tgPostResume[post.id];
+        await refreshTelegramPost(post.id);
+        await render.telegram();
+        openTelegramConversation(res.contact);
+        return;
+      }
+      delete tgPostResume[post.id];
+      await refreshTelegramPost(post.id);
+      render.telegram();
+    } else if (action === "later") {
+      if (!text) return;
+      busy("Ставлю на утро…");
+      const contact = tgPostContact(post);
+      const res = await api(`/api/telegram/posts/${post.id}/later`, { method: "POST", body: JSON.stringify({ contact: contact.value, text, resume }) });
+      await refreshTelegramPost(post.id);
+      showSavedToast(`Уйдёт ${fmtWhen(res.send_after)} — ночью HR не беспокоим`, async () => {
+        await api(`/api/telegram/posts/${post.id}/status`, { method: "POST", body: JSON.stringify({ status: "new" }) });
+        await refreshTelegramPost(post.id);
+      });
+    } else if (action === "unschedule") {
+      busy("Отменяю…");
+      await api(`/api/telegram/posts/${post.id}/status`, { method: "POST", body: JSON.stringify({ status: "new" }) });
+      showToast("Отправка отменена — черновик снова здесь", "success");
+      await refreshTelegramPost(post.id);
+    } else if (action === "hide" || action === "block") {
+      await api(`/api/telegram/posts/${post.id}/status`, { method: "POST", body: JSON.stringify({ status: action === "hide" ? "hidden" : "blocked" }) });
+      closeTelegramPost();
+      document.getElementById("tg-chat-empty").style.display = "";
+      document.getElementById("talk-context-body").innerHTML = "";
+      lastTgPostsSnapshot = "";
+      await renderTelegramPosts();
+      showSavedToast(action === "hide" ? "Вакансия скрыта" : "Больше не пишем этой компании — отмечено в Базе", async () => {
+        await api(`/api/telegram/posts/${post.id}/status`, { method: "POST", body: JSON.stringify({ status: "new" }) });
+        if (action === "block") {
+          const contact = tgPostContact(post);
+          if (contact) await api("/api/contacts/do-not-contact", { method: "POST", body: JSON.stringify({ value: contact.value, on: false }) }).catch(() => {});
+        }
+        await refreshTelegramPost(post.id);
+      });
+    }
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+    if (document.body.contains(btn)) await refreshTelegramPost(post.id);
+  }
+}
+
+// «Не писать компании» из разговора или вакансии: в Базе — «не писать».
+function blockContactButtonHtml(value, postId = "") {
+  return `<button type="button" class="btn btn-small btn-ghost is-danger" data-talk-action="block" data-block-contact="${escapeHtml(value)}" data-block-post="${escapeHtml(postId)}" data-ui="talk.block-company">Не писать компании</button>`;
+}
+
+async function blockContact(value, postId) {
+  const post = (on) => api("/api/contacts/do-not-contact", { method: "POST", body: JSON.stringify({ value, on, post_id: postId || "" }) });
+  try {
+    await post(true);
+    showSavedToast("Больше не пишем этой компании — отмечено в Базе", () => post(false));
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  }
+}
+
+// «Ответ от ИИ» под перепиской Telegram: варианты подставляются в поле.
+async function suggestTelegramReplies() {
+  if (!activeTelegramContact) return;
+  const btn = document.getElementById("tg-chat-suggest");
+  const box = document.getElementById("tg-chat-suggestions");
+  btn.disabled = true;
+  btn.textContent = "Думаю…";
+  try {
+    const { suggestions } = await api(`/api/telegram/conversations/${activeTelegramContact}/suggest`, { method: "POST" });
+    box.innerHTML = suggestions.length
+      ? suggestions
+          .map((x, i) => `<button type="button" class="chip" data-suggestion="${i}" title="${escapeHtml(x.text)}">${escapeHtml(x.label)}</button>`)
+          .join("")
+      : `<span class="muted small">ИИ не предложил вариантов — ответьте сами.</span>`;
+    box.querySelectorAll("[data-suggestion]").forEach((chip) =>
+      chip.addEventListener("click", () => {
+        const x = suggestions[Number(chip.dataset.suggestion)];
+        const input = document.getElementById("tg-chat-input");
+        input.value = x.text;
+        input.focus();
+        document.getElementById("tg-chat-attach-resume").classList.toggle("is-suggested", !!x.attach_resume);
+        if (x.attach_resume) document.getElementById("tg-chat-status").textContent = "К этому ответу уместно приложить резюме — кнопка «Резюме».";
+      })
+    );
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Ещё варианты";
+  }
+}
+
+async function sendTelegramMessageLater() {
+  if (!activeTelegramContact) return;
+  const input = document.getElementById("tg-chat-input");
+  const text = input.value.trim();
+  if (!text) {
+    input.focus();
+    return;
+  }
+  const contact = activeTelegramContact;
+  try {
+    const res = await api(`/api/telegram/conversations/${contact}/later`, { method: "POST", body: JSON.stringify({ text }) });
+    input.value = "";
+    showSavedToast(`Уйдёт @${contact} ${fmtWhen(res.send_after)}`, async () => {
+      await api(`/api/telegram/scheduled/${res.id}`, { method: "DELETE" });
+      if (activeTelegramContact === contact) input.value = text;
+    });
+  } catch (err) {
+    showToast(err.message.replace(/^\d+: /, ""), "error");
+  }
+}
+
+function initTalkExtras() {
+  document.getElementById("tg-posts-list")?.addEventListener("click", (e) => {
+    const row = e.target.closest("[data-tg-post]");
+    if (row) openTelegramPost(row.dataset.tgPost);
+  });
+  const panel = document.getElementById("tg-post-panel");
+  panel?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-post-action]");
+    if (btn) {
+      tgPostAction(btn.dataset.postAction, btn);
+      return;
+    }
+    const chip = e.target.closest("[data-post-resume]");
+    if (chip && activeTgPostId) {
+      tgPostResume[activeTgPostId] = chip.dataset.postResume;
+      const keep = document.getElementById("tg-post-text")?.value;
+      openTelegramPost(activeTgPostId);
+      if (keep != null) document.getElementById("tg-post-text").value = keep;
+      return;
+    }
+    const who = e.target.closest("[data-post-contact]");
+    if (who && activeTgPostId) {
+      const post = tgPostsData.posts.find((p) => p.id === activeTgPostId);
+      if (post && post.draft?.contact !== who.dataset.postContact) {
+        post.draft = null;
+        post.contacts = [...post.contacts].sort((a, b) => (a.value === who.dataset.postContact ? -1 : b.value === who.dataset.postContact ? 1 : 0));
+        openTelegramPost(activeTgPostId);
+      }
+    }
+  });
+  // Правка черновика сохраняется, когда уходите из поля.
+  panel?.addEventListener("change", async (e) => {
+    if (e.target.id !== "tg-post-text") return;
+    const post = tgPostsData.posts.find((p) => p.id === activeTgPostId);
+    if (!post?.draft || !e.target.value.trim()) return;
+    try {
+      await api(`/api/hr-drafts/${post.draft.code}`, { method: "PUT", body: JSON.stringify({ text: e.target.value }) });
+      post.draft.text = e.target.value;
+    } catch (err) {
+      showToast(err.message.replace(/^\d+: /, ""), "error");
+    }
+  });
+  panel?.addEventListener("keydown", (e) => {
+    if (e.target.id === "tg-post-text" && e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      panel.querySelector('[data-post-action="send"]')?.click();
+    }
+  });
+  document.getElementById("talk-context-body")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-block-contact]");
+    if (btn) {
+      blockContact(btn.dataset.blockContact, btn.dataset.blockPost);
+      return;
+    }
+    const postBtn = e.target.closest('[data-post-action="hide"], [data-post-action="block"]');
+    if (postBtn) tgPostAction(postBtn.dataset.postAction, postBtn);
+  });
+}

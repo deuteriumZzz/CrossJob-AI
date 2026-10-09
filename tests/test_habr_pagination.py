@@ -17,7 +17,9 @@ def test_walks_pages_until_nothing_new(tmp_path, monkeypatch):
         def get_vacancy_html(self, vacancy_id):
             return vacancy_id
 
-    monkeypatch.setattr(habr, "parse_search_results", lambda p: pages.get(p, []))
+    monkeypatch.setattr(
+        habr, "parse_search_results", lambda p: pages.get(p, [])
+    )
     monkeypatch.setattr(habr, "parse_search_dates", lambda p: {})
     monkeypatch.setattr(
         habr,

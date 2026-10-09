@@ -21,10 +21,14 @@ def test_zero_new_run_is_recorded_and_served_in_status(client):  # noqa: F811
     )
 
     saved = json.loads(
-        (ctx.output_folder / ".last_run_summary.json").read_text(encoding="utf-8")
+        (ctx.output_folder / ".last_run_summary.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert saved["geekjob"]["new"] == 0 and saved["geekjob"]["applied"] == 0
 
-    sources = {s["name"]: s for s in client.get("/api/status").json()["sources"]}
+    sources = {
+        s["name"]: s for s in client.get("/api/status").json()["sources"]
+    }
     assert sources["geekjob"]["last_summary"]["new"] == 0
     assert sources["hirify"]["last_summary"] is None  # ещё не заходила

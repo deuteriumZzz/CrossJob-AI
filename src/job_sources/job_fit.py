@@ -37,6 +37,10 @@ _SCORE_PROMPT = ChatPromptTemplate.from_template(
     Зарплатные ожидания кандидата: {salary_expectations}
     Описание:
     {job_description}
+
+    Поправки кандидата к прошлым решениям бота — его личные предпочтения;
+    похожие вакансии оценивай в ту же сторону, а непохожих они не касаются:
+    {user_feedback}
     """
 )
 
@@ -69,6 +73,46 @@ def classify_fit(score: int, min_score: float, good_score: float) -> FitTier:
     return "good"
 
 
+_VERDICT_TEXT = {
+    "should_apply": "бот пропустил, а стоило откликнуться",
+    "should_skip": "бот откликнулся, а не стоило",
+}
+
+
+def _decision_feedback(job: Job) -> tuple[str, bool]:
+    """(строки пометок «Это была ошибка» для промта, просьба «Откликнуться
+    всё равно» для этой вакансии). Журнал — в папке результатов, которую
+    знает llm_usage; без неё (тесты, разовый вызов) пометок нет."""
+    from src.job_sources.applied_log import AppliedLog
+    from src.job_sources.llm_usage import get_output_folder
+
+    output_folder = get_output_folder()
+    if output_folder is None:
+        return "", False
+    path = Path(output_folder) / "applied_log.json"
+    if not path.exists():
+        return "", False
+    try:
+        log = AppliedLog(path)
+        forced = bool(job.external_id) and log.apply_anyway_requested(job)
+        marks = log.decision_feedback(limit=10)
+    except Exception as e:  # пометки — подсказка, оценку не ломают
+        logger.warning(f"Пометки «Это была ошибка» не прочитаны: {e}")
+        return "", False
+    lines = []
+    for entry in marks:
+        fb = entry["feedback"]
+        verdict = _VERDICT_TEXT.get(fb.get("verdict", ""))
+        if not verdict:
+            continue
+        reason = f" Причина: {fb['reason']}" if fb.get("reason") else ""
+        lines.append(
+            f"- «{entry.get('title', '')}» ({entry.get('company', '')}): "
+            f"{verdict}.{reason}"
+        )
+    return "\n".join(lines), forced
+
+
 def score_job_fit(
     resume_pdf_path: Path,
     job: Job,
@@ -84,6 +128,10 @@ def score_job_fit(
     При сбое LLM (сеть, лимит, невалидный ответ) — две повторные
     попытки, затем fail closed: оценка 1 с меткой SCORING_UNAVAILABLE_GAP,
     отклик не уходит, а вакансия оценивается заново в следующий раз."""
+    feedback, forced = _decision_feedback(job)
+    if forced:
+        # «Откликнуться всё равно»: вы уже решили — не тратим вызов ИИ.
+        return FitAssessment(score=10, gaps=[])
     resume_text = extract_text(str(resume_pdf_path))
     llm = cast(
         BaseChatModel,
@@ -100,6 +148,7 @@ def score_job_fit(
         "job_description": job.description,
         "job_salary": job.salary or "не указана",
         "salary_expectations": salary_expectations or "не указаны",
+        "user_feedback": feedback or "нет",
     }
     for pause in (*SCORE_RETRY_PAUSES, None):
         try:

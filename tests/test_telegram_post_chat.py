@@ -14,8 +14,8 @@ from src.job_sources.telegram.watcher import (
     update_watch_post,
 )
 from src.job_sources.telegram_conversations import TelegramConversations
-from tests.test_webui_api import _with_telegram_creds
 from tests.test_webui_api import client  # noqa: F401  (fixture)
+from tests.test_webui_api import _with_telegram_creds
 
 POST = {
     "channel": "rabotapython",
@@ -47,11 +47,15 @@ class _FakeClient:
 
 
 def _conversations(ctx) -> TelegramConversations:
-    return TelegramConversations(ctx.output_folder / "telegram_conversations.json")
+    return TelegramConversations(
+        ctx.output_folder / "telegram_conversations.json"
+    )
 
 
 def _post(ctx, **fields) -> str:
-    post_id = save_watch_post(ctx.output_folder, {**POST, **fields.pop("post", {})})
+    post_id = save_watch_post(
+        ctx.output_folder, {**POST, **fields.pop("post", {})}
+    )
     if fields:
         update_watch_post(ctx.output_folder, post_id, **fields)
     return post_id
@@ -83,7 +87,9 @@ def test_posts_lists_only_recent_waiting_ones(client):  # noqa: F811
     assert body["posts"][0]["notes"]["anna_hr"].startswith("писали")
 
 
-def test_send_goes_from_account_with_resume_and_closes_post(client, monkeypatch):  # noqa: F811
+def test_send_goes_from_account_with_resume_and_closes_post(
+    client, monkeypatch  # noqa: F811
+):
     ctx = api.get_ctx()
     _with_telegram_creds(ctx)
     (ctx.config["dataFolder"] / "resume.pdf").write_bytes(b"%PDF-1.4")
@@ -93,7 +99,11 @@ def test_send_goes_from_account_with_resume_and_closes_post(client, monkeypatch)
 
     res = client.post(
         f"/api/telegram/posts/{post_id}/send",
-        json={"contact": "@anna_hr", "text": "Здравствуйте!", "resume": "resume.pdf"},
+        json={
+            "contact": "@anna_hr",
+            "text": "Здравствуйте!",
+            "resume": "resume.pdf",
+        },
     )
 
     assert res.status_code == 200, res.text
@@ -123,17 +133,12 @@ def test_send_refuses_contact_not_from_post(client, monkeypatch):  # noqa: F811
     assert _FakeClient.sent == []
 
 
-def test_later_needs_bot_then_queues_and_cancel_unqueues(client):  # noqa: F811
+def test_later_queues_and_cancel_unqueues(client):  # noqa: F811
+    # Бот для «утром» больше не нужен: очередь без шлюза разбирают проверка
+    # ответов и окно приложения (main.flush_telegram_scheduled).
     ctx = api.get_ctx()
     post_id = _post(ctx)
     body = {"contact": "anna_hr", "text": "Здравствуйте!"}
-    assert client.post(f"/api/telegram/posts/{post_id}/later", json=body).status_code == 400
-
-    ctx.secrets_file.write_text(
-        ctx.secrets_file.read_text(encoding="utf-8")
-        + "notifications:\n  telegram_bot_token: 't'\n  telegram_chat_id: '1'\n",
-        encoding="utf-8",
-    )
     res = client.post(f"/api/telegram/posts/{post_id}/later", json=body)
     assert res.status_code == 200, res.text
     send_after = datetime.fromisoformat(res.json()["send_after"])
@@ -141,9 +146,14 @@ def test_later_needs_bot_then_queues_and_cancel_unqueues(client):  # noqa: F811
     queue_file = ctx.output_folder / PENDING_SENDS_FILE
     queue = json.loads(queue_file.read_text(encoding="utf-8"))
     assert [e["contact"] for e in queue.values()] == ["anna_hr"]
-    assert client.get("/api/telegram/posts").json()["posts"][0]["status"] == "later"
+    assert (
+        client.get("/api/telegram/posts").json()["posts"][0]["status"]
+        == "later"
+    )
 
-    client.post(f"/api/telegram/posts/{post_id}/status", json={"status": "new"})
+    client.post(
+        f"/api/telegram/posts/{post_id}/status", json={"status": "new"}
+    )
     assert json.loads(queue_file.read_text(encoding="utf-8")) == {}
 
 
@@ -151,7 +161,9 @@ def test_block_marks_company_do_not_contact(client):  # noqa: F811
     ctx = api.get_ctx()
     post_id = _post(ctx)
 
-    res = client.post(f"/api/telegram/posts/{post_id}/status", json={"status": "blocked"})
+    res = client.post(
+        f"/api/telegram/posts/{post_id}/status", json={"status": "blocked"}
+    )
 
     assert res.status_code == 200
     cards = ContactBook(ctx.output_folder).all().values()

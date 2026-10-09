@@ -321,7 +321,55 @@ def test_stats_empty_log_returns_zeros(client):
         "prev_day": 0,
         "prev_week": 0,
         "prev_month": 0,
+        "daily": [0] * 30,
     }
+
+
+def test_stats_daily_counts_last_30_days(client):
+    import json
+    from datetime import datetime, timedelta
+
+    ctx = api.get_ctx()
+    now = datetime.now().astimezone()
+    base = {"company": "C", "title": "T", "link": "", "source": "hh"}
+    ctx.applied_log.path.write_text(
+        json.dumps(
+            {
+                "applications": [
+                    {
+                        **base,
+                        "external_id": "1",
+                        "status": "applied",
+                        "applied_at": now.isoformat(),
+                    },
+                    {
+                        **base,
+                        "external_id": "2",
+                        "status": "applied",
+                        "applied_at": (now - timedelta(days=2)).isoformat(),
+                    },
+                    {
+                        **base,
+                        "external_id": "3",
+                        "status": "skipped_low_fit",
+                        "applied_at": now.isoformat(),
+                    },
+                    {
+                        **base,
+                        "external_id": "4",
+                        "status": "applied",
+                        "applied_at": (now - timedelta(days=40)).isoformat(),
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    daily = client.get("/api/stats").json()["daily"]
+    assert len(daily) == 30
+    assert daily[-1] == 1
+    assert daily[-3] == 1
+    assert sum(daily) == 2
 
 
 def test_settings_update_persists_and_reflects_in_status(client):
@@ -694,9 +742,27 @@ def test_generate_download_without_result_is_404(client):
     assert response.status_code == 404
 
 
-def test_generate_resume_audit_requires_job_url(client):
-    response = client.post("/api/generate/resume-audit", json={})
-    assert response.status_code == 400
+def test_generate_resume_audit_without_job_url_is_general(client):
+    """Без ссылки — общая проверка под должности из «Что ищу» (раньше 400);
+    резюме и письму под вакансию ссылка по-прежнему нужна."""
+    calls = []
+    with patch(
+        "src.webui.api._create_resume_audit",
+        side_effect=lambda config, key, job_url=None: calls.append(job_url)
+        or {"audit": "общая"},
+    ):
+        response = client.post("/api/generate/resume-audit", json={})
+        assert response.status_code == 200
+        for _ in range(50):
+            if not client.get("/api/generate/status").json()["running"]:
+                break
+            time.sleep(0.05)
+    assert calls == [""]
+    assert client.get("/api/generate/status").json()["result"] == {
+        "audit": "общая"
+    }
+    tailored = client.post("/api/generate/resume-tailored", json={})
+    assert tailored.status_code == 400
 
 
 def test_generate_resume_audit_runs_and_reports_result(client):
@@ -799,6 +865,18 @@ def test_post_search_settings_partial_update_leaves_others(client):
     body = response.json()
     assert body["positions"] == ["QA"]
     assert body["locations"] == ["Berlin"]
+
+
+def test_search_settings_apply_once_at_company_round_trip(client):
+    assert (
+        client.get("/api/settings/search").json()["apply_once_at_company"]
+        is False
+    )
+    body = client.post(
+        "/api/settings/search", json={"apply_once_at_company": True}
+    ).json()
+    assert body["apply_once_at_company"] is True
+    assert api.get_ctx().config["apply_once_at_company"] is True
 
 
 def test_post_telegram_settings_updates_channels(client):
@@ -1250,3 +1328,58 @@ def test_direct_settings_toggles_hirify_schedule(client):
         ]
         is False
     )
+
+
+def test_source_resume_clears_block_and_enables_source(client):
+    from src.job_sources.block_detection import is_still_blocked, mark_blocked
+
+    ctx = api.get_ctx()
+    mark_blocked(ctx.output_folder, "headhunter")
+    assert is_still_blocked(ctx.output_folder, "headhunter") is True
+
+    response = client.post("/api/sources/headhunter/resume")
+
+    assert response.status_code == 200
+    assert is_still_blocked(ctx.output_folder, "headhunter") is False
+    hh = next(
+        s
+        for s in client.get("/api/status").json()["sources"]
+        if s["name"] == "headhunter"
+    )
+    assert hh["schedule_enabled"] is True
+    assert client.post("/api/sources/nope/resume").status_code == 404
+
+
+def test_inbox_lists_manual_stage_without_platform_state(client):
+    """Этап «интервью», поставленный руками для отклика без статуса
+    переговоров с площадки (LinkedIn), раньше ронял /api/inbox."""
+    import json
+    from datetime import datetime
+
+    ctx = api.get_ctx()
+    now = datetime.now().astimezone().isoformat()
+    ctx.applied_log.path.write_text(
+        json.dumps(
+            {
+                "applications": [
+                    {
+                        "source": "linkedin",
+                        "external_id": "1",
+                        "company": "Acme",
+                        "title": "Dev",
+                        "link": "https://x/1",
+                        "status": "applied",
+                        "applied_at": now,
+                        "stage": "interview",
+                        "stage_at": now,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    response = client.get("/api/inbox")
+    assert response.status_code == 200
+    item = response.json()[0]
+    assert item["stage"] == "interview"
+    assert item["text"] == ""

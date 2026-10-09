@@ -4,16 +4,12 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>CrossJob-AI</title>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link
-  href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&display=swap"
-  rel="stylesheet"
-/>
-<link rel="stylesheet" href="/style.css?v=42" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%278%27 fill=%27%23121417%27/%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%275%27 fill=%27%232fb36b%27/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="/vendor/fonts/fonts.css" />
+<link rel="stylesheet" href="/style.css?v=63" />
 </head>
 <body>
-<div id="setup-screen" class="setup-screen" style="display:none">
+<div id="setup-screen" class="setup-screen" style="display:none" data-ui="shell.first-run">
   <div class="setup-card panel">
     <svg aria-hidden="true" class="brand-mark" viewBox="0 0 40 40" fill="none">
       <circle cx="20" cy="20" r="17" stroke="#2a2d34" stroke-width="1.6"/>
@@ -39,64 +35,71 @@
 <div id="app-shell" class="shell" style="display:none">
   <aside class="sidebar">
     <div class="brand">
-      <svg aria-hidden="true" class="brand-mark" viewBox="0 0 40 40" fill="none">
-        <circle cx="20" cy="20" r="17" stroke="#2a2d34" stroke-width="1.6"/>
-        <circle cx="20" cy="20" r="10" stroke="#7ab8ff" stroke-width="1.6" opacity="0.85"/>
-        <circle cx="20" cy="20" r="3" fill="#6fdc8c"/>
-      </svg>
+      <span class="brand-dot" id="brand-dot" aria-hidden="true"></span>
       <div class="brand-text">
         <div class="brand-name">CrossJob<span>-AI</span></div>
-        <div class="brand-sub">панель управления</div>
+        <div class="brand-sub">ваш поиск работы</div>
       </div>
-      <button id="help-open" class="theme-toggle help-toggle" title="Как пользоваться" aria-label="Как пользоваться">?</button>
-      <button id="theme-toggle" class="theme-toggle" title="Переключить тему" aria-label="Переключить тему">
-        <svg aria-hidden="true" class="theme-icon-sun" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="4" stroke="currentColor" stroke-width="1.6"/><path d="M10 1.8v2M10 16.2v2M18.2 10h-2M3.8 10h-2M15.6 4.4l-1.4 1.4M5.8 14.2l-1.4 1.4M15.6 15.6l-1.4-1.4M5.8 5.8 4.4 4.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-        <svg aria-hidden="true" class="theme-icon-moon" viewBox="0 0 20 20" fill="none"><path d="M17 11.5A7.5 7.5 0 0 1 8.5 3 7.5 7.5 0 1 0 17 11.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-      </button>
     </div>
 
-    <nav class="tabs">
+    <nav class="tabs" aria-label="Разделы">
       <div class="tab-indicator" id="nav-tab-indicator"></div>
-      <button data-tab="overview" title="Главная — что сделать сейчас и статус площадок" class="active">
-        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><rect x="2.5" y="2.5" width="6.5" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="11" y="2.5" width="6.5" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="2.5" y="11" width="6.5" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="11" y="11" width="6.5" height="6.5" rx="1.5" stroke="currentColor" stroke-width="1.6"/></svg>
-        <span>Главная</span>
+      <button data-tab="overview" class="active" title="Главная — что ждёт вашего решения и как идут дела" data-ui="nav.home nav.home.badge">
+        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7 8 2.5 13.5 7v6a.5.5 0 0 1-.5.5H10V10H6v3.5H3a.5.5 0 0 1-.5-.5V7Z"/></svg>
+        <span class="tab-label">Главная</span>
         <span id="overview-error-badge" class="tab-badge" style="display:none"></span>
       </button>
-      <button data-tab="history" title="Вакансии — куда откликнулись, что с этим, и технические логи исполнения">
-        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><rect x="2.5" y="5.5" width="15" height="11" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M7 5.5V4a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 13 4v1.5M2.5 10h15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-        <span>Вакансии</span>
+      <button data-tab="history" title="Вакансии — куда бот откликнулся, что пропустил и почему" data-ui="nav.jobs">
+        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4.5" width="12" height="9" rx="1.5"/><path d="M5.5 4.5V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5"/></svg>
+        <span class="tab-label">Вакансии</span>
       </button>
-      <button data-tab="replies" title="Общение — ответы работодателей и Telegram">
-        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="M3 5.5A2 2 0 0 1 5 3.5h10a2 2 0 0 1 2 2V12a2 2 0 0 1-2 2H8l-3.5 3V14H5a2 2 0 0 1-2-2V5.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-        <span>Общение</span>
+      <button data-tab="replies" title="Общение — работодатели, письма и Telegram" data-ui="nav.talk nav.talk.badge">
+        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v5a1.5 1.5 0 0 1-1.5 1.5H7.2L4.5 13v-2A1.5 1.5 0 0 1 3 9.5v-5Z"/></svg>
+        <span class="tab-label">Общение</span>
         <span id="telegram-unread-badge" class="tab-badge" style="display:none"></span>
       </button>
-      <button data-tab="contacts" title="Компании — ваша база компаний и HR и рассылки им">
-        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><rect x="2.5" y="4.5" width="15" height="11" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="m3 5.5 7 5.5 7-5.5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-        <span>Компании</span>
+      <button data-tab="contacts" title="Компании — ваша база компаний и HR и письма им" data-ui="nav.companies">
+        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="m2.5 4.5 5.5 4 5.5-4"/></svg>
+        <span class="tab-label">Компании</span>
       </button>
-      <button data-tab="analytics" title="Аналитика — воронка, рынок, офферы">
-        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="M3.5 16.5v-5M9 16.5V5.5M14.5 16.5v-8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-        <span>Аналитика</span>
+      <button data-tab="analytics" title="Аналитика — что приносит ответы" data-ui="nav.analytics">
+        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13V8M8 13V3M13 13v-7"/></svg>
+        <span class="tab-label">Аналитика</span>
       </button>
-      <button data-tab="settings" title="Настройки — поиск, резюме, площадки">
-        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="2.6" stroke="currentColor" stroke-width="1.6"/><path d="M10 2.5v2.1M10 15.4v2.1M17.5 10h-2.1M4.6 10H2.5M15.1 4.9l-1.5 1.5M6.4 13.6l-1.5 1.5M15.1 15.1l-1.5-1.5M6.4 6.4 4.9 4.9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-        <span>Настройки</span>
+      <button data-tab="settings" title="Настройки — поиск, площадки, письма, система" data-ui="nav.settings" class="nav-gear">
+        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M14.2 8h-1.6M3.4 8H1.8M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1M12.4 12.4l-1.1-1.1M4.7 4.7 3.6 3.6"/></svg>
+        <span class="tab-label">Настройки</span>
       </button>
     </nav>
 
-    <div class="daemon-controls">
-      <span id="daemon-badge" class="badge off"><span class="badge-dot"></span><span class="btn-label">бот остановлен</span></span>
-      <div class="daemon-buttons">
-        <button id="daemon-toggle" class="btn btn-primary" title="Запустить бота">
-          <svg aria-hidden="true" class="icon-play" viewBox="0 0 20 20" fill="none"><path d="M6.5 4.7v10.6a1 1 0 0 0 1.53.85l8.4-5.3a1 1 0 0 0 0-1.7l-8.4-5.3a1 1 0 0 0-1.53.85Z" fill="currentColor"/></svg>
-          <svg aria-hidden="true" class="icon-pause" viewBox="0 0 20 20" fill="none"><rect x="5" y="5" width="10" height="10" rx="1.5" fill="currentColor"/></svg>
-          <span class="btn-label">Запустить</span>
-        </button>
+    <div class="side-foot">
+      <button type="button" id="help-open" class="side-link" title="Как пользоваться" data-ui="shell.help">
+        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M6.5 6.2a1.6 1.6 0 1 1 2.2 1.5c-.5.2-.7.6-.7 1.1v.4M8 11.2h.01"/></svg>
+        <span class="side-label">Как пользоваться</span>
+      </button>
+      <button type="button" id="notif-open" class="side-link" title="Уведомления" data-ui="shell.notifications">
+        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11V7a4 4 0 0 1 8 0v4l1 1.5H3L4 11ZM6.5 14a1.6 1.6 0 0 0 3 0"/></svg>
+        <span class="side-label">Уведомления</span>
+        <span id="notif-count" class="side-count" hidden></span>
+      </button>
+      <button type="button" id="palette-open" class="side-link" title="Найти действие (Ctrl/⌘+K)" data-ui="shell.palette">
+        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+        <span class="side-label">Найти действие</span>
+        <kbd class="side-kbd">⌘K</kbd>
+      </button>
+      <div class="daemon-controls">
+        <span id="daemon-badge" class="badge off" data-ui="bot.status"><span class="badge-dot"></span><span class="btn-label">бот остановлен</span></span>
+        <div class="daemon-buttons">
+          <button id="daemon-toggle" class="btn btn-primary" title="Запустить бота" data-ui="bot.toggle">
+            <svg aria-hidden="true" class="icon-play" viewBox="0 0 20 20" fill="none"><path d="M6.5 4.7v10.6a1 1 0 0 0 1.53.85l8.4-5.3a1 1 0 0 0 0-1.7l-8.4-5.3a1 1 0 0 0-1.53.85Z" fill="currentColor"/></svg>
+            <svg aria-hidden="true" class="icon-pause" viewBox="0 0 20 20" fill="none"><rect x="5" y="5" width="10" height="10" rx="1.5" fill="currentColor"/></svg>
+            <span class="btn-label">Запустить</span>
+          </button>
+        </div>
       </div>
+      <div id="activity" class="activity" role="status" data-ui="bot.activity"></div>
     </div>
-    <div id="activity" class="activity" role="status"></div>
-    <button id="sidebar-collapse-toggle" class="sidebar-collapse-toggle" title="Свернуть меню" aria-label="Свернуть меню">
+    <button id="sidebar-collapse-toggle" class="sidebar-collapse-toggle" title="Свернуть меню (Ctrl/⌘+B)" aria-label="Свернуть меню" data-ui="nav.collapse">
       <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="M12.5 4.5 7 10l5.5 5.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
   </aside>
@@ -104,88 +107,120 @@
   <dialog id="help-dialog" class="help-dialog" aria-labelledby="help-title">
     <div class="help-head">
       <h2 id="help-title" class="m0">Как пользоваться</h2>
-      <button type="button" class="btn btn-ghost btn-small" id="help-close" aria-label="Закрыть">✕</button>
+      <button type="button" class="icon-btn" id="help-close" aria-label="Закрыть">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg>
+      </button>
     </div>
-    <p class="muted">Три способа выйти на работодателя. Можно пользоваться одним или всеми сразу — бот делает рутину, решения остаются за вами.</p>
+    <p class="muted">Три способа выйти на работодателя — одним или всеми сразу. Бот делает рутину, решения остаются за вами.</p>
 
     <section class="help-case">
-      <h3>1. Площадки — hh, LinkedIn и другие</h3>
+      <h3>1. Площадки — HeadHunter, LinkedIn и другие</h3>
       <ol>
-        <li>Главная → включите нужные площадки переключателем.</li>
-        <li>Режим на карточке: <b>откликается сам</b> (бот отправляет отклики до дневного лимита) или <b>только ищет</b> (вакансии появляются в «Вакансиях», откликаетесь вы).</li>
-        <li>Нажмите <b>▶ Запустить</b>. Ответы работодателей — в «Общение → Входящие».</li>
+        <li>Главная → «Площадки»: нажмите на строку площадки — справа откроется шторка, включите площадку там.</li>
+        <li>Режим для всех площадок — в шапке Главной: <b>Откликаться</b> (бот отправляет отклики до дневного лимита) или <b>Только искать</b> (вакансии копятся в «Вакансиях», откликаетесь вы). Для одной площадки — переключатель «Откликаться самому» в её шторке.</li>
+        <li>Нажмите <b>Запустить бота</b>. Ответы работодателей — в «Общении».</li>
       </ol>
     </section>
-    <section class="help-case">
+    <section class="help-case" data-ui="talk.tg.howto">
       <h3>2. Telegram-парсер</h3>
       <ol>
-        <li>Общение → Telegram-парсер → войдите своим аккаунтом (один раз) и добавьте каналы.</li>
+        <li>Общение → Telegram-парсер: войдите своим аккаунтом (один раз), в Настройки → Telegram-парсер добавьте каналы.</li>
         <li>Подходящий пост за секунды приходит в <b>CrossJob-бот</b> с кнопками «Здравствуйте», «+ резюме», «Сопроводительное».</li>
         <li>Нажали кнопку — сообщение уходит HR <b>с вашего аккаунта</b>. Контакты из постов сами попадают в базу компаний.</li>
       </ol>
     </section>
     <section class="help-case">
       <h3>3. Своя база компаний и рассылка</h3>
-      <p class="muted small">Всё делается на Главной, в карточке <b>🏢 Компании и рассылка</b>: в ней всегда одна большая кнопка — следующий шаг.</p>
+      <p class="muted small">Состояние рассылки — на Главной, строка <b>Рассылка по почте</b>: в её шторке всегда одна большая кнопка — следующий шаг. Полный вид — Компании → Рассылка.</p>
       <ol>
-        <li><b>📥 Загрузить список компаний</b> — Excel, CSV, PDF или Word. Нет списка — «Где взять список?»: там готовый промт для ИИ с поиском в интернете. Ещё база пополняется сама из Telegram-парсера и с сайтов компаний (переключатель в карточке).</li>
-        <li><b>✍️ Написать письма</b> — бот пишет каждой компании личное письмо по вашему резюме, порцией на сегодня.</li>
-        <li><b>👀 Просмотреть и отправить</b> → <b>🚀 Начать отправку</b>. Письма уходят с вашего Gmail с резюме во вложении — по одному, в рабочее время, со случайными паузами. Что не ушло сегодня, бот отправит в следующие дни сам, а следующую порцию писем пришлёт в CrossJob-бот.</li>
+        <li><b>Загрузить список компаний</b> — Excel, CSV, PDF или Word. Нет списка — «Где взять список?»: там готовый промт для ИИ с поиском в интернете. Ещё база пополняется сама из Telegram-парсера и с сайтов компаний (строка «Сайты компаний» на Главной).</li>
+        <li><b>Написать письма</b> — бот пишет каждой компании личное письмо по вашему резюме, порцией на сегодня.</li>
+        <li><b>Просмотреть и отправить</b> → <b>Начать отправку</b>. Письма уходят с вашего Gmail с резюме во вложении — по одному, в рабочее время, со случайными паузами. Что не ушло сегодня, бот отправит в следующие дни сам, а следующую порцию писем пришлёт в CrossJob-бот.</li>
       </ol>
-      <p class="muted small">Что происходит сейчас — в строке «Сейчас» в меню: 🔄 отправляю, ⏸ ждёт (вечер, выходные, лимит), ⛔ остановлено. Отдельные компании — Компании → База: выделите → <b>✉️ Написать выбранным</b>.</p>
+      <p class="muted small">Что происходит сейчас — в строке под меню: идёт отправка, ждёт (вечер, выходные, лимит) или остановлено. Отдельные компании — Компании → База: выделите → <b>Написать выбранным</b>.</p>
     </section>
 
     <h3>Частые вопросы</h3>
-    <details><summary>Бот может что-то отправить без меня?</summary><p>Только отклики на площадках в режиме «откликается сам». Сообщения HR в Telegram и письма рассылки уходят только после вашего нажатия; после «Начать отправку» уже просмотренные письма бот досылает сам в следующие дни. Остановить — «Остановить рассылку» в карточке.</p></details>
-    <details><summary>Почту Gmail не заблокируют?</summary><p>Рассылка устроена как письма живого человека: первые дни — 15 писем, потом больше; только в рабочие часы; случайные паузы; много возвратов за сутки (по умолчанию 3) — стоп до завтра. Лимит и часы — Настройки → Почта и письма → 🛡 Защита почты.</p></details>
-    <details><summary>Рассылка идёт, если бот не запущен?</summary><p>Да: «▶ Запустить» — это поиск вакансий на площадках. Рассылка работает сама, пока открыто приложение.</p></details>
-    <details><summary>Где хранятся мои данные?</summary><p>Только на вашем компьютере, в папке <code>data_folder</code>. База только пополняется — сама ничего не удаляет; раз в день делается запасная копия (хранятся копии за 7 дней). Выгрузить в Excel — Компании → «⬇ Скачать в Excel».</p></details>
-    <details><summary>Слишком много сообщений от бота</summary><p>Настройки → 📣 Уведомления в Telegram → «Тихий режим»: несрочное придёт одним списком в утренней сводке.</p></details>
-    <details><summary>Площадка на паузе после капчи</summary><p>Откройте сайт площадки в браузере бота, пройдите проверку и напишите боту <code>/resume hh</code> (или имя площадки).</p></details>
-    <details><summary>Что-то не подключено или не работает</summary><p>Настройки → «Подключения» — там видно, что красное, и кнопка «Подключить». Подробности ошибок — Настройки → Логи.</p></details>
+    <details><summary>Бот может что-то отправить без меня?</summary><p>Только отклики на площадках в режиме «Откликаться». Сообщения HR в Telegram и письма рассылки уходят только после вашего нажатия; после «Начать отправку» уже просмотренные письма бот досылает сам в следующие дни. Остановить — «Остановить рассылку» в шторке рассылки.</p></details>
+    <details><summary>Почту Gmail не заблокируют?</summary><p>Рассылка устроена как письма живого человека: первые дни — 15 писем, потом больше; только в рабочие часы; случайные паузы; много возвратов за сутки (по умолчанию 3) — стоп до завтра. Лимит и часы — Настройки → Почта и письма → «Защита от блокировки».</p></details>
+    <details><summary>Рассылка идёт, если бот не запущен?</summary><p>Да: «Запустить бота» — это поиск вакансий на площадках. Рассылка работает сама, пока открыто приложение.</p></details>
+    <details><summary>Где хранятся мои данные?</summary><p>Только на вашем компьютере, в папке <code>data_folder</code>. База только пополняется — сама ничего не удаляет; раз в день делается запасная копия (хранятся копии за 7 дней, Настройки → Резервные копии). Выгрузить в Excel — Компании → «Скачать в Excel».</p></details>
+    <details><summary>Слишком много сообщений от бота</summary><p>Настройки → Уведомления в Telegram → «Тихий режим»: несрочное придёт одним списком в утренней сводке.</p></details>
+    <details><summary>Площадка на паузе после капчи</summary><p>Нажмите на неё на Главной: в шторке будет причина и кнопка «Я прошёл проверку — снять паузу». Или напишите боту <code>/resume hh</code> (или имя площадки).</p></details>
+    <details><summary>Что-то не подключено или не работает</summary><p>Настройки → «Подключения» — там видно, что красное, и кнопка «Подключить». Подробности ошибок — Вакансии → Журнал бота.</p></details>
   </dialog>
 
   <main>
-    <nav id="subnav" class="subnav" aria-label="Подразделы" style="display:none"></nav>
+    <nav id="subnav" class="subnav" aria-label="Подразделы" style="display:none" data-ui="nav.subtabs jobs.tabs companies.tabs"></nav>
     <section id="view-overview" class="view active">
-      <div class="view-header">
-        <div>
+      <header class="page-head">
+        <div class="page-title">
           <h2>Главная</h2>
-          <p class="muted">Что ждёт вашего решения, статистика и площадки</p>
+          <p class="muted">Что требует вашего решения и как идут дела</p>
         </div>
-      </div>
-      <div id="todo-panel" class="panel todo-panel"></div>
+        <span id="home-limit" class="home-limit mono" data-ui="home.limit"></span>
+        <div class="segmented" id="home-mode" role="radiogroup" aria-label="Режим работы площадок" data-ui="home.mode">
+          <span class="segmented-ind" aria-hidden="true"></span>
+          <button type="button" role="radio" aria-checked="false" data-mode="apply" title="Бот сам отправляет отклики на включённых площадках — до дневного лимита">Откликаться</button>
+          <button type="button" role="radio" aria-checked="false" data-mode="search" title="Бот только находит вакансии, откликаетесь вы">Только искать</button>
+        </div>
+        <button type="button" class="btn" id="home-palette" title="Найти действие (Ctrl/⌘+K)">
+          <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>Поиск<kbd>⌘K</kbd>
+        </button>
+        <button type="button" class="btn" id="home-pause-all" data-ui="home.pause-all" aria-pressed="false" title="Остановить отклики, рассылку и переписку от вашего имени разом">Пауза на всё</button>
+        <button type="button" class="btn btn-primary" id="home-run" data-ui="bot.toggle">Запустить</button>
+      </header>
+      <div id="pause-banner" class="pause-banner" role="status" hidden></div>
+
+      <section id="todo-panel" class="card todo-panel" aria-label="Нужно ваше решение" data-ui="home.setup home.todo home.todo.calm home.queue.telegram home.queue.hh shell.tour"></section>
 
       <!-- Пока не пройдены обязательные шаги настройки (резюме, ключ ИИ,
            хотя бы одна площадка) — ниже нечего показывать: пустая
-           статистика и карточки площадок без резюме только отвлекают от
-           чек-листа выше. render.overview() прячет/показывает этот блок
-           целиком через #dashboard-sections. -->
-      <div id="dashboard-sections">
-        <div id="stats-row" class="stats-row"></div>
-        <div id="speed-card" class="panel speed-card"></div>
-        <details id="live-feed" class="panel"><summary>Что бот делает сейчас</summary><div id="live-feed-body" class="muted small"></div></details>
+           статистика и площадки без резюме только отвлекают от
+           чек-листа выше. render.overview() прячет этот блок целиком. -->
+      <div id="dashboard-sections" data-ui="home.gate">
+        <section id="stats-row" class="kpi-grid" aria-label="Итоги" data-ui="home.kpi"></section>
 
-        <h3 class="section-subheading"><svg class="section-subheading-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" stroke="currentColor" stroke-width="1.6"/><path d="M5.6 6.1a6 6 0 0 0 0 7.8M14.4 6.1a6 6 0 0 1 0 7.8M3 3.5a10 10 0 0 0 0 13M17 3.5a10 10 0 0 1 0 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Свои каналы</h3>
-        <div id="own-channels" class="source-grid"></div>
+        <div class="home-grid">
+          <section class="card list-card" aria-labelledby="platforms-h" data-ui="home.platforms home.platform.order">
+            <div class="card-head">
+              <h3 id="platforms-h">Площадки</h3>
+              <span class="muted small">нажмите на строку — настройки откроются справа</span>
+            </div>
+            <div class="grp">Свои каналы</div>
+            <div id="own-channels" class="platform-list" data-ui="home.tg home.sites home.pipeline home.own.extra"></div>
+            <div class="grp">Русские площадки</div>
+            <div id="source-grid-ru" class="platform-list"></div>
+            <div class="grp">Зарубежные площадки</div>
+            <div id="source-grid-intl" class="platform-list"></div>
+          </section>
 
-        <h3 class="section-subheading"><svg class="section-subheading-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 17.5S15.5 12.8 15.5 8.5a5.5 5.5 0 1 0-11 0c0 4.3 5.5 9 5.5 9Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="10" cy="8.3" r="2" stroke="currentColor" stroke-width="1.6"/></svg>Русские площадки</h3>
-        <div id="source-grid-ru" class="source-grid"></div>
-
-        <h3 class="section-subheading"><svg class="section-subheading-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="1.6"/><path d="M2.5 10h15M10 2.5c2.2 2 3.5 4.9 3.5 7.5s-1.3 5.5-3.5 7.5c-2.2-2-3.5-4.9-3.5-7.5S7.8 4.5 10 2.5Z" stroke="currentColor" stroke-width="1.6"/></svg>Зарубежные площадки</h3>
-        <div id="source-grid-intl" class="source-grid"></div>
+          <div class="home-side">
+            <section class="card pad-card" id="home-split" aria-labelledby="home-split-h" data-ui="home.split"></section>
+            <section class="card pad-card" id="live-feed" aria-labelledby="live-feed-h" data-ui="home.feed">
+              <div class="card-head flat">
+                <span class="dot never_run" id="live-feed-dot" aria-hidden="true"></span>
+                <h3 id="live-feed-h">Что бот делает сейчас</h3>
+              </div>
+              <div id="live-feed-body" class="feed muted small"></div>
+            </section>
+          </div>
+        </div>
       </div>
     </section>
 
     <section id="view-history" class="view">
-      <div class="view-header">
-        <div>
+      <header class="page-head">
+        <div class="page-title">
           <h2>Вакансии</h2>
-          <p class="muted">Всё, что бот нашёл: куда откликнулся, что пропустил и почему, этап по каждой. У вакансии — «Действия»: найти HR, подготовка к интервью</p>
+          <p class="muted">Куда бот откликнулся, что пропустил и почему. Нажмите на строку — подробности справа</p>
         </div>
-      </div>
-      <div class="filters">
-        <select id="filter-source">
+        <span id="history-today" class="home-limit mono"></span>
+      </header>
+      <div class="jobs-filters">
+        <div class="chip-group" id="history-chips" role="group" aria-label="Статус" data-ui="jobs.filter.status jobs.filter.rejected"></div>
+        <div class="jobs-filter-row">
+          <select id="filter-source" aria-label="Площадка" data-ui="jobs.filter.source">
           <option value="">Все площадки</option>
           <option value="headhunter">HeadHunter</option>
           <option value="geekjob">geekjob.ru</option>
@@ -201,69 +236,120 @@
           <option value="hirify">Hirify</option>
           <option value="direct">Сайты компаний</option>
         </select>
-        <select id="filter-status">
-          <option value="">Любой статус</option>
-          <option value="applied">Отправлено</option>
-          <option value="dry_run">Тестовый прогон</option>
-          <option value="skipped_low_fit">Пропущено (слабое совпадение)</option>
-          <option value="skipped_requirements">Пропущено (не проходит требования)</option>
-          <option value="skipped_easy_apply_failed">Пропущено (форма Easy Apply)</option>
-        </select>
-        <label class="checkbox-row"><input id="filter-show-rejected" type="checkbox" class="switch" /> Показать также отклонённые</label>
-        <input id="filter-query" type="text" class="search-input" placeholder="Поиск по компании/названию" aria-label="Поиск по компании/названию" />
-        <button id="history-apply-filters" class="btn btn-secondary">Применить</button>
+          <input id="filter-query" type="search" class="search-input" placeholder="Компания или должность" aria-label="Поиск по компании и должности" data-ui="jobs.search" />
+          <select id="filter-status" hidden aria-hidden="true" tabindex="-1">
+            <option value="">Любой статус</option>
+            <option value="applied">Отправлено</option>
+            <option value="dry_run">Тестовый прогон</option>
+            <option value="skipped_low_fit">Пропущено (слабое совпадение)</option>
+            <option value="skipped_requirements">Пропущено (не проходит требования)</option>
+            <option value="skipped_easy_apply_failed">Пропущено (форма Easy Apply)</option>
+          </select>
+          <input id="filter-show-rejected" type="checkbox" hidden aria-hidden="true" tabindex="-1" />
+          <button id="history-apply-filters" class="btn" hidden type="button" data-ui="jobs.apply-filters">Применить</button>
+        </div>
       </div>
-      <div class="table-wrap" id="history-table-wrap">
-        <table>
-          <thead>
-            <tr><th>Дата</th><th>Площадка</th><th>Компания</th><th>Вакансия</th><th>Статус</th><th>Этап</th><th>Балл</th><th>Письмо</th></tr>
-          </thead>
-          <tbody id="history-rows"></tbody>
-        </table>
+      <div class="card table-card" id="history-table-wrap" data-ui="jobs.table jobs.region jobs.keys">
+        <div class="table-wrap">
+          <table class="jobs-table">
+            <thead>
+              <tr><th>Время</th><th>Компания и должность</th><th data-ui="jobs.salary">Зарплата</th><th>Статус</th><th class="num">Оценка</th></tr>
+            </thead>
+            <tbody id="history-rows"></tbody>
+          </table>
+        </div>
+        <div class="table-foot muted small"><span><kbd>j</kbd> <kbd>k</kbd> выбрать · <kbd>↵</kbd> почему так решил · <kbd>Esc</kbd> закрыть</span><span id="history-count"></span></div>
       </div>
     </section>
 
     <section id="view-replies" class="view">
-      <div class="view-header">
-        <div>
-          <h2>Входящие</h2>
-          <p class="muted">Что ответили работодатели — с площадок, в Telegram и на ваши письма. Отклики бот шлёт сам, а здесь то, где нужен человек: интервью, вопросы HR, черновики ответов.</p>
+      <header class="page-head">
+        <div class="page-title">
+          <h2>Общение</h2>
+          <p class="muted">Работодатели, письма и Telegram — в одном окне. Без вашего «Отправить» ничего не уходит</p>
         </div>
+        <div class="talk-parser" data-ui="talk.tg.status">
+          <span id="telegram-status-badge" class="badge off"><span class="badge-dot"></span>проверка…</span>
+          <span id="tg-quick-line-status" class="parser-state small muted">Парсер: …</span>
+        </div>
+        <button type="button" class="btn btn-ghost btn-small" id="parser-open-base" data-ui="talk.tg.contacts">Контакты из Telegram</button>
+        <button type="button" class="btn btn-small" data-goto-settings="settings-tg-quick" data-ui="talk.tg.rules" title="Каналы, ключевые слова, текст «Здравствуйте» и резюме для кнопок">Правила парсера</button>
+      </header>
+      <div class="results-numbers talk-numbers" id="parser-numbers"></div>
+
+      <div id="drafts-queue" class="card pad-card talk-queue" style="display:none" data-ui="talk.drafts talk.drafts.send-all"></div>
+      <div id="hh-reminders-queue" class="card pad-card talk-queue" style="display:none" data-ui="talk.hh-reminders">
+        <details class="talk-queue-details">
+          <summary><span class="dot warn"></span><b>Молчат дольше срока — напомнить о себе на HH</b> <span class="muted small" id="hh-reminders-count"></span></summary>
+          <p class="field-hint">Отклик не просмотрели дольше срока из Настройки → Отклики и переписка. Отправка только по кнопке — текст можно поправить.</p>
+          <div id="hh-reminders-list"></div>
+        </details>
       </div>
-      <div id="drafts-queue" class="panel" style="display:none"></div>
-      <div id="hh-reminders-queue" class="panel" style="display:none">
-        <h3>🔔 Молчат долго — напомнить о себе на HH</h3>
-        <p class="muted small">Отклик не просмотрели дольше настроенного срока (Настройки → Площадки → HH → ⚙ Настроить). Отправка только по кнопке — текст можно поправить перед отправкой.</p>
-        <div id="hh-reminders-list"></div>
+
+      <div class="talk-layout">
+        <aside class="card talk-list" aria-label="Разговоры">
+          <div class="talk-list-head">
+            <div class="chip-group" id="replies-kind" role="group" aria-label="Что показать" data-ui="talk.filter"></div>
+            <input id="replies-filter-query" type="search" class="search-input" placeholder="Компания, вакансия или контакт" aria-label="Поиск по разговорам" data-ui="talk.search" />
+          </div>
+          <div id="tg-posts-block" data-ui="talk.tg.posts" hidden>
+            <div class="grp">Новые вакансии из Telegram <span id="tg-posts-count" class="muted"></span></div>
+            <div id="tg-posts-list" class="talk-posts"></div>
+            <div class="grp">Переписка</div>
+          </div>
+          <div id="replies-rows" class="inbox-list" data-ui="talk.item talk.open-dialog"></div>
+          <div class="grp">Все диалоги в Telegram</div>
+          <div id="tg-conv-list" class="conv-list" data-ui="talk.tg.list">
+            <p class="muted small">Загрузка…</p>
+          </div>
+        </aside>
+
+        <section class="card talk-thread" aria-label="Разговор">
+          <div id="tg-chat-empty" class="talk-empty muted">Выберите разговор слева. Автоответа на входящие нет — отвечаете вы, здесь или в CrossJob-боте.</div>
+          <div id="talk-item-panel" class="talk-item-panel" hidden></div>
+          <div id="tg-post-panel" class="talk-post-panel" hidden data-ui="talk.rewrite"></div>
+          <div id="tg-chat-panel" style="display:none" data-ui="talk.tg.chat">
+            <div class="thread-head"><h3 id="tg-chat-contact" class="m0"></h3><span class="muted small">Telegram · с вашего личного аккаунта</span></div>
+            <div id="tg-chat-messages" class="chat-messages"></div>
+            <div class="ai-replies" data-ui="talk.ai-replies">
+              <span class="muted small">Ответ от ИИ:</span>
+              <div id="tg-chat-suggestions" class="chip-row"></div>
+              <button type="button" class="btn btn-ghost btn-small" id="tg-chat-suggest">Предложить варианты</button>
+            </div>
+            <div class="chat-composer" data-ui="talk.tg.input talk.tg.attach">
+              <input id="tg-chat-input" type="text" placeholder="Написать сообщение…" aria-label="Текст сообщения" />
+              <button id="tg-chat-attach-resume" class="btn" type="button" title="Отправить резюме файлом">Резюме</button>
+              <button id="tg-chat-later" class="btn" type="button" title="Отправить завтра утром — ночью HR не беспокоим" data-ui="talk.later">Утром, в 10:00</button>
+              <button id="tg-chat-send" class="btn btn-primary" type="button">Отправить</button>
+            </div>
+            <span id="tg-chat-status" class="muted small"></span>
+          </div>
+        </section>
+
+        <aside class="card talk-context" id="talk-context" aria-label="Подробности" data-ui="talk.open-gmail talk.prep talk.stage talk.tg.delete">
+          <div id="talk-context-body" class="talk-context-body muted small">Здесь — вакансия, этап и действия по выбранному разговору.</div>
+          <button id="tg-chat-delete" class="btn btn-ghost btn-small" type="button" title="Удалить диалог из истории" hidden>Удалить диалог</button>
+        </aside>
       </div>
-      <div class="filters">
-        <div class="chip-group" id="replies-kind" role="group" aria-label="Что показать"></div>
-        <input id="replies-filter-query" type="text" class="search-input" placeholder="Поиск по компании или вакансии" aria-label="Поиск по компании или вакансии" />
-      </div>
-      <div id="replies-rows" class="inbox-list"></div>
     </section>
 
 
     <section id="view-contacts" class="view">
-      <div class="view-header">
-        <div>
-          <h2>База компаний</h2>
-          <p class="muted">Все компании и HR, которых вы собрали: из своего файла, Telegram-каналов, сайтов компаний и вакансий. Нажмите на строку — контакты и история.</p>
+      <header class="page-head">
+        <div class="page-title">
+          <h2>Компании</h2>
+          <p class="muted">Ваша база компаний и HR — из своего файла, Telegram-каналов, сайтов компаний и вакансий. Нажмите на строку — контакты и история справа</p>
         </div>
-        <div class="toolbar">
+        <div class="toolbar" data-ui="companies.import companies.export companies.ai-prompt">
           <input type="file" id="import-file" accept=".csv,.tsv,.xlsx,.md,.txt,.pdf,.docx" hidden />
-          <button type="button" id="import-btn" class="btn btn-secondary">📥 Загрузить файл</button>
-          <a class="btn btn-ghost" href="/api/contacts/export" download title="Файл .csv — открывается в Excel и Google Таблицах, можно поправить и загрузить обратно">⬇ Скачать в Excel</a>
+          <button type="button" id="import-btn" class="btn btn-primary">Загрузить файл</button>
+          <button type="button" id="ai-prompt-open" class="btn btn-ghost" title="Готовый промт для ИИ с поиском в интернете">Где взять список?</button>
+          <a class="btn" href="/api/contacts/export" download title="Файл .csv — открывается в Excel и Google Таблицах, можно поправить и загрузить обратно">Скачать в Excel</a>
         </div>
-      </div>
+      </header>
       <div id="import-preview"></div>
-      <details class="panel import-help" id="import-help">
-        <summary><strong>Где взять список компаний?</strong> <span class="muted small">— готовый промт для ИИ с поиском в интернете</span></summary>
-        <ol class="small plain-steps">
-          <li>Откройте ChatGPT в режиме <b>Deep Research</b> или Claude с <b>Research</b> — нужен поиск в интернете. Обычный чат без поиска придумывает адреса: такие письма вернутся и испортят репутацию вашей почты.</li>
-          <li>Вставьте промт ниже, поменяйте то, что в [скобках].</li>
-          <li>Попросите сохранить таблицу файлом Excel или CSV (или скопируйте её в Google Таблицы → «Скачать → CSV») и загрузите сюда кнопкой «📥 Загрузить файл». PDF с таблицей тоже подойдёт.</li>
-        </ol>
+      <details class="import-help" id="import-help" hidden>
+        <summary>Где взять список компаний?</summary>
         <textarea id="ai-prompt" rows="16" readonly aria-label="Промт для ИИ">Найди [30] IT-компаний, которые сейчас нанимают [Python-разработчиков] [в России / удалённо в Европе], и публичные адреса для откликов в них.
 
 Правила:
@@ -275,104 +361,378 @@
 Ответ — одна таблица без текста вокруг, столбцы по порядку:
 Компания | Сайт | Email | Имя | Должность | Вакансия | Ссылка | Источник
 «Должность» — должность человека из столбца «Имя»; «Ссылка» — ссылка на вакансию, если есть; «Источник» — страница, где опубликован email.</textarea>
-        <div class="step-actions">
-          <button type="button" class="btn btn-secondary btn-small" id="ai-prompt-copy">📋 Скопировать промт</button>
-          <span class="muted small">При загрузке бот проверит домены, отбросит ящики для жалоб, склеит дубли и покажет всё до сохранения.</span>
-        </div>
+        <button type="button" class="btn btn-small" id="ai-prompt-copy">Скопировать промт</button>
       </details>
 
-      <div class="chip-group" id="base-chips" role="group" aria-label="Статус"></div>
-      <div class="filters">
-        <input id="contacts-filter-query" type="text" class="search-input" placeholder="Поиск: компания, email, HR, вакансия" aria-label="Поиск" />
-        <select id="contacts-filter-source" aria-label="Источник">
+      <div class="jobs-filters">
+        <div class="chip-group" id="base-chips" role="group" aria-label="Статус" data-ui="companies.chips"></div>
+        <div class="jobs-filter-row">
+          <input id="contacts-filter-query" type="search" class="search-input" placeholder="Компания, email, HR, вакансия" aria-label="Поиск по Базе" data-ui="companies.search" />
+          <select id="contacts-filter-source" data-ui="companies.filter.source" aria-label="Источник">
           <option value="">Любой источник</option>
-          <option value="file">📄 Мой файл</option>
-          <option value="telegram">✈️ Telegram</option>
-          <option value="vacancy">💼 Вакансии</option>
-          <option value="sites">🏢 Сайты компаний</option>
-          <option value="talanto">🔎 Talanto</option>
-          <option value="hirify">🔎 Hirify</option>
-          <option value="dossier">🔎 Найдено кнопкой «Найти ещё контакты»</option>
+          <option value="file">Мой файл</option>
+          <option value="telegram">Telegram</option>
+          <option value="vacancy">Вакансии</option>
+          <option value="sites">Сайты компаний</option>
+          <option value="talanto">Talanto</option>
+          <option value="hirify">Hirify</option>
+          <option value="dossier">Найдено кнопкой «Найти ещё контакты»</option>
         </select>
-        <select id="contacts-filter-contact" aria-label="Контакт">
+          <select id="contacts-filter-contact" data-ui="companies.filter.contact" aria-label="Контакт">
           <option value="">Любой контакт</option>
-          <option value="email">✉️ Есть email</option>
+          <option value="email">Есть email</option>
           <option value="none">Нет контакта</option>
         </select>
+        </div>
       </div>
-      <div class="base-bulk" id="base-bulk" hidden></div>
-      <div class="table-wrap">
-        <table class="base-table" id="base-table">
-          <thead>
-            <tr>
-              <th class="base-check"><input type="checkbox" id="base-select-all" aria-label="Выбрать все" /></th>
-              <th data-sort="company">Компания</th>
-              <th>Контакт</th>
-              <th class="col-source">Откуда</th>
-              <th data-sort="status">Статус</th>
-              <th data-sort="last" class="col-last">Последнее действие</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="contacts-list"></tbody>
-        </table>
+      <div class="base-bulk" id="base-bulk" hidden data-ui="companies.bulk companies.select"></div>
+      <div class="card table-card" data-ui="companies.table companies.detail">
+        <div class="table-wrap">
+          <table class="base-table" id="base-table">
+            <thead>
+              <tr>
+                <th class="base-check"><input type="checkbox" id="base-select-all" aria-label="Выбрать все на странице" /></th>
+                <th data-sort="company">Компания и контакт</th>
+                <th class="col-source">Откуда</th>
+                <th data-sort="status">Статус</th>
+                <th data-sort="last" class="col-last">Последнее</th>
+              </tr>
+            </thead>
+            <tbody id="contacts-list"></tbody>
+          </table>
+        </div>
+        <div class="table-foot muted small"><nav class="base-pager" id="base-pager" aria-label="Страницы базы" data-ui="companies.pager"></nav><span data-ui="companies.note">База только пополняется — удаляете только вы. Копия Базы каждый день, хранится 7 дней.</span></div>
       </div>
-      <nav class="base-pager" id="base-pager" aria-label="Страницы базы"></nav>
-      <p class="muted small">База только пополняется — компании и контакты сами не удаляются, только вручную. Плюс раз в день бот сохраняет запасную копию всей Базы на случай ошибки (копии за последние 7 дней).</p>
     </section>
 
     <section id="view-outreach" class="view">
-      <div class="view-header">
-        <div>
+      <header class="page-head">
+        <div class="page-title">
           <h2>Рассылка</h2>
-          <p class="muted">Персональное письмо каждой компании из базы, которой вы ещё не писали — по вашему промту, с резюме во вложении, через Gmail.</p>
+          <p class="muted">Личное письмо каждой компании из Базы, которой вы ещё не писали — по вашему резюме, с резюме во вложении, через ваш Gmail</p>
         </div>
-      </div>
-      <ol class="steps">
-        <li class="panel step" id="step-base"></li>
-        <li class="panel step" id="step-letters"></li>
-        <li class="panel step" id="step-send"></li>
+      </header>
+      <ol class="steps mail-steps">
+        <li class="card pad-card step" id="step-base" data-ui="mail.step.base"></li>
+        <li class="card pad-card step" id="step-letters" data-ui="mail.step.letters mail.review"></li>
+        <li class="card pad-card step" id="step-send" data-ui="mail.step.send mail.auto-off mail.stopped mail.followups"></li>
       </ol>
-      <div class="panel" id="sent-log">
-        <h3 class="mt0">Отправленные</h3>
-        <div class="toolbar">
-          <input id="sent-search" type="search" placeholder="Компания, адрес или тема" aria-label="Поиск по отправленным" />
-          <select id="sent-status" aria-label="Статус">
-            <option value="">Все статусы</option>
-            <option value="sent">Отправлено</option>
-            <option value="replied">Ответили</option>
-            <option value="bounced">Возврат</option>
-            <option value="failed">Не ушло</option>
-          </select>
-        </div>
-        <div id="sent-list" class="muted small">Загрузка…</div>
+      <div class="analytics-grid two mail-bottom">
+        <section class="card pad-card" id="mail-guard" aria-labelledby="mail-guard-h" data-ui="mail.guard"></section>
+        <section class="card pad-card" id="sent-log" aria-labelledby="sent-h" data-ui="mail.sent">
+          <div class="card-head flat between"><h3 id="sent-h">Отправленные</h3></div>
+          <div class="jobs-filter-row">
+            <input id="sent-search" type="search" class="search-input" placeholder="Компания, адрес или тема" aria-label="Поиск по отправленным" />
+            <select id="sent-status" aria-label="Статус">
+              <option value="">Все статусы</option>
+              <option value="sent">Отправлено</option>
+              <option value="replied">Ответили</option>
+              <option value="bounced">Возврат</option>
+              <option value="failed">Не ушло</option>
+            </select>
+          </div>
+          <div id="sent-list" class="muted small">Загрузка…</div>
+        </section>
       </div>
     </section>
 
-    <section id="view-telegram" class="view">
-      <div class="view-header">
+
+
+    <section id="view-resume" class="view">
+      <header class="page-head">
+        <div class="page-title">
+          <h2>Мои резюме</h2>
+          <p class="muted">По ним ИИ подбирает вакансии и пишет письма; уходят во вложении писем и сообщений HR</p>
+        </div>
+        <button type="button" id="tgq-resume-add" class="btn btn-primary" data-ui="resume.add">Добавить резюме</button>
+      </header>
+
+      <section class="card pad-card resume-card" aria-labelledby="resume-files-h" data-ui="resume.list">
+        <div class="card-head flat between"><h3 id="resume-files-h">Файлы</h3><span class="muted small">PDF, обновляются кнопкой «Заменить»</span></div>
+        <div class="resume-table" id="resume-table" role="table" aria-label="Мои резюме"></div>
+        <input type="file" id="resume-upload-primary" accept="application/pdf" hidden />
+        <input type="file" id="resume-upload-linkedin" accept="application/pdf" hidden />
+        <input type="file" id="tgq-resume-file" accept="application/pdf" multiple hidden />
+        <p id="tgq-resume-status" class="field-hint" role="status" data-ui="resume.status"></p>
+      </section>
+
+      <section class="card pad-card" aria-labelledby="resume-routing-h" data-ui="resume.routing">
+        <div class="card-head flat between"><h3 id="resume-routing-h">Какое резюме куда уходит</h3><span class="muted small">сохраняется сразу</span></div>
+        <div class="resume-routing" id="resume-routing" aria-live="polite"></div>
+      </section>
+
+      <section class="card pad-card" aria-labelledby="resume-job-h" data-ui="resume.job-url resume.progress">
+        <div class="card-head flat"><h3 id="resume-job-h">Под конкретную вакансию</h3><span class="muted small">вставьте ссылку — ИИ подготовит документ по вашему резюме, до минуты</span></div>
+        <input id="gen-job-url" type="url" placeholder="Ссылка на вакансию" aria-label="Ссылка на вакансию" class="wide-input" />
+        <div class="resume-action-grid">
+          <div class="resume-action-card" data-ui="resume.tailored">
+            <h4>Резюме под вакансию</h4>
+            <p class="field-hint">Переставляет акценты и формулировки под требования вакансии.</p>
+            <button id="gen-resume-tailored" class="btn btn-small" type="button">Сгенерировать PDF</button>
+          </div>
+          <div class="resume-action-card" data-ui="resume.cover">
+            <h4>Сопроводительное письмо</h4>
+            <p class="field-hint">Короткое письмо для поля отклика — под эту вакансию.</p>
+            <button id="gen-cover-letter" class="btn btn-small" type="button">Сгенерировать PDF</button>
+          </div>
+          <div class="resume-action-card is-review" data-ui="resume.audit">
+            <h4>Аудит под вакансию</h4>
+            <p class="field-hint">Оценка 0–100, недостающие ключевые слова, сигналы для рекрутёра и переписанный опыт — только по реальным данным резюме.</p>
+            <button id="gen-resume-audit" class="btn btn-small" type="button">Проверить</button>
+          </div>
+        </div>
+        <div class="gen-row">
+          <span id="gen-status" class="muted small" role="status"></span>
+          <a id="gen-download" class="btn btn-primary btn-small" style="display:none" href="/api/generate/download" download>Скачать PDF</a>
+        </div>
+        <div class="gen-progress" id="gen-progress"><div class="gen-progress-bar"></div></div>
+      </section>
+
+      <section class="card pad-card" aria-labelledby="resume-plain-h" data-ui="resume.generate">
+        <div class="card-head flat"><h3 id="resume-plain-h">Резюме без вакансии</h3><span class="muted small">общий вариант в PDF, не подогнанный ни под одно объявление</span></div>
+        <div class="field-row-inline">
+          <select id="gen-style" aria-label="Стиль резюме"></select>
+          <button id="gen-resume" class="btn" type="button">Сгенерировать</button>
+        </div>
+        <p id="gen-style-ats-note" class="field-hint"></p>
+        <div class="field-row" data-ui="resume.audit.general"><div class="field-text"><div class="field-title">Проверить резюме</div><div class="field-hint">Без вакансии: как его увидит рекрутер на ваши должности из «Что ищу» — оценка, недостающие ключевые слова и переписанный опыт</div></div><div class="field-control"><button id="gen-resume-audit-general" class="btn btn-small" type="button">Проверить</button></div></div>
+      </section>
+
+      <section class="card pad-card resume-audit-panel" id="resume-audit-overlay" hidden aria-labelledby="resume-audit-title" data-ui="resume.audit.copy">
+        <div class="card-head flat between">
+          <div><h3 id="resume-audit-title">Аудит резюме под вакансию</h3><p id="resume-audit-meta" class="field-hint"></p></div>
+          <button type="button" class="btn btn-ghost btn-small" id="resume-audit-close">Скрыть разбор</button>
+        </div>
+        <div class="resume-audit-score-row">
+        <div class="resume-audit-score">
+          <span id="resume-audit-score-value" class="hero-figure">—</span>
+          <span class="muted small">/ 100</span>
+        </div>
+        <div class="resume-audit-meter-wrap">
+          <div class="meter"><div id="resume-audit-meter-fill" class="meter-fill"></div></div>
+          <span id="resume-audit-score-label" class="muted small"></span>
+        </div>
+      </div>
+
+      <div class="resume-audit-badges">
+        <span id="resume-audit-ats-badge" class="badge"></span>
+        <span id="resume-audit-bucket-badge" class="badge"></span>
+      </div>
+
+      <p id="resume-audit-comparison-note" class="muted small"></p>
+
+      <div class="resume-audit-columns">
         <div>
-          <h2>Telegram-парсер</h2>
-          <p class="muted">Слушает каналы с вакансиями в реальном времени: пост с вашими ключевыми словами за секунды приходит в бота с кнопками ответа, а контакты HR из поста сами попадают в «Базу компаний».</p>
+          <h4>Тревожные сигналы</h4>
+          <ul id="resume-audit-red-flags" class="resume-audit-list"></ul>
         </div>
-        <div class="toolbar">
-          <span id="telegram-status-badge" class="badge off"><span class="badge-dot"></span>проверка…</span>
-        </div>
-      </div>
-
-      <div class="panel tg-howto">
-        <h3 class="mt0">Как это работает</h3>
-        <div class="howto-grid">
-          <div><b>1. Читает каналы</b><p class="muted small">Через ваш личный аккаунт Telegram — как будто вы сами листаете каналы из списка. Если вы не подписаны на канал, парсер подпишется сам.</p></div>
-          <div><b>2. Присылает вакансию</b><p class="muted small">Пост с вашими ключевыми словами за секунды появляется ниже, в шаге 3, с готовым черновиком — и копией в вашем <b>CrossJob-боте</b> с кнопками. Кому написали — те попадают в «Базу компаний».</p></div>
-          <div><b>3. Пишет HR от вашего имени</b><p class="muted small">Когда вы нажимаете кнопку, сообщение уходит <b>с вашего личного аккаунта</b> — HR видит вас, а не бота и не канал. Без вашего нажатия никому ничего не отправляется.</p></div>
+        <div>
+          <h4>Отсутствующие ключевые слова</h4>
+          <div id="resume-audit-missing-keywords" class="chip-row"></div>
         </div>
       </div>
 
-      <ol class="steps">
-        <li class="panel step">
-          <div class="step-head"><span class="step-num">1</span><h3>Подключить аккаунт</h3></div>
-          <details class="more" id="tg-connect-panel" open>
+      <div class="resume-audit-columns">
+        <div>
+          <h4>Сильные разделы</h4>
+          <ul id="resume-audit-strong-sections" class="resume-audit-list"></ul>
+        </div>
+        <div>
+          <h4>Слабые разделы</h4>
+          <ul id="resume-audit-weak-sections" class="resume-audit-list"></ul>
+        </div>
+      </div>
+
+      <div>
+        <h4>Проблемы оформления для ATS</h4>
+        <ul id="resume-audit-formatting-issues" class="resume-audit-list"></ul>
+      </div>
+
+      <details>
+        <summary>Переписанный раздел опыта</summary>
+        <div id="resume-audit-rewrite-body"></div>
+        <button type="button" class="btn btn-secondary" id="resume-audit-copy-rewrite">Скопировать текст</button>
+      </details>
+      </section>
+    </section>
+
+    <section id="view-analytics" class="view">
+      <header class="page-head">
+        <div class="page-title">
+          <h2>Аналитика</h2>
+          <p class="muted">Что приносит ответы, что мешает и кого стоит вычеркнуть</p>
+        </div>
+        <div class="segmented" id="stats-period" role="radiogroup" aria-label="Период" data-ui="stats.period">
+          <span class="segmented-ind" aria-hidden="true"></span>
+          <button type="button" role="radio" aria-checked="true" class="on" data-days="7">Неделя</button>
+          <button type="button" role="radio" aria-checked="false" data-days="30">Месяц</button>
+          <button type="button" role="radio" aria-checked="false" data-days="3650">Всё время</button>
+        </div>
+      </header>
+
+      <div id="results-panel" class="results-panel" data-ui="stats.results"></div>
+
+      <div class="analytics-grid two">
+        <section class="card pad-card" aria-labelledby="weekly-h" data-ui="stats.weekly">
+          <div class="card-head flat between">
+            <h3 id="weekly-h">Отклики по неделям</h3>
+            <span id="weekly-readout" class="small muted mono">наведите на график</span>
+          </div>
+          <div id="weekly-chart" class="area-chart" role="img" aria-label="Отклики по неделям за 13 недель"></div>
+        </section>
+        <section class="card pad-card" aria-labelledby="funnel-h" data-ui="stats.funnel">
+          <div class="card-head flat"><h3 id="funnel-h">Воронка после отклика</h3></div>
+          <div id="funnel" class="funnel"></div>
+          <p class="field-hint">У каждого отклика один текущий этап, поэтому «интервью» и «отказ» не входят в «ответили». Этап ставится сам по ответу площадки или вручную в «Вакансиях» и «Общении».</p>
+        </section>
+      </div>
+
+      <div class="analytics-grid three">
+        <section class="card pad-card" aria-labelledby="skills-h" data-ui="stats.skills">
+          <div class="card-head flat"><h3 id="skills-h">Спрос на навыки</h3><span class="muted small">доля вакансий, где навык упоминается</span></div>
+          <div id="skill-demand" class="funnel"></div>
+        </section>
+        <section class="card pad-card" aria-labelledby="salary-h" data-ui="stats.salary">
+          <div class="card-head flat"><h3 id="salary-h">Зарплаты на рынке</h3><span class="muted small">медиана «от» и «до» в месяц</span></div>
+          <div id="salary-stats"></div>
+        </section>
+        <section class="card pad-card" aria-labelledby="sources-h" data-ui="stats.sources">
+          <div class="card-head flat"><h3 id="sources-h">Откуда вакансии</h3><span class="muted small">Talanto и Hirify дают вакансии и контакты, откликов там нет</span></div>
+          <div id="vacancy-sources"></div>
+        </section>
+      </div>
+
+      <div class="analytics-grid two">
+        <section class="card pad-card" aria-labelledby="gaps-h" data-ui="stats.gaps">
+          <div class="card-head flat"><h3 id="gaps-h">Чаще всего не хватает</h3><span class="muted small">из оценок вакансий: что мешало совпадению</span></div>
+          <ul id="gaps-list" class="gaps-list"></ul>
+        </section>
+        <section class="card pad-card" aria-labelledby="blacklist-h" data-ui="stats.blacklist stats.hh-block">
+          <div class="card-head flat"><h3 id="blacklist-h">Кандидаты на чёрный список</h3><span class="muted small">3 и больше откликов без единого ответа</span></div>
+          <div id="blacklist-candidates" class="candidate-list"></div>
+          <button id="blacklist-add" class="btn btn-small" type="button">Добавить отмеченные</button>
+        </section>
+      </div>
+
+      <section class="card pad-card" aria-labelledby="heatmap-h" data-ui="stats.heatmap">
+        <div class="card-head flat between"><h3 id="heatmap-h">Активность по дням</h3><span id="heatmap-readout" class="small muted">отклики за 13 недель</span></div>
+        <div id="activity-heatmap" class="heatmap"></div>
+        <div class="heatmap-legend small muted" aria-hidden="true">меньше <span class="heatmap-cell" data-level="0"></span><span class="heatmap-cell" data-level="1"></span><span class="heatmap-cell" data-level="2"></span><span class="heatmap-cell" data-level="3"></span> больше</div>
+      </section>
+
+      <section class="card pad-card" aria-labelledby="offers-h" data-ui="stats.offers">
+        <div class="card-head flat"><h3 id="offers-h">Сравнение офферов</h3><span class="muted small">сумма в месяц; «к рынку» — выше или ниже медианы «до» в той же валюте, без пересчёта валют и налогов</span></div>
+        <div class="field-row-inline offers-form">
+          <input id="offer-company" type="text" placeholder="Компания" aria-label="Компания" />
+          <input id="offer-amount" type="number" min="0" placeholder="Сумма в месяц" aria-label="Сумма в месяц" />
+          <select id="offer-currency" aria-label="Валюта"><option>RUB</option><option>USD</option><option>EUR</option><option>KZT</option></select>
+          <label class="check-chip"><input id="offer-remote" type="checkbox" checked /> удалённо</label>
+          <input id="offer-notes" type="text" placeholder="Заметки: бонусы, ДМС, оформление" aria-label="Заметки" />
+          <button id="offer-add" class="btn btn-primary btn-small" type="button">Добавить</button>
+        </div>
+        <div id="offers"></div>
+      </section>
+    </section>
+
+    <section id="view-settings" class="view">
+      <header class="page-head">
+        <div class="page-title">
+          <h2>Настройки</h2>
+          <p class="muted">Сохраняются сразу — в уведомлении всегда есть «Отменить»</p>
+          <p class="muted small" id="settings-onboarding-hint" style="display:none" data-ui="settings.onboarding">Пока не пройдены основные шаги — остальные разделы спрятаны, чтобы не мешали. <button type="button" id="settings-onboarding-hint-reveal" class="link-btn">Показать всё</button></p>
+        </div>
+        <label class="settings-find" data-ui="settings.search settings.saved">
+          <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+          <input type="search" id="settings-find-input" placeholder="Найти настройку: лимит, резюме, Telegram…" aria-label="Найти настройку" autocomplete="off" />
+        </label>
+      </header>
+      <div class="settings-layout">
+      <nav class="settings-nav" id="settings-jump" role="tablist" aria-label="Разделы настроек" aria-orientation="vertical" data-ui="settings.groups settings.more">
+        <div class="tab-indicator" id="settings-tab-indicator"></div>
+        <span class="settings-jump-label">Поиск</span>
+        <button type="button" class="active" data-settings-tab="settings-search" role="tab" aria-selected="true" aria-controls="settings-search" id="settings-search-tab">Что ищу</button>
+        <button type="button" data-settings-tab="settings-exclude" role="tab" aria-selected="false" aria-controls="settings-exclude" id="settings-exclude-tab">Исключения</button>
+        <button type="button" data-settings-tab="settings-auto" role="tab" aria-selected="false" aria-controls="settings-auto" id="settings-auto-tab">Отклики и переписка</button>
+        <button type="button" data-settings-tab="settings-resume-short" role="tab" aria-selected="false" aria-controls="settings-resume-short" id="settings-resume-short-tab">Мои резюме</button>
+        <span class="settings-jump-label">Площадки</span>
+        <button type="button" data-settings-tab="settings-table" role="tab" aria-selected="false" aria-controls="settings-table" id="settings-table-tab">Площадки</button>
+        <button type="button" data-settings-tab="settings-limits" data-onboarding-hide role="tab" aria-selected="false" aria-controls="settings-limits" id="settings-limits-tab">Лимиты и оценка</button>
+        <span class="settings-jump-label" data-onboarding-hide>Общение и письма</span>
+        <button type="button" data-settings-tab="settings-tg-quick" data-onboarding-hide role="tab" aria-selected="false" aria-controls="settings-tg-quick" id="settings-tg-quick-tab">Telegram-парсер</button>
+        <button type="button" data-settings-tab="settings-outreach" data-onboarding-hide role="tab" aria-selected="false" aria-controls="settings-outreach" id="settings-outreach-tab">Почта и письма</button>
+        <button type="button" data-settings-tab="settings-direct" data-onboarding-hide role="tab" aria-selected="false" aria-controls="settings-direct" id="settings-direct-tab">Сайты компаний</button>
+        <span class="settings-jump-label">Система</span>
+        <button type="button" data-settings-tab="settings-accounts" role="tab" aria-selected="false" aria-controls="settings-accounts" id="settings-accounts-tab">Подключения</button>
+        <button type="button" data-settings-tab="settings-llm" role="tab" aria-selected="false" aria-controls="settings-llm" id="settings-llm-tab">Провайдер ИИ</button>
+        <button type="button" data-settings-tab="settings-notifications" data-onboarding-hide role="tab" aria-selected="false" aria-controls="settings-notifications" id="settings-notifications-tab">Уведомления</button>
+        <button type="button" data-settings-tab="settings-look" role="tab" aria-selected="false" aria-controls="settings-look" id="settings-look-tab">Вид</button>
+        <button type="button" data-settings-tab="settings-autostart" data-onboarding-hide role="tab" aria-selected="false" aria-controls="settings-autostart" id="settings-autostart-tab">Автозапуск</button>
+        <button type="button" data-settings-tab="settings-backups" role="tab" aria-selected="false" aria-controls="settings-backups" id="settings-backups-tab">Резервные копии</button>
+      </nav>
+      <div class="settings-content">
+        <div id="settings-search-results" class="card settings-results" hidden aria-live="polite"></div>
+      <div class="settings-pane card active" id="settings-search" role="tabpanel" aria-labelledby="settings-search-tab">
+        <div class="pane-head"><div><h3>Что ищу</h3><p class="pane-lead">Один выбор — для всех площадок, которые это умеют. Должности — они же ключевые слова Telegram-парсера.</p></div></div>
+        <div class="pane-group"><h4>Должности и места</h4><div class="field-block" data-ui="settings.positions"><div class="field-title">Должности</div><div class="field-hint">Каждая — отдельный поисковый запрос, как в строке поиска HH или LinkedIn: площадка сама подберёт похожие.</div><textarea id="search-positions" rows="3" placeholder="Python разработчик&#10;Backend developer"></textarea></div><div class="field-block" data-ui="settings.locations"><div class="field-title">Города</div><div class="field-hint">Пусто — по всей стране и удалённо</div><textarea id="search-locations" rows="2" placeholder="Москва"></textarea></div><details class="pane-more"><summary>Ещё настройки</summary><div class="pane-more-body"><div class="field-row" data-ui="settings.gen-positions"><div class="field-text"><div class="field-title">Должности из резюме</div><div class="field-hint">ИИ предложит названия по вашему опыту</div></div><div class="field-control"><button id="search-generate-positions" class="btn btn-small" type="button">Сгенерировать</button><span id="search-generate-status" class="muted small" role="status"></span></div></div></div></details></div>
+        <div class="pane-group"><h4>Формат и уровень</h4><div class="field-row" data-ui="settings.format"><div class="field-text"><div class="field-title">Удалённо</div><div class="field-hint">Формат работы</div></div><div class="field-control"><input id="search-remote" type="checkbox" class="switch" aria-label="Удалённо" /></div></div><div class="field-row"><div class="field-text"><div class="field-title">Гибрид</div><div class="field-hint">Формат работы</div></div><div class="field-control"><input id="search-hybrid" type="checkbox" class="switch" aria-label="Гибрид" /></div></div><div class="field-row"><div class="field-text"><div class="field-title">На месте работодателя</div><div class="field-hint">Формат работы</div></div><div class="field-control"><input id="search-onsite" type="checkbox" class="switch" aria-label="На месте работодателя" /></div></div><div class="field-block" data-ui="settings.levels"><div class="field-title">Уровень</div><div class="field-hint">Ничего не выбрано — любой уровень</div><div class="check-chips" id="search-levels"><label class="check-chip"><input type="checkbox" class="search-level" value="intern" /> Стажёр</label><label class="check-chip"><input type="checkbox" class="search-level" value="junior" /> Junior</label><label class="check-chip"><input type="checkbox" class="search-level" value="middle" /> Middle</label><label class="check-chip"><input type="checkbox" class="search-level" value="senior" /> Senior</label><label class="check-chip"><input type="checkbox" class="search-level" value="lead" /> Lead</label></div></div><div class="field-row" data-ui="settings.posted"><div class="field-text"><div class="field-title">Опубликовано</div><div class="field-hint">Сужает выдачу там, где площадка это умеет</div></div><div class="field-control"><select id="search-posted-within" aria-label="Опубликовано за"><option value="0">Когда угодно</option><option value="1">За сутки</option><option value="3">За 3 дня</option><option value="7">За неделю</option><option value="30">За месяц</option></select></div></div><div class="field-row" data-ui="settings.salary-only"><div class="field-text"><div class="field-title">Только с указанной зарплатой</div><div class="field-hint">Вакансии без зарплаты не показываются</div></div><div class="field-control"><input id="search-only-with-salary" type="checkbox" class="switch" aria-label="Только с указанной зарплатой" /></div></div><details class="pane-more"><summary>Ещё настройки</summary><div class="pane-more-body"><div class="field-block" data-ui="settings.employment"><div class="field-title">Тип занятости</div><div class="field-hint">Ничего не выбрано — любой</div><div class="check-chips" id="search-employment"><label class="check-chip"><input type="checkbox" class="search-employment" value="full" /> Полная</label><label class="check-chip"><input type="checkbox" class="search-employment" value="part" /> Частичная</label><label class="check-chip"><input type="checkbox" class="search-employment" value="project" /> Проект / контракт</label><label class="check-chip"><input type="checkbox" class="search-employment" value="internship" /> Стажировка</label></div></div></div></details><div id="search-filter-coverage" class="filter-coverage field-hint" aria-live="polite" data-ui="settings.coverage"></div></div>
+        <div class="pane-group"><h4>Удалёнка за рубежом</h4><div class="field-row" data-ui="settings.skip-us"><div class="field-text"><div class="field-title">Пропускать «только для США»</div><div class="field-hint">Такие отклики всё равно отклонят по географии</div></div><div class="field-control"><input id="outreach-skip-us" type="checkbox" class="switch" aria-label="Пропускать удалёнку только для США" /></div></div><div class="field-row" data-ui="settings.skip-eu"><div class="field-text"><div class="field-title">Пропускать «только для Европы»</div><div class="field-hint">То же для Европы</div></div><div class="field-control"><input id="outreach-skip-eu" type="checkbox" class="switch" aria-label="Пропускать удалёнку только для Европы" /></div></div></div>
+        <div class="pane-save" hidden><button id="search-save" class="btn btn-primary" type="button">Сохранить</button><span id="search-status" class="muted small" role="status"></span></div>
+      </div>
+      <div class="settings-pane card" id="settings-exclude" role="tabpanel" aria-labelledby="settings-exclude-tab">
+        <div class="pane-head"><div><h3>Исключения</h3><p class="pane-lead">Куда не откликаться и кому не писать</p></div></div>
+        <div class="pane-group"><div class="field-block" data-ui="settings.blacklist.companies"><div class="field-title">Чёрный список компаний</div><div class="field-hint">Не откликаемся и не пишем им в рассылке</div><textarea id="search-company-blacklist" rows="3"></textarea></div><div class="field-block" data-ui="settings.blacklist.words"><div class="field-title">Чёрный список слов</div><div class="field-hint">В названии или описании; точное совпадение части слова, без учёта регистра и без ИИ — «джун» не поймает «junior», добавляйте оба варианта.</div><textarea id="search-title-blacklist" rows="3"></textarea></div><div class="field-block" data-ui="settings.blacklist.locations"><div class="field-title">Чёрный список локаций</div><div class="field-hint">Вакансии из этих мест пропускаются</div><textarea id="search-location-blacklist" rows="2"></textarea></div></div>
+      </div>
+      <div class="settings-pane card" id="settings-auto" role="tabpanel" aria-labelledby="settings-auto-tab">
+        <div class="pane-head"><div><h3>Отклики и переписка</h3><p class="pane-lead">Что бот делает сам, а что оставляет вам</p></div></div>
+        <div class="pane-group"><h4>Отклики</h4><div class="field-row" data-ui="settings.auto-apply-all"><div class="field-text"><div class="field-title">Откликаться автоматически</div><div class="field-hint">Выключено — бот только находит, откликаетесь вы. То же, что режим в шапке Главной. <span id="search-auto-note"></span></div></div><div class="field-control"><input id="search-auto-all" type="checkbox" class="switch" aria-label="Откликаться автоматически на всех включённых площадках" /></div></div><div class="field-row" data-ui="settings.auto.once-per-company"><div class="field-text"><div class="field-title">Один отклик в одну компанию</div><div class="field-hint">Остальные вакансии компании, куда уже откликнулись, пропускаются</div></div><div class="field-control"><input id="search-once-per-company" type="checkbox" class="switch" aria-label="Один отклик в одну компанию" /></div></div></div>
+        <div class="pane-group"><h4>Переписка на HeadHunter</h4><div class="field-row" data-ui="settings.auto-chat-all"><div class="field-text"><div class="field-title">Вести переписку целиком</div><div class="field-hint">Одним переключателем три настройки ниже. <span id="search-auto-chat-note"></span></div></div><div class="field-control"><input id="search-auto-chat" type="checkbox" class="switch" aria-label="Вести переписку с работодателями в чате HH" /></div></div><div class="field-row"><div class="field-text"><div class="field-title">Автоответ HR в чате</div><div class="field-hint">Простые вопросы бот закрывает сам, сложные — вам в «Общение»</div></div><div class="field-control"><input id="hh-auto-reply" type="checkbox" class="switch" aria-label="Автоответ HR в чате" /></div></div><div class="field-row"><div class="field-text"><div class="field-title">Зарплата для ответов HR</div><div class="field-hint">Подставляется в автоответ</div></div><div class="field-control"><input type="text" id="hh-salary-expectations" placeholder="250000-300000 RUR" aria-label="Зарплата для ответов HR" /></div></div><details class="pane-more"><summary>Ещё настройки</summary><div class="pane-more-body"><div class="field-row" data-ui="settings.hh.cover-to-chat"><div class="field-text"><div class="field-title">Письмо в чат после отклика</div><div class="field-hint">Если отклик ушёл без письма — досылает его в чат вакансии</div></div><div class="field-control"><input id="hh-cover-to-chat" type="checkbox" class="switch" aria-label="Письмо в чат после отклика" /></div></div><div class="field-row"><div class="field-text"><div class="field-title">Поднимать резюме</div><div class="field-hint">Бамп резюме на hh.ru, как только это разрешено</div></div><div class="field-control"><input id="hh-auto-bump" type="checkbox" class="switch" aria-label="Поднимать резюме на HH" /></div></div></div></details></div>
+        <div class="pane-group"><h4>Напоминания</h4><div class="field-row"><div class="field-text"><div class="field-title">Напомнить о себе, если молчат, через</div><div class="field-hint">Дней; 0 — не напоминать. Готовые напоминания — в «Общении»</div></div><div class="field-control"><input type="number" id="hh-reminder-days" class="num-input" min="0" aria-label="Дней до напоминания" /></div></div><div class="field-row" data-ui="settings.hh.auto-reminder"><div class="field-text"><div class="field-title">Отправлять напоминания сами</div><div class="field-hint">Выключено — ждут вашего «Отправить»</div></div><div class="field-control"><input id="hh-auto-reminder" type="checkbox" class="switch" aria-label="Отправлять напоминания сами" /></div></div></div>
+      </div>
+      <div class="settings-pane card" id="settings-resume-short" role="tabpanel" aria-labelledby="settings-resume-short-tab">
+        <div class="pane-head"><div><h3>Мои резюме</h3><p class="pane-lead">Какое резюме уходит на какую площадку, письма и аудит</p></div></div>
+        <div id="settings-resume-summary" class="kv-list flat"></div>
+        <div class="pane-actions"><button type="button" class="btn btn-primary" data-goto-view="resume">Открыть «Мои резюме»</button></div>
+      </div>
+      <div class="settings-pane card" id="settings-table" role="tabpanel" aria-labelledby="settings-table-tab">
+        <div class="pane-head"><div><h3>Площадки</h3><p class="pane-lead">Каждая настраивается в одной шторке — на Главной нажатием на строку или здесь, кнопкой «Настроить»</p></div></div>
+        <div class="platform-settings-list" id="platform-cards" data-ui="settings.platforms"></div>
+      </div>
+      <div class="settings-pane card" id="settings-limits" role="tabpanel" aria-labelledby="settings-limits-tab">
+        <div class="pane-head"><div><h3>Лимиты и оценка</h3><p class="pane-lead">Сколько откликов в день и насколько строго отбирать вакансии</p></div></div>
+        <div class="pane-group"><h4>Как оцениваем</h4><div class="field-row" data-ui="settings.fit-preset"><div class="field-text"><div class="field-title">Строгость подбора</div><div class="field-hint">Выберите — пороги ниже проставятся сами</div></div><div class="field-control"><select id="limit-fit-preset" aria-label="Строгость подбора"><option value="">— выбрать —</option><option value="soft">Мягко — почти всё, даже слабое совпадение</option><option value="standard">Сбалансированно — пропускать явно неподходящее</option><option value="strict">Строго — только сильное совпадение</option></select></div></div><div class="field-row" data-ui="settings.letter-style"><div class="field-text"><div class="field-title">Стиль сопроводительного письма</div><div class="field-hint">Для откликов на площадках; у рассылки и Telegram — свой</div></div><div class="field-control"><select id="limit-cover-letter-style" aria-label="Стиль сопроводительного письма"><option value="memorable">Запоминающийся</option><option value="neutral">Нейтральный</option><option value="classic">Классический</option></select></div></div><details class="pane-more"><summary>Ещё настройки</summary><div class="pane-more-body"><div class="field-row" data-ui="settings.min-score"><div class="field-text"><div class="field-title">Порог отсева</div><div class="field-hint">Ниже — пропуск без письма. Из 10</div></div><div class="field-control"><input id="limit-min-score" type="number" class="num-input" min="0" max="10" step="0.5" aria-label="Порог отсева" /></div></div><div class="field-row" data-ui="settings.fit-score"><div class="field-text"><div class="field-title">Уверенное совпадение от</div><div class="field-hint">Между порогами отклик уходит, но помечается «слабый»</div></div><div class="field-control"><input id="limit-suitability-score" type="number" class="num-input" min="0" max="10" step="0.5" aria-label="Порог уверенного совпадения" /></div></div></div></details></div>
+        <div class="pane-group"><h4>Сколько в день</h4><div class="field-row" data-ui="settings.limit.total"><div class="field-text"><div class="field-title">Всего откликов в день</div><div class="field-hint">По всем площадкам вместе; пусто — выключено</div></div><div class="field-control"><input id="limit-total" type="number" class="num-input" min="1" placeholder="нет" aria-label="Общий дневной лимит" /></div></div><div id="total-budget-info" class="limit-bar-info" data-ui="settings.limit.budget"></div><div class="field-row" data-ui="settings.limit.daily"><div class="field-text"><div class="field-title">Дневной лимит по умолчанию: HH и остальные</div><div class="field-hint">Своё число площадки — в её шторке</div></div><div class="field-control"><input id="limit-daily" type="number" class="num-input" min="1" aria-label="Дневной лимит по умолчанию" /></div></div><div class="field-row"><div class="field-text"><div class="field-title">Дневной лимит по умолчанию: LinkedIn</div><div class="field-hint">LinkedIn блокирует автоматизацию строже — держите ниже</div></div><div class="field-control"><input id="limit-linkedin" type="number" class="num-input" min="1" aria-label="Дневной лимит LinkedIn" /></div></div><div class="field-row" data-ui="settings.limit.presets"><div class="field-text"><div class="field-title">Распределить по площадкам</div><div class="field-hint">Общий лимит — случайными долями между включёнными площадками</div></div><div class="field-control"><button id="limits-distribute" class="btn btn-small" type="button" title="Раскидывает общий дневной лимит по включённым площадкам случайными долями (LinkedIn — меньше)">Распределить</button></div></div><div class="field-row"><div class="field-text"><div class="field-title">Готовые режимы частоты</div><div class="field-hint">Про риск капчи, не про качество подбора. Снимают «своё значение» у площадок</div></div><div class="field-control"><div class="btn-group"><button id="limits-preset-cautious" class="btn btn-small" type="button" title="HH и остальные — 8/день, LinkedIn — 4/день, 3 за заход, интервал 4ч">Осторожно</button><button id="limits-preset-standard" class="btn btn-small" type="button" title="HH и остальные — 15/день, LinkedIn — 8/день, 5 за заход, интервал 3ч">Стандартно</button><button id="limits-preset-aggressive" class="btn btn-small" type="button" title="HH и остальные — 25/день, LinkedIn — 12/день, 8 за заход, интервал 2ч. Выше риск капчи">Агрессивно</button></div></div></div><details class="pane-more"><summary>Ещё настройки</summary><div class="pane-more-body"><div class="field-row" data-ui="settings.limit.per-run"><div class="field-text"><div class="field-title">Максимум за один заход</div><div class="field-hint">Не дневной лимит — защита от всплеска</div></div><div class="field-control"><input id="limit-per-run" type="number" class="num-input" min="1" aria-label="Максимум за один заход" /></div></div></div></details><details class="risk-note" data-ui="settings.limit.risk"><summary>Почему лимиты лучше держать невысокими</summary><p>Официальных цифр лимитов не публикует ни одна площадка — заданные здесь значения только уменьшают риск, но не гарантируют, что бота не заметят. Чем выше лимиты и чем ближе они к количеству найденных вакансий, тем больше активность похожа на бота. Повышайте постепенно, начните с малого. LinkedIn блокирует автоматизацию агрессивнее остальных — держите его лимит ниже.</p><p><b>Ориентир для старта</b>: HH и остальные — 15/день, LinkedIn — 8/день, не больше 5 откликов за один заход, интервал между ходами — от 3 ч. Поднимайте эти числа, только если несколько дней подряд не видите капчи и блокировок.</p></details></div>
+        <div class="pane-group"><h4>Расписание</h4><div class="field-row" data-ui="settings.cycle home.cycle"><div class="field-text"><div class="field-title">Постоянный цикл</div><div class="field-hint">Площадки по кругу с короткой паузой, вместо своего интервала у каждой</div></div><div class="field-control"><input id="limit-continuous-cycle" type="checkbox" class="switch" aria-label="Постоянный цикл вместо расписания" /></div></div><details class="pane-more"><summary>Ещё настройки</summary><div class="pane-more-body"><div class="field-row" data-ui="settings.cycle-gap"><div class="field-text"><div class="field-title">Пауза между площадками, минут</div><div class="field-hint">Только для постоянного цикла</div></div><div class="field-control"><input id="limit-continuous-gap" type="number" class="num-input" min="1" aria-label="Пауза между площадками в цикле" /></div></div><div class="field-row" data-ui="settings.retention"><div class="field-text"><div class="field-title">Хранить историю откликов</div><div class="field-hint">Старые записи удаляются безвозвратно, а с ними — защита от повторного отклика</div></div><div class="field-control"><select id="limit-history-retention" aria-label="Хранить историю откликов"><option value="0">Бессрочно</option><option value="1">1 день</option><option value="7">Неделю</option><option value="30">Месяц</option><option value="365">Год</option></select></div></div></div></details></div>
+        <div class="pane-save" hidden><button id="limits-save" class="btn btn-primary" type="button">Сохранить</button><span id="limits-status" class="muted small" role="status"></span></div>
+      </div>
+      <div class="settings-pane card" id="settings-tg-quick" role="tabpanel" aria-labelledby="settings-tg-quick-tab">
+        <div class="pane-head"><div><h3>Telegram-парсер</h3><p class="pane-lead">Каналы с вакансиями и как писать HR</p></div></div>
+        <div class="pane-toggle" data-ui="settings.tg.enabled"><div class="field-row"><div class="field-text"><div class="field-title">Включить парсер</div><div class="field-hint">Новый пост с нужным словом — за секунды в вашем боте с кнопками ответа</div></div><div class="field-control"><input id="tgq-enabled" type="checkbox" class="switch" aria-label="Включить Telegram-парсер" /></div></div></div>
+        <div id="tgq-status" class="tgq-status" role="status" data-ui="settings.tg.status"></div>
+        <div id="tg-rules-panel" data-needs-load="1" class="pane-group"><h4>Каналы и поиск</h4><div class="field-block" data-ui="settings.tg.channels"><div class="field-title">Каналы</div><div class="field-hint">@username, t.me/… или полный URL; для приватного канала сначала вступите в него своим аккаунтом</div><div class="tg-channel-composer"><label class="sr-only" for="tg-channel-input">Ссылка или username Telegram-канала</label><input id="tg-channel-input" type="text" autocomplete="off" spellcheck="false" placeholder="Вставьте ссылку на канал" /><button id="tg-channel-paste" type="button" class="btn btn-small">Вставить ссылку</button><button id="tg-channel-add" type="button" class="btn btn-small btn-primary">Добавить</button></div><p id="tg-channel-editor-status" class="field-hint" role="status"></p><div id="tg-channel-list" class="tg-channel-list" role="list" aria-label="Добавленные Telegram-каналы"></div><details class="pane-more tg-channel-bulk"><summary>Вставить список каналов</summary><textarea id="tg-channels" rows="4" placeholder="some_public_job_channel&#10;https://t.me/another_channel" aria-label="Telegram-каналы, по одному на строку"></textarea></details></div><details class="pane-more"><summary>Ещё настройки</summary><div class="pane-more-body"><div class="field-row" data-ui="settings.tg.max-age"><div class="field-text"><div class="field-title">Не старше, дней</div><div class="field-hint">Старые вакансии обычно уже закрыты</div></div><div class="field-control"><input id="tg-max-age" type="number" class="num-input" min="1" placeholder="7" aria-label="Не старше, дней" /></div></div></div></details><div class="pane-save" hidden><button id="tg-settings-save" class="btn btn-primary" type="button">Сохранить</button><span id="tg-settings-status" class="muted small" role="status"></span></div></div>
+        <div class="pane-group"><div class="field-block" data-ui="settings.tg.keywords"><div class="field-title">Ключевые слова</div><div class="field-hint">Хватит одного совпадения</div><textarea id="tgq-keywords" rows="2"></textarea><p class="field-hint" id="tgq-keywords-hint"></p></div><div class="field-block" data-ui="settings.tg.stop"><div class="field-title">Стоп-слова</div><div class="field-hint">Такие посты не присылать</div><textarea id="tgq-stop" rows="2"></textarea><p class="field-hint">Плюс всегда включены встроенные — отсеивают посты кандидатов (резюме), а не вакансий:</p><p class="field-hint" id="tgq-builtin-stop"></p></div><details class="pane-more"><summary>Ещё настройки</summary><div class="pane-more-body"><div class="field-row" data-ui="settings.tg.backfill"><div class="field-text"><div class="field-title">Досмотреть историю нового канала, дней</div><div class="field-hint">Вакансия могла появиться до того, как вы добавили канал; 0 — не смотреть</div></div><div class="field-control"><input id="tgq-backfill-days" class="num-input" type="number" min="0" max="60" aria-label="Досмотреть историю нового канала, дней" /></div></div><div class="field-row" data-ui="settings.tg.ai-filter"><div class="field-text"><div class="field-title">Доп. проверка ИИ: «это вакансия?»</div><div class="field-hint">После стоп-слов, только для совпавших постов — отсеивает рекламу и посты кандидатов</div></div><div class="field-control"><input id="tgq-llm-vacancy-filter" type="checkbox" class="switch" aria-label="Дополнительная проверка ИИ" /></div></div></div></details></div>
+        <div class="pane-group"><h4>Как писать HR</h4><div class="field-block" data-ui="settings.tg.bot-state"><div class="field-title">Где писать</div><p id="tgq-bot-state" class="field-hint"></p><p class="field-hint">Без бота посты пересылаются в «Избранное» вашего Telegram, но без кнопок. Все найденные вакансии видны и в «Общении» — с черновиком от ИИ.</p></div><div class="field-row" data-ui="settings.tg.night"><div class="field-text"><div class="field-title">Ночные вакансии — утром</div><div class="field-hint">Найденное ночью придёт в бот в начале рабочих часов (без них — после 8:00), а не в 3 часа ночи. В «Общении» видно сразу</div></div><div class="field-control"><input id="tgq-night" type="checkbox" class="switch" aria-label="Ночные вакансии — утром" /></div></div><div class="field-block" data-ui="settings.tg.resumes"><div class="field-title">Резюме для кнопки «+ резюме»</div><p class="field-hint">Какие резюме прикладывать — в <a href="#" data-goto-view="resume">«Мои резюме»</a>: каждое дополнительное резюме становится своей кнопкой.</p><p class="small" id="tgq-resume-route"></p></div><details class="pane-more"><summary>Ещё настройки</summary><div class="pane-more-body"><div class="field-row" data-ui="settings.tg.smart-greeting"><div class="field-text"><div class="field-title">Черновик от ИИ под вакансию</div><div class="field-hint">Шаблон ниже — запасной, если ИИ недоступен</div></div><div class="field-control"><input id="tgq-smart-greeting" type="checkbox" class="switch" aria-label="Писать умно через ИИ" /></div></div><div class="field-block" data-ui="settings.tg.greeting"><div class="field-title">Шаблон приветствия</div><div class="field-hint">Уходит HR по кнопке, когда ИИ выключен. <code>{role}</code> — должность, <code>{link}</code> — ссылка на пост</div><textarea id="tgq-greeting" rows="3"></textarea><p class="field-hint">Пример: <span id="tgq-greeting-preview"></span></p></div></div></details></div>
+        <div class="pane-group is-risk"><h4>Автоотправка</h4><p class="field-hint">Сообщения с вашего личного аккаунта без вашего нажатия. При слишком активной рассылке Telegram может ограничить аккаунт — надёжнее кнопки под вакансией в боте.</p><div class="field-row" data-ui="settings.tg.auto"><div class="field-text"><div class="field-title">Писать HR самому, из парсера</div><div class="field-hint">Сообщение уходит без вашего нажатия — с паузой и в рабочие часы ниже</div></div><div class="field-control"><input id="tgq-auto-message" type="checkbox" class="switch" aria-label="Отправлять текст рекрутёру самому, без кнопки" /></div></div><div class="field-row" data-ui="settings.tg.preview"><div class="field-text"><div class="field-title">Показывать текст перед отправкой</div><div class="field-hint">Вместо отправки — черновик: ждёт вашего «Отправить» в «Общении» и в боте</div></div><div class="field-control"><input id="tgq-preview" type="checkbox" class="switch" aria-label="Показывать текст перед отправкой" /></div></div><div class="field-row-inline"><label class="field-hint">Пауза перед отправкой, минут: от <input id="tgq-delay-min" class="num-input" type="number" min="0" /> до <input id="tgq-delay-max" class="num-input" type="number" min="0" /></label><label class="field-hint">Рабочие часы: с <input id="tgq-hours-start" class="num-input" type="number" min="0" max="23" /> до <input id="tgq-hours-end" class="num-input" type="number" min="1" max="24" /></label><label class="field-hint">Не больше в день <input id="tgq-daily-limit" class="num-input" type="number" min="1" max="200" /></label></div><p class="field-hint" id="tgq-pending-status"></p><div id="tg-source-auto" class="sub-group" data-needs-load="1" data-ui="settings.tg.source-auto"><div class="field-row"><div class="field-text"><div class="field-title">Писать HR самому, из поиска по расписанию</div><div class="field-hint">Тот же текст «Здравствуйте» — контактам из постов, найденных по расписанию</div></div><div class="field-control"><input id="tg-auto-message" type="checkbox" class="switch" aria-label="Писать найденному в посте контакту первым" /></div></div><div class="field-row-inline"><label class="field-hint">Не больше в день <input id="tg-daily-limit" class="num-input" type="number" min="1" placeholder="15" /></label><label class="field-hint">Активные часы: с <input id="tg-hours-start" class="num-input" type="number" min="0" max="23" placeholder="9" /> до <input id="tg-hours-end" class="num-input" type="number" min="0" max="23" placeholder="21" /></label></div></div></div>
+        <div class="pane-save" hidden><button id="tgq-save" class="btn btn-primary" type="button">Сохранить</button><span id="tgq-save-status" class="muted small" role="status"></span></div>
+      </div>
+      <div class="settings-pane card" id="settings-outreach" role="tabpanel" aria-labelledby="settings-outreach-tab">
+        <div class="pane-head"><div><h3>Почта и письма</h3><p class="pane-lead">Рассылка компаниям из Базы через ваш Gmail. Ни одно письмо не уходит без вашего подтверждения — черновики ждут в «Общении» и в CrossJob-боте.</p></div></div>
+        <p class="field-hint">Стиль писем на площадках — в <a href="#" data-goto-settings="settings-limits">«Лимиты и оценка»</a>. Какой файл уходит вложением — в <a href="#" data-goto-view="resume">«Мои резюме»</a>.</p><p class="small" id="outreach-resume-route" data-ui="settings.mail.resume-route"></p>
+        <div class="pane-group"><h4>Ящик</h4><p class="field-hint" id="outreach-email-status" data-ui="settings.mail.status"></p><div class="field-row" data-ui="settings.mail.email"><div class="field-text"><div class="field-title">Адрес Gmail</div><div class="field-hint">С него уходят письма</div></div><div class="field-control"><input id="outreach-email" type="email" placeholder="you@gmail.com" aria-label="Адрес Gmail" autocomplete="off" /></div></div><div class="field-row" data-ui="settings.mail.password"><div class="field-text"><div class="field-title">Пароль приложения</div><div class="field-hint">16 символов, не пароль от почты. <details class="inline-help"><summary>Где взять?</summary><ol><li>Включите двухэтапную проверку в аккаунте Google.</li><li>Откройте <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">myaccount.google.com/apppasswords</a>, создайте пароль с любым названием.</li><li>Вставьте 16 символов в поле — его можно отозвать в любой момент.</li></ol></details></div></div><div class="field-control"><input id="outreach-app-password" type="password" placeholder="16 символов" aria-label="Пароль приложения Google" autocomplete="new-password" /></div></div><div class="field-row" data-ui="settings.mail.test"><div class="field-text"><div class="field-title">Проверка</div><div class="field-hint">Отправить письмо самому себе</div></div><div class="field-control"><button id="outreach-email-test" class="btn btn-small" type="button">Письмо себе</button></div></div></div>
+        <div class="pane-group"><h4>Защита от блокировки</h4><p class="small" id="outreach-guard-status" role="status"></p><div class="field-row" data-ui="settings.mail.limit"><div class="field-text"><div class="field-title">Писем в день, не больше</div><div class="field-hint">Незнакомым разумно 30–50. <details class="inline-help" data-ui="settings.mail.safe-help"><summary>Сколько безопасно?</summary><p>Обычный Gmail технически позволяет около 500 писем в день, но для писем незнакомым людям это верный путь в спам. Для рассылки по HR разумно 30–50 в день, до 80–100 — только на ящике, который уже несколько недель отправляет письма и получает ответы. Разогрев доводит до вашего лимита постепенно — не выключайте его на новом ящике.</p><p><b>Сколько возвратов терпеть?</b> Возврат — письмо на адрес, которого нет. Gmail смотрит на их долю: когда возвратов много, письма начинают уходить в спам всем. Разумно держать долю возвратов ниже 3–5% от писем за день: при 20–30 письмах в день — стоп после 3, при 50 — после 3–5, при 100 — не больше 5–8.</p></details></div></div><div class="field-control"><input id="outreach-email-limit" class="num-input" type="number" min="1" max="300" aria-label="Писем в день" /></div></div><div class="field-row" data-ui="settings.mail.hours"><div class="field-text"><div class="field-title">Когда отправлять</div><div class="field-hint">По одному, со случайными паузами</div></div><div class="field-control">с <input id="outreach-send-from" class="num-input" type="number" min="0" max="23" aria-label="Отправлять с, час" /> до <input id="outreach-send-to" class="num-input" type="number" min="1" max="24" aria-label="Отправлять до, час" /> ч</div></div><div class="field-row" data-ui="settings.mail.weekdays"><div class="field-text"><div class="field-title">Только по будням</div><div class="field-hint">В выходные письма ждут понедельника</div></div><div class="field-control"><input id="outreach-weekdays" type="checkbox" class="switch" aria-label="Только по будням" /></div></div><details class="pane-more"><summary>Ещё настройки</summary><div class="pane-more-body"><div class="field-row" data-ui="settings.mail.bounce"><div class="field-text"><div class="field-title">Стоп после возвратов за сутки</div><div class="field-hint">Защита репутации ящика</div></div><div class="field-control"><input id="outreach-bounce-stop" class="num-input" type="number" min="1" max="30" aria-label="Стоп после возвратов" /></div></div><div class="field-row" data-ui="settings.mail.warmup"><div class="field-text"><div class="field-title">Разогрев ящика</div><div class="field-hint">С 15 писем в день, +5 за каждый день отправки, пока не дойдёт до лимита</div></div><div class="field-control"><input id="outreach-warmup" type="checkbox" class="switch" aria-label="Разогрев ящика" /></div></div></div></details></div>
+        <div class="pane-group"><h4>Письма</h4><div class="field-row" data-ui="settings.mail.follow-up"><div class="field-text"><div class="field-title">Напоминание, если HR молчит, через</div><div class="field-hint">Дней; 0 — не напоминать</div></div><div class="field-control"><input id="outreach-follow-up" class="num-input" type="number" min="0" max="60" aria-label="Напоминание через дней" /></div></div><div class="field-block" data-ui="settings.mail.prompt"><div class="field-row-inline field-row-split"><div class="field-text"><div class="field-title">Промт письма</div><div class="field-hint">Основа общая: кто вы и что ищете, почему эта компания, 2–3 достижения с цифрами, без клише, до 180 слов. Ваши правила добавляются к ней.</div></div><button type="button" id="outreach-letter-edit" class="btn btn-small" aria-expanded="false" aria-controls="outreach-letter-box">Изменить</button></div><p class="field-hint" id="outreach-letter-current"></p><div id="outreach-letter-box" hidden><textarea id="outreach-letter-instructions" rows="4" maxlength="2000" placeholder="Например: пиши на «ты»; упомяни, что готов к релокации; не больше 120 слов" aria-label="Свои правила для письма"></textarea><p class="field-hint">Сохраняется, когда уходите из поля. Действует на новые письма рассылки.</p></div></div><details class="pane-more"><summary>Ещё настройки</summary><div class="pane-more-body"><div class="field-block" data-ui="settings.mail.signature"><div class="field-title">Контакты для подписи</div><div class="field-hint">Бот берёт их из резюме; поля нужны, только если в резюме этого нет. Пусто и там, и там — не добавится в подпись.</div><div class="field-row-inline"><input id="outreach-candidate-telegram" type="text" placeholder="Telegram, напр. t.me/username" aria-label="Telegram кандидата" /><input id="outreach-candidate-whatsapp" type="text" placeholder="WhatsApp/телефон" aria-label="WhatsApp или телефон кандидата" /><input id="outreach-candidate-linkedin" type="text" placeholder="LinkedIn, linkedin.com/in/…" aria-label="LinkedIn кандидата" /></div></div><div class="field-block" id="hunter-block" data-ui="settings.mail.hunter"><div class="field-title">Ключ hunter.io <span class="field-hint">необязательно</span></div><div class="field-hint">Бот спрашивает у Hunter email HR, когда в вакансии нет контакта, и по кнопке «Найти ещё контакты» в Базе. Ключ бесплатный: <a href="https://hunter.io/users/sign_up" target="_blank" rel="noopener">hunter.io</a> → <a href="https://hunter.io/api-keys" target="_blank" rel="noopener">API keys</a>.</div><div class="field-row-inline"><input id="outreach-hunter" type="password" placeholder="API-ключ hunter.io" aria-label="API-ключ Hunter" autocomplete="off" /><span id="outreach-hunter-status" class="muted small" role="status"></span></div></div></div></details></div>
+        <div class="pane-group is-risk"><h4>Без просмотра</h4><p class="field-hint">Письма уходят без вашего взгляда.</p><div class="field-row" data-ui="settings.mail.auto-send"><div class="field-text"><div class="field-title">Новые порции — без моего просмотра</div><div class="field-hint">Первую порцию вы смотрите всегда; остановить — «Остановить рассылку» или «Не отправлять» в боте</div></div><div class="field-control"><input id="outreach-auto-send" type="checkbox" class="switch" aria-label="Бот отправляет новые порции писем сам" /></div></div></div>
+        <div class="pane-save" hidden><button id="outreach-save" class="btn btn-primary" type="button">Сохранить</button><span id="outreach-save-status" class="muted small" role="status"></span></div>
+      </div>
+      <div class="settings-pane card" id="settings-direct" role="tabpanel" aria-labelledby="settings-direct-tab">
+        <div class="pane-head"><div><h3>Сайты компаний</h3><p class="pane-lead">Откуда бот собирает компании в Базу — с email HR из текста вакансии, сайта или через Hunter. Писем здесь не пишет: рассылка — в «Компании → Рассылка».</p></div></div>
+        <div class="pane-group"><h4>Где искать</h4><div class="field-row" data-ui="settings.direct.boards"><div class="field-text"><div class="field-title">We Work Remotely</div><div class="field-hint">Доска удалённых вакансий</div></div><div class="field-control"><input id="direct-wwr" type="checkbox" class="switch" aria-label="We Work Remotely" /></div></div><div class="field-row"><div class="field-text"><div class="field-title">Hacker News: Who is hiring</div><div class="field-hint">Ежемесячная ветка с вакансиями</div></div><div class="field-control"><input id="direct-hn" type="checkbox" class="switch" aria-label="Hacker News Who is hiring" /></div></div><div class="field-row"><div class="field-text"><div class="field-title">Talanto</div><div class="field-hint">Вакансии и контакты HR; Telegram-каналы из них сами попадают в парсер</div></div><div class="field-control"><input id="direct-talanto" type="checkbox" class="switch" aria-label="Talanto" /></div></div><div class="field-row"><div class="field-text"><div class="field-title">Hirify</div><div class="field-hint">Вакансии из Telegram-каналов; контакты видны после входа в hirify.me (scripts/hirify_login.py)</div></div><div class="field-control"><input id="direct-hirify" type="checkbox" class="switch" aria-label="Hirify" /></div></div></div>
+        <div class="pane-group"><h4>Отслеживаемые компании</h4><div class="field-block" data-ui="settings.direct.companies"><div class="field-hint">Введите адрес сайта — бот сам найдёт, где компания публикует вакансии (Greenhouse, Lever, Ashby, Workable).</div><div class="field-row-inline"><input id="direct-company-website" type="text" placeholder="Сайт, например linear.app" aria-label="Сайт компании" /><input id="direct-company-name" type="text" placeholder="Название (необязательно)" aria-label="Название компании" /><button id="direct-company-add" class="btn btn-small btn-primary" type="button">Найти и добавить</button></div><p id="direct-company-status" class="field-hint" role="status"></p><div id="direct-companies"></div></div></div>
+      </div>
+      <div class="settings-pane card" id="settings-accounts" role="tabpanel" aria-labelledby="settings-accounts-tab">
+        <div class="pane-head"><div><h3>Подключения</h3><p class="pane-lead">Всё, к чему подключён CrossJob. Красное — нажмите и исправьте.</p></div></div>
+        <div id="accounts-services" class="accounts-list" data-ui="settings.accounts.services settings.accounts.hunter"></div>
+        <div class="field-block tg-account" data-ui="settings.accounts.tg"><div class="field-title">Telegram-аккаунт <span class="field-hint">для парсера и сообщений HR с вашего имени</span></div>
+          <details class="inline-panel" id="tg-connect-panel" open>
             <summary>Как подключить</summary>
             <ol class="howto small">
               <li>Откройте <a href="https://my.telegram.org/apps" target="_blank" rel="noopener">my.telegram.org</a> → войдите по номеру → «API development tools» → создайте приложение (название любое). Скопируйте <b>api_id</b> и <b>api_hash</b> сюда:
@@ -393,7 +753,7 @@
               <button id="telegram-login-send-code" class="btn btn-primary">Прислать код</button>
             </div>
             <div class="filters" id="telegram-login-code-row" style="display:none">
-              <input type="text" id="telegram-login-code" placeholder="Код из Telegram" style="flex:1;min-width:160px" />
+              <input type="text" id="telegram-login-code" placeholder="Код из Telegram" />
               <button id="telegram-login-submit-code" class="btn btn-primary">Подтвердить</button>
             </div>
             <div class="filters" id="telegram-login-password-row" style="display:none">
@@ -402,340 +762,15 @@
             </div>
             <p class="muted small" id="telegram-login-status"></p>
           </details>
-        </li>
-
-        <li class="panel step">
-          <div class="step-head"><span class="step-num">2</span><h3>Слушает и присылает вакансии</h3></div>
-          <div class="parser-head">
-            <span id="tg-quick-line-status" class="parser-state">Парсер: …</span>
-            <span class="step-actions m0">
-              <button type="button" class="btn btn-ghost btn-small" id="parser-open-base">Контакты из Telegram →</button>
-              <button type="button" class="btn btn-secondary btn-small" data-goto-settings="settings-tg-quick" title="Каналы, ключевые слова, текст «Здравствуйте» и резюме для кнопок — в одном месте">Настроить</button>
-            </span>
-          </div>
-          <div class="results-numbers" id="parser-numbers"></div>
-        </li>
-
-        <li class="panel step">
-          <div class="step-head"><span class="step-num">3</span><h3>Вакансии из каналов и переписка</h3><span id="tg-sent-today" class="muted small tg-sent-today"></span></div>
-          <p class="muted small">Новая вакансия из канала — диалог с готовым черновиком: поправьте и отправьте с вашего аккаунта, ответ HR придёт сюда же. Без вашего «Отправить» ничего не уходит. В CrossJob-боте — копия с кнопками.</p>
-          <div class="telegram-layout">
-            <div id="tg-conv-list" class="conv-list">
-              <p class="muted small">Загрузка…</p>
-            </div>
-            <div class="chat-thread">
-              <div id="tg-chat-empty" class="muted small">Выберите диалог слева.</div>
-              <div id="tg-post-panel" style="display:none">
-                <div class="post-card">
-                  <div class="post-card-meta"><span id="tg-post-meta" class="muted small"></span><a id="tg-post-link" class="btn btn-ghost btn-small" href="#" target="_blank" rel="noopener">Открыть пост ↗</a></div>
-                  <h3 id="tg-post-title" class="m0"></h3>
-                  <p id="tg-post-body" class="post-card-text"></p>
-                  <p id="tg-post-note" class="muted small m0"></p>
-                </div>
-                <div id="tg-post-history" class="chat-messages" style="display:none"></div>
-                <div id="tg-post-compose" class="post-compose">
-                  <div class="filters">
-                    <label class="muted small">Кому <select id="tg-post-contact" aria-label="Кому написать"></select></label>
-                    <label class="muted small">Резюме <select id="tg-post-resume" aria-label="Резюме к сообщению"></select></label>
-                    <button type="button" id="tg-post-rewrite" class="btn btn-ghost btn-small">🔄 Переписать</button>
-                  </div>
-                  <textarea id="tg-post-input" rows="6" aria-label="Текст сообщения"></textarea>
-                  <div class="filters">
-                    <button type="button" id="tg-post-send" class="btn btn-primary">Отправить</button>
-                    <button type="button" id="tg-post-later" class="btn btn-secondary">Утром, в рабочие часы</button>
-                    <button type="button" id="tg-post-hide" class="btn btn-ghost btn-small">Скрыть</button>
-                    <button type="button" id="tg-post-block" class="btn btn-ghost btn-small">🚫 Не писать компании</button>
-                  </div>
-                </div>
-                <div id="tg-post-later-box" class="filters" style="display:none"><span id="tg-post-later-text" class="muted small"></span><button type="button" id="tg-post-unlater" class="btn btn-secondary btn-small">Отменить</button></div>
-                <span id="tg-post-status" class="muted small" role="status"></span>
-              </div>
-              <div id="tg-chat-panel" style="display:none">
-                <div class="filters" style="justify-content:space-between;margin-bottom:8px">
-                  <h3 id="tg-chat-contact" class="m0"></h3>
-                  <a id="tg-chat-job" class="btn btn-ghost btn-small" href="#" target="_blank" rel="noopener" style="display:none">Вакансия ↗</a>
-                  <button id="tg-chat-delete" class="btn btn-ghost btn-small" title="Удалить диалог из истории">🗑 Удалить диалог</button>
-                </div>
-                <div id="tg-chat-messages" class="chat-messages"></div>
-                <div class="chat-composer">
-                  <input id="tg-chat-input" type="text" placeholder="Написать сообщение…" aria-label="Текст сообщения" />
-                  <button id="tg-chat-attach-resume" class="btn btn-secondary" title="Отправить resume.pdf файлом">📎 Резюме</button>
-                  <button id="tg-chat-send" class="btn btn-primary">Отправить</button>
-                </div>
-                <span id="tg-chat-status" class="muted small"></span>
-              </div>
-            </div>
-          </div>
-        </li>
-      </ol>
-    </section>
-
-    <section id="view-resume" class="view">
-      <div class="view-header">
-        <div>
-          <h2>Мои резюме</h2>
-          <p class="muted">Все ваши резюме в одном месте. Ниже — версия под конкретную вакансию и разбор, что улучшить.</p>
+          <div class="filters" id="tg-account-off-row" hidden><span class="small">Подключено — парсер и сообщения HR идут с этого аккаунта.</span><button type="button" id="tg-account-off" class="btn btn-small btn-ghost is-danger" data-ui="settings.accounts.tg-off">Отключить</button></div>
         </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h3 class="m0">Резюме</h3>
-          <button type="button" id="tgq-resume-add" class="btn btn-secondary btn-small">📎 Добавить дополнительное</button>
-        </div>
-        <p class="muted small">Уходят во вложении писем и сообщений HR; по ним ИИ подбирает вакансии и пишет письма.</p>
-        <div class="resume-table" id="resume-table" role="table" aria-label="Мои резюме"></div>
-        <div class="resume-routing" id="resume-routing" aria-live="polite"></div>
-        <input type="file" id="resume-upload-primary" accept="application/pdf" hidden />
-        <input type="file" id="resume-upload-linkedin" accept="application/pdf" hidden />
-        <input type="file" id="tgq-resume-file" accept="application/pdf" multiple hidden />
-        <p id="tgq-resume-status" class="muted small" role="status"></p>
-      </div>
-
-      <div class="panel">
-        <h3>Резюме без вакансии</h3>
-        <p class="muted small">Общий вариант, не подогнанный ни под одно объявление — на случай, если резюме нужно просто в PDF.</p>
-        <div class="filters">
-          <select id="gen-style"></select>
-          <button id="gen-resume" class="btn btn-secondary">📄 Сгенерировать</button>
-        </div>
-        <p id="gen-style-ats-note" class="muted small"></p>
-      </div>
-
-      <div class="panel">
-        <h3>Под конкретную вакансию</h3>
-        <p class="muted small">Вставьте ссылку на вакансию — ИИ подготовит документ по вашему резюме, это займёт до минуты.</p>
-        <div class="filters">
-          <input id="gen-job-url" type="text" placeholder="Ссылка на вакансию" aria-label="Ссылка на вакансию" style="flex:1;min-width:260px" />
-        </div>
-
-        <div class="resume-action-grid">
-          <div class="resume-action-card">
-            <h4>📄 Резюме под вакансию</h4>
-            <p class="muted small">Переставляет акценты и формулировки резюме под требования этой вакансии.</p>
-            <button id="gen-resume-tailored" class="btn btn-secondary">Сгенерировать PDF</button>
-          </div>
-          <div class="resume-action-card">
-            <h4>📄 Сопроводительное письмо</h4>
-            <p class="muted small">Короткое письмо для поля отклика — под требования этой вакансии.</p>
-            <button id="gen-cover-letter" class="btn btn-secondary">Сгенерировать PDF</button>
-          </div>
-          <div class="resume-action-card is-review">
-            <h4>🔍 Аудит резюме</h4>
-            <p class="muted small">Оценка соответствия 0–100, отсутствующие ATS-ключевики, тревожные сигналы для рекрутера и переписанный раздел опыта — 3 шага ИИ, только на реальных данных резюме.</p>
-            <button id="gen-resume-audit" class="btn btn-secondary">Проверить</button>
-          </div>
-        </div>
-
-        <div class="filters" style="margin-top:14px">
-          <span id="gen-status" class="muted small"></span>
-          <a id="gen-download" class="btn btn-accent" style="display:none" href="/api/generate/download" download>Скачать PDF</a>
-        </div>
-        <div class="gen-progress" id="gen-progress"><div class="gen-progress-bar"></div></div>
-      </div>
-
-
-    </section>
-
-    <section id="view-analytics" class="view">
-      <div class="view-header">
-        <div>
-          <h2>Аналитика</h2>
-          <p class="muted">Что приносит ответы, что мешает и кого стоит вычеркнуть</p>
-        </div>
-      </div>
-      <div id="results-panel" class="panel results-panel"></div>
-      <details class="panel more">
-        <summary><strong>Активность по дням</strong> <span class="muted small">— отклики за 13 недель</span></summary>
-        <div id="activity-heatmap" class="heatmap"></div>
-      </details>
-      <div class="panel">
-        <h3>Воронка после отклика</h3>
-        <p class="muted small">Сколько реальных откликов сейчас на каждом этапе — у каждой заявки только один текущий этап, поэтому «интервью» и «отказ» не входят в «ответили». Этап ставится сам по ответу hh или вручную в «Истории» и «Входящих»</p>
-        <div id="funnel" class="funnel"></div>
-      </div>
-      <div class="analytics-grid">
-        <div class="panel">
-          <h3>Спрос на навыки</h3>
-          <p class="muted small">Доля вакансий, где навык упоминается (по откликам, собранным после обновления). ✗ — в резюме не найден</p>
-          <div id="skill-demand" class="funnel"></div>
-        </div>
-        <div class="panel">
-          <h3>Зарплаты на рынке</h3>
-          <p class="muted small">Медиана «от» и «до» в месяц по всем собранным вакансиям с указанной зарплатой</p>
-          <div id="salary-stats"></div>
-        </div>
-        <div class="panel">
-          <h3>Откуда вакансии</h3>
-          <p class="muted small">Сколько вакансий собрано с каждой площадки. Talanto — источник вакансий и контактов HR, откликов там нет.</p>
-          <div id="vacancy-sources"></div>
-        </div>
-      </div>
-      <details class="panel more">
-        <summary><strong>Сравнение офферов</strong> <span class="muted small">— когда придут предложения</span></summary>
-        <p class="muted small">Сумма в месяц. «К рынку» — насколько оффер выше или ниже медианы «до» по собранным вакансиям в той же валюте (без пересчёта валют и налогов)</p>
-        <div class="filters">
-          <input id="offer-company" type="text" placeholder="Компания" aria-label="Компания" />
-          <input id="offer-amount" type="number" min="0" placeholder="Сумма в месяц" aria-label="Сумма в месяц" />
-          <select id="offer-currency" aria-label="Валюта"><option>RUB</option><option>USD</option><option>EUR</option><option>KZT</option></select>
-          <label class="muted small"><input id="offer-remote" type="checkbox" checked /> удалённо</label>
-          <input id="offer-notes" type="text" placeholder="Заметки: бонусы, ДМС, оформление" aria-label="Заметки" />
-          <button id="offer-add" class="btn btn-primary" type="button">Добавить</button>
-        </div>
-        <div id="offers"></div>
-      </details>
-      <div class="analytics-grid">
-        <div class="panel">
-          <h3>Чаще всего не хватает</h3>
-          <ul id="gaps-list" class="gaps-list"></ul>
-        </div>
-        <div class="panel">
-          <h3>Кандидаты на чёрный список</h3>
-          <p class="muted small">3+ отклика без единого ответа</p>
-          <div id="blacklist-candidates" class="candidate-list"></div>
-          <button id="blacklist-add" class="btn btn-secondary">Добавить отмеченные</button>
-        </div>
-      </div>
-    </section>
-
-    <section id="view-settings" class="view">
-      <div class="view-header">
-        <div>
-          <h2>Настройки</h2>
-          <p class="muted">Расписание, автоотклик и уведомления</p>
-          <p class="muted small" id="settings-onboarding-hint" style="display:none">Пока не пройдены основные шаги — остальные вкладки спрятаны, чтобы не мешали. <button type="button" id="settings-onboarding-hint-reveal" class="link-btn">Показать всё</button></p>
-        </div>
-      </div>
-      <nav class="settings-jump" id="settings-jump" role="tablist" aria-label="Разделы настроек">
-        <div class="tab-indicator" id="settings-tab-indicator"></div>
-        <span class="settings-jump-label">Основное</span>
-        <button type="button" class="active" data-settings-tab="settings-accounts" role="tab" aria-selected="true" aria-controls="settings-accounts" id="settings-accounts-tab"><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M8 12l4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M7.5 13.5l-1 1a2.5 2.5 0 0 1-3.5-3.5l2-2a2.5 2.5 0 0 1 3.5 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12.5 6.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-2 2a2.5 2.5 0 0 1-3.5 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Подключения</button>
-        <button type="button" data-settings-tab="settings-search" role="tab" aria-selected="false" aria-controls="settings-search" id="settings-search-tab"><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3.5 17V12M3.5 9.5V3M10 17V10.5M10 8V3M16.5 17V13.5M16.5 11V3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M1.5 12h4M8 10.5h4M14.5 13.5h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Что ищу</button>
-        <span class="settings-jump-label">Площадки</span>
-        <button type="button" data-settings-tab="settings-table" role="tab" aria-selected="false" aria-controls="settings-table" id="settings-table-tab"><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.5 3 6.5l7 4 7-4-7-4Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M3 11l7 4 7-4" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Площадки</button>
-        <button type="button" data-settings-tab="settings-limits" data-onboarding-hide role="tab" aria-selected="false" aria-controls="settings-limits" id="settings-limits-tab"><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 5.5A2 2 0 0 1 5 3.5h10a2 2 0 0 1 2 2V12a2 2 0 0 1-2 2H8l-3.5 3V14H5a2 2 0 0 1-2-2V5.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Как отвечать и лимиты</button>
-        <span class="settings-jump-label" data-onboarding-hide>Каналы отправки</span>
-        <button type="button" data-settings-tab="settings-tg-quick" data-onboarding-hide role="tab" aria-selected="false" aria-controls="settings-tg-quick" id="settings-tg-quick-tab"><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M17 3 2.5 9.2c-.7.3-.6 1.3.1 1.5l4 1.2 1.6 4.4c.3.8 1.3.9 1.8.2l1.9-2.6 3.6 2.7c.6.4 1.5.1 1.6-.7L18.9 3.8c.1-.7-.5-1.2-1.1-.9Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M7 11.9 17 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Telegram-парсер</button>
-        <button type="button" data-settings-tab="settings-direct" data-onboarding-hide role="tab" aria-selected="false" aria-controls="settings-direct" id="settings-direct-tab"><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 17V4a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M13 17v-8a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M2 17h16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M6.5 6.5h.01M6.5 9.5h.01M6.5 12.5h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Сайты компаний</button>
-        <button type="button" data-settings-tab="settings-outreach" data-onboarding-hide role="tab" aria-selected="false" aria-controls="settings-outreach" id="settings-outreach-tab"><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="4.5" width="15" height="11" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="m3 6 7 5 7-5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Почта и письма</button>
-        <details class="settings-more">
-          <summary>Продвинутое ▾</summary>
-          <div class="settings-more-menu">
-            <button type="button" data-settings-tab="settings-llm" role="tab" aria-selected="false" aria-controls="settings-llm" id="settings-llm-tab"><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 3.5 11.3 8 15.5 9.3 11.3 10.6 10 15 8.7 10.6 4.5 9.3 8.7 8 10 3.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M16 12.5l.6 1.7 1.7.6-1.7.6-.6 1.7-.6-1.7-1.7-.6 1.7-.6.6-1.7Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Провайдер ИИ</button>
-            <button type="button" data-settings-tab="settings-notifications" data-onboarding-hide role="tab" aria-selected="false" aria-controls="settings-notifications" id="settings-notifications-tab"><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M6 8.2a4 4 0 0 1 8 0c0 4.5 1.8 5.8 1.8 5.8H4.2S6 12.7 6 8.2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8.6 16.3a1.5 1.5 0 0 0 2.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Уведомления в Telegram</button>
-            <button type="button" data-settings-tab="settings-autostart" data-onboarding-hide role="tab" aria-selected="false" aria-controls="settings-autostart" id="settings-autostart-tab"><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M14.2 5.3a6.5 6.5 0 1 1-8.4 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M10 2.5v7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Автозапуск</button>
-            <button type="button" data-settings-tab="settings-backups" role="tab" aria-selected="false" aria-controls="settings-backups" id="settings-backups-tab"><svg class="settings-tab-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="3" width="15" height="4" rx="1" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M4 7v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M8.2 11h3.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Резервные копии</button>
-          </div>
-        </details>
-      </nav>
-
-      <div class="panel settings-pane active" id="settings-accounts" role="tabpanel" aria-labelledby="settings-accounts-tab">
-        <h3>Подключения</h3>
-        <p class="muted small">Всё, к чему подключён CrossJob, в одном месте. Красное — нажмите, чтобы исправить.</p>
-        <div id="accounts-services" class="accounts-list"></div>
         <h4>Площадки</h4>
-        <div id="accounts-platforms" class="accounts-list"></div>
-        <div class="filters">
-          <button id="dry-run-button" class="btn btn-secondary" title="Прогоняет площадки из расписания прямо сейчас, но ничего реально не отправляет — как будто у всех выключен «Автоотклик»/«Автосообщения», результат смотрите в Истории со статусом «Тестовый прогон»">
-            <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="M10 3.5a6.5 6.5 0 1 0 6.5 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M10 3.5 7.8 5.7M10 3.5l2.2 2.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <span class="btn-label">Проверить площадки, ничего не отправляя</span>
-          </button>
-        </div>
+        <div id="accounts-platforms" class="accounts-list" data-ui="settings.accounts.platforms"></div>
+        <div class="pane-actions" data-ui="settings.dry-run"><button id="dry-run-button" class="btn" type="button" title="Прогоняет площадки из расписания прямо сейчас, но ничего не отправляет — результат смотрите в «Вакансиях» со статусом «Тестовый прогон»"><svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="M10 3.5a6.5 6.5 0 1 0 6.5 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M10 3.5 7.8 5.7M10 3.5l2.2 2.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="btn-label">Проверить все площадки, ничего не отправляя</span></button></div>
       </div>
-
-      <div class="panel settings-pane" id="settings-search" role="tabpanel" aria-labelledby="settings-search-tab">
-        <h3>Что ищу</h3>
-        <p class="muted small">Какую работу искать: должности (по ним же парсер ищет посты в Telegram) и города или «удалённо». Каналы Telegram и диалоги — в «Общение → Telegram-парсер».</p>
-        <div class="limits-grid">
-          <label class="limit-field">
-            <span>Должности (одна на строку)</span>
-            <textarea id="search-positions" rows="3" placeholder="Python разработчик&#10;Backend developer"></textarea>
-            <span class="muted small">Каждая строка — отдельный поисковый запрос на площадках, как в строке поиска HH/LinkedIn: площадка сама подберёт похожие вакансии, не обязательно перечислять все варианты формулировки.</span>
-          </label>
-          <label class="limit-field">
-            <span>Локации (одна на строку)</span>
-            <textarea id="search-locations" rows="3" placeholder="Москва"></textarea>
-          </label>
-        </div>
-        <div class="filters">
-          <button id="search-generate-positions" class="btn btn-primary">🪄 Сгенерировать должности из резюме</button>
-          <span id="search-generate-status" class="muted small"></span>
-        </div>
-        <h4 style="margin-top:14px">Формат работы</h4>
-        <p class="muted small">Один выбор для всех площадок. Где площадка такой фильтр не умеет, он просто не применяется.</p>
-        <div class="filters">
-          <label class="checkbox-row"><input id="search-remote" type="checkbox" class="switch" /> Удалённо</label>
-          <label class="checkbox-row"><input id="search-hybrid" type="checkbox" class="switch" /> Гибрид</label>
-          <label class="checkbox-row"><input id="search-onsite" type="checkbox" class="switch" /> На месте работодателя</label>
-          <label class="checkbox-row"><input id="search-only-with-salary" type="checkbox" class="switch" /> Только с указанной зарплатой</label>
-        </div>
-        <h4 style="margin-top:14px">Уровень</h4>
-        <p class="muted small">Ничего не выбрано — любой уровень. Если выбрать, выдача сузится на тех площадках, которые это умеют.</p>
-        <div class="filters" id="search-levels">
-          <label class="checkbox-row"><input type="checkbox" class="switch search-level" value="intern" /> Стажёр</label>
-          <label class="checkbox-row"><input type="checkbox" class="switch search-level" value="junior" /> Junior</label>
-          <label class="checkbox-row"><input type="checkbox" class="switch search-level" value="middle" /> Middle</label>
-          <label class="checkbox-row"><input type="checkbox" class="switch search-level" value="senior" /> Senior</label>
-          <label class="checkbox-row"><input type="checkbox" class="switch search-level" value="lead" /> Lead</label>
-        </div>
-        <h4 style="margin-top:14px">Тип занятости</h4>
-        <p class="muted small">Ничего не выбрано — любой.</p>
-        <div class="filters" id="search-employment">
-          <label class="checkbox-row"><input type="checkbox" class="switch search-employment" value="full" /> Полная</label>
-          <label class="checkbox-row"><input type="checkbox" class="switch search-employment" value="part" /> Частичная</label>
-          <label class="checkbox-row"><input type="checkbox" class="switch search-employment" value="project" /> Проект / контракт</label>
-          <label class="checkbox-row"><input type="checkbox" class="switch search-employment" value="internship" /> Стажировка</label>
-        </div>
-        <h4 style="margin-top:14px">Опубликовано</h4>
-        <div class="filters">
-          <select id="search-posted-within" aria-label="Опубликовано за">
-            <option value="0">Когда угодно</option>
-            <option value="1">За сутки</option>
-            <option value="3">За 3 дня</option>
-            <option value="7">За неделю</option>
-            <option value="30">За месяц</option>
-          </select>
-          
-        </div>
-        <div id="search-filter-coverage" class="muted small" aria-live="polite"></div>
-        <div class="filters">
-          <label class="checkbox-row"><input id="outreach-skip-us" type="checkbox" class="switch" /> Пропускать удалёнку «только из США»</label>
-          <label class="checkbox-row"><input id="outreach-skip-eu" type="checkbox" class="switch" /> Пропускать удалёнку «только из Европы»</label>
-        </div>
-        <div class="filters">
-          <label class="checkbox-row"><input id="search-auto-all" type="checkbox" class="switch" /> Откликаться автоматически на всех включённых площадках</label>
-          <span id="search-auto-note" class="muted small"></span>
-        </div>
-        <div class="filters">
-          <label class="checkbox-row"><input id="search-auto-chat" type="checkbox" class="switch" /> Вести переписку с работодателями в чате</label>
-          <span id="search-auto-chat-note" class="muted small"></span>
-        </div>
-        <h4 style="margin-top:14px">Исключения</h4>
-        <div class="limits-grid">
-          <label class="limit-field">
-            <span>Чёрный список компаний (одна на строку) — не откликаемся и не пишем им в рассылке</span>
-            <textarea id="search-company-blacklist" rows="3"></textarea>
-          </label>
-          <label class="limit-field">
-            <span>Чёрный список слов — в названии или описании (одно на строку)</span>
-            <textarea id="search-title-blacklist" rows="3"></textarea>
-            <span class="muted small">Точное совпадение части слова, без учёта регистра, без ИИ — «джун» не поймает «junior», добавляйте оба варианта, если нужно оба. Работает и для русских, и для английских слов одинаково.</span>
-          </label>
-          <label class="limit-field">
-            <span>Чёрный список локаций (одна на строку)</span>
-            <textarea id="search-location-blacklist" rows="3"></textarea>
-          </label>
-        </div>
-        <div class="filters">
-          <button id="search-save" class="btn btn-primary">Сохранить</button>
-          <span id="search-status" class="muted small"></span>
-        </div>
-      </div>
-
-      <div class="panel settings-pane" id="settings-llm" role="tabpanel" aria-labelledby="settings-llm-tab">
-        <h3>Провайдер ИИ</h3>
-        <p class="muted small">Переключение применяется сразу, без перезапуска — для всего, что делает ИИ: оценка вакансий, письма, резюме.</p>
-        <div class="provider-grid" id="provider-grid">
+      <div class="settings-pane card" id="settings-llm" role="tabpanel" aria-labelledby="settings-llm-tab">
+        <div class="pane-head"><div><h3>Провайдер ИИ</h3><p class="pane-lead">Кто оценивает вакансии и пишет письма. Переключение применяется сразу, без перезапуска.</p></div></div>
+        <div id="settings-llm-provider-block" class="pane-group"><h4>Основной провайдер</h4><div data-ui="settings.llm.provider"><div class="provider-grid" id="provider-grid">
           <button class="provider-card" data-provider="openai" title="OpenAI">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3.4" fill="currentColor"/></svg>
             <span>OpenAI</span>
@@ -793,499 +828,43 @@
             <span>Ollama</span>
           </button>
         </div>
-        <button type="button" id="provider-grid-toggle" class="btn btn-ghost btn-small" style="margin:-6px 0 16px">Показать все провайдеры</button>
-        <div class="limits-grid">
-          <label class="limit-field">
-            <span>Модель</span>
-            <select id="llm-model"></select>
-          </label>
-          <label class="limit-field">
-            <span>Base URL (нужен для Ollama — адрес локального сервера)</span>
-            <input id="llm-base-url" type="text" placeholder="http://localhost:11434" />
-          </label>
-        </div>
-        <div class="limits-grid">
-          <label class="limit-field">
-            <span>Режим переключения на другие провайдеры</span>
-            <select id="llm-mode">
-              <option value="auto">Авто — сначала бесплатные, потом платные</option>
-              <option value="free">Только бесплатные модели</option>
-              <option value="paid">Только платные модели</option>
-            </select>
-          </label>
-          <label class="limit-field" style="justify-content:flex-end">
-            <span style="display:flex;align-items:center;gap:8px"><input id="llm-fallback-enabled" type="checkbox" class="switch" checked />Переключаться на другой провайдер при ошибке/лимите</span>
-          </label>
-        </div>
-        <p class="muted small">Если выключить переключение — используется строго выбранный выше провайдер, без ухода на другие ключи из настроек ниже, даже если они настроены. Режим (авто/бесплатно/платно) определяет, какие из настроенных ключей участвуют в цепочке переключения и в каком порядке.</p>
-        <div class="filters">
-          <button id="llm-provider-save" class="btn btn-primary">Сохранить провайдера</button>
-          <span id="llm-provider-status" class="muted small"></span>
-        </div>
-        <div class="filters" style="margin-top:14px">
-          <label class="limit-field" style="flex:1 1 260px">
-            <span>
-              Ключ для <span id="llm-key-provider-label">OpenAI</span>
-              (сейчас: <span id="llm-key-preview">—</span>)
-              — <a id="llm-key-get-link" href="#" target="_blank" rel="noopener">получить ключ →</a>
-            </span>
-            <span style="position:relative;display:block">
-              <input id="llm-key-input" type="password" placeholder="вставьте ключ этого провайдера" autocomplete="off" style="width:100%;padding-right:34px" />
-              <button type="button" id="llm-key-toggle" class="copy-btn" style="position:absolute;right:6px;top:50%;transform:translateY(-50%)" title="Показать/скрыть ключ" aria-label="Показать/скрыть ключ">
-                <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="M2 10s3-5.5 8-5.5 8 5.5 8 5.5-3 5.5-8 5.5-8-5.5-8-5.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="10" cy="10" r="2.4" stroke="currentColor" stroke-width="1.6"/></svg>
-              </button>
-            </span>
-          </label>
-          <button id="llm-key-save" class="btn btn-secondary">Сохранить ключ</button>
-          <span id="llm-key-status" class="muted small"></span>
-        </div>
-        <div class="filters" id="llm-provider-base-url-row" style="margin-top:14px; display:none">
-          <label class="limit-field" style="flex:1 1 260px">
-            <span>
-              Base URL для <span id="llm-provider-base-url-label">этого провайдера</span>
-              (сейчас: <span id="llm-provider-base-url-preview">—</span>)
-              — у Cloudflare свой account_id зашит в адрес, найти его можно в личном кабинете справа на странице учётной записи
-            </span>
-            <input id="llm-provider-base-url-input" type="text" placeholder="https://api.cloudflare.com/client/v4/accounts/ВАШ_ACCOUNT_ID/ai/v1" autocomplete="off" />
-          </label>
-          <button id="llm-provider-base-url-save" class="btn btn-secondary">Сохранить Base URL</button>
-          <span id="llm-provider-base-url-status" class="muted small"></span>
-        </div>
+        <button type="button" id="provider-grid-toggle" class="btn btn-ghost btn-small" >Показать все провайдеры</button></div><div class="field-row" data-ui="settings.llm.fallback"><div class="field-text"><div class="field-title">Переключаться при ошибке или лимите</div><div class="field-hint">При лимите провайдер отдыхает 7 минут, вызовы идут к запасным</div></div><div class="field-control"><input id="llm-fallback-enabled" type="checkbox" class="switch" aria-label="Переключаться на другой провайдер при ошибке или лимите" checked/></div></div><div class="field-block" data-ui="settings.llm.fallbacks"><div class="field-title">Запасные</div><div class="field-hint">Пробуются по порядку. В списке — провайдеры, для которых сохранён ключ</div><ol id="llm-fallback-order" class="order-list"></ol></div><details class="pane-more"><summary>Ещё настройки</summary><div class="pane-more-body"><div class="field-row" data-ui="settings.llm.model"><div class="field-text"><div class="field-title">Модель</div><div class="field-hint">Корона — рекомендованная для этих задач</div></div><div class="field-control"><select id="llm-model" aria-label="Модель"></select></div></div><div class="field-row" data-ui="settings.llm.mode"><div class="field-text"><div class="field-title">Режим запасных</div><div class="field-hint">Какие из ключей участвуют в цепочке и в каком порядке</div></div><div class="field-control"><select id="llm-mode" aria-label="Режим переключения"><option value="auto">Сначала бесплатные, потом платные</option><option value="free">Только бесплатные</option><option value="paid">Только платные</option></select></div></div><div class="field-row" data-ui="settings.llm.base-url"><div class="field-text"><div class="field-title">Base URL</div><div class="field-hint">Нужен для Ollama — адрес локального сервера</div></div><div class="field-control"><input id="llm-base-url" type="text" placeholder="http://localhost:11434" aria-label="Base URL" /></div></div></div></details><div class="pane-save" hidden><button id="llm-provider-save" class="btn btn-primary" type="button">Сохранить</button><span id="llm-provider-status" class="muted small" role="status"></span></div></div>
+        <div class="pane-group"><h4>Ключ</h4><div class="field-block" data-ui="settings.llm.key"><div class="field-title">Ключ для <span id="llm-key-provider-label">OpenAI</span> <span class="field-hint">сейчас: <span id="llm-key-preview">—</span> · <a id="llm-key-get-link" href="#" target="_blank" rel="noopener">получить ключ</a></span></div><div class="field-row-inline"><span class="secret-field"><input id="llm-key-input" type="password" placeholder="вставьте ключ этого провайдера" autocomplete="off" aria-label="Ключ провайдера" /><button type="button" id="llm-key-toggle" class="copy-btn" title="Показать/скрыть ключ" aria-label="Показать/скрыть ключ"><svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="M2 10s3-5.5 8-5.5 8 5.5 8 5.5-3 5.5-8 5.5-8-5.5-8-5.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="10" cy="10" r="2.4" stroke="currentColor" stroke-width="1.6"/></svg></button></span><button id="llm-key-save" class="btn btn-small btn-primary" type="button">Сохранить ключ</button><span id="llm-key-status" class="muted small" role="status"></span></div><div class="field-hint">Хранится только на этом компьютере.</div></div><div class="field-block" id="llm-provider-base-url-row" style="display:none" data-ui="settings.llm.provider-base-url"><div class="field-title">Base URL для <span id="llm-provider-base-url-label">этого провайдера</span> <span class="field-hint">сейчас: <span id="llm-provider-base-url-preview">—</span></span></div><div class="field-hint">У Cloudflare свой account_id зашит в адрес — он в личном кабинете, справа на странице учётной записи.</div><div class="field-row-inline"><input id="llm-provider-base-url-input" type="text" placeholder="https://api.cloudflare.com/client/v4/accounts/ВАШ_ACCOUNT_ID/ai/v1" autocomplete="off" aria-label="Base URL провайдера" /><button id="llm-provider-base-url-save" class="btn btn-small" type="button">Сохранить Base URL</button><span id="llm-provider-base-url-status" class="muted small" role="status"></span></div></div></div>
+        <div id="settings-llm-costs" class="pane-group"><h4>Расходы</h4><div id="llm-exhausted-banner" class="risk-banner" style="display:none">Похоже, все настроенные провайдеры ИИ сегодня недоступны (несколько ошибок подряд, ни одного успешного вызова) — вероятно, исчерпаны бесплатные лимиты. Вакансии пока оцениваются без реальной проверки ИИ. Добавьте платный ключ или подождите до завтра.</div><div class="field-block" data-ui="settings.llm.usage"><p id="usage-summary" class="small">Загрузка…</p><p id="usage-note" class="field-hint"></p></div><details class="pane-more"><summary>Ещё настройки</summary><div class="pane-more-body"><div class="field-row" data-ui="settings.llm.alert-usd"><div class="field-text"><div class="field-title">Уведомить при расходах за день больше, $</div><div class="field-hint">Только OpenAI: у бесплатных провайдеров точной цены нет</div></div><div class="field-control"><input id="llm-alert-usd" type="number" class="num-input" min="0.01" step="0.01" placeholder="нет" aria-label="Уведомить при расходах больше" /></div></div><div class="field-row" data-ui="settings.llm.token-limit"><div class="field-text"><div class="field-title">Остановиться на день при токенах больше</div><div class="field-hint">Для любого провайдера — останавливает отклики и письма до завтра</div></div><div class="field-control"><input id="llm-token-limit" type="number" class="num-input" min="1" step="1000" placeholder="нет" aria-label="Остановиться при токенах больше" /></div></div></div></details></div>
       </div>
-
-      <div class="panel settings-pane" id="settings-limits" role="tabpanel" aria-labelledby="settings-limits-tab">
-        <h3>Как отвечать и лимиты</h3>
-
-        <h4>Как оцениваем и отвечаем</h4>
-        <div class="limits-grid">
-          <label class="limit-field">
-            <span>Строгость подбора — не понимаете, что значат баллы ниже? Выберите вариант, числа проставятся сами</span>
-            <select id="limit-fit-preset">
-              <option value="">— выбрать —</option>
-              <option value="soft">🙂 Мягко — брать почти всё, даже слабое совпадение</option>
-              <option value="standard">⚖️ Сбалансированно — пропускать только явно не подходящее</option>
-              <option value="strict">🎯 Строго — только сильное совпадение по опыту/навыкам/зарплате</option>
-            </select>
-          </label>
-          <label class="limit-field">
-            <span title="Только отклики на площадках (HH и т.п.) — не влияет на email-рассылку и Telegram-парсер, у них свой стиль в своих настройках">Стиль сопроводительного письма на площадках</span>
-            <select id="limit-cover-letter-style">
-              <option value="memorable">Запоминающийся (высокая конверсия на приглашения)</option>
-              <option value="neutral">Нейтральный (средняя конверсия на приглашения)</option>
-              <option value="classic">Классический (чуть ниже средней конверсии)</option>
-            </select>
-          </label>
-          <label class="limit-field">
-            <span>Порог отсева — балл фита ниже (0-10), при котором вакансия пропускается без письма</span>
-            <input id="limit-min-score" type="number" min="0" max="10" step="0.5" />
-          </label>
-          <label class="limit-field">
-            <span>Порог уверенного фита (0-10) — между этим и порогом отсева отклик уходит, но помечается как слабый</span>
-            <input id="limit-suitability-score" type="number" min="0" max="10" step="0.5" />
-          </label>
-        </div>
-
-        <h4>Лимиты в день</h4>
-        <div class="risk-banner">
-          ⚠️ Официальных цифр лимитов не публикует ни одна площадка — заданные здесь значения только уменьшают риск, но не гарантируют, что бота не заметят. Чем выше лимиты и чем ближе они к количеству найденных вакансий, тем больше активность похожа на бота. Повышайте постепенно, начните с малого. LinkedIn блокирует автоматизацию агрессивнее остальных — держите его лимит ниже.
-          <br /><br />
-          <strong>Ориентир для старта</strong>: HH и остальные — 15/день, LinkedIn — 8/день, не больше 5 откликов за один прогон, интервал между прогонами — от 3ч. Поднимайте эти числа только если несколько дней подряд не видите капчи/блокировок.
-        </div>
-        <div class="limits-grid">
-          <label class="limit-field">
-            <span>Общий дневной лимит — все площадки вместе (пусто — выключено)</span>
-            <input id="limit-total" type="number" min="1" placeholder="напр. 20" />
-          </label>
-          <label class="limit-field">
-            <span>Дневной лимит по умолчанию — HH и остальные</span>
-            <input id="limit-daily" type="number" min="1" />
-          </label>
-          <label class="limit-field">
-            <span>Дневной лимит по умолчанию — LinkedIn</span>
-            <input id="limit-linkedin" type="number" min="1" />
-          </label>
-          <label class="limit-field">
-            <span title="Максимум откликов за один заход площадки, не за день — защита от всплеска, чтобы дневная квота набиралась за несколько запусков по расписанию, а не за один">Максимум за один заход по умолчанию (не дневной лимит)</span>
-            <input id="limit-per-run" type="number" min="1" />
-          </label>
-        </div>
-        <p class="muted small">Общий лимит — сколько откликов в день максимум по всем площадкам вместе. Своё число для отдельной площадки — галочкой «своё значение» в таблице ниже.</p>
-        <div id="total-budget-info" class="limit-bar-info"></div>
-
-        <h4>Реже нужно</h4>
-        <div class="limits-grid">
-          <label class="limit-field" style="justify-content:flex-end">
-            <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="switch" id="limit-continuous-cycle" /> Постоянный цикл вместо расписания</span>
-          </label>
-          <label class="limit-field">
-            <span title="Пока включён постоянный цикл, свой интервал каждой площадки (в её ⚙ Настроить) не действует — все идут по общему кругу с этой паузой между переключением">Пауза между площадками в цикле, минут</span>
-            <input id="limit-continuous-gap" type="number" min="1" style="width:100px" />
-          </label>
-          <label class="limit-field">
-            <span title="Записи об откликах старше выбранного срока удаляются безвозвратно при следующей плановой проверке — вместе с ними теряется и защита от повторного отклика на ту же вакансию">Хранить историю откликов</span>
-            <select id="limit-history-retention">
-              <option value="0">Бессрочно</option>
-              <option value="1">1 день</option>
-              <option value="7">Неделю</option>
-              <option value="30">Месяц</option>
-              <option value="365">Год</option>
-            </select>
-          </label>
-        </div>
-
-        <h4>Расходы на ИИ</h4>
-        <div id="llm-exhausted-banner" class="risk-banner" style="display:none">
-          ⚠️ Похоже, все настроенные провайдеры ИИ сегодня недоступны (несколько ошибок подряд, ни одного успешного вызова) — вероятно, исчерпаны бесплатные лимиты. Вакансии пока оцениваются с fallback, без реальной LLM-проверки. Добавьте платный ключ или подождите до завтра (лимиты бесплатных провайдеров обычно сбрасываются раз в сутки).
-        </div>
-        <p id="usage-summary" class="muted small">Загрузка…</p>
-        <p id="usage-note" class="muted small"></p>
-        <label class="limit-field" style="max-width:320px">
-          <span title="Работает только для OpenAI — для бесплатных провайдеров (Groq, Gemini, OpenRouter и т.п.) точная цена в $ неизвестна никому, кроме них самих">Уведомить, если расходы на ИИ за день превысят ($, только OpenAI)</span>
-          <input id="llm-alert-usd" type="number" min="0.01" step="0.01" placeholder="не задано" />
-        </label>
-        <label class="limit-field" style="max-width:320px">
-          <span title="Считается для любого провайдера — в отличие от $-уведомления выше, реально останавливает бота на сегодня (отклики и письма), а не только предупреждает">Остановиться на день при токенах ИИ больше</span>
-          <input id="llm-token-limit" type="number" min="1" step="1000" placeholder="не задано" />
-        </label>
-
-        <div class="filters">
-          <button id="limits-save" class="btn btn-primary">Сохранить</button>
-          <span id="limits-status" class="muted small"></span>
-        </div>
-
-        <h4>Частота откликов — готовые режимы</h4>
-        <p class="muted small">Это про риск капчи/блокировки (сколько и как часто), а не про качество подбора — качество настраивается в «Строгость подбора» выше.</p>
-        <div class="filters">
-          <button id="limits-distribute" class="btn btn-secondary" title="Раскидывает общий дневной лимит по площадкам в расписании случайными долями (LinkedIn — меньше остальных)">🎲 Распределить по площадкам</button>
-          <button id="limits-preset-cautious" class="btn btn-ghost" title="HH и остальные — 8/день, LinkedIn — 4/день, 3 за заход, интервал 4ч. Также снимает «своё значение» со всех площадок в таблице ниже. Расписание (какие площадки включены) не трогает — включённые останутся включены, выключенные не запустятся сами.">🐢 Осторожно</button>
-          <button id="limits-preset-standard" class="btn btn-ghost" title="HH и остальные — 15/день, LinkedIn — 8/день, 5 за заход, интервал 3ч. Также снимает «своё значение» со всех площадок в таблице ниже. Расписание (какие площадки включены) не трогает — включённые останутся включены, выключенные не запустятся сами.">⚖️ Стандартно</button>
-          <button id="limits-preset-aggressive" class="btn btn-ghost" title="HH и остальные — 25/день, LinkedIn — 12/день, 8 за заход, интервал 2ч. Выше риск капчи/блокировки. Также снимает «своё значение» со всех площадок в таблице ниже. Расписание (какие площадки включены) не трогает — включённые останутся включены, выключенные не запустятся сами.">🚀 Агрессивно</button>
-        </div>
+      <div class="settings-pane card" id="settings-notifications" role="tabpanel" aria-labelledby="settings-notifications-tab">
+        <div class="pane-head"><div><h3>Уведомления</h3><p class="pane-lead">Ваш личный бот в Telegram: вакансии из парсера с кнопками, ответы работодателей, черновики на подтверждение, утренняя сводка и предупреждения. Пишет только вам — HR его не видят.</p></div></div>
+        <div class="pane-group"><h4>Что присылать</h4><div class="field-row" data-ui="settings.notify.kinds"><div class="field-text"><div class="field-title">Отклики и ответы HR</div><div class="field-hint">Что отправлено, кто ответил, приглашения</div></div><div class="field-control"><input id="notify-activity" type="checkbox" class="switch" aria-label="Отклики и ответы HR" checked/></div></div><div class="field-row"><div class="field-text"><div class="field-title">Сбои и блокировки</div><div class="field-hint">Капча, пауза площадки, нехватка места</div></div><div class="field-control"><input id="notify-failures" type="checkbox" class="switch" aria-label="Сбои и блокировки" checked/></div></div><div class="field-row" data-ui="settings.digest"><div class="field-text"><div class="field-title">Утренняя сводка</div><div class="field-hint">Что нашлось, кто ответил, что ждёт вас</div></div><div class="field-control"><input id="outreach-digest" type="checkbox" class="switch" aria-label="Утренняя сводка" /> в <input id="outreach-digest-hour" type="number" class="num-input" min="0" max="23" aria-label="Час сводки" /> ч</div></div><div class="field-row" data-ui="settings.quiet"><div class="field-text"><div class="field-title">Тихий режим</div><div class="field-hint">Несрочное (итоги ходов, лимиты) — только в утренней сводке. Ответы HR, интервью, капча и черновики приходят сразу</div></div><div class="field-control"><input id="digest-quiet" type="checkbox" class="switch" aria-label="Тихий режим" /></div></div><details class="pane-more"><summary>Ещё настройки</summary><div class="pane-more-body"><div class="field-block" data-ui="settings.bot.commands"><div class="field-title">Команды боту</div><p class="field-hint"><code>/status</code> — что происходит сейчас; <code>/pause hh</code> — поставить площадку на паузу; <code>/resume hh</code> — продолжить (например, после капчи).</p></div></div></details></div>
+        <div class="pane-group"><h4>Бот</h4><div class="field-block" data-ui="settings.bot.token"><div class="field-title">Токен от @BotFather</div><div class="field-row-inline" id="telegram-connect-row"><span class="secret-field"><input type="password" id="telegram-bot-token" placeholder="Токен бота от @BotFather (/newbot)" autocomplete="off" aria-label="Токен бота" /><button type="button" id="telegram-bot-token-toggle" class="copy-btn" title="Показать/скрыть токен" aria-label="Показать/скрыть токен"><svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="M2 10s3-5.5 8-5.5 8 5.5 8 5.5-3 5.5-8 5.5-8-5.5-8-5.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="10" cy="10" r="2.4" stroke="currentColor" stroke-width="1.6"/></svg></button></span><button id="telegram-connect-btn" class="btn btn-small btn-primary" type="button">Подключить</button></div><p class="field-hint" id="telegram-connect-status"></p><details class="inline-help"><summary>Ещё нет бота?</summary><ol><li>В Telegram напишите <strong>@BotFather</strong>, отправьте <code>/newbot</code>, задайте имя — в ответ придёт токен.</li><li>Вставьте токен в поле и нажмите «Подключить» — откроется чат с ботом, нажмите там <code>Start</code>, дальше всё подхватится само.</li></ol></details></div><div class="field-row" data-ui="settings.bot.test"><div class="field-text"><div class="field-title">Проверка</div><div class="field-hint">Тестовое уведомление в бота</div></div><div class="field-control"><button id="notif-test" class="btn btn-small" type="button">Отправить тест</button><span id="notif-test-status" class="muted small" role="status"></span></div></div><details class="pane-more"><summary>Ещё настройки</summary><div class="pane-more-body"><div class="field-block" data-ui="settings.bot.group"><div class="field-title">Темы по площадкам</div><div class="field-hint">Отдельная тема на каждую площадку внутри группы. Нужна группа с включёнными «Темами»: кнопка сама добавит в неё бота, а включить «Темы» и сделать бота админом с правом «Управление темами» нужно руками.</div><div class="field-row-inline"><button id="telegram-connect-group-btn" class="btn btn-small" type="button">Подключить группу для тем</button></div><p class="field-hint" id="telegram-connect-group-status"></p></div></div></details></div>
       </div>
-
-      <div class="panel settings-pane" id="settings-notifications" role="tabpanel" aria-labelledby="settings-notifications-tab">
-        <h3>📣 Уведомления в Telegram</h3>
-        <p class="muted small">
-          Ваш личный бот — через него CrossJob общается с вами: присылает вакансии из Telegram-парсера
-          с кнопками ответа, ответы работодателей, черновики на подтверждение, утреннюю сводку и
-          предупреждения (капча, лимиты). Пишет он только вам — HR его не видят.
-        </p>
-        <div class="filters" id="telegram-connect-row">
-          <span class="flex-grow-field" style="position:relative;display:block">
-            <input type="password" id="telegram-bot-token" placeholder="Токен бота от @BotFather (/newbot)" autocomplete="off" style="width:100%;padding-right:34px" />
-            <button type="button" id="telegram-bot-token-toggle" class="copy-btn" style="position:absolute;right:6px;top:50%;transform:translateY(-50%)" title="Показать/скрыть токен" aria-label="Показать/скрыть токен">
-              <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="M2 10s3-5.5 8-5.5 8 5.5 8 5.5-3 5.5-8 5.5-8-5.5-8-5.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="10" cy="10" r="2.4" stroke="currentColor" stroke-width="1.6"/></svg>
-            </button>
-          </span>
-          <button id="telegram-connect-btn" class="btn btn-primary">Подключить</button>
-        </div>
-        <p class="muted small" id="telegram-connect-status"></p>
-        <details class="muted small">
-          <summary>Ещё нет бота?</summary>
-          <ol>
-            <li>В Telegram напишите <strong>@BotFather</strong>, отправьте <code>/newbot</code>,
-              задайте имя — в ответ придёт токен.</li>
-            <li>Вставьте токен в поле выше и нажмите "Подключить" — откроется чат с ботом,
-              нажмите там <code>Start</code>, дальше всё подхватится само (chat_id
-              и приветственное сообщение).</li>
-          </ol>
-        </details>
-        <h4>Темы по площадкам (опционально)</h4>
-        <p class="muted small">
-          Вместо одной сплошной ленты — отдельная тема на каждую площадку/раздел (Avito, HeadHunter,
-          Ошибки, Ответы HR и т.д.) внутри группы. Нужна группа Telegram с включёнными «Темами» — эта
-          кнопка сама добавит в неё бота (нативный выбор группы Telegram), два шага всё равно только
-          руками: включить «Темы» в настройках группы и сделать бота админом с правом «Управление
-          темами».
-        </p>
-        <div class="filters">
-          <button id="telegram-connect-group-btn" class="btn btn-secondary">Подключить группу для тем</button>
-        </div>
-        <p class="muted small" id="telegram-connect-group-status"></p>
-        <div class="filters">
-          <button id="notif-test" class="btn btn-secondary">
-            <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="M17.5 2.5 2 8.8l5 2 1.7 5.7 3-3.6 3.9 3.1 1.9-13.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-            Тестовое уведомление
-          </button>
-          <span id="notif-test-status" class="muted small"></span>
-        </div>
-        <h4>Утренняя сводка</h4>
-        <div class="filters">
-          <label class="checkbox-row"><input id="outreach-digest" type="checkbox" class="switch" /> Каждое утро в</label>
-          <input id="outreach-digest-hour" type="number" min="0" max="23" style="width:70px" aria-label="Час сводки" /> <span class="muted small">часов — что нашлось, кто ответил, что ждёт вас</span>
-        </div>
-        <label class="checkbox-row"><input id="digest-quiet" type="checkbox" class="switch" /> 🔕 Тихий режим — несрочное (итоги прогонов, лимиты, «анкета отправлена») только в утренней сводке. Ответы HR, интервью, капча и черновики приходят сразу.</label>
-        <details class="muted small">
-          <summary>Команды боту</summary>
-          <p>Напишите боту: <code>/status</code> — что происходит сейчас; <code>/pause hh</code> — поставить площадку на паузу; <code>/resume hh</code> — продолжить (например, после капчи).</p>
-        </details>
+      <div class="settings-pane card" id="settings-look" role="tabpanel" aria-labelledby="settings-look-tab">
+        <div class="pane-head"><div><h3>Вид</h3><p class="pane-lead">Как выглядит приложение. Хранится в этом окне, на работу бота не влияет.</p></div></div>
+        <div class="field-row" data-ui="shell.theme"><div class="field-text"><div class="field-title">Тема</div></div><div class="field-control"><select id="look-theme" aria-label="Тема"><option value="system">Как в системе</option><option value="dark">Тёмная</option><option value="light">Светлая</option></select></div></div>
+        <div class="field-row" data-ui="settings.look.density"><div class="field-text"><div class="field-title">Плотность</div><div class="field-hint">Сколько строк помещается на экране</div></div><div class="field-control"><select id="look-density" aria-label="Плотность"><option value="comfortable">Обычная</option><option value="compact">Компактная</option></select></div></div>
+        <div class="field-row" data-ui="settings.look.motion"><div class="field-text"><div class="field-title">Анимации</div><div class="field-hint">«Выключить» — то же, что «уменьшить движение» в системе</div></div><div class="field-control"><select id="look-motion" aria-label="Анимации"><option value="system">Как в системе</option><option value="reduce">Выключить</option></select></div></div>
       </div>
-
-      <div class="panel settings-pane" id="settings-autostart" role="tabpanel" aria-labelledby="settings-autostart-tab">
-        <h3>Автозапуск</h3>
-        <p class="muted small">
-          Запускать приложение (и бота внутри него) автоматически при входе в систему —
-          не нужно вручную открывать CrossJob-AI после перезагрузки. macOS — LaunchAgent,
-          Windows — автозапуск через реестр.
-        </p>
-        <div class="filters">
-          <label class="limit-field" style="flex-direction:row;align-items:center;gap:8px">
-            <input id="autostart-toggle" type="checkbox" class="switch" disabled />
-            <span>Запускать при входе в систему</span>
-          </label>
-        </div>
-        <p class="muted small" id="autostart-status"></p>
-        <hr />
-        <p class="muted small">
-          Бот в фоне — работает, даже когда окно закрыто
-          (launchd на macOS, Task Scheduler на Windows), с автоперезапуском
-          при падении. Не включайте одновременно с кнопкой "Запустить" в
-          шапке окна — получится два планировщика разом на одних и тех же
-          Chrome-профилях площадок.
-        </p>
-        <div class="filters">
-          <label class="limit-field" style="flex-direction:row;align-items:center;gap:8px">
-            <input id="daemon-service-toggle" type="checkbox" class="switch" disabled />
-            <span>Держать бота в фоне, даже когда окно закрыто</span>
-          </label>
-        </div>
-        <p class="muted small" id="daemon-service-status"></p>
+      <div class="settings-pane card" id="settings-autostart" role="tabpanel" aria-labelledby="settings-autostart-tab">
+        <div class="pane-head"><div><h3>Автозапуск</h3><p class="pane-lead">Запуск вместе с компьютером</p></div></div>
+        <div class="field-row" data-ui="settings.autostart"><div class="field-text"><div class="field-title">Открывать при входе в систему</div><div class="field-hint">macOS — LaunchAgent, Windows — автозапуск через реестр. <span id="autostart-status"></span></div></div><div class="field-control"><input id="autostart-toggle" type="checkbox" class="switch" aria-label="Запускать при входе в систему" disabled/></div></div>
+        <div class="field-row" data-ui="settings.daemon-service"><div class="field-text"><div class="field-title">Держать бота в фоне без окна</div><div class="field-hint">С автоперезапуском (launchd на macOS, Task Scheduler на Windows). Не включайте вместе с кнопкой «Запустить» в окне — получится два планировщика на одних Chrome-профилях. <span id="daemon-service-status"></span></div></div><div class="field-control"><input id="daemon-service-toggle" type="checkbox" class="switch" aria-label="Держать бота в фоне, даже когда окно закрыто" disabled/></div></div>
       </div>
-
-      <div class="panel settings-pane" id="settings-backups" role="tabpanel" aria-labelledby="settings-backups-tab">
-        <h3>Резервные копии</h3>
-        <p class="muted small">
-          Раз в день сама сохраняется копия базы компаний, рассылок, откликов, переписки и черновиков —
-          на случай, если что-то испортилось или удалилось по ошибке. Хранятся 7 дней.
-          Восстановление делает свой снимок текущего состояния перед тем, как что-то менять.
-        </p>
-        <div id="backups-list"></div>
+      <div class="settings-pane card" id="settings-backups" role="tabpanel" aria-labelledby="settings-backups-tab">
+        <div class="pane-head"><div><h3>Резервные копии</h3><p class="pane-lead">Раз в день сама сохраняется копия базы компаний, рассылок, откликов, переписки и черновиков. Хранятся 7 дней, ручные — последние 5. Восстановление сначала делает снимок текущего состояния.</p></div><button type="button" id="backup-now" class="btn btn-small" data-ui="settings.backups.now">Сделать копию сейчас</button></div>
+        <div id="backups-list" data-ui="settings.backups"></div>
       </div>
-
-      <div class="settings-pane" id="settings-table" role="tabpanel" aria-labelledby="settings-table-tab">
-        <p class="muted small">Клик по «⚙ Настроить» открывает расписание, лимиты и фильтры для площадки.</p>
-        <div class="source-grid" id="platform-cards"></div>
       </div>
-
-      <div class="panel settings-pane" id="settings-direct" role="tabpanel" aria-labelledby="settings-direct-tab">
-        <h3>🏢 Сайты компаний</h3>
-        <ul class="muted small plain-steps">
-          <li>Бот сам смотрит вакансии на сайтах компаний из списка ниже и на досках удалёнки We Work Remotely и Hacker News.</li>
-          <li>Компании с подходящими по резюме вакансиями попадают в «Базу» вместе с email HR — из текста вакансии, с сайта компании или через Hunter.</li>
-          <li>Писем бот здесь не пишет: разошлите всем новым компаниям одной кнопкой в «Рассылках» — по вашему промту, с резюме во вложении.</li>
-        </ul>
-
-        <h4>Где искать</h4>
-        <label class="checkbox-row"><input id="direct-wwr" type="checkbox" /> We Work Remotely — доска удалённых вакансий</label>
-        <label class="checkbox-row"><input id="direct-hn" type="checkbox" /> Hacker News «Who is hiring» — ежемесячная ветка с вакансиями</label>
-        <label class="checkbox-row"><input id="direct-talanto" type="checkbox" /> Talanto — вакансии и контакты HR; Telegram-каналы из них сами попадают в парсер</label>
-        <label class="checkbox-row"><input id="direct-hirify" type="checkbox" /> Hirify — вакансии из Telegram-каналов; контакты HR и каналы видны после входа в аккаунт hirify.me (scripts/hirify_login.py)</label>
-
-        <h4>Отслеживаемые компании</h4>
-        <p class="muted small">Введите адрес сайта — бот сам найдёт, где компания публикует вакансии (Greenhouse, Lever, Ashby, Workable).</p>
-        <div class="filters">
-          <input id="direct-company-website" type="text" placeholder="Сайт, например linear.app" aria-label="Сайт компании" />
-          <input id="direct-company-name" type="text" placeholder="Название (необязательно)" aria-label="Название компании" />
-          <button id="direct-company-add" class="btn btn-primary" type="button">Найти и добавить</button>
-        </div>
-        <p id="direct-company-status" class="muted small" role="status"></p>
-        <div id="direct-companies"></div>
       </div>
-
-      <div class="panel settings-pane" id="settings-tg-quick" role="tabpanel" aria-labelledby="settings-tg-quick-tab">
-        <div class="tgq-head">
-          <div>
-            <h3 class="m0">✈️ Telegram-парсер</h3>
-            <p class="muted small" style="margin:4px 0 0">Новый пост в ваших каналах с нужным словом — через секунды в вашем боте, с кнопками «Здравствуйте», «+ резюме» и «сопроводительное под вакансию».</p>
-          </div>
-          <label style="display:flex;align-items:center;gap:8px;white-space:nowrap"><input id="tgq-enabled" type="checkbox" class="switch" />Включить</label>
-        </div>
-        <div id="tgq-status" class="tgq-status" role="status"></div>
-
-        <div class="tgq-grid">
-          <section class="tgq-block" id="tg-rules-panel" data-needs-load="1">
-            <h4>0. Каналы</h4>
-            <p class="muted small">Скопируйте ссылку из Telegram и вставьте её сюда. Подойдут <code>@username</code>, <code>t.me/username</code> и полный URL; для приватного канала сначала вступите в него своим аккаунтом.</p>
-            <div class="tg-channel-composer">
-              <label class="sr-only" for="tg-channel-input">Ссылка или username Telegram-канала</label>
-              <input id="tg-channel-input" type="text" autocomplete="off" spellcheck="false" placeholder="Вставьте ссылку на канал" />
-              <button id="tg-channel-paste" type="button" class="btn btn-secondary btn-small">Вставить ссылку</button>
-              <button id="tg-channel-add" type="button" class="btn btn-primary btn-small">Добавить</button>
-            </div>
-            <p id="tg-channel-editor-status" class="muted small" role="status"></p>
-            <div id="tg-channel-list" class="tg-channel-list" role="list" aria-label="Добавленные Telegram-каналы"></div>
-            <details class="more tg-channel-bulk">
-              <summary>Вставить список каналов</summary>
-              <textarea id="tg-channels" rows="4" placeholder="some_public_job_channel&#10;https://t.me/another_channel" aria-label="Telegram-каналы, по одному на строку"></textarea>
-            </details>
-            <label class="limit-field" style="max-width:260px;margin-top:8px">
-              <span>Не старше, дней (старые вакансии обычно уже закрыты)</span>
-              <input id="tg-max-age" type="number" min="1" placeholder="7" />
-            </label>
-            <details class="more">
-              <summary>Ещё: писать всем из постов автоматически, без кнопки (рискованно)</summary>
-              <div class="limits-grid">
-                <label class="limit-field" style="justify-content:flex-end">
-                  <span style="display:flex;align-items:center;gap:8px"><input id="tg-auto-message" type="checkbox" class="switch" />Писать найденному в посте контакту первым</span>
-                </label>
-                <label class="limit-field">
-                  <span>Не больше сообщений в день</span>
-                  <input id="tg-daily-limit" type="number" min="1" placeholder="15" />
-                </label>
-                <label class="limit-field">
-                  <span>Активные часы — с</span>
-                  <input id="tg-hours-start" type="number" min="0" max="23" placeholder="9" />
-                </label>
-                <label class="limit-field">
-                  <span>Активные часы — до</span>
-                  <input id="tg-hours-end" type="number" min="0" max="23" placeholder="21" />
-                </label>
-              </div>
-              <p class="muted small">Текст сообщения — из пункта 3 «Текст „Здравствуйте“».</p>
-              <div class="risk-banner">
-                ⚠️ Это холодные сообщения незнакомым людям с вашего личного аккаунта: при слишком
-                активной рассылке Telegram может его ограничить. Надёжнее — кнопки под вакансией в боте.
-              </div>
-            </details>
-            <div class="filters">
-              <button id="tg-settings-save" class="btn btn-primary">Сохранить</button>
-              <span id="tg-settings-status" class="muted small"></span>
-            </div>
-          </section>
-
-          <section class="tgq-block">
-            <h4>1. Что искать</h4>
-            <label class="limit-field">
-              <span>Ключевые слова — хватит одного совпадения</span>
-              <textarea id="tgq-keywords" rows="2"></textarea>
-            </label>
-            <p class="muted small" id="tgq-keywords-hint"></p>
-            <label class="limit-field">
-              <span>Стоп-слова — такие посты не присылать</span>
-              <textarea id="tgq-stop" rows="2"></textarea>
-            </label>
-            <p class="muted small">Здесь — только ваши дополнительные. Плюс всегда включены встроенные — отсеивают посты кандидатов (резюме), а не вакансий, их нельзя выключить:</p>
-            <p class="muted small" id="tgq-builtin-stop"></p>
-            <label class="limit-field">
-              <span>Досмотреть историю нового канала за последние дни (вакансия могла появиться до того, как вы его добавили, и всё ещё быть открыта) — 0 отключает</span>
-              <input id="tgq-backfill-days" class="num-input" type="number" min="0" max="60" style="width:80px" />
-            </label>
-          </section>
-
-          <section class="tgq-block">
-            <h4>2. Резюме для кнопки «+ 📎»</h4>
-            <p class="muted small">Какие резюме прикладывать — в <a href="#" data-goto-view="resume">«Мои резюме»</a>: каждое дополнительное резюме становится своей кнопкой.</p>
-            <p class="small" id="tgq-resume-route"></p>
-          </section>
-
-          <section class="tgq-block">
-            <h4>3. Текст «Здравствуйте»</h4>
-            <label class="checkbox-row"><input id="tgq-smart-greeting" type="checkbox" class="switch" /> Писать умно через ИИ, под конкретную вакансию — шаблон ниже остаётся резервным, если ИИ недоступен</label>
-            <label class="checkbox-row"><input id="tgq-llm-vacancy-filter" type="checkbox" class="switch" /> Доп. проверка через ИИ: «это вакансия?» — после стоп-слов, только для уже совпавших постов</label>
-            <label class="limit-field">
-              <span>Уходит HR по кнопке 👋, когда ИИ выключен или недоступен. <code>{role}</code> — название вакансии, <code>{link}</code> — ссылка на пост</span>
-              <textarea id="tgq-greeting" rows="3"></textarea>
-            </label>
-            <p class="muted small">Пример: <span id="tgq-greeting-preview"></span></p>
-          </section>
-
-          <section class="tgq-block">
-            <h4>4а. Автоотправка (имитация живого человека)</h4>
-            <label class="checkbox-row"><input id="tgq-auto-message" type="checkbox" class="switch" /> Отправлять текст «Здравствуйте» рекрутёру самому, без клика по кнопке — с паузой и в рабочие часы ниже</label>
-            <div class="filters">
-              <label class="muted small">Пауза перед отправкой, минут: от <input id="tgq-delay-min" class="num-input" type="number" min="0" style="width:70px" /> до <input id="tgq-delay-max" class="num-input" type="number" min="0" style="width:70px" /></label>
-              <label class="muted small">Рабочие часы: с <input id="tgq-hours-start" class="num-input" type="number" min="0" max="23" style="width:64px" /> до <input id="tgq-hours-end" class="num-input" type="number" min="1" max="24" style="width:64px" /></label>
-              <label class="muted small">Сообщений в день, не больше <input id="tgq-daily-limit" class="num-input" type="number" min="1" max="200" style="width:80px" /></label>
-            </div>
-            <p class="muted small" id="tgq-pending-status"></p>
-          </section>
-
-          <section class="tgq-block">
-            <h4>4. Куда приходят вакансии</h4>
-            <p id="tgq-bot-state" class="muted small"></p>
-            <p class="muted small">Без бота посты пересылаются в «Избранное» вашего Telegram, но без кнопок.</p>
-          </section>
-        </div>
-
-        <div class="filters">
-          <button id="tgq-save" class="btn btn-primary" type="button">Сохранить</button>
-          <span id="tgq-save-status" class="muted small" role="status"></span>
-        </div>
-      </div>
-
-      <div class="panel settings-pane" id="settings-outreach" role="tabpanel" aria-labelledby="settings-outreach-tab">
-        <h3>Контакты и письма HR</h3>
-        <p class="muted small">Как бот пишет HR напрямую. Ни одно письмо или сообщение не уходит без вашего подтверждения — черновики ждут во «Входящих» и в CrossJob-боте (кнопки «Отправить» / «Пропустить»).</p>
-        <p class="muted small">Стиль текста писем на площадках (HH и т.п.) — в <a href="#" data-goto-settings="settings-limits">«Как отвечать и лимиты»</a>. Поменять, какой файл уходит вложением — в <a href="#" data-goto-view="resume">«Мои резюме»</a>.</p>
-        <p class="small" id="outreach-resume-route"></p>
-
-        <h4>Почта Gmail</h4>
-        <p class="muted small" id="outreach-email-status"></p>
-        <div class="filters">
-          <input id="outreach-email" type="email" placeholder="you@gmail.com" aria-label="Адрес Gmail" autocomplete="off" />
-          <input id="outreach-app-password" type="password" placeholder="Пароль приложения (16 символов)" aria-label="Пароль приложения Google" autocomplete="new-password" />
-          <button id="outreach-email-test" class="btn btn-secondary" type="button">Проверить: письмо себе</button>
-        </div>
-        <details class="muted small">
-          <summary>Где взять пароль приложения?</summary>
-          <ol>
-            <li>Включите двухэтапную проверку в аккаунте Google.</li>
-            <li>Откройте <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">myaccount.google.com/apppasswords</a>, создайте пароль с любым названием.</li>
-            <li>Вставьте 16 символов в поле выше — это не пароль от почты, его можно отозвать в любой момент.</li>
-          </ol>
-        </details>
-        <div class="filters">
-          <label class="muted small">Напоминание, если HR молчит, через (дней, 0 — не напоминать) <input id="outreach-follow-up" class="num-input" type="number" min="0" max="60" style="width:80px" /></label>
-        </div>
-
-        <h4>Мои контакты для подписи писем</h4>
-        <p class="muted small">Бот сам берёт эти данные из вашего резюме (Telegram — из текста PDF, WhatsApp/телефон и LinkedIn — из разобранного резюме), поля ниже нужны, только если в резюме этого нет или вы хотите указать другое. Пусто и там, и там — просто не добавится в подпись, ничего не выдумываем.</p>
-        <div class="filters">
-          <input id="outreach-candidate-telegram" type="text" placeholder="Telegram, напр. t.me/dmitry_kaizen" aria-label="Telegram кандидата" />
-          <input id="outreach-candidate-whatsapp" type="text" placeholder="WhatsApp/телефон, напр. +79991234567" aria-label="WhatsApp или телефон кандидата" />
-          <input id="outreach-candidate-linkedin" type="text" placeholder="LinkedIn, напр. linkedin.com/in/…" aria-label="LinkedIn кандидата" />
-        </div>
-
-        <h4>🛡 Защита почты от блокировки</h4>
-        <p class="muted small">Письма уходят как у живого человека: по одному, со случайными паузами, растянутыми на весь рабочий день, иногда с перерывом подольше. Если за сутки вернулось слишком много писем (адреса не существуют), отправка сама встаёт до завтра.</p>
-        <p class="small" id="outreach-guard-status" role="status"></p>
-        <div class="filters">
-          <label class="muted small">Писем в день, не больше <input id="outreach-email-limit" class="num-input" type="number" min="1" max="300" style="width:80px" /></label>
-          <label class="muted small">Стоп после возвратов за сутки <input id="outreach-bounce-stop" class="num-input" type="number" min="1" max="30" /></label>
-          <label class="muted small">Отправлять с <input id="outreach-send-from" class="num-input" type="number" min="0" max="23" style="width:64px" /> до <input id="outreach-send-to" class="num-input" type="number" min="1" max="24" style="width:64px" /> ч</label>
-        </div>
-        <label class="checkbox-row"><input id="outreach-weekdays" type="checkbox" /> Только по будням</label>
-        <label class="checkbox-row"><input id="outreach-auto-send" type="checkbox" /> Бот отправляет новые порции писем сам, без моего просмотра — первую порцию рассылки вы всё равно смотрите; остановить — «Остановить рассылку» на Главной или «⏸ Не отправлять» в боте</label>
-        <label class="checkbox-row"><input id="outreach-warmup" type="checkbox" /> Разогрев ящика: начать с 15 писем в день и прибавлять по 5 за каждый день отправки, пока не дойдёт до лимита</label>
-        <details class="muted small">
-          <summary>Сколько писем в день безопасно?</summary>
-          <p>Обычный Gmail технически позволяет около 500 писем в день, но для писем незнакомым людям это верный путь в спам. Для рассылки по HR разумно 30–50 в день, до 80–100 — только на ящике, который уже несколько недель отправляет письма и получает ответы. Разогрев доводит до вашего лимита постепенно — не выключайте его на новом ящике.</p>
-          <p><b>Сколько возвратов терпеть?</b> Возврат — письмо на адрес, которого нет. Gmail смотрит на их долю: когда возвратов много, письма начинают уходить в спам всем, включая живых HR. Разумно держать долю возвратов ниже 3–5% от писем за день: при 20–30 письмах в день — стоп после 3, при 50 — после 3–5, при 100 — не больше 5–8. Старые списки с личными адресами HR (люди уходят из компаний) дают больше возвратов — для них лучше меньше писем в день, а не больше разрешённых возвратов.</p>
-        </details>
-
-        <h4 id="hunter-block">Hunter — поиск email HR <span class="muted small">(необязательно)</span></h4>
-        <p class="muted small">Hunter.io — сервис, который знает рабочие адреса сотрудников компаний. Бот спрашивает у него email HR, когда в вакансии с сайта компании нет контакта, и по кнопке «🔎 Найти ещё контакты» в Базе. Без ключа всё работает, но контакты ищутся только на самом сайте компании. Ключ бесплатный (небольшой лимит проверок в месяц): зарегистрируйтесь на <a href="https://hunter.io/users/sign_up" target="_blank" rel="noopener">hunter.io</a> → <a href="https://hunter.io/api-keys" target="_blank" rel="noopener">API keys</a> → скопируйте ключ сюда.</p>
-        <div class="filters">
-          <input id="outreach-hunter" type="password" placeholder="API-ключ hunter.io" aria-label="API-ключ Hunter" autocomplete="off" />
-          <span id="outreach-hunter-status" class="muted small"></span>
-        </div>
-
-        <div class="filters">
-          <button id="outreach-save" class="btn btn-primary" type="button">Сохранить</button>
-          <span id="outreach-save-status" class="muted small" role="status"></span>
-        </div>
-      </div>
-
     </section>
 
     <section id="view-logs" class="view">
-      <div class="view-header">
-        <div>
-          <h2>Логи</h2>
-          <p class="muted">Последние строки исполнения</p>
+      <header class="page-head">
+        <div class="page-title">
+          <h2>Журнал бота</h2>
+          <p class="muted">Технические подробности для разбора ошибок — последние строки исполнения</p>
         </div>
-        <div class="toolbar">
-          <select id="log-source">
+      </header>
+      <div class="jobs-filter-row">
+        <select id="log-source" aria-label="Площадка" data-ui="jobs.log.source">
             <option value="">Все источники</option>
             <option value="headhunter">HeadHunter</option>
             <option value="geekjob">geekjob.ru</option>
@@ -1299,19 +878,17 @@
             <option value="avito">Авито Работа</option>
             <option value="talanto">Talanto</option>
             <option value="hirify">Hirify</option>
-          <option value="hirify">Hirify</option>
           </select>
-          <input id="log-search" type="text" class="search-input" placeholder="Поиск по тексту…" aria-label="Поиск по тексту лога" />
-          <label class="checkbox-row"><input id="log-raw-toggle" type="checkbox" /> Без перевода (сырой лог)</label>
-        </div>
+        <input id="log-search" type="search" class="search-input" placeholder="Поиск по тексту…" aria-label="Поиск по тексту журнала" data-ui="jobs.log.search" />
+        <label class="check-chip" data-ui="jobs.log.raw"><input id="log-raw-toggle" type="checkbox" /> Без перевода (сырой журнал)</label>
       </div>
-      <pre id="log-output" class="logs"></pre>
+      <div class="card log-card"><pre id="log-output" class="logs" data-ui="jobs.log.output"></pre></div>
     </section>
   </main>
 </div>
 
-<div id="toast-container" role="status" aria-atomic="false"></div>
-<div id="sr-announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+<div id="toast-container" role="status" aria-atomic="false" data-ui="shell.toast drawer.save"></div>
+<div id="sr-announcer" class="sr-only" aria-live="polite" aria-atomic="true" data-ui="shell.sr"></div>
 
 <div id="command-overlay" class="command-overlay" style="display:none" role="dialog" aria-modal="true" aria-label="Командная палитра">
   <div class="command-palette">
@@ -1320,7 +897,7 @@
   </div>
 </div>
 
-<div id="confirm-overlay" class="command-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="confirm-message">
+<div id="confirm-overlay" data-ui="shell.confirm" class="command-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="confirm-message">
   <div class="command-palette" style="padding:18px 20px">
     <p id="confirm-message" style="margin:0 0 16px;font-size:13.5px;line-height:1.5"></p>
     <div class="tour-actions">
@@ -1330,12 +907,12 @@
   </div>
 </div>
 
-<div id="shortcuts-overlay" class="command-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
+<div id="shortcuts-overlay" data-ui="shell.shortcuts" class="command-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
   <div class="command-palette" style="padding:18px 20px">
     <h3 id="shortcuts-title" style="margin:0 0 4px">Горячие клавиши</h3>
     <div class="shortcuts-list">
       <div class="shortcuts-row"><span>Командная палитра</span><kbd>Ctrl/⌘</kbd> + <kbd>K</kbd></div>
-      <div class="shortcuts-row"><span>Переключить раздел</span><kbd>1</kbd>–<kbd>8</kbd></div>
+      <div class="shortcuts-row"><span>Переключить раздел</span><kbd>1</kbd>–<kbd>6</kbd></div>
       <div class="shortcuts-row"><span>Свернуть/развернуть меню</span><kbd>Ctrl/⌘</kbd> + <kbd>B</kbd></div>
       <div class="shortcuts-row"><span>Эта подсказка</span><kbd>?</kbd></div>
       <div class="shortcuts-row"><span>Закрыть окно</span><kbd>Esc</kbd></div>
@@ -1381,79 +958,23 @@
   </div>
 </div>
 
-<div id="resume-audit-overlay" class="command-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="resume-audit-title">
-  <div class="command-palette" style="padding:18px 20px;max-width:720px;width:92vw">
-    <h3 id="resume-audit-title" style="margin:0 0 2px">Аудит резюме под вакансию</h3>
-    <p id="resume-audit-meta" class="muted small" style="margin:0 0 14px"></p>
-    <div style="max-height:70vh;overflow-y:auto;padding-right:4px">
-
-      <div class="resume-audit-score-row">
-        <div class="resume-audit-score">
-          <span id="resume-audit-score-value" class="hero-figure">—</span>
-          <span class="muted small">/ 100</span>
-        </div>
-        <div class="resume-audit-meter-wrap">
-          <div class="meter"><div id="resume-audit-meter-fill" class="meter-fill"></div></div>
-          <span id="resume-audit-score-label" class="muted small"></span>
-        </div>
-      </div>
-
-      <div class="resume-audit-badges">
-        <span id="resume-audit-ats-badge" class="badge"></span>
-        <span id="resume-audit-bucket-badge" class="badge"></span>
-      </div>
-
-      <p id="resume-audit-comparison-note" class="muted small" style="margin:0 0 18px"></p>
-
-      <div class="resume-audit-columns">
-        <div>
-          <h4 style="margin:0 0 6px">⚠️ Тревожные сигналы</h4>
-          <ul id="resume-audit-red-flags" class="resume-audit-list"></ul>
-        </div>
-        <div>
-          <h4 style="margin:0 0 6px">🔑 Отсутствующие ключевые слова</h4>
-          <div id="resume-audit-missing-keywords" class="chip-row"></div>
-        </div>
-      </div>
-
-      <div class="resume-audit-columns" style="margin-top:16px">
-        <div>
-          <h4 style="margin:0 0 6px">✅ Сильные разделы</h4>
-          <ul id="resume-audit-strong-sections" class="resume-audit-list"></ul>
-        </div>
-        <div>
-          <h4 style="margin:0 0 6px">🔻 Слабые разделы</h4>
-          <ul id="resume-audit-weak-sections" class="resume-audit-list"></ul>
-        </div>
-      </div>
-
-      <div style="margin-top:16px">
-        <h4 style="margin:0 0 6px">🧩 Проблемы оформления для ATS</h4>
-        <ul id="resume-audit-formatting-issues" class="resume-audit-list"></ul>
-      </div>
-
-      <details style="margin-top:18px">
-        <summary style="cursor:pointer;font-weight:600;font-size:14px">📄 Переписанный раздел опыта</summary>
-        <div id="resume-audit-rewrite-body" style="white-space:pre-wrap;word-break:break-word;line-height:1.55;font-size:13.5px;margin-top:10px"></div>
-        <button type="button" class="btn btn-secondary" id="resume-audit-copy-rewrite" style="margin-top:10px">Скопировать текст</button>
-      </details>
-
-    </div>
-    <button type="button" class="btn btn-secondary" id="resume-audit-close" style="width:100%;justify-content:center;margin-top:16px">Закрыть</button>
-  </div>
-</div>
-
 <div id="platform-drawer-overlay" class="drawer-overlay" style="display:none">
-  <div class="drawer-panel" id="platform-drawer" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="platform-drawer-title">
+  <div class="drawer-panel" id="platform-drawer" data-ui="home.platform.last-run" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="platform-drawer-title">
     <div class="drawer-header">
-      <h3 id="platform-drawer-title"></h3>
-      <button type="button" class="btn btn-ghost btn-small" id="platform-drawer-close" aria-label="Закрыть">✕</button>
+      <div class="drawer-heading">
+        <h3 id="platform-drawer-title"></h3>
+        <div class="drawer-sub" id="platform-drawer-sub" hidden></div>
+      </div>
+      <button type="button" class="icon-btn" id="platform-drawer-close" aria-label="Закрыть">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg>
+      </button>
     </div>
     <div class="drawer-body" id="platform-drawer-body"></div>
+    <div class="drawer-foot" id="platform-drawer-foot" hidden></div>
   </div>
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=63"></script>
+<script src="/app.js?v=81"></script>
 </body>
 </html>

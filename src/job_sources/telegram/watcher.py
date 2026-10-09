@@ -17,6 +17,7 @@ import re
 import threading
 import time
 from collections import OrderedDict
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Coroutine, Optional, Sequence
 
@@ -33,6 +34,7 @@ from src.job_sources.telegram_notify import (
 )
 from src.logging import logger
 from src.utils.file_lock import state_file_lock
+from src.utils.pause_all import is_paused
 
 _ACTIVE: Optional["TelegramWatcher"] = None
 RECONNECT_DELAY_SECONDS = 30
@@ -343,6 +345,7 @@ class TelegramWatcher(threading.Thread):
                         self.parameters, self.llm_api_key, updates
                     )
                 self._flush_pending_sends()
+                self._deliver_night_posts()
             except Exception as e:
                 logger.warning(
                     f"Telegram-бот: не удалось прочитать обновления: {e}"
@@ -350,6 +353,8 @@ class TelegramWatcher(threading.Thread):
                 self._stopping.wait(5)
 
     def _flush_pending_sends(self) -> None:
+        if is_paused(self.output_folder):
+            return  # «Пауза на всё» — очередь ждёт, ничего не уходит
         tg_prefs = self.parameters.get("telegram") or {}
         start, end = tg_prefs.get("active_hours_start"), tg_prefs.get(
             "active_hours_end"
@@ -613,6 +618,9 @@ class TelegramWatcher(threading.Thread):
             tg_prefs.get("auto_message")
             and not unverified
             and len(telegram_contacts) == 1
+            # На паузе вакансия приходит в бот с кнопками, как без
+            # автоотправки, — не копится очередью, которая уйдёт разом.
+            and not is_paused(self.output_folder)
         ):
             from src.job_sources.apply_pacing import (
                 MAX_TELEGRAM_MESSAGE_DELAY_SECONDS,
@@ -634,6 +642,18 @@ class TelegramWatcher(threading.Thread):
                 ) = await asyncio.get_event_loop().run_in_executor(
                     None, self._auto_message_text, title, text, link
                 )
+                if tg_prefs.get("preview_before_send"):
+                    # «Показывать текст перед отправкой»: тот же текст —
+                    # черновиком в «Общение» и в бот с «Отправить».
+                    await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        self._draft_for_preview,
+                        {**post, "contacts": contacts, "unverified": False},
+                        contact_value,
+                        intro_text,
+                        resume_path,
+                    )
+                    return
                 queue_telegram_send(
                     self.output_folder,
                     contact_value,
@@ -662,11 +682,16 @@ class TelegramWatcher(threading.Thread):
             ],
             "unverified": unverified,
         }
-        # Всегда — для чата «Общение → Telegram» в приложении, даже без
-        # бота: там пост ждёт ответа с черновиком, бот — только копия.
-        await asyncio.get_event_loop().run_in_executor(
+        # Всегда — для «Общения» в приложении, даже без бота: там пост ждёт
+        # ответа с черновиком, бот — только копия.
+        post_id = await asyncio.get_event_loop().run_in_executor(
             None, save_watch_post, self.output_folder, delivered
         )
+        if self.bot is not None and night_hold(tg_prefs):
+            # «Ночные вакансии — утром»: в бот придёт в начале рабочих
+            # часов — ночью не будим. В «Общении» пост виден сразу.
+            queue_night_post(self.output_folder, post_id, matched)
+            return
         if self.bot is not None:
             # Через бота — чтобы под вакансией были кнопки быстрого ответа.
             await asyncio.get_event_loop().run_in_executor(
@@ -742,6 +767,77 @@ class TelegramWatcher(threading.Thread):
             logger.warning(
                 f"Telegram-шлюз: бот не отправил вакансию {post['link']}: {e}"
             )
+
+    def _draft_for_preview(
+        self, post: dict, contact: str, text: str, resume_path: str
+    ) -> None:
+        """Черновик автоотправки на подтверждение: в «Общение» (очередь
+        черновиков) и, если бот подключён, в бот с кнопками отправки."""
+        from main import HR_DRAFTS_FILE
+        from src.job_sources.hr_replies import DraftStore
+        from src.job_sources.resume_routing import resume_relative_name
+
+        post_id = save_watch_post(self.output_folder, post)
+        code = DraftStore(self.output_folder / HR_DRAFTS_FILE).add(
+            contact,
+            text,
+            "first",
+            post["link"],
+            russian=_looks_russian(post.get("text") or post.get("title", "")),
+            resume=resume_relative_name(
+                self.parameters, Path(resume_path) if resume_path else None
+            ),
+            post_id=post_id,
+        )
+        if self.bot is None:
+            return
+        token, chat_id = self.bot
+        send_row = [{"text": "Отправить", "callback_data": f"d:{code}:-1"}]
+        if resume_path:
+            send_row.append(
+                {
+                    "text": f"Отправить + {Path(resume_path).stem}",
+                    "callback_data": f"d:{code}:0",
+                }
+            )
+        payload = {
+            "chat_id": chat_id,
+            "text": (
+                f"Черновик для @{contact} · @{post['channel']}\n"
+                f"{post['link']}\n\n{text}"
+            )[:4000],
+            "disable_web_page_preview": True,
+            "reply_markup": {
+                "inline_keyboard": [
+                    send_row,
+                    [
+                        {"text": "Пропустить", "callback_data": f"x:{code}"},
+                        {
+                            "text": "Не писать компании",
+                            "callback_data": f"nd:{code}",
+                        },
+                    ],
+                ]
+            },
+        }
+        thread_id = get_or_create_topic(self.parameters, "Telegram-каналы")
+        if thread_id is not None:
+            payload["message_thread_id"] = thread_id
+        try:
+            bot_request(token, "sendMessage", payload)
+        except Exception as e:
+            logger.warning(f"Telegram-шлюз: черновик не ушёл в бот: {e}")
+
+    def _deliver_night_posts(self) -> None:
+        """Утром — вакансии, пришедшие ночью, одной пачкой в бот."""
+        tg_prefs = self.parameters.get("telegram") or {}
+        if self.bot is None or night_hold(tg_prefs):
+            return
+        for item in take_night_posts(self.output_folder):
+            post = get_watch_post(self.output_folder, item["post_id"])
+            if post is None:
+                continue
+            self._deliver_via_bot(post, item.get("matched") or [])
 
     def _auto_message_text(
         self, title: str, post_text: str, link: str
@@ -904,23 +1000,25 @@ def queue_telegram_send(
     delay_max_seconds: float,
     resume_path: str = "",
     post: Optional[dict] = None,
-) -> None:
+    send_at: Optional[datetime] = None,
+    draft: Optional[dict] = None,
+) -> str:
+    """В очередь отправки. send_at — точное время («Утром, в 10:00» в
+    «Общении»), иначе — через случайную паузу. draft — черновик, из
+    которого пришёл текст: при отмене он возвращается в «Общение»."""
     import json
     import random
     from datetime import datetime, timedelta
 
     path = output_folder / PENDING_SENDS_FILE
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        data = {}
-    send_after = datetime.now().astimezone() + timedelta(
+    send_after = send_at or datetime.now().astimezone() + timedelta(
         seconds=random.uniform(delay_min_seconds, delay_max_seconds)
     )
-    entry_id = hashlib.sha1(
-        f"{contact}:{job_link}".encode("utf-8")
-    ).hexdigest()[:10]
-    data[entry_id] = {
+    seed = f"{contact}:{job_link}" + (
+        f":{send_after.isoformat()}" if send_at else ""
+    )
+    entry_id = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:10]
+    entry: dict[str, Any] = {
         "contact": contact,
         "text": text,
         "job_link": job_link,
@@ -928,7 +1026,45 @@ def queue_telegram_send(
         "resume_path": resume_path,
         "post": post or {},
     }
-    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    if send_at:
+        entry["scheduled"] = True
+    if draft:
+        entry["draft"] = draft
+    with state_file_lock(path):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        data[entry_id] = entry
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return entry_id
+
+
+def pending_telegram_sends(output_folder: Path) -> dict:
+    import json
+
+    try:
+        data = json.loads(
+            (output_folder / PENDING_SENDS_FILE).read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def cancel_telegram_send(output_folder: Path, entry_id: str) -> Optional[dict]:
+    """Отменить отложенное сообщение до отправки; возвращает его."""
+    import json
+
+    path = output_folder / PENDING_SENDS_FILE
+    with state_file_lock(path):
+        data = pending_telegram_sends(output_folder)
+        entry = data.pop(entry_id, None)
+        if entry is not None:
+            path.write_text(
+                json.dumps(data, ensure_ascii=False), encoding="utf-8"
+            )
+    return entry
 
 
 def pending_telegram_sends_count(output_folder: Path) -> int:
@@ -947,7 +1083,7 @@ def flush_pending_telegram_sends(
     send_fn: Callable[[str, str], None],
     output_folder: Path,
     active_hours: tuple[int, int] | None,
-    send_file_fn: Optional[Callable[[str, str], None]] = None,
+    send_file_fn: Optional[Callable[[str, Any], Any]] = None,
     on_sent: Optional[Callable[[dict], None]] = None,
 ) -> None:
     """Отправляет то, чему пришло время, и мы в рабочих часах; остальное
@@ -964,29 +1100,41 @@ def flush_pending_telegram_sends(
     from src.job_sources.telegram_conversations import TelegramConversations
 
     path = output_folder / PENDING_SENDS_FILE
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return
-    if not data:
-        return
     now = datetime.now().astimezone()
     if active_hours is not None and not (
         active_hours[0] <= now.hour < active_hours[1]
     ):
         return  # вне рабочих часов — вся очередь ждёт следующего тика
+    # Забираем подошедшие под замком и сразу убираем из файла, отправляем
+    # уже без него: две очереди (шлюз и проверка ответов, окно и бот в
+    # фоне) не отправят одно сообщение дважды.
+    with state_file_lock(path):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if not data:
+            return
+        due_entries = {}
+        remaining = {}
+        for entry_id, entry in data.items():
+            try:
+                due = datetime.fromisoformat(entry["send_after"])
+            except (KeyError, ValueError):
+                continue
+            if now < due:
+                remaining[entry_id] = entry
+            else:
+                due_entries[entry_id] = entry
+        if not due_entries:
+            return
+        path.write_text(
+            json.dumps(remaining, ensure_ascii=False), encoding="utf-8"
+        )
     conversations = TelegramConversations(
         output_folder / "telegram_conversations.json"
     )
-    remaining = {}
-    for entry_id, entry in data.items():
-        try:
-            due = datetime.fromisoformat(entry["send_after"])
-        except (KeyError, ValueError):
-            continue
-        if now < due:
-            remaining[entry_id] = entry
-            continue
+    for entry_id, entry in due_entries.items():
         try:
             send_fn(entry["contact"], entry["text"])
             conversations.record_outbound(
@@ -1009,9 +1157,6 @@ def flush_pending_telegram_sends(
                 f"Не удалось отправить отложенное сообщение "
                 f"@{entry['contact']}: {e}"
             )
-    path.write_text(
-        json.dumps(remaining, ensure_ascii=False), encoding="utf-8"
-    )
 
 
 def remember_telegram_post_contact(
@@ -1128,7 +1273,9 @@ def save_watch_post(output_folder: Path, post: dict) -> str:
         # Поверх прежней записи: бот пересохраняет пост, уже записанный в
         # _handle_post, — статус из чата приложения и found_at не теряются.
         data[post_id] = {
-            "found_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "found_at": datetime.now()
+            .astimezone()
+            .isoformat(timespec="seconds"),
             **data.get(post_id, {}),
             **post,
         }
@@ -1181,9 +1328,9 @@ def cancel_pending_telegram_send(
     import json
 
     path = output_folder / PENDING_SENDS_FILE
-    entry_id = hashlib.sha1(f"{contact}:{job_link}".encode("utf-8")).hexdigest()[
-        :10
-    ]
+    entry_id = hashlib.sha1(
+        f"{contact}:{job_link}".encode("utf-8")
+    ).hexdigest()[:10]
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -1202,7 +1349,9 @@ def block_post_contacts(
     if post:
         # Контакты постов в Базу до отправки не попадают — «не писать»
         # единственный повод завести карточку без письма.
-        remember_telegram_post_contact(output_folder, contacts, post, sent=False)
+        remember_telegram_post_contact(
+            output_folder, contacts, post, sent=False
+        )
     book = ContactBook(output_folder)
     keys = sorted({k for c in contacts for k in book.keys_with(c["value"])})
     book.update(keys, do_not_contact=True)
@@ -1300,3 +1449,75 @@ def vacancy_keyboard(
             ]
         )
     return {"inline_keyboard": rows}
+
+
+# --- Посты в «Общении», ночные вакансии -------------------------------------
+
+NIGHT_POSTS_FILE = ".night_posts.json"
+MORNING_HOUR = 10
+# Без своих рабочих часов (Настройки → Telegram-парсер) ночь — 23:00–8:00.
+DEFAULT_NIGHT = (23, 8)
+
+
+def night_hold(tg_prefs: dict, now: Optional[datetime] = None) -> bool:
+    """«Ночные вакансии — утром» включено и сейчас ночь: вне рабочих часов
+    Telegram-парсера, а без них — с 23:00 до 8:00."""
+    from datetime import datetime
+
+    if not tg_prefs.get("night_to_morning"):
+        return False
+    hour = (now or datetime.now().astimezone()).hour
+    start, end = tg_prefs.get("active_hours_start"), tg_prefs.get(
+        "active_hours_end"
+    )
+    if start is not None and end is not None:
+        return not (int(start) <= hour < int(end))
+    return hour >= DEFAULT_NIGHT[0] or hour < DEFAULT_NIGHT[1]
+
+
+def next_morning(
+    now: Optional[datetime] = None, hour: int = MORNING_HOUR
+) -> datetime:
+    """Ближайшие 10:00: сегодня, если ещё не наступило, иначе завтра."""
+    from datetime import datetime, timedelta
+
+    now = now or datetime.now().astimezone()
+    target = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+    return target if target > now else target + timedelta(days=1)
+
+
+def _load_json_file(path: Path, default):
+    import json
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+    return data if isinstance(data, type(default)) else default
+
+
+def queue_night_post(
+    output_folder: Path, post_id: str, matched: list[str]
+) -> None:
+    import json
+
+    path = output_folder / NIGHT_POSTS_FILE
+    with state_file_lock(path):
+        items = _load_json_file(path, [])
+        if all(i.get("post_id") != post_id for i in items):
+            items.append({"post_id": post_id, "matched": matched})
+        path.write_text(json.dumps(items[-200:]), encoding="utf-8")
+
+
+def take_night_posts(output_folder: Path) -> list[dict]:
+    path = output_folder / NIGHT_POSTS_FILE
+    if not path.exists():
+        return []
+    with state_file_lock(path):
+        items = _load_json_file(path, [])
+        path.write_text("[]", encoding="utf-8")
+    return items
+
+
+def night_posts_count(output_folder: Path) -> int:
+    return len(_load_json_file(output_folder / NIGHT_POSTS_FILE, []))

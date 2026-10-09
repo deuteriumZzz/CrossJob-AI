@@ -412,6 +412,12 @@ def test_week_results_by_source(client):  # noqa: F811
         "email_campaign": 1,
     }
 
+    # Тот же журнал за 30 дней: «прошлая» запись 10-дневной давности
+    # попадает в текущий период.
+    month = client.get("/api/results?days=30").json()
+    assert month["days"] == 30
+    assert month["week"] == {"applied": 4, "replies": 3, "interviews": 1}
+
 
 def test_campaign_follow_up_in_same_thread(client, monkeypatch):  # noqa: F811
     from datetime import datetime, timedelta

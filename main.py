@@ -191,6 +191,9 @@ from src.job_sources.llm_provider import (
     set_fallback_mode as set_llm_fallback_mode,
 )
 from src.job_sources.llm_provider import (
+    set_fallback_order as set_llm_fallback_order,
+)
+from src.job_sources.llm_provider import (
     set_provider_override as set_llm_provider_override,
 )
 from src.job_sources.llm_usage import (
@@ -223,7 +226,10 @@ from src.job_sources.talanto.client import (
     company_from_apply_url,
 )
 from src.job_sources.talanto.source import TalantoSource
-from src.job_sources.telegram.client import TelegramSourceClient
+from src.job_sources.telegram.client import (
+    TelegramSourceClient,
+    TelegramStatusClient,
+)
 from src.job_sources.telegram.contact import extract_contact
 from src.job_sources.telegram.post_parser import parse_post
 from src.job_sources.telegram.source import TelegramSource
@@ -233,7 +239,9 @@ from src.job_sources.telegram.watcher import (
     _llm_check_post,
     active_watcher,
     block_post_contacts,
+    flush_pending_telegram_sends,
     get_watch_post,
+    pending_telegram_sends,
     remember_telegram_post_contact,
     save_telegram_letter,
     telegram_resumes,
@@ -249,7 +257,10 @@ from src.job_sources.telegram_notify import (
     bot_credentials,
     bot_request,
     get_or_create_topic,
+    notification_allowed,
+    notification_kind,
     notify_from_secrets,
+    record_notification,
     send_document_from_secrets,
     send_notification,
 )
@@ -275,6 +286,8 @@ from src.utils.constants import (
     WORK_PREFERENCES_YAML,
 )
 from src.utils.file_lock import state_file_lock
+from src.utils.pause_all import is_paused, set_paused
+from src.utils.vocabulary import STATUS_WORDS, platform_name, platform_state
 
 # Профиль HH нельзя открывать двумя WebDriver одновременно: Chrome оставляет
 # блокировку профиля, а второй ручной клик тогда выглядит для пользователя как
@@ -886,10 +899,40 @@ def create_cover_letter(
         raise
 
 
+def general_audit_brief(parameters: dict) -> str:
+    """«Вакансия» для общей проверки резюме без ссылки (Мои резюме →
+    «Проверить резюме»): должности и пожелания из «Что ищу», требования —
+    типичные для рынка, их знает сама модель."""
+    from src.job_sources.reply_answerer import build_preferences_summary
+
+    positions = [str(p) for p in parameters.get("positions") or [] if p]
+    levels = [
+        name
+        for key, name in (
+            ("internship", "стажировка"),
+            ("entry", "junior"),
+            ("associate", "middle"),
+            ("mid_senior_level", "senior"),
+            ("director", "руководитель"),
+            ("executive", "топ-менеджмент"),
+        )
+        if (parameters.get("experience_level") or {}).get(key)
+    ]
+    return (
+        "Общая проверка — конкретной вакансии нет. Оцени резюме как "
+        "рекрутер, который нанимает на такие позиции: "
+        f"{', '.join(positions) or 'по профилю резюме'}.\n"
+        + (f"Уровень: {', '.join(levels)}.\n" if levels else "")
+        + f"{build_preferences_summary(parameters)}\n"
+        "Требования бери типичные для этих позиций на рынке сейчас; "
+        "о конкретной компании ничего не придумывай."
+    )
+
+
 def create_resume_audit(
     parameters: dict,
     llm_api_key: str,
-    job_url: str,
+    job_url: str = "",
 ) -> dict:
     """
     Аудит резюме под конкретную вакансию (дашборд — тот же блок
@@ -900,11 +943,16 @@ def create_resume_audit(
     здесь не нужны — результат 3-шаговой LLM-цепочки из
     resume_audit.py возвращается как текст, не как файл.
     """
-    logger.info("Running resume audit against job posting: %s", job_url)
-
     plain_text_resume_file = ensure_plain_text_resume(parameters, llm_api_key)
     with open(plain_text_resume_file, "r", encoding="utf-8") as file:
         plain_text_resume = file.read()
+    if not job_url:
+        # Без ссылки — общая проверка под ваши должности, без браузера.
+        logger.info("Running general resume audit (no job posting)")
+        return run_full_resume_audit(
+            plain_text_resume, general_audit_brief(parameters), llm_api_key
+        )
+    logger.info("Running resume audit against job posting: %s", job_url)
 
     style_manager = StyleManager()
     resume_generator = ResumeGenerator()
@@ -1162,6 +1210,7 @@ def apply_llm_provider_override(parameters: dict) -> None:
     )
     set_llm_fallback_mode(llm_config.get("mode"))
     set_llm_fallback_enabled(llm_config.get("fallback_enabled"))
+    set_llm_fallback_order(llm_config.get("fallback_order"))
 
 
 def _job_min_score(parameters: dict) -> float:
@@ -4503,7 +4552,7 @@ def start_campaign_job(
                     campaign_id,
                     email,
                     status="skipped",
-                    reason="черновик удалён во «Входящих»",
+                    reason="черновик удалён в «Общении»",
                 )
                 return None
             if _emailed_directly(book, email):
@@ -4756,8 +4805,10 @@ def check_campaign_sending(parameters: dict, llm_api_key: str) -> None:
     """Раз в 5 минут, пока открыт дашборд (не зависит от «▶ Запустить»):
     следующая порция писем (раз в день) и продолжение начатых рассылок,
     когда снова можно — время отправки, лимит, нет волны возвратов."""
-    _prepare_campaign_batches(parameters, llm_api_key)
     output_folder: Path = parameters["outputFileDirectory"]
+    if is_paused(output_folder):
+        return  # «Пауза на всё»: ни новых порций, ни отправки
+    _prepare_campaign_batches(parameters, llm_api_key)
     if not mail_guard.plan(parameters, output_folder)["can_send"]:
         return
     for cid, campaign in CampaignStore(output_folder).all().items():
@@ -4775,6 +4826,18 @@ def check_campaign_sending(parameters: dict, llm_api_key: str) -> None:
             )
             start_campaign_job(parameters, llm_api_key, cid, "send", resume)
             return  # по одной рассылке за раз — лимит общий
+
+
+def stop_campaign_sending(output_folder: Path) -> int:
+    """«Пауза на всё»: идущие отправки писем останавливаются после текущего
+    письма. Рассылки остаются «в отправке» и продолжат сами, когда пауза
+    снята (check_campaign_sending). Возвращает, сколько остановили."""
+    stopped = 0
+    for job in list(CampaignJob.RUNNING.values()):
+        if job.kind in ("send", "followups") and job.is_alive():
+            job.stop()
+            stopped += 1
+    return stopped
 
 
 def _prepare_campaign_batches(parameters: dict, llm_api_key: str) -> None:
@@ -5377,6 +5440,11 @@ def notify_routine(
     if not (parameters.get("digest") or {}).get("quiet"):
         notify(parameters, text, category)
         return
+    kind = notification_kind(text, category)
+    if not notification_allowed(parameters, kind):
+        record_notification(parameters, text, category, kind, "muted")
+        return
+    record_notification(parameters, text, category, kind, "digest")
     path = Path(parameters["outputFileDirectory"]) / QUIET_QUEUE_FILE
     with state_file_lock(path):
         try:
@@ -6202,6 +6270,7 @@ def _send_missing_cover_letters(
             wait_before_apply()
         tried += 1
         if not letter:
+            assert generate is not None  # пустое письмо без генератора — выше
             try:
                 letter = generate(entry)
             except Exception as e:
@@ -6282,22 +6351,30 @@ def _sync_headhunter_negotiation_states(
 
 
 def _format_telegram_status(parameters: dict, applied_log: AppliedLog) -> str:
+    """/status в боте — теми же словами, что площадки на Главной: название
+    площадки и статус (работает, пауза, нужен вход, ошибка)."""
     output_folder: Path = parameters["outputFileDirectory"]
     state = load_state(output_folder)
-    lines = [
-        f"Всего откликов сегодня: {applied_log.applied_today_count_all()}"
-    ]
+    lines = []
+    if is_paused(output_folder):
+        lines.append("Пауза на всё — снять: /resume all")
+    lines.append(f"Откликов сегодня: {applied_log.applied_today_count_all()}")
     for name, _ in ALL_SOURCES:
         source_config = parameters.get(name) or {}
         if not source_config.get("schedule_enabled"):
             continue
         info = state.get(name) or {}
-        status = info.get("status")
-        dot = "🟢" if status == "ok" else "🔴" if status == "error" else "⚪"
+        word = STATUS_WORDS[
+            platform_state(
+                info.get("status"),
+                is_still_blocked(output_folder, name),
+                info.get("last_error"),
+            )
+        ]
         count = applied_log.applied_today_count(name)
         limit = _daily_limit(parameters, name)
-        line = f"{dot} {name}: {count}/{limit}"
-        if info.get("last_error"):
+        line = f"{platform_name(name)}: {word} · {count} из {limit}"
+        if word != STATUS_WORDS["ok"] and info.get("last_error"):
             line += f" — {info['last_error'].splitlines()[0][:80]}"
         lines.append(line)
     return "\n".join(lines)
@@ -6405,6 +6482,21 @@ def _run_control_commands(
                 bot_token,
                 chat_id,
                 _format_telegram_status(parameters, applied_log),
+            )
+        elif action in ("pause", "resume") and cmd["source"] == "all":
+            # /pause all — то же, что «Пауза на всё» на Главной.
+            set_paused(output_folder, action == "pause")
+            if action == "pause":
+                stop_campaign_sending(output_folder)
+            send_notification(
+                bot_token,
+                chat_id,
+                (
+                    "Всё на паузе: отклики, рассылка и переписка стоят. "
+                    "Снять — /resume all."
+                    if action == "pause"
+                    else "Пауза снята — бот продолжает."
+                ),
             )
         elif action in ("pause", "resume"):
             source = cmd["source"]
@@ -6548,6 +6640,7 @@ def check_telegram_replies(parameters: dict, llm_api_key: str) -> None:
     где есть чат с явной кнопкой "ответить" на площадке — здесь это
     личный диалог самого пользователя, автоматически отвечать в него
     от его имени не тот случай)."""
+    flush_telegram_scheduled(parameters)
     if active_watcher() is not None:
         return  # ответы HR шлюз ловит сам, в момент прихода
     secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
@@ -6590,6 +6683,60 @@ def check_telegram_replies(parameters: dict, llm_api_key: str) -> None:
 
 
 HR_DRAFTS_FILE = ".hr_reply_drafts.json"
+
+
+def flush_telegram_scheduled(parameters: dict) -> None:
+    """Отложенные сообщения Telegram («Утром, в 10:00» из «Общения»,
+    автоотправка), когда шлюза нет: он, если работает, отправляет их сам.
+    Зовётся из проверки ответов Telegram и из тикера окна."""
+    output_folder: Path = parameters["outputFileDirectory"]
+    if active_watcher() is not None or is_paused(output_folder):
+        return
+    now = datetime.now().astimezone()
+
+    def due(entry: dict) -> bool:
+        try:
+            return datetime.fromisoformat(entry["send_after"]) <= now
+        except (KeyError, ValueError):
+            return True
+
+    if not any(due(e) for e in pending_telegram_sends(output_folder).values()):
+        return
+    tg = (
+        ConfigValidator.load_yaml(parameters["secretsFile"]).get("telegram")
+        or {}
+    )
+    if not tg.get("api_id") or not tg.get("api_hash"):
+        return
+    # Без входа в Telegram (вышли кнопкой «Отключить») свежий клиент спросил
+    # бы номер в консоли и подвесил поток — сначала проверка без вопросов.
+    try:
+        with TelegramStatusClient(
+            int(tg["api_id"]),
+            tg["api_hash"],
+            output_folder / ".telegram_session",
+        ) as status_client:
+            if not status_client.is_authorized():
+                return
+    except Exception as e:
+        logger.warning(f"Отложенные сообщения Telegram ждут: {e}")
+        return
+    tg_prefs = parameters.get("telegram") or {}
+    start, end = tg_prefs.get("active_hours_start"), tg_prefs.get(
+        "active_hours_end"
+    )
+    with _telegram_client(parameters) as client:
+        flush_pending_telegram_sends(
+            client.send_message,
+            output_folder,
+            (start, end) if start is not None and end is not None else None,
+            send_file_fn=client.send_file,
+            on_sent=lambda entry: remember_telegram_post_contact(
+                output_folder,
+                [{"kind": "telegram", "value": entry["contact"]}],
+                entry.get("post") or {"link": entry.get("job_link", "")},
+            ),
+        )
 
 
 def _telegram_client(parameters: dict) -> TelegramSourceClient:
@@ -6946,7 +7093,8 @@ def _handle_vacancy_button(
                     "sendMessage",
                     {
                         "chat_id": message["chat"]["id"],
-                        "text": "Остальные — в дашборде: Компании → Рассылки.",
+                        "text": "Остальные — в окне приложения: "
+                        "Компании → Рассылка.",
                     },
                 )
                 break
@@ -7121,7 +7269,8 @@ def prepare_interview(parameters: dict, llm_api_key: str, entry: dict) -> str:
         f"🎯 Подготовка к интервью: {entry.get('company')} — "
         f"{entry.get('title')}\n\n{prep[:1500]}"
         + (
-            "\n\n…полностью — в «Истории» в дашборде."
+            "\n\n…полностью — в окне приложения: Вакансии → шторка "
+            "вакансии → «Подготовка»."
             if len(prep) > 1500
             else ""
         ),
@@ -7366,6 +7515,7 @@ def _maybe_send_daily_digest(
         return
     queue_path.unlink(missing_ok=True)
     state_path.write_text(json.dumps({"last_sent": today}), encoding="utf-8")
+    record_notification(parameters, text, "Сводка", "activity", "sent")
 
 
 # ponytail: check_*_replies не входят в ALL_SOURCES (это не

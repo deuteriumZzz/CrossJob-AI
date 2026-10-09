@@ -123,6 +123,11 @@ class AppliedLog:
             entry.get("gaps") or []
         ):
             return True  # оценку не получили (сбой ИИ) — оценим заново
+        if entry.get("apply_anyway") and entry.get("status") not in (
+            "applied",
+            "dry_run",
+        ):
+            return True  # «Откликнуться всё равно» — пройдём ещё раз
         if entry.get("status") != "skipped_easy_apply_failed":
             return False
         if entry.get("retry_count", 1) >= EASY_APPLY_MAX_ATTEMPTS:
@@ -394,6 +399,85 @@ class AppliedLog:
         self._write_locked(_mutate)
         return found
 
+    def _latest(self, data: dict, source: str, external_id: str):
+        matches = [
+            e
+            for e in data["applications"]
+            if e["source"] == source and e["external_id"] == external_id
+        ]
+        return matches[-1] if matches else None
+
+    def set_feedback(
+        self,
+        source: str,
+        external_id: str,
+        verdict: str | None,
+        reason: str = "",
+    ) -> dict | None:
+        """«Это была ошибка» (Вакансии → шторка вакансии): verdict
+        "should_apply" — бот пропустил зря, "should_skip" — откликнулся
+        зря; None снимает пометку. Пометки уходят в оценку следующих
+        вакансий (job_fit.score_job_fit). None — такой заявки нет."""
+        result: dict | None = None
+
+        def _mutate(data: dict) -> None:
+            nonlocal result
+            entry = self._latest(data, source, external_id)
+            if entry is None:
+                return
+            if verdict is None:
+                entry.pop("feedback", None)
+            else:
+                entry["feedback"] = {
+                    "verdict": verdict,
+                    "reason": reason.strip()[:300],
+                    "at": datetime.now().astimezone().isoformat(),
+                }
+            result = dict(entry)
+
+        self._write_locked(_mutate)
+        return result
+
+    def set_apply_anyway(
+        self, source: str, external_id: str, on: bool
+    ) -> dict | None:
+        """«Откликнуться всё равно» на пропущенную вакансию: когда площадка
+        снова её увидит, оценка не помешает отклику (см. _retryable и
+        job_fit.score_job_fit). None — такой заявки нет."""
+        result: dict | None = None
+
+        def _mutate(data: dict) -> None:
+            nonlocal result
+            entry = self._latest(data, source, external_id)
+            if entry is None:
+                return
+            if on:
+                entry["apply_anyway"] = True
+                entry["apply_anyway_at"] = (
+                    datetime.now().astimezone().isoformat()
+                )
+            else:
+                entry.pop("apply_anyway", None)
+                entry.pop("apply_anyway_at", None)
+            result = dict(entry)
+
+        self._write_locked(_mutate)
+        return result
+
+    def apply_anyway_requested(self, job: Job) -> bool:
+        return any(
+            (e["source"], e["external_id"]) == self._key(job)
+            and e.get("apply_anyway")
+            and e["status"] not in ("applied", "dry_run")
+            for e in self._data["applications"]
+        )
+
+    def decision_feedback(self, limit: int = 10) -> list[dict]:
+        """Последние пометки «Это была ошибка», новые первыми."""
+        marked = [e for e in self._data["applications"] if e.get("feedback")]
+        marked.sort(key=lambda e: e["feedback"].get("at", ""), reverse=True)
+        return marked[:limit]
+
     def update_fields(self, source: str, external_id: str, **fields) -> None:
         """Служебные поля заявки (письмо HR: outreach_email,
         outreach_sent_at, outreach_message_id, email_replied…)."""
@@ -443,6 +527,21 @@ class AppliedLog:
             and (source is None or e["source"] == source)
             and datetime.fromisoformat(e["applied_at"]) >= since
         )
+
+    def daily_counts(self, days: int) -> list[int]:
+        """Реальные (status=applied) отклики по дням за последние days
+        дней, от самого старого к сегодняшнему — для мини-графиков в
+        карточках Главной."""
+        today = datetime.now().astimezone().date()
+        counts = [0] * days
+        for e in self._data["applications"]:
+            if e["status"] != "applied":
+                continue
+            day = datetime.fromisoformat(e["applied_at"]).astimezone().date()
+            index = days - 1 - (today - day).days
+            if 0 <= index < days:
+                counts[index] += 1
+        return counts
 
     def count_in_previous_period(self, period: Period) -> int:
         """То же скользящее окно, что у count_in_period(), но сдвинутое
@@ -522,6 +621,22 @@ class AppliedLog:
                         and e["status"] == "skipped_easy_apply_failed"
                     )
                 ]
+                # «Откликнуться всё равно» выполнено: пропуск заменяется
+                # откликом, ваша пометка и просьба переезжают в новую запись.
+                forced = [
+                    e
+                    for e in data["applications"]
+                    if (e["source"], e["external_id"]) == self._key(job)
+                    and e.get("apply_anyway")
+                    and e["status"] not in ("applied", "dry_run")
+                ]
+                if forced:
+                    entry["apply_anyway"] = True
+                    if forced[-1].get("feedback"):
+                        entry["feedback"] = forced[-1]["feedback"]
+                    data["applications"][:] = [
+                        e for e in data["applications"] if e not in forced
+                    ]
             data["applications"].append(entry)
 
         self._write_locked(_mutate)
