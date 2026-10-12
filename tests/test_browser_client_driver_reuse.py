@@ -40,6 +40,7 @@ def test_headhunter_client_reuses_one_driver_inside_with_block():
         "src.job_sources.headhunter.browser_client.time.sleep"
     ):
         mock_init.return_value.find_elements.return_value = []
+        mock_init.return_value.current_url = "https://hh.ru/vacancy/123"
 
         with HeadHunterBrowserClient("profile") as client:
             client.search_vacancies_html("python", True, page=0)
@@ -97,6 +98,7 @@ def test_headhunter_client_without_with_opens_and_closes_per_call():
         "src.job_sources.headhunter.browser_client.time.sleep"
     ):
         mock_init.return_value.find_elements.return_value = []
+        mock_init.return_value.current_url = "https://hh.ru/vacancy/1"
 
         client = HeadHunterBrowserClient("profile")
         client.get_vacancy_html("1")
@@ -105,6 +107,22 @@ def test_headhunter_client_without_with_opens_and_closes_per_call():
         # Обратная совместимость: без `with` — старое поведение,
         # свой driver на каждый вызов.
         assert mock_init.call_count == 2
+
+
+def test_headhunter_captcha_clearance_requires_challenge_to_leave_open_tab():
+    client = HeadHunterBrowserClient(Path("profile"))
+    driver = MagicMock()
+    driver.execute_script.return_value = "Обычная страница поиска"
+    driver.current_url = "https://hh.ru/account/captcha?backurl=search"
+    client._driver = driver
+
+    assert client.captcha_cleared() is False
+
+    driver.current_url = "https://hh.ru/search/vacancy?text=Python"
+    assert client.captcha_cleared() is True
+
+    driver.execute_script.return_value = "Подтвердите, что вы не робот"
+    assert client.captcha_cleared() is False
 
 
 def test_headhunter_client_reconnects_after_dead_session_mid_run():
@@ -130,6 +148,7 @@ def test_headhunter_client_reconnects_after_dead_session_mid_run():
         )
         fresh_driver = MagicMock()
         fresh_driver.find_elements.return_value = []
+        fresh_driver.current_url = "https://hh.ru/vacancy/123"
         mock_init.side_effect = [dead_driver, fresh_driver]
 
         with HeadHunterBrowserClient("profile") as client:
@@ -355,6 +374,69 @@ def test_headhunter_client_raises_on_captcha_redirect_and_saves_screenshot(
         driver.save_screenshot.assert_called_once_with(
             str(tmp_path / "hh_captcha_screenshot.png")
         )
+
+
+def test_headhunter_short_vacancy_mentioning_captcha_does_not_block(tmp_path):
+    with patch(
+        "src.job_sources.headhunter.browser_client.init_browser"
+    ) as mock_init, patch(
+        "src.job_sources.headhunter.browser_client.time.sleep"
+    ):
+        driver = mock_init.return_value
+        driver.current_url = "https://hh.ru/vacancy/138254102"
+        driver.execute_script.return_value = (
+            "Python-разработчик. Обход защитных механизмов, captcha-сервисов."
+        )
+        driver.find_elements.side_effect = lambda _by, selector: (
+            [MagicMock()]
+            if selector
+            in (
+                '[data-qa="vacancy-title"]',
+                '[data-qa="vacancy-description"]',
+            )
+            else []
+        )
+
+        client = HeadHunterBrowserClient(tmp_path)
+        assert client.get_vacancy_html("138254102") == driver.page_source
+        assert client.apply(driver.current_url, lambda: "letter") == (
+            False,
+            "",
+        )
+
+
+def test_headhunter_vacancy_still_blocks_on_explicit_challenge(tmp_path):
+    with patch(
+        "src.job_sources.headhunter.browser_client.init_browser"
+    ) as mock_init, patch(
+        "src.job_sources.headhunter.browser_client.time.sleep"
+    ):
+        driver = mock_init.return_value
+        driver.current_url = "https://hh.ru/vacancy/138254102"
+        driver.execute_script.return_value = (
+            "Python-разработчик. captcha. Подтвердите, что вы не робот"
+        )
+        driver.find_elements.return_value = [MagicMock()]
+
+        client = HeadHunterBrowserClient(tmp_path)
+        with pytest.raises(PlatformBlockedError, match="вы не робот"):
+            client.get_vacancy_html("138254102")
+
+
+def test_headhunter_vacancy_without_visible_content_still_blocks(tmp_path):
+    with patch(
+        "src.job_sources.headhunter.browser_client.init_browser"
+    ) as mock_init, patch(
+        "src.job_sources.headhunter.browser_client.time.sleep"
+    ):
+        driver = mock_init.return_value
+        driver.current_url = "https://hh.ru/vacancy/138254102"
+        driver.execute_script.return_value = "Проверка безопасности: captcha"
+        driver.find_elements.return_value = []
+
+        client = HeadHunterBrowserClient(tmp_path)
+        with pytest.raises(PlatformBlockedError, match="captcha"):
+            client.get_vacancy_html("138254102")
 
 
 def test_wait_for_any_returns_true_when_selector_appears():

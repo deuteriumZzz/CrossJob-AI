@@ -27,6 +27,9 @@ class _FakeClient:
         self.apply_calls += 1
         raise PlatformBlockedError("captcha")
 
+    def captcha_cleared(self):
+        return False
+
     def __enter__(self):
         return self
 
@@ -34,14 +37,10 @@ class _FakeClient:
         return False
 
 
-def test_captcha_during_apply_stops_run_instead_of_hammering_next_jobs(
+def test_captcha_timeout_during_apply_defers_without_hammering_next_jobs(
     monkeypatch,
 ):
-    """Регрессия: раньше PlatformBlockedError из client.apply() ловился
-    общим except в цикле и просто continue'ил на следующую вакансию —
-    бот продолжал долбить driver.get() по всем оставшимся вакансиям в
-    уже заблокированной (капчей) сессии. Теперь должен остановиться
-    после первой же и поставить площадку на cooldown."""
+    """After the manual window expires, HH yields to the next platform."""
     with tempfile.TemporaryDirectory() as tmp:
         data_folder = Path(tmp) / "data"
         output_folder = Path(tmp) / "output"
@@ -50,6 +49,7 @@ def test_captcha_during_apply_stops_run_instead_of_hammering_next_jobs(
         (data_folder / main.RESUME_PDF).write_bytes(b"%PDF-1.4 fake")
 
         fake_client = _FakeClient()
+        cursor_commits = []
         jobs = [
             Job(role="Dev A", company="Co A", link="https://hh.ru/vacancy/1"),
             Job(role="Dev B", company="Co B", link="https://hh.ru/vacancy/2"),
@@ -68,9 +68,15 @@ def test_captcha_during_apply_stops_run_instead_of_hammering_next_jobs(
         monkeypatch.setattr(
             main.HeadHunterBrowserSource, "search", lambda self, prefs: jobs
         )
+        monkeypatch.setattr(
+            main.HeadHunterBrowserSource,
+            "commit_scan_cursor",
+            lambda self: cursor_commits.append(True),
+        )
         monkeypatch.setattr(main, "score_job_fit", lambda *a, **k: _FakeFit())
         monkeypatch.setattr(main, "classify_fit", lambda *a, **k: "strong")
         monkeypatch.setattr(main, "notify", lambda *a, **k: None)
+        monkeypatch.setattr(main, "HH_CAPTCHA_WAIT_SECONDS", 0)
 
         parameters = {
             "dataFolder": data_folder,
@@ -78,10 +84,12 @@ def test_captcha_during_apply_stops_run_instead_of_hammering_next_jobs(
             "headhunter": {"auto_apply": True},
         }
 
-        main.search_and_apply_headhunter(parameters, "fake-llm-key")
+        result = main.search_and_apply_headhunter(parameters, "fake-llm-key")
 
         assert fake_client.apply_calls == 1
-        assert is_still_blocked(output_folder, "headhunter")
+        assert result is main.DEFER_TO_NEXT_TURN
+        assert not is_still_blocked(output_folder, "headhunter")
+        assert cursor_commits == []
 
 
 def test_auto_bump_without_resume_id_bumps_every_account_resume(monkeypatch):
@@ -96,6 +104,7 @@ def test_auto_bump_without_resume_id_bumps_every_account_resume(monkeypatch):
         (data_folder / main.RESUME_PDF).write_bytes(b"%PDF-1.4 fake")
 
         bumped: list[str] = []
+        cursor_commits = []
 
         class _BumpClient(_FakeClient):
             def resume_ids(self):
@@ -118,6 +127,11 @@ def test_auto_bump_without_resume_id_bumps_every_account_resume(monkeypatch):
         monkeypatch.setattr(
             main.HeadHunterBrowserSource, "search", lambda self, prefs: []
         )
+        monkeypatch.setattr(
+            main.HeadHunterBrowserSource,
+            "commit_scan_cursor",
+            lambda self: cursor_commits.append(True),
+        )
         monkeypatch.setattr(main, "notify", lambda *a, **k: None)
 
         main.search_and_apply_headhunter(
@@ -130,6 +144,7 @@ def test_auto_bump_without_resume_id_bumps_every_account_resume(monkeypatch):
         )
 
         assert bumped == ["aaa111", "bbb222"]
+        assert cursor_commits == [True]
 
 
 def test_letter_goes_to_chat_right_after_apply_without_letter_field(

@@ -1,7 +1,8 @@
 import asyncio
 import threading
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 # telethon.sync (не просто telethon!) — иначе TelegramClient остаётся
 # чисто async, и любой синхронный вызов метода (is_user_authorized(),
@@ -55,6 +56,20 @@ def normalize_channel(raw: str) -> str:
     return value.split("/")[0].strip()
 
 
+def message_receipt(message: object) -> Tuple[Optional[int], datetime]:
+    """Подтверждение Telethon: тестовые/старые клиенты могут вернуть None."""
+    message_id = getattr(message, "id", None)
+    sent_at = getattr(message, "date", None)
+    return (
+        message_id if isinstance(message_id, int) else None,
+        (
+            sent_at
+            if isinstance(sent_at, datetime)
+            else datetime.now().astimezone()
+        ),
+    )
+
+
 class TelegramSourceClient:
     """Обёртка над сессией Telethon. Первый запуск требует
     интерактивного ввода номера телефона + кода входа (и пароля 2FA,
@@ -63,10 +78,18 @@ class TelegramSourceClient:
 
     _watcher = None
 
-    def __init__(self, api_id: int, api_hash: str, session_path: Path):
+    def __init__(
+        self,
+        api_id: int,
+        api_hash: str,
+        session_path: Path,
+        *,
+        interactive=True
+    ):
         session_path.parent.mkdir(parents=True, exist_ok=True)
         _ensure_event_loop()
         self._client = TelegramClient(str(session_path), api_id, api_hash)
+        self._interactive = interactive
 
     def __enter__(self) -> "TelegramSourceClient":
         # Пока работает постоянный шлюз, сессией владеет он — второе
@@ -86,7 +109,13 @@ class TelegramSourceClient:
             _SESSION_LOCK.release()
             return self
         try:
-            self._client.start()
+            if self._interactive:
+                self._client.start()
+            else:
+                self._client.connect()
+                if not self._client.is_user_authorized():
+                    self._client.disconnect()
+                    raise RuntimeError("Telegram session is not authorized")
         except Exception:
             _SESSION_LOCK.release()
             raise
@@ -158,16 +187,24 @@ class TelegramSourceClient:
             messages = self._client.iter_messages(contact, min_id=min_id)
         return [m for m in messages if not m.out]
 
-    def dialog_history(self, contact: str, limit: int = 40) -> list[dict]:
+    def dialog_history(
+        self, contact: str, limit: int = 200, before_id: int = 0
+    ) -> list[dict]:
         """Личная переписка с contact'ом из самого Telegram, старые
         первыми: и то, что ушло через бота, и написанное вами руками в
         Telegram, — локальный журнал знает только первое."""
         if self._watcher is not None:
             messages = self._watcher.call(
-                lambda c: c.get_messages(contact, limit=limit)
+                lambda c: c.get_messages(
+                    contact, limit=limit, offset_id=before_id
+                )
             )
         else:
-            messages = list(self._client.iter_messages(contact, limit=limit))
+            messages = list(
+                self._client.iter_messages(
+                    contact, limit=limit, offset_id=before_id
+                )
+            )
         return [
             {
                 "direction": "out" if m.out else "in",
@@ -177,6 +214,54 @@ class TelegramSourceClient:
             }
             for m in reversed(list(messages))
         ]
+
+    def dialog_summaries(self, relevant_contacts: set[str]) -> list[dict]:
+        """Только личные диалоги с контактами вакансий парсера."""
+        if self._watcher is not None:
+            dialogs = self._watcher.call(lambda c: c.get_dialogs(limit=None))
+        else:
+            dialogs = self._client.get_dialogs(limit=None)
+        relevant = {
+            contact.lower().lstrip("@") for contact in relevant_contacts
+        }
+        result = []
+        for dialog in dialogs:
+            if not getattr(dialog, "is_user", False):
+                continue
+            username = getattr(dialog.entity, "username", None)
+            if not username or username.lower() not in relevant:
+                continue
+            message = dialog.message
+            last = (
+                {
+                    "direction": "out" if message.out else "in",
+                    "text": message.message
+                    or ("📎 файл" if message.media else ""),
+                    "at": message.date.astimezone().isoformat(),
+                    "id": message.id,
+                }
+                if message is not None
+                else None
+            )
+            result.append(
+                {
+                    "contact": username,
+                    "last_activity_at": last["at"] if last else "",
+                    "last_message": last,
+                    "message_count": 0,
+                    "unread": bool(dialog.unread_count),
+                }
+            )
+        return result
+
+    def delete_dialog(self, contact: str) -> None:
+        """Удалить личный диалог лишь у владельца аккаунта."""
+        if self._watcher is not None:
+            self._watcher.call(
+                lambda c: c.delete_dialog(contact, revoke=False)
+            )
+        else:
+            self._client.delete_dialog(contact, revoke=False)
 
 
 class TelegramStatusClient:

@@ -24,6 +24,9 @@ _TME_LINK = re.compile(
     r"https?://t\.me/([A-Za-z][A-Za-z0-9_]{4,31})(?:/\d+)?(?:[/?#]|$)"
 )
 _NOT_CHANNELS = {"hirify_support_bot", "hirify"}
+_CHANNEL_LABEL = re.compile(
+    r"^\s*(?:канал|источник|опубликовано\s+в)\s*:", re.IGNORECASE
+)
 
 
 def parse_list(html: str) -> list[dict]:
@@ -69,10 +72,9 @@ def parse_job(html: str, job_id: str) -> Optional[tuple[Job, dict]]:
     # Метка Hirify (TELECOMMUTE) бывает неверной: у вакансии «Локация:
     # Новосибирск, офисный формат» она стояла как удалёнка (9.10) — текст
     # вакансии про формат главнее метки.
-    remote = (
-        item.get("jobLocationType") == "TELECOMMUTE"
-        and not _OFFICE_IN_TEXT.search(description)
-    )
+    remote = item.get(
+        "jobLocationType"
+    ) == "TELECOMMUTE" and not _OFFICE_IN_TEXT.search(description)
     countries = []
     for place in item.get("applicantLocationRequirements") or []:
         if isinstance(place, dict) and place.get("name"):
@@ -114,9 +116,11 @@ def channels_from_links(hrefs: list[str]) -> list[str]:
 
 
 _CONTACTS_MODAL = re.compile(
-    r"Ссылки для отклика:?(.*?)"
-    r"(?:Не входите|Не забудьте|Ссылки не работают|$)",
-    re.S,
+    r"(?:Ссылки для отклика|Контакты для отклика|"
+    r"Links to apply|Application contacts):?\s*(.*?)"
+    r"(?:Не входите|Не забудьте|Ссылки не работают|"
+    r"Be careful|Do not log in|Links do not work|$)",
+    re.S | re.I,
 )
 
 
@@ -125,3 +129,33 @@ def contacts_block(page_text: str) -> str:
     email и ссылки HR, без подвала и ссылок самого сайта."""
     match = _CONTACTS_MODAL.search(page_text or "")
     return match.group(1).strip() if match else ""
+
+
+def hirify_apply_contacts(
+    text: str, exclude: tuple[str, ...] = ()
+) -> list[dict]:
+    """Find reply addresses in a Hirify vacancy or its contacts modal.
+
+    These are already visible vacancy texts, not arbitrary page HTML, so
+    explicit @handles are usable. Source/channel lines and Hirify's own
+    service handles are excluded; any remaining alternatives are presented
+    for manual recipient selection rather than sent automatically.
+    """
+    from src.job_sources.contact_book import contacts_from_text
+
+    skipped = {name.lower().lstrip("@") for name in exclude}
+    skipped.update(_NOT_CHANNELS)
+    result: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for line in (text or "").splitlines():
+        if _CHANNEL_LABEL.match(line):
+            continue
+        for contact in contacts_from_text(line, bare_mentions=True):
+            value = str(contact["value"])
+            if contact["kind"] == "telegram" and value.lower() in skipped:
+                continue
+            key = (contact["kind"], value.lower())
+            if key not in seen:
+                seen.add(key)
+                result.append(contact)
+    return result

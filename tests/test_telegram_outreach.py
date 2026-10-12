@@ -65,6 +65,49 @@ def test_telegram_conversations_roundtrip(tmp_path):
     assert store.get("hr_ivan")["unread"] is False
 
 
+def test_resume_attachment_is_in_history_but_not_daily_outreach(tmp_path):
+    store = TelegramConversations(tmp_path / "telegram_conversations.json")
+    store.record_outbound("hr_ivan", "Здравствуйте!")
+    store.record_outbound(
+        "hr_ivan",
+        "📎 Отправлено резюме (resume.pdf)",
+        counts_toward_limit=False,
+    )
+
+    assert len(store.get("hr_ivan")["messages"]) == 2
+    assert store.sent_today_count() == 1
+
+    store.dismiss_local("hr_ivan")
+    assert store.sent_today_count() == 1
+
+
+def test_legacy_resume_attachment_does_not_count_as_outreach(tmp_path):
+    store = TelegramConversations(tmp_path / "telegram_conversations.json")
+    store.record_outbound("hr_ivan", "Здравствуйте!")
+    store.record_outbound("hr_ivan", "Отправлено резюме (old.pdf)")
+
+    assert store.sent_today_count() == 1
+    store.dismiss_local("hr_ivan")
+    assert store.sent_today_count() == 1
+
+
+def test_deleting_dialog_keeps_daily_outreach_count_without_resume(tmp_path):
+    store = TelegramConversations(tmp_path / "telegram_conversations.json")
+    store.record_outbound("hr_ivan", "Здравствуйте!")
+    store.record_outbound(
+        "hr_ivan",
+        "📎 Отправлено резюме (resume.pdf)",
+        counts_toward_limit=False,
+    )
+    store.record_outbound("hr_ivan", "Отправлено резюме (legacy.pdf)")
+    assert store.sent_today_count() == 1
+
+    assert store.delete("hr_ivan") is True
+
+    assert store.get("hr_ivan") is None
+    assert store.sent_today_count() == 1
+
+
 if __name__ == "__main__":
     test_extract_contact_single_mention()
     test_extract_contact_ignores_self_channel_mention()

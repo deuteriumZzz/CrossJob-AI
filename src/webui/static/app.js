@@ -91,6 +91,14 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+const htmlSnapshots = new WeakMap();
+function setHtmlIfChanged(element, html) {
+  if (htmlSnapshots.get(element) === html) return false;
+  element.innerHTML = html;
+  htmlSnapshots.set(element, html);
+  return true;
+}
+
 // Причины пропуска (fit.gaps) — это полные предложения от LLM, а не
 // короткие лейблы, для которых была сделана .readiness-note (110px):
 // без обрезки один длинный gap растягивал строку истории на сотни
@@ -486,6 +494,7 @@ function switchTab(name) {
   document
     .querySelectorAll("main .view")
     .forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
+  document.getElementById("app-shell")?.classList.toggle("is-messenger", name === "replies");
   if (prevName && prevName !== name) {
     directionalReveal(document.getElementById(`view-${name}`), prevName, name);
   }
@@ -533,6 +542,8 @@ let llmCatalog = { models: {}, api_key_previews: {}, provider_base_urls: {} };
 // set_fallback_base_urls().
 const PROVIDERS_NEEDING_BASE_URL = new Set(["cloudflare"]);
 let activeTelegramContact = null;
+let telegramLoadedHistory = { contact: null, messages: [], hasMore: false };
+let telegramConversationsCache = [];
 
 function formatChatTime(iso) {
   try {
@@ -890,6 +901,10 @@ function renderContactsList() {
   document.querySelectorAll("#base-table th[data-sort]").forEach((th) => {
     th.classList.toggle("sorted", th.dataset.sort === baseState.sort);
     th.dataset.dir = th.dataset.sort === baseState.sort ? (baseState.dir > 0 ? "↑" : "↓") : "";
+    th.setAttribute(
+      "aria-sort",
+      th.dataset.sort !== baseState.sort ? "none" : baseState.dir > 0 ? "ascending" : "descending"
+    );
   });
   baseFiltered = filtered.map((c) => c.key);
   const pages = Math.max(1, Math.ceil(filtered.length / baseState.size));
@@ -1352,12 +1367,12 @@ function skeletonRowsList(n) {
 
 // Строка площадки в списке Главной. m — модель из sourceRowModel() или
 // своих каналов: key, name, logo, dot, statusText, counter, pct.
-function platformRowHtml(m, i = 0) {
+function platformRowHtml(m) {
   const pct = m.pct == null ? null : Math.max(0, Math.min(100, m.pct));
   const bar = pct == null
     ? `<span class="bar is-empty" aria-hidden="true"></span>`
     : `<span class="bar" aria-hidden="true"><span class="${pct >= 100 ? "full" : pct >= 70 ? "warn" : ""}" style="width:${pct}%"></span></span>`;
-  return `<div class="platform-row-wrap stagger-item" data-source="${m.key}" draggable="true" style="animation-delay:${staggerDelay(i, 40)}">
+  return `<div class="platform-row-wrap" data-source="${m.key}" draggable="true">
     <button type="button" class="row platform-row${m.running ? " is-running" : ""}" data-open-source="${m.key}" aria-label="${escapeHtml(m.name)}: ${escapeHtml(m.statusText)}. Открыть настройки">
       ${m.logo}
       <span class="row-main">
@@ -1461,7 +1476,7 @@ async function renderOwnChannels() {
   rows.push(mailRowModel(o));
   ["talanto", "hirify"].forEach((n) => byName[n] && rows.push(sourceRowModel(byName[n], lastRunNow)));
   const el = document.getElementById("own-channels");
-  el.innerHTML = applySourceOrder(rows, "key", "cj-source-order-own").map(platformRowHtml).join("");
+  setHtmlIfChanged(el, applySourceOrder(rows, "key", "cj-source-order-own").map(platformRowHtml).join(""));
   if (openDrawerSource === "mail" && isPlatformDrawerOpen() && !drawerDirty) openMailDrawer(true);
   if (openDrawerSource === "telegram" && isPlatformDrawerOpen() && !drawerDirty) openTelegramDrawer(true);
 }
@@ -2372,7 +2387,7 @@ async function renderTodo(todo, status = lastStatus) {
     badge.style.display = "none";
   }
   const head = `<div class="card-head"><h3>Нужно ваше решение</h3><span class="muted small">всё остальное бот делает сам</span></div>`;
-  el.innerHTML = `${setupHtml}${head}${items.length
+  if (!setHtmlIfChanged(el, `${setupHtml}${head}${items.length
     ? `<div class="todo-list">${items
         .map(
           (i, n) => `<div class="todo-row stagger-item" style="animation-delay:${staggerDelay(n, 40)}">
@@ -2382,7 +2397,7 @@ async function renderTodo(todo, status = lastStatus) {
           </div>`
         )
         .join("")}</div>`
-    : `<div class="todo-calm"><span class="dot ok"></span>Сейчас ничего не ждёт вашего решения — бот справляется сам.</div>`}`;
+    : `<div class="todo-calm"><span class="dot ok"></span>Сейчас ничего не ждёт вашего решения — бот справляется сам.</div>`}`)) return !!missingRequired.length;
   el.querySelector(".setup-dismiss")?.addEventListener("click", (e) => {
     e.preventDefault(); // не раскрывать <details>
     try {
@@ -2914,8 +2929,8 @@ async function renderLiveFeed() {
   const busy = !!lastRunNow?.running;
   dot.className = `dot ${running || busy ? "running" : "idle"}`;
   if (!running && !busy) {
-    body.innerHTML = `<p class="feed-stopped">Бот остановлен. Площадки не ищут по расписанию; рассылка работает, пока открыто приложение.</p>
-      <button type="button" class="btn btn-small" id="feed-run">Запустить</button>`;
+    if (!setHtmlIfChanged(body, `<p class="feed-stopped">Бот остановлен. Площадки не ищут по расписанию; рассылка работает, пока открыто приложение.</p>
+      <button type="button" class="btn btn-small" id="feed-run">Запустить</button>`)) return;
     body.querySelector("#feed-run").addEventListener("click", () => document.getElementById("daemon-toggle").click());
     return;
   }
@@ -2925,11 +2940,11 @@ async function renderLiveFeed() {
       .filter((l) => / (INFO|WARNING|ERROR) +\|/.test(l) && !l.includes("api.telegram.org"))
       .slice(-8)
       .reverse()
-      .map((l, i) => {
+      .map((l) => {
         const [, time = "", level = "", , msg = l] = l.match(/^\S+ (\S+) \| (\w+) *\| ([^-]*) - (.*)$/) || [];
-        return `<div class="feed-row stagger-item${level === "INFO" ? "" : " is-warn"}" style="animation-delay:${staggerDelay(i, 40)}"><span class="mono feed-time">${escapeHtml(time.slice(0, 5))}</span><span>${escapeHtml(msg.slice(0, 160))}</span></div>`;
+        return `<div class="feed-row${level === "INFO" ? "" : " is-warn"}"><span class="mono feed-time">${escapeHtml(time.slice(0, 5))}</span><span>${escapeHtml(msg.slice(0, 160))}</span></div>`;
       });
-    body.innerHTML = rows.join("") || `<p class="feed-stopped">Пока тихо — бот ждёт следующего хода.</p>`;
+    setHtmlIfChanged(body, rows.join("") || `<p class="feed-stopped">Пока тихо — бот ждёт следующего хода.</p>`);
   } catch (e) {
     /* лента необязательна */
   }
@@ -3279,9 +3294,9 @@ function renderDaemonState(status) {
   const gw = status.telegram_gateway;
   badge.title = gw?.alive ? (gw.connected ? "Telegram-шлюз на связи" : "Telegram-шлюз переподключается") : "";
   const pausedAll = !!status.pause_all?.paused;
-  badge.innerHTML = `<span class="badge-dot"></span><span class="btn-label">${
+  setHtmlIfChanged(badge, `<span class="badge-dot"></span><span class="btn-label">${
     pausedAll ? "пауза на всё" : status.daemon_running ? (status.daemon_paused ? "бот на паузе" : runningLabel) : "бот остановлен"
-  }${gw?.alive ? (gw.connected ? " · Telegram ✓" : " · Telegram …") : ""}</span>`;
+  }${gw?.alive ? (gw.connected ? " · Telegram ✓" : " · Telegram …") : ""}</span>`);
   badge.classList.toggle("on", status.daemon_running && !status.daemon_paused);
   badge.classList.toggle("off", !status.daemon_running || !!status.daemon_paused);
   document.getElementById("brand-dot")?.classList.toggle("is-live", !!status.daemon_running && !status.daemon_paused);
@@ -3423,7 +3438,7 @@ async function renderKpis(stats) {
   if (results) {
     cards.push({ label: "Ответов работодателей", help: "Ответы, приглашения и офферы за 7 дней — с площадок, из Telegram и на письма рассылки.", value: results.week.replies, prev: results.prev.replies, prevLabel: "неделей раньше", series: null });
   }
-  el.innerHTML = cards.map((c, i) => kpiCardHtml({ ...c, i })).join("");
+  if (!setHtmlIfChanged(el, cards.map((c, i) => kpiCardHtml({ ...c, i })).join(""))) return;
   el.querySelectorAll(".kpi-value").forEach((v) => countUp(v, parseInt(v.dataset.target, 10)));
 }
 
@@ -3443,7 +3458,7 @@ async function renderHomeSplit() {
   const rest = rows.slice(5).reduce((acc, x) => acc + x.applied, 0);
   const segs = top.map((x, i) => ({ name: label(x.source), value: x.applied, color: `var(--chart-${i + 1})`, replies: x.replies }));
   if (rest) segs.push({ name: `Прочие: ${rows.slice(5).map((x) => label(x.source)).join(", ")}`, value: rest, color: "var(--chart-6)", replies: rows.slice(5).reduce((a, x) => a + x.replies, 0) });
-  el.innerHTML = `<div class="card-head flat between"><h3 id="home-split-h">Куда ушли отклики за месяц</h3><span class="mono small muted">${total}</span></div>
+  if (!setHtmlIfChanged(el, `<div class="card-head flat between"><h3 id="home-split-h">Куда ушли отклики за месяц</h3><span class="mono small muted">${total}</span></div>
     ${total
       ? `<div class="segs" role="img" aria-label="${escapeHtml(segs.map((x) => `${x.name}: ${x.value}`).join(", "))}">${segs
           .map((x, i) => `<div class="seg" data-i="${i}" style="flex:${x.value} 1 0;background:${x.color}"></div>`)
@@ -3452,7 +3467,7 @@ async function renderHomeSplit() {
         <div class="seg-legend">${segs
           .map((x) => `<div class="seg-key"><span class="seg-swatch" style="background:${x.color}"></span><span class="seg-name">${escapeHtml(x.name)}</span><span class="mono">${x.value}</span></div>`)
           .join("")}</div>`
-      : `<p class="small muted">За 30 дней откликов пока нет — включите площадки ниже и запустите бота.</p>`}`;
+      : `<p class="small muted">За 30 дней откликов пока нет — включите площадки ниже и запустите бота.</p>`}`)) return;
   const cap = el.querySelector("#home-split-caption");
   el.querySelectorAll(".seg").forEach((seg) => {
     seg.addEventListener("mouseenter", () => {
@@ -3543,8 +3558,6 @@ const render = {
     lastStatus = status;
     lastRunNow = runNow;
     const isOnboarding = todo ? await renderTodo(todo, status) : document.getElementById("dashboard-sections").style.display === "none";
-    renderOwnChannels();
-    renderLiveFeed();
     // Обязательные шаги (резюме/ключ ИИ/площадка) не пройдены — ниже
     // нечего показывать: пустая статистика и площадки без резюме
     // только отвлекают от чек-листа выше него. См. #dashboard-sections
@@ -3564,23 +3577,27 @@ const render = {
     renderHomeLimit(status, stats);
 
     if (!unchanged) {
-      renderKpis(stats);
-      renderHomeSplit();
       // Telegram, «Сайты компаний», Talanto и Hirify — в «Свои каналы».
       const ruSources = status.sources.filter((s) => !INTL_SOURCES.has(s.name) && !OWN_CHANNELS.has(s.name));
       const intlSources = status.sources.filter((s) => INTL_SOURCES.has(s.name));
       const rowOf = (s, i) => platformRowHtml(sourceRowModel(s, runNow), i);
-      document.getElementById("source-grid-ru").innerHTML = applySourceOrder(ruSources, "name", "cj-source-order-ru")
+      setHtmlIfChanged(document.getElementById("source-grid-ru"), applySourceOrder(ruSources, "name", "cj-source-order-ru")
         .map(rowOf)
-        .join("");
-      document.getElementById("source-grid-intl").innerHTML = applySourceOrder(intlSources, "name", "cj-source-order-intl")
+        .join(""));
+      setHtmlIfChanged(document.getElementById("source-grid-intl"), applySourceOrder(intlSources, "name", "cj-source-order-intl")
         .map(rowOf)
-        .join("");
+        .join(""));
       if (openDrawerSource && isPlatformDrawerOpen() && !drawerDirty) {
         refreshSourceDrawerHead(openDrawerSource);
       }
     }
 
+    await Promise.all([
+      renderOwnChannels(),
+      renderLiveFeed(),
+      renderKpis(stats),
+      renderHomeSplit(),
+    ]);
     overviewLoaded = true;
   },
 
@@ -3639,10 +3656,15 @@ const render = {
     const tbody = document.getElementById("replies-rows");
     if (!repliesLoaded) tbody.innerHTML = `<div class="skeleton" style="height:90px;margin-bottom:10px"></div>`.repeat(3);
 
-    renderDraftsQueue();
-    renderHhRemindersQueue();
-    render.telegram();
-    const entries = await api("/api/inbox");
+    const [inboxResult] = await Promise.allSettled([
+      api("/api/inbox"),
+      renderDraftsQueue(),
+      renderHhRemindersQueue(),
+      render.telegram(),
+      renderTelegramPosts(),
+    ]);
+    if (inboxResult.status === "rejected") throw inboxResult.reason;
+    const entries = inboxResult.value;
     // Конфетти — только на реально новый ответ, появившийся после
     // первой загрузки за сессию, не на каждое открытие вкладки с уже
     // существующими данными.
@@ -3658,7 +3680,6 @@ const render = {
     lastRepliesSnapshot = repliesSnapshot;
     lastRepliesEntries = entries;
     renderRepliesRows();
-    renderTelegramPosts();
   },
 
   async analytics() {
@@ -3879,7 +3900,20 @@ const render = {
       navBadge.style.display = "none";
     }
 
-    const list = document.getElementById("tg-conv-list");
+    telegramConversationsCache = conversations;
+    if (currentView === "replies") {
+      renderRepliesRows();
+      updateTalkListCount();
+    }
+    if (activeTelegramContact && !conversations.some(
+      (c) => c.contact.toLowerCase() === activeTelegramContact.toLowerCase()
+    )) {
+      activeTelegramContact = null;
+      telegramLoadedHistory = { contact: null, messages: [], hasMore: false };
+      document.getElementById("tg-chat-panel").style.display = "none";
+      document.getElementById("tg-chat-delete").hidden = true;
+      document.getElementById("tg-chat-empty").style.display = "";
+    }
     // "Выберите диалог слева" в правой панели уместно, только пока
     // список слева не пуст — иначе получаются два взаимоисключающих
     // сообщения одновременно ("диалогов нет" + "выберите один из них").
@@ -3889,27 +3923,10 @@ const render = {
         ? "Выберите диалог слева."
         : "Диалогов пока нет — появятся здесь, как только кто-то напишет.";
     }
-    if (!conversations.length) {
-      list.innerHTML = '<p class="muted small">Пока нет диалогов.</p>';
-    } else {
-      list.innerHTML = conversations
-        .map(
-          (c) => `
-        <div class="conv-item${c.contact === activeTelegramContact ? " active" : ""}" data-contact="${c.contact}">
-          <span class="conv-contact">${c.unread ? '<span class="conv-unread-dot"></span>' : ""}@${c.contact}</span>
-          <span class="conv-preview">${c.last_message ? c.last_message.text : ""}</span>
-        </div>`
-        )
-        .join("");
-      list.querySelectorAll(".conv-item").forEach((el) => {
-        el.addEventListener("click", () =>
-          openTelegramConversation(el.dataset.contact)
-        );
-      });
-    }
+    renderTelegramConversationRows(conversations);
 
     if (activeTelegramContact) {
-      await openTelegramConversation(activeTelegramContact);
+      await openTelegramConversation(activeTelegramContact, false, true);
     }
   },
 
@@ -3941,6 +3958,34 @@ const render = {
     renderLogLines();
   },
 };
+
+function renderTelegramConversationRows(conversations) {
+  const list = document.getElementById("tg-conv-list");
+  const query = document.getElementById("replies-filter-query")?.value.trim().toLowerCase() || "";
+  const shown = query ? conversations.filter((c) =>
+    `${c.contact} ${c.last_message?.text || ""}`.toLowerCase().includes(query)
+  ) : conversations;
+  if (!shown.length) {
+    list.innerHTML = `<p class="muted small">${query ? "Диалоги не найдены." : "Пока нет диалогов."}</p>`;
+    return;
+  }
+  list.innerHTML = shown.map((c) => `
+    <div class="conv-item${c.contact === activeTelegramContact ? " active" : ""}" data-contact="${escapeHtml(c.contact)}" role="button" tabindex="0">
+      ${plogoHtml("telegram")}
+      <span class="conv-copy"><span class="conv-contact">${c.unread ? '<span class="conv-unread-dot"></span>' : ""}@${escapeHtml(c.contact)}</span>
+      <span class="conv-preview">${escapeHtml(c.last_message?.text || "")}</span></span>
+      <small class="conv-time">${c.last_activity_at ? escapeHtml(fmtDay(c.last_activity_at)) : ""}</small>
+    </div>`).join("");
+  list.querySelectorAll(".conv-item").forEach((el) => {
+    el.addEventListener("click", () => openTelegramConversation(el.dataset.contact));
+    el.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openTelegramConversation(el.dataset.contact);
+      }
+    });
+  });
+}
 
 // Фильтр по тексту — чисто на клиенте: сервер и так уже отдаёт не
 // больше 300 строк за раз, дозапрашивать их под каждую букву поиска
@@ -4001,6 +4046,26 @@ let repliesKind = "";
 let selectedInboxIndex = -1;
 let talkEntries = [];
 
+function telegramConversationCount(conversations, inboxEntries) {
+  const contacts = new Set();
+  for (const conversation of conversations) {
+    if (conversation.contact) contacts.add(conversation.contact.toLowerCase());
+  }
+  for (const entry of inboxEntries) {
+    if (entry.channel === "telegram_dm" && entry.contact) contacts.add(entry.contact.toLowerCase());
+  }
+  return contacts.size;
+}
+
+function updateTalkListCount() {
+  const badge = document.getElementById("talk-list-count");
+  if (!badge) return;
+  const conversations = telegramConversationCount(telegramConversationsCache, lastRepliesEntries);
+  const otherReplies = lastRepliesEntries.filter((entry) => entry.channel !== "telegram_dm").length;
+  const activePosts = tgPostsData.posts.filter((post) => !["hidden", "blocked"].includes(post.status)).length;
+  badge.textContent = String(talkListTab === "posts" ? (tgPostsData.total ?? tgPostsData.posts.length) : activePosts + conversations + otherReplies);
+}
+
 function renderRepliesRows() {
   const list = document.getElementById("replies-rows");
   const query = document.getElementById("replies-filter-query").value.trim().toLowerCase();
@@ -4008,8 +4073,8 @@ function renderRepliesRows() {
   const counts = { interview: 0, replied: 0, rejected: 0, telegram: 0 };
   lastRepliesEntries.forEach((e) => {
     counts[groupOf(e)]++;
-    if (e.channel === "telegram_dm") counts.telegram++;
   });
+  counts.telegram = telegramConversationCount(telegramConversationsCache, lastRepliesEntries);
   const chips = [
     ["", "Главное", counts.interview + counts.replied],
     ["interview", "Интервью и офферы", counts.interview],
@@ -4038,14 +4103,14 @@ function renderRepliesRows() {
     return [e.company, e.title, e.text, e.contact].filter(Boolean).some((v) => v.toLowerCase().includes(query));
   });
   talkEntries = entries;
-  if (!lastRepliesEntries.length) {
-    list.innerHTML = emptyStateHtml("Пока нет ответов. Как только работодатель ответит на отклик, в Telegram или на письмо — он появится здесь.");
-    return;
-  }
   if (!entries.length) {
-    list.innerHTML = emptyStateHtml(query ? "Ничего не найдено." : repliesKind ? "Здесь пока пусто." : "Сейчас нет новых приглашений и вопросов — бот сообщит, когда появятся.");
+    list.innerHTML = "";
+    list.hidden = true;
+    chipBox.hidden = (!lastRepliesEntries.length && !telegramConversationsCache.length) || talkListTab === "posts";
     return;
   }
+  list.hidden = false;
+  chipBox.hidden = talkListTab === "posts";
   const where = (e) =>
     e.channel === "telegram_dm" ? `Telegram @${escapeHtml(e.contact)}`
     : e.channel === "email" ? `Письмо · ${escapeHtml(e.contact)}`
@@ -4145,10 +4210,12 @@ function selectInboxItem(i) {
     ${e.draft ? `<div class="fix is-warn"><span class="dot warn"></span><div class="fix-body">Черновик ответа готов — вверху, в «Ждут вашего решения».</div></div>` : ""}`;
 }
 
-async function openTelegramConversation(contact, fromInbox = false) {
+async function openTelegramConversation(contact, fromInbox = false, keepTab = false) {
+  if (!keepTab) setTalkListTab("chats", false);
   if (activeTelegramContact !== contact) {
     document.getElementById("tg-chat-suggestions").innerHTML = "";
     document.getElementById("tg-chat-input").value = "";
+    telegramLoadedHistory = { contact, messages: [], hasMore: false };
   }
   activeTelegramContact = contact;
   closeTelegramPost();
@@ -4176,6 +4243,8 @@ async function openTelegramConversation(contact, fromInbox = false) {
   document.getElementById("tg-chat-contact").textContent = `@${contact}`;
 
   const messages = document.getElementById("tg-chat-messages");
+  const older = document.getElementById("tg-chat-older");
+  older.hidden = true;
   const bubbles = (list) =>
     list
       .map((m) => `<div class="chat-bubble ${m.direction === "out" ? "out" : "in"}">${escapeHtml(m.text || "")}<span class="chat-bubble-time">${formatChatTime(m.at)}</span></div>`)
@@ -4187,8 +4256,18 @@ async function openTelegramConversation(contact, fromInbox = false) {
   // работает шлюз; иначе остаётся журнал приложения.
   api(`/api/telegram/history/${encodeURIComponent(contact)}`)
     .then((h) => {
-      if (activeTelegramContact !== contact || h.source !== "telegram" || !h.messages.length) return;
-      messages.innerHTML = bubbles(h.messages);
+      if (activeTelegramContact !== contact || h.source !== "telegram") return;
+      const freshIds = new Set(h.messages.map((m) => m.id));
+      const old = telegramLoadedHistory.contact === contact
+        ? telegramLoadedHistory.messages.filter((m) => !freshIds.has(m.id) && m.id < h.messages[0]?.id)
+        : [];
+      telegramLoadedHistory = {
+        contact,
+        messages: [...old, ...h.messages],
+        hasMore: old.length ? telegramLoadedHistory.hasMore : h.has_more,
+      };
+      older.hidden = !telegramLoadedHistory.hasMore;
+      messages.innerHTML = bubbles(telegramLoadedHistory.messages);
       messages.scrollTop = messages.scrollHeight;
     })
     .catch(() => {});
@@ -4200,9 +4279,9 @@ async function openTelegramConversation(contact, fromInbox = false) {
   const remaining = document.querySelectorAll(
     "#tg-conv-list .conv-unread-dot"
   ).length;
-  const dot = document.querySelector(
-    `#tg-conv-list .conv-item[data-contact="${contact}"] .conv-unread-dot`
-  );
+  const selected = [...document.querySelectorAll("#tg-conv-list .conv-item")]
+    .find((el) => el.dataset.contact === contact);
+  const dot = selected?.querySelector(".conv-unread-dot");
   if (dot) {
     dot.remove();
     const left = remaining - 1;
@@ -5194,8 +5273,14 @@ function collectCommandItems(query) {
 
 function updateCommandActive(results) {
   results.querySelectorAll(".command-item").forEach((el, i) => {
-    el.classList.toggle("active", i === commandActiveIndex);
+    const active = i === commandActiveIndex;
+    el.classList.toggle("active", active);
+    el.setAttribute("aria-selected", String(active));
   });
+  const activeItem = results.querySelector(`#command-option-${commandActiveIndex}`);
+  const input = document.getElementById("command-input");
+  if (activeItem) input.setAttribute("aria-activedescendant", activeItem.id);
+  else input.removeAttribute("aria-activedescendant");
 }
 
 function renderCommandResults(query) {
@@ -5206,15 +5291,17 @@ function renderCommandResults(query) {
   commandActiveIndex = 0;
   results.__items = items;
   if (!items.length) {
-    results.innerHTML = `<div class="command-empty">Ничего не найдено</div>`;
+    results.innerHTML = `<div class="command-empty" role="status">Ничего не найдено</div>`;
+    document.getElementById("command-input").removeAttribute("aria-activedescendant");
     return;
   }
   results.innerHTML = items
     .map(
       (it, i) =>
-        `<div class="command-item${i === 0 ? " active" : ""}" data-index="${i}"><span>${escapeHtml(it.label)}</span><span class="muted">${it.hint}</span></div>`
+        `<div id="command-option-${i}" class="command-item${i === 0 ? " active" : ""}" role="option" aria-selected="${i === 0}" data-index="${i}"><span>${escapeHtml(it.label)}</span><span class="muted">${escapeHtml(it.hint)}</span></div>`
     )
     .join("");
+  document.getElementById("command-input").setAttribute("aria-activedescendant", "command-option-0");
   results.querySelectorAll(".command-item").forEach((el, i) => {
     el.addEventListener("click", () => {
       items[i].action();
@@ -5281,6 +5368,7 @@ function openCommandPalette() {
   const overlay = document.getElementById("command-overlay");
   const input = document.getElementById("command-input");
   overlay.style.display = "flex";
+  input.setAttribute("aria-expanded", "true");
   input.value = "";
   renderCommandResults("");
   trapFocus(overlay);
@@ -5288,6 +5376,8 @@ function openCommandPalette() {
 }
 
 function closeCommandPalette() {
+  document.getElementById("command-input").setAttribute("aria-expanded", "false");
+  document.getElementById("command-input").removeAttribute("aria-activedescendant");
   hideOverlay(document.getElementById("command-overlay"));
 }
 
@@ -6137,14 +6227,14 @@ async function updateActivity() {
     a.state === "waiting" ? `<span class="dot warn activity-icon" aria-hidden="true"></span>`
       : a.state === "stopped" ? `<span class="dot error activity-icon" aria-hidden="true"></span>`
       : `<span class="activity-spin" aria-hidden="true"></span>`;
-  el.innerHTML = items
+  if (!setHtmlIfChanged(el, items
     .map(
       (a) => `<button type="button" class="activity-item${a.state ? ` is-${a.state}` : ""}" data-activity-view="${a.goto || a.view}">
         ${icon(a)}
         <span>${escapeHtml(a.text)}${a.source ? " " + escapeHtml(sourceLabel(a.source)) : ""}${a.total ? ` · ${a.done}/${a.total}` : ""}${a.state === "stopped" ? " — что делать →" : ""}</span>
       </button>`
     )
-    .join("");
+    .join(""))) return;
   el.querySelectorAll("[data-activity-view]").forEach((b) =>
     b.addEventListener("click", () => {
       const to = b.dataset.activityView;
@@ -6634,10 +6724,17 @@ function directionalReveal(viewEl, fromName, toName) {
 
 async function withButtonLoading(btn, fn) {
   if (!btn) return fn();
+  const wasDisabled = btn.disabled;
+  const previousBusy = btn.getAttribute("aria-busy");
+  btn.disabled = true;
+  btn.setAttribute("aria-busy", "true");
   btn.classList.add("is-loading");
   try {
     return await fn();
   } finally {
+    btn.disabled = wasDisabled;
+    if (previousBusy === null) btn.removeAttribute("aria-busy");
+    else btn.setAttribute("aria-busy", previousBusy);
     btn.classList.remove("is-loading");
   }
 }
@@ -6780,10 +6877,10 @@ function renderMarket(market) {
     ? market.skills
         .map(
           (s) => `
-      <div class="funnel-row" title="${escapeHtml(s.skill)}: ${s.count} вакансий, ${s.share}%${s.in_resume ? "" : " — нет в резюме"}">
+      <div class="funnel-row" title="${escapeHtml(s.skill)}: ${s.count} вакансий, ${s.share}%${s.in_resume === false ? " — нет в резюме" : s.in_resume == null ? " — резюме недоступно" : ""}">
         <span class="funnel-label">${escapeHtml(s.skill)}</span>
         <span class="funnel-track"><span class="funnel-bar" style="width:${s.share}%"></span></span>
-        <span class="funnel-value">${s.share}%${s.in_resume ? "" : ` <span class="tag-miss">нет в резюме</span>`}</span>
+        <span class="funnel-value">${s.share}%${s.in_resume === false ? ` <span class="tag-miss">нет в резюме</span>` : s.in_resume == null ? ` <span class="muted small">резюме недоступно</span>` : ""}</span>
       </div>`
         )
         .join("")
@@ -7358,7 +7455,12 @@ function initDashboard() {
     });
   document
     .getElementById("replies-filter-query")
-    .addEventListener("input", () => renderRepliesRows());
+    .addEventListener("input", () => {
+      renderRepliesRows();
+      renderTelegramConversationRows(telegramConversationsCache);
+      lastTgPostsSnapshot = "";
+      renderTelegramPosts();
+    });
 
   document
     .getElementById("blacklist-add")
@@ -7864,7 +7966,7 @@ function initDashboard() {
     .addEventListener("click", async () => {
       if (!activeTelegramContact) return;
       const ok = await showConfirm(
-        `Удалить всю переписку с @${activeTelegramContact}? Это не архив — история удаляется без возможности восстановить, а контакт перестаёт считаться "уже написанным" (бот может написать ему заново при следующем совпадении).`
+        `Удалить переписку с @${activeTelegramContact} в Telegram и приложении? У вас она исчезнет без возможности восстановить. Контакт останется в списке тех, кому уже писали, чтобы автоматическая отправка не повторилась.`
       );
       if (!ok) return;
       try {
@@ -8019,10 +8121,18 @@ function initDashboard() {
     "logs",
     "telegram",
   ]);
+  const pendingLiveRefresh = new Map();
   function refreshActiveTab() {
     const active = currentView;
-    if (active && LIVE_TABS.has(active)) render[active]();
-    else if (active === "settings") {
+    if (active && LIVE_TABS.has(active)) {
+      if (pendingLiveRefresh.has(active)) return pendingLiveRefresh.get(active);
+      const request = Promise.resolve()
+        .then(() => render[active]())
+        .catch((error) => console.error(`Не удалось обновить вкладку ${active}`, error))
+        .finally(() => pendingLiveRefresh.delete(active));
+      pendingLiveRefresh.set(active, request);
+      return request;
+    } else if (active === "settings") {
       // Только подсветка провайдеров + статус Telegram, не полный
       // render.settings() — тот перезатирал бы несохранённый ввод в
       // полях ключа/модели. telegram-connect-status — отдельный
@@ -8146,8 +8256,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("contacts-filter-source").value = "telegram";
     switchTab("contacts");
   });
-  document.querySelectorAll("#base-table th[data-sort]").forEach((th) =>
-    th.addEventListener("click", () => {
+  document.querySelectorAll("#base-table th[data-sort] button").forEach((button) =>
+    button.addEventListener("click", () => {
+      const th = button.closest("th[data-sort]");
       baseState.dir = baseState.sort === th.dataset.sort ? -baseState.dir : th.dataset.sort === "company" ? 1 : -1;
       baseState.sort = th.dataset.sort;
       renderContactsList();
@@ -8456,9 +8567,14 @@ async function setPauseAll(paused) {
 // --- Общение: вакансии из Telegram с черновиком от ИИ (talk.tg.posts) ------
 
 let tgPostsData = { posts: [], resume_options: [], sent_today: 0, daily_limit: 15 };
+let talkListTab = "all";
 let activeTgPostId = null;
 let lastTgPostsSnapshot = "";
+let lastTgPostHistorySnapshot = "";
+let tgPostsVisibleLimit = 200;
 const tgPostResume = {}; // выбор «Резюме:» по посту, пока не отправили
+let tgPostContactChoice = {}; // выбранный контакт сохраняется при обновлении
+const hirifyLoginRequired = new Set(); // показываем повторный вход лишь при истёкшей сессии
 
 // Время в будущем: «сегодня в 10:00», «завтра в 10:00», «9 окт. в 10:00».
 function fmtWhen(iso) {
@@ -8472,10 +8588,16 @@ function fmtWhen(iso) {
 }
 
 function tgPostBadge(post) {
+  if (post.status === "sent") return { dot: "ok", text: "отправлено" };
+  if (post.status === "queued") return { dot: "idle", text: "в очереди на отправку" };
+  if (post.status === "send_unknown") return { dot: "warn", text: "проверьте отправку" };
+  if (post.status === "skipped_contacted") return { dot: "idle", text: "уже писали" };
+  if (post.status === "hidden") return { dot: "idle", text: "скрыто" };
+  if (post.status === "blocked") return { dot: "warn", text: "не писать" };
   if (post.scheduled) return { dot: "idle", text: `уйдёт ${fmtWhen(post.scheduled.send_after)}` };
-  if (!post.contacts.length) return { dot: "idle", text: "контакта нет" };
+  if (!tgPostRecipients(post).length) return { dot: "idle", text: "адресат не найден" };
   if (post.contacts.some((c) => (c.note || "").startsWith("писали"))) return { dot: "warn", text: "уже писали" };
-  if (post.draft) return { dot: "ok", text: "черновик готов" };
+  if (tgPostDraft(post)) return { dot: "ok", text: "черновик готов" };
   return { dot: "", text: "новая" };
 }
 
@@ -8484,49 +8606,106 @@ async function renderTelegramPosts() {
   if (!block) return;
   let data;
   try {
-    data = await api("/api/telegram/posts?limit=50");
+    data = await api("/api/telegram/posts?scope=all&limit=200&offset=0");
+    const posts = [...data.posts];
+    while (posts.length < Math.min(tgPostsVisibleLimit, data.total) && posts.length) {
+      const next = await api(`/api/telegram/posts?scope=all&limit=200&offset=${posts.length}`);
+      if (!next.posts.length) break;
+      posts.push(...next.posts);
+    }
+    data = { ...data, posts };
   } catch (e) {
     return;
   }
+  const previousActivePost = tgPostsData.posts.find((p) => p.id === activeTgPostId);
   tgPostsData = data;
+  updateTalkListCount();
   const laterBtn = document.getElementById("tg-chat-later");
   if (laterBtn) laterBtn.textContent = `Утром, в ${data.morning_hour ?? 10}:00`;
-  const showAll = !repliesKind || repliesKind === "telegram";
-  block.hidden = !data.posts.length || !showAll;
-  const snapshot = JSON.stringify([data.posts.map((p) => [p.id, p.draft?.code, p.scheduled?.id, p.contacts.map((c) => c.note)]), activeTgPostId, showAll]);
-  if (snapshot === lastTgPostsSnapshot) return;
+  const showAll = talkListTab === "posts" || (talkListTab === "all" && (!repliesKind || repliesKind === "telegram"));
+  block.hidden = !showAll;
+  const more = document.getElementById("tg-posts-more");
+  if (more) more.hidden = data.posts.length >= (data.total ?? data.posts.length);
+  const query = document.getElementById("replies-filter-query")?.value.trim().toLowerCase() || "";
+  const snapshot = JSON.stringify([data.posts.map((p) => [p.id, p.source, p.title, p.status, p.sent_at, p.resume_status, p.resume_name, p.draft?.code, p.scheduled?.id, p.contacts.map((c) => [c.kind, c.value, c.note]), p.recipient_options]), activeTgPostId, showAll, query]);
+  if (snapshot === lastTgPostsSnapshot) {
+    const active = data.posts.find((p) => p.id === activeTgPostId);
+    if (active && !document.getElementById("tg-post-panel")?.hidden) loadTelegramPostHistory(active);
+    return;
+  }
   lastTgPostsSnapshot = snapshot;
-  document.getElementById("tg-posts-count").textContent = `· ${data.posts.length}`;
-  document.getElementById("tg-posts-list").innerHTML = data.posts
-    .slice(0, 30)
-    .map((p) => {
+  document.getElementById("tg-posts-count").textContent = `· ${data.total ?? data.posts.length}`;
+  if (!data.posts.length) {
+    document.getElementById("tg-posts-list").innerHTML = emptyStateHtml(
+      "Вакансий пока нет. Здесь появятся посты из Telegram и Hirify."
+    );
+    document.getElementById("tg-chat-posts-list")?.replaceChildren();
+    if (previousActivePost) {
+      closeTelegramPost();
+      document.getElementById("tg-chat-empty").style.display = "";
+      document.getElementById("talk-context-body").innerHTML = "";
+    }
+    return;
+  }
+  const shown = query ? data.posts.filter((p) =>
+    `${p.channel} ${p.title} ${p.text || ""} ${(p.contacts || []).map((c) => c.value).join(" ")}`.toLowerCase().includes(query)
+  ) : data.posts;
+  const postRow = (p) => {
       const b = tgPostBadge(p);
       return `<button type="button" class="row talk-row${p.id === activeTgPostId ? " is-selected" : ""}" data-tg-post="${escapeHtml(p.id)}">
-        ${plogoHtml("telegram")}
+        ${plogoHtml(p.source === "hirify" ? "hirify" : "telegram")}
         <span class="row-main">
-          <span class="talk-row-top"><span class="row-title">@${escapeHtml(p.channel)}</span><span class="muted small nowrap">${p.found_at ? fmtDay(p.found_at) : ""}</span></span>
-          <span class="talk-preview small">${escapeHtml(truncate(p.title, 90))}</span>
+          <span class="talk-row-top"><span class="row-title">${escapeHtml(truncate(p.title, 70))}</span><span class="muted small nowrap">${p.found_at ? fmtDay(p.found_at) : ""}</span></span>
+          <span class="talk-preview small">${p.source === "hirify" ? "Hirify" : `@${escapeHtml(p.channel)}`} · ${escapeHtml(tgPostRecipients(p).map((c) => c.kind === "telegram" ? `@${c.value}` : c.value).join(", ") || "адресат не найден")}</span>
           <span class="row-sub small muted">${b.dot ? `<span class="dot ${b.dot}" aria-hidden="true"></span>` : ""}${escapeHtml(b.text)}</span>
         </span>
       </button>`;
-    })
-    .join("");
+    };
+  document.getElementById("tg-posts-list").innerHTML = shown.length ? shown.map(postRow).join("") : emptyStateHtml("Вакансии не найдены.");
+  const conversationPosts = shown.filter((p) => !["hidden", "blocked"].includes(p.status));
+  document.getElementById("tg-chat-posts-list").innerHTML = conversationPosts.map(postRow).join("");
+  const active = data.posts.find((p) => p.id === activeTgPostId);
+  if (active && (previousActivePost?.status !== active.status || previousActivePost?.resume_status !== active.resume_status) && !document.getElementById("tg-post-panel")?.hidden) openTelegramPost(active.id);
+  if (previousActivePost && !active) {
+    closeTelegramPost();
+    document.getElementById("tg-chat-empty").style.display = "";
+    document.getElementById("talk-context-body").innerHTML = "";
+  }
 }
 
 function closeTelegramPost() {
   activeTgPostId = null;
+  lastTgPostHistorySnapshot = "";
   const panel = document.getElementById("tg-post-panel");
   if (panel) {
     panel.hidden = true;
     panel.innerHTML = "";
   }
-  document.querySelectorAll("#tg-posts-list .talk-row").forEach((r) => r.classList.remove("is-selected"));
+  document.querySelectorAll("#tg-posts-list .talk-row, #tg-chat-posts-list .talk-row").forEach((r) => r.classList.remove("is-selected"));
 }
 
 function tgPostContact(post) {
-  return post.draft
-    ? post.contacts.find((c) => c.value === post.draft.contact) || post.contacts[0]
-    : post.contacts.find((c) => c.kind === "telegram") || post.contacts[0];
+  const recipients = tgPostRecipients(post);
+  const chosen = tgPostContactChoice[post.id];
+  const match = (value) => recipients.find((c) => c.value.toLowerCase() === String(value).toLowerCase());
+  return chosen
+    ? match(chosen)
+    : post.draft
+    ? match(post.draft.contact)
+    : post.contact
+    ? match(post.contact)
+    : recipients.length === 1 ? recipients[0] : undefined;
+}
+
+function tgPostRecipients(post) {
+  const options = post.recipient_options ?? post.contacts ?? [];
+  return options.filter((c) => c.kind === "telegram" || c.kind === "email");
+}
+
+function tgPostDraft(post) {
+  const chosen = tgPostContactChoice[post.id];
+  if (chosen && post.draft?.contact !== chosen) return null;
+  return post.draft;
 }
 
 function tgPostResumeChoice(post) {
@@ -8536,48 +8715,62 @@ function tgPostResumeChoice(post) {
 }
 
 function tgPostPanelHtml(post) {
+  const recipients = tgPostRecipients(post);
   const contact = tgPostContact(post);
+  const draft = tgPostDraft(post);
   const isEmail = contact?.kind === "email";
   const resume = tgPostResumeChoice(post);
   const full = !isEmail && tgPostsData.sent_today >= tgPostsData.daily_limit;
-  const head = `<div class="thread-head"><h3 class="m0">${escapeHtml(truncate(post.title, 80))}</h3>
-    <span class="muted small">@${escapeHtml(post.channel)}${post.found_at ? " · " + escapeHtml(fmtDay(post.found_at)) : ""}</span></div>
-    <details class="post-text"><summary>Текст поста</summary><div class="letter-text">${escapeHtml(post.text)}</div></details>`;
-  if (!contact) {
-    return `${head}<div class="composer-empty"><span>В посте нет контакта — отклик, скорее всего, через форму на сайте.</span>
-      <a class="btn btn-small" href="${escapeHtml(post.link)}" target="_blank" rel="noopener">Открыть пост ↗</a></div>`;
-  }
-  const notes = post.contacts.filter((c) => c.note).map((c) => `${c.kind === "telegram" ? "@" : ""}${c.value}: ${c.note}`);
-  const contactChips = post.contacts.length > 1
-    ? `<div class="chip-row" role="radiogroup" aria-label="Кому писать">${post.contacts
-        .map((c) => `<button type="button" class="chip${c.value === contact.value ? " active" : ""}" role="radio" aria-checked="${c.value === contact.value}" data-post-contact="${escapeHtml(c.value)}">${c.kind === "telegram" ? "@" : ""}${escapeHtml(c.value)}</button>`)
-        .join("")}</div>`
-    : "";
+  const sourceName = post.source === "hirify" ? "Hirify" : `@${escapeHtml(post.channel)}`;
+  const recipient = contact ? `${isEmail ? "" : "@"}${escapeHtml(contact.value)}` : "";
+  const head = `<div class="post-head">${plogoHtml(post.source === "hirify" ? "hirify" : "telegram")}<div class="post-head-copy"><h3 class="m0">${escapeHtml(truncate(post.title, 100))}</h3>
+    <span class="muted small">Источник: ${sourceName}${post.found_at ? " · " + escapeHtml(fmtDay(post.found_at)) : ""}</span></div></div>
+    <details class="post-text"><summary><span><strong>Исходный пост</strong><small>${escapeHtml(truncate(post.text || post.title, 135))}</small></span><span aria-hidden="true">⌄</span></summary><div class="letter-text">${escapeHtml(post.text || "")}</div><a class="btn btn-small btn-ghost" href="${escapeHtml(post.link)}" target="_blank" rel="noopener">Открыть источник ↗</a></details>`;
+  const contacts = `<div class="post-recipient-section"><div class="post-recipient-heading"><div class="post-section-label">Кому отправить <span class="muted" title="Выберите адресата перед отправкой">ⓘ</span></div><span class="muted small">Источник: ${sourceName}</span></div>
+    ${recipients.length ? `<div class="post-recipient-list" role="radiogroup" aria-label="Кому отправить">${recipients.map((c) => {
+      const selected = c.value === contact?.value;
+      const address = `${c.kind === "telegram" ? "@" : ""}${escapeHtml(c.value)}`;
+      return `<button type="button" class="post-recipient${selected ? " active" : ""}" role="radio" aria-checked="${selected}" data-post-contact="${escapeHtml(c.value)}"><span class="post-recipient-icon">${c.kind === "telegram" ? "✈" : "@"}</span><span class="post-recipient-copy"><strong>${address}</strong><small>${c.kind === "telegram" ? "Telegram" : "Email"}${c.note ? ` · ${escapeHtml(c.note)}` : ""}</small></span><span class="post-recipient-check" aria-hidden="true">${selected ? "●" : "○"}</span></button>`;
+    }).join("")}</div>` : `<p class="muted small">Адресат не найден. Проверьте исходную вакансию и добавьте контакт вручную.</p>`}
+    ${post.source === "hirify" ? `<div class="post-hirify-actions">${hirifyLoginRequired.has(post.id) ? `<button type="button" class="btn btn-small btn-ghost" data-post-action="login-hirify">Повторить вход в Hirify</button>` : ""}<button type="button" class="btn btn-small" data-post-action="sync-hirify">Получить контакты из Hirify</button></div>` : ""}
+    ${post.status === "new" ? `<details class="post-add-recipient"><summary>+ Добавить адресата</summary><div><select id="tg-post-contact-kind" aria-label="Тип адресата"><option value="telegram">Telegram</option><option value="email">Email</option></select><input id="tg-post-contact-value" type="text" autocomplete="off" placeholder="@username или email" aria-label="Адресат"><button type="button" class="btn btn-small" data-post-action="add-contact">Добавить адресата</button></div></details>` : ""}</div>`;
+  const history = `<section class="post-history" aria-label="Переписка"><div id="tg-post-history" class="post-history-messages"><div class="post-history-empty"><span class="post-history-empty-icon" aria-hidden="true">▢</span><strong>${isEmail ? "Письмо ещё не отправлено" : "Переписки пока нет — она появится после отправки"}</strong><span>${contact ? `Напишите сообщение и отправьте его ${recipient}. Здесь будут все сообщения в этом диалоге.` : "Выберите адресата, чтобы увидеть историю и подготовить сообщение."}</span></div></div></section>`;
+  const locked = ["sent", "queued", "send_unknown", "skipped_contacted", "hidden", "blocked"].includes(post.status);
+  const status = post.status === "sent"
+    ? `Сообщение отправлено${post.sent_at ? ` ${escapeHtml(fmtDay(post.sent_at))}` : ""}${recipient ? ` → ${recipient}` : ""}.${post.resume_status === "sent" ? " Резюме тоже отправлено." : post.resume_status === "failed" ? " Резюме не отправилось — его можно отправить отдельно в переписке." : ""}`
+    : post.status === "queued" ? "Сообщение ожидает автоматической отправки. Факт отправки появится здесь."
+    : post.status === "send_unknown" ? "Отправку не удалось подтвердить. Проверьте переписку в Telegram."
+    : post.status === "skipped_contacted" ? "Автоматическая отправка отменена: этому контакту уже писали."
+    : post.status === "hidden" ? "Вакансия скрыта."
+    : post.status === "blocked" ? "Для этого контакта установлено «Не писать»." : "";
+  if (locked) return `${head}${contacts}${status ? `<div class="fix is-info"><span class="dot ${post.status === "sent" ? "ok" : "idle"}"></span><div class="fix-body">${status}</div></div>` : ""}${history}${contact?.kind === "telegram" && ["sent", "skipped_contacted"].includes(post.status) ? `<button type="button" class="btn btn-small" data-post-action="open-chat">Продолжить переписку с ${recipient}</button>` : ""}`;
   const scheduled = post.scheduled
     ? `<div class="fix is-info"><span class="dot idle"></span><div class="fix-body">Сообщение уйдёт ${escapeHtml(fmtWhen(post.scheduled.send_after))} — ночью HR не беспокоим.</div><button type="button" class="btn btn-small" data-post-action="unschedule">Отменить</button></div>`
     : "";
-  if (post.scheduled && !post.draft) return `${head}${contactChips}${scheduled}`;
-  const draftBlock = post.draft
-    ? `<div class="draft-note"><span class="small">Черновик от ИИ под эту вакансию — можно править</span><button type="button" class="btn btn-ghost btn-small" data-post-action="rewrite">Переписать</button></div>
-       <textarea id="tg-post-text" rows="7" aria-label="Текст сообщения">${escapeHtml(post.draft.text)}</textarea>`
+  if (!contact) return `${head}${contacts}${history}<div class="composer-empty">Выберите адресата: затем можно проверить черновик и отправить сообщение.</div>`;
+  if (post.scheduled && !draft) return `${head}${contacts}${history}${scheduled}`;
+  const draftBlock = draft
+    ? `<div class="draft-note"><label for="tg-post-text">Сообщение</label><button type="button" class="btn btn-ghost btn-small" data-post-action="rewrite">✧ Переписать с ИИ</button></div>
+       <textarea id="tg-post-text" rows="5" aria-label="Текст сообщения">${escapeHtml(draft.text)}</textarea>`
     : `<div class="composer-empty"><span>Черновика пока нет. ИИ напишет его под эту вакансию и ваше резюме — ничего не уйдёт без вашего «Отправить».</span>
        <button type="button" class="btn btn-primary btn-small" data-post-action="draft">Написать черновик</button></div>`;
   const resumes = [{ name: "", label: "без резюме" }, ...tgPostsData.resume_options];
-  const resumeRow = post.draft
-    ? `<div class="composer-row"><span class="muted small">Резюме:</span><div class="chip-row" role="radiogroup" aria-label="Резюме">${resumes
-        .map((r) => `<button type="button" class="chip${r.name === resume ? " active" : ""}" role="radio" aria-checked="${r.name === resume}" data-post-resume="${escapeHtml(r.name)}">${escapeHtml(r.label)}</button>`)
-        .join("")}</div>
+  const chosenResume = resumes.find((r) => r.name === resume);
+  const resumeRow = draft
+    ? `<div class="post-attachment"><button type="button" class="post-attachment-open" data-post-action="resume-menu" aria-expanded="false" aria-controls="tg-post-resume-menu"><span aria-hidden="true">📎</span> ${resume ? "Прикрепить резюме" : "Выбрать резюме"}</button><span class="post-attachment-name">${resume ? escapeHtml(chosenResume?.label || resume.split(/[\\/]/).pop()) : "Без резюме"}</span>${resume ? `<button type="button" class="post-attachment-remove" data-post-resume="" aria-label="Убрать резюме">×</button>` : ""}<div id="tg-post-resume-menu" class="post-resume-menu" role="radiogroup" aria-label="Резюме" hidden>${resumes
+        .map((r) => `<button type="button" class="${r.name === resume ? "active" : ""}" role="radio" aria-checked="${r.name === resume}" data-post-resume="${escapeHtml(r.name)}">${escapeHtml(r.label)}</button>`)
+        .join("")}</div></div>
+       <div class="post-delivery"><span class="post-route">${isEmail ? "С вашего Gmail" : "С вашего Telegram"} → <strong>${recipient}</strong><small> · ещё не отправлено</small></span>
        <span class="composer-actions">${!isEmail && !post.scheduled ? `<button type="button" class="btn btn-small" data-post-action="later">Утром, в ${tgPostsData.morning_hour ?? 10}:00</button>` : ""}
-       <button type="button" class="btn btn-primary btn-small" data-post-action="send" ${full ? "disabled" : ""}>${full ? "Лимит на сегодня" : resume ? "Отправить с резюме" : "Отправить"}</button></span></div>
-       <span class="muted small">${isEmail ? "Уйдёт письмом через ваш Gmail" : `Уйдёт с вашего личного аккаунта Telegram · сегодня ${tgPostsData.sent_today} из ${tgPostsData.daily_limit}`} · Ctrl/⌘ + Enter — отправить</span>`
+       <button type="button" class="btn btn-primary btn-small" data-post-action="send" ${full ? "disabled" : ""}>${full ? "Лимит на сегодня" : isEmail ? "Отправить письмо" : "Отправить в Telegram"}</button></span></div>
+       <span class="muted small">${!isEmail ? `Сегодня ${tgPostsData.sent_today} из ${tgPostsData.daily_limit} · ` : ""}Ctrl/⌘ + Enter — отправить${resume ? " · с резюме" : ""}</span>`
     : "";
-  return `${head}${notes.length ? `<div class="fix is-warn"><span class="dot warn"></span><div class="fix-body">${escapeHtml(notes.join(" · "))}</div></div>` : ""}
-    ${contactChips}${scheduled}<div class="post-composer">${draftBlock}${resumeRow}</div>`;
+  return `${head}${contacts}${history}${scheduled}<div class="post-composer">${draftBlock}${resumeRow}</div>`;
 }
 
 function tgPostContextHtml(post) {
   const contact = tgPostContact(post);
-  return `<div class="field-block"><div class="field-title">Вакансия из @${escapeHtml(post.channel)}</div>
+  return `<div class="field-block"><div class="field-title">Вакансия из ${post.source === "hirify" ? "Hirify" : `@${escapeHtml(post.channel)}`}</div>
       <div class="field-hint">${escapeHtml(post.title)}</div>
       ${post.unverified ? `<div class="field-hint">ИИ не проверил, вакансия ли это — автоотправки не было</div>` : ""}</div>
     <div class="field-block"><div class="field-title">Контакт</div><div class="field-hint">${contact ? `${contact.kind === "telegram" ? "@" : ""}${escapeHtml(contact.value)}` : "не найден"}</div></div>
@@ -8595,7 +8788,7 @@ function openTelegramPost(postId) {
   activeTelegramContact = null;
   selectedInboxIndex = -1;
   document.querySelectorAll("#replies-rows .talk-row, #tg-conv-list .conv-item").forEach((r) => r.classList.remove("is-selected", "active"));
-  document.querySelectorAll("#tg-posts-list .talk-row").forEach((r) => r.classList.toggle("is-selected", r.dataset.tgPost === postId));
+  document.querySelectorAll("#tg-posts-list .talk-row, #tg-chat-posts-list .talk-row").forEach((r) => r.classList.toggle("is-selected", r.dataset.tgPost === postId));
   document.getElementById("tg-chat-panel").style.display = "none";
   document.getElementById("tg-chat-empty").style.display = "none";
   document.getElementById("talk-item-panel").hidden = true;
@@ -8603,9 +8796,34 @@ function openTelegramPost(postId) {
   const panel = document.getElementById("tg-post-panel");
   panel.hidden = false;
   panel.innerHTML = tgPostPanelHtml(post);
+  lastTgPostHistorySnapshot = "";
+  loadTelegramPostHistory(post);
   const ctxBody = document.getElementById("talk-context-body");
   ctxBody.classList.remove("muted", "small");
   ctxBody.innerHTML = tgPostContextHtml(post);
+}
+
+async function loadTelegramPostHistory(post) {
+  const contact = tgPostContact(post);
+  if (contact?.kind !== "telegram") return;
+  const history = document.getElementById("tg-post-history");
+  if (!history) return;
+  try {
+    const page = await api(`/api/telegram/history/${encodeURIComponent(contact.value)}`);
+    if (activeTgPostId !== post.id || tgPostContact(tgPostsData.posts.find((p) => p.id === post.id) || post)?.value !== contact.value) return;
+    const current = document.getElementById("tg-post-history");
+    if (!current) return;
+    const snapshot = JSON.stringify([post.id, contact.value, page.messages.map((m) => [m.id, m.text, m.at])]);
+    if (snapshot === lastTgPostHistorySnapshot) return;
+    lastTgPostHistorySnapshot = snapshot;
+    current.innerHTML = page.messages.length
+      ? page.messages.map((m) => `<div class="chat-bubble ${m.direction === "out" ? "out" : "in"}">${escapeHtml(m.text || "")}<span class="chat-bubble-time">${formatChatTime(m.at)}</span></div>`).join("")
+      : `<p class="post-history-empty">Переписки пока нет — она появится здесь после первого сообщения.</p>`;
+    current.scrollTop = current.scrollHeight;
+  } catch (error) {
+    const current = document.getElementById("tg-post-history");
+    if (activeTgPostId === post.id && current) current.innerHTML = `<p class="post-history-empty">История сейчас недоступна. Проверьте чат Telegram перед отправкой.</p>`;
+  }
 }
 
 async function refreshTelegramPost(postId = activeTgPostId) {
@@ -8618,6 +8836,11 @@ async function refreshTelegramPost(postId = activeTgPostId) {
 async function tgPostAction(action, btn) {
   const post = tgPostsData.posts.find((p) => p.id === activeTgPostId);
   if (!post) return;
+  if (action === "open-chat") {
+    const contact = tgPostContact(post);
+    if (contact?.kind === "telegram") openTelegramConversation(contact.value);
+    return;
+  }
   const textEl = document.getElementById("tg-post-text");
   const text = textEl ? textEl.value.trim() : "";
   const resume = tgPostResumeChoice(post);
@@ -8626,29 +8849,56 @@ async function tgPostAction(action, btn) {
     btn.textContent = label;
   };
   try {
-    if (action === "draft" || action === "rewrite") {
+    if (action === "login-hirify") {
+      busy("Открываю Hirify…");
+      const result = await api("/api/hirify/login", { method: "POST" });
+      showToast(result.message || "Войдите в Hirify в открывшемся окне", "success");
+      btn.disabled = false;
+      btn.textContent = "Повторить вход в Hirify";
+    } else if (action === "sync-hirify") {
+      busy("Читаю контакты…");
+      const result = await api(`/api/telegram/posts/${post.id}/hirify-contacts`, { method: "POST" });
+      hirifyLoginRequired.delete(post.id);
+      await refreshTelegramPost(post.id);
+      showToast(`Контакты Hirify сохранены: ${result.contacts?.length || 0}`, "success");
+    } else if (action === "draft" || action === "rewrite") {
       busy(action === "draft" ? "Пишу черновик…" : "Переписываю…");
       const contact = tgPostContact(post);
-      await api(`/api/telegram/posts/${post.id}/draft`, { method: "POST", body: JSON.stringify({ contact: contact?.value || "" }) });
+      if (!contact) throw new Error("Сначала выберите адресата");
+      await api(`/api/telegram/posts/${post.id}/draft`, { method: "POST", body: JSON.stringify({ contact: contact.value, rewrite: action === "rewrite" }) });
       await refreshTelegramPost(post.id);
+      if (action === "rewrite") showToast("ИИ переписал черновик — проверьте текст перед отправкой", "success");
+    } else if (action === "add-contact") {
+      const kind = document.getElementById("tg-post-contact-kind")?.value;
+      const value = document.getElementById("tg-post-contact-value")?.value.trim();
+      if (!value) throw new Error("Введите Telegram-адрес или email адресата");
+      busy("Добавляю…");
+      const result = await api(`/api/telegram/posts/${post.id}/contacts`, { method: "POST", body: JSON.stringify({ kind, value }) });
+      const added = result.contacts?.find((c) => c.kind === kind && c.value.toLowerCase() === value.replace(/^@/, "").toLowerCase());
+      tgPostContactChoice = { ...tgPostContactChoice, [post.id]: added?.value || value.replace(/^@/, "") };
+      await refreshTelegramPost(post.id);
+      showToast("Адресат добавлен. Проверьте его перед отправкой", "success");
     } else if (action === "send") {
       if (!text) return;
       busy("Отправляю…");
       const contact = tgPostContact(post);
       if (contact.kind === "email") {
-        const res = await api(`/api/hr-drafts/${post.draft.code}/send`, { method: "POST", body: JSON.stringify({ text, resume }) });
+        const draft = tgPostDraft(post);
+        const res = await api(`/api/hr-drafts/${draft.code}/send`, { method: "POST", body: JSON.stringify({ text, resume }) });
         showToast(res.message, "success");
       } else {
         // Отправлено — пост становится обычной перепиской в списке ниже.
         const res = await api(`/api/telegram/posts/${post.id}/send`, { method: "POST", body: JSON.stringify({ contact: contact.value, text, resume }) });
         showToast(res.warning || `Отправлено @${res.contact}${resume ? " + резюме" : ""}`, res.warning ? "error" : "success");
         delete tgPostResume[post.id];
+        tgPostContactChoice = { ...tgPostContactChoice, [post.id]: undefined };
         await refreshTelegramPost(post.id);
         await render.telegram();
         openTelegramConversation(res.contact);
         return;
       }
       delete tgPostResume[post.id];
+      tgPostContactChoice = { ...tgPostContactChoice, [post.id]: undefined };
       await refreshTelegramPost(post.id);
       render.telegram();
     } else if (action === "later") {
@@ -8683,6 +8933,7 @@ async function tgPostAction(action, btn) {
       });
     }
   } catch (err) {
+    if (action === "sync-hirify" && /^409:.*Войдите в Hirify/s.test(err.message)) hirifyLoginRequired.add(post.id);
     showToast(err.message.replace(/^\d+: /, ""), "error");
     if (document.body.contains(btn)) await refreshTelegramPost(post.id);
   }
@@ -8756,15 +9007,222 @@ async function sendTelegramMessageLater() {
   }
 }
 
-function initTalkExtras() {
-  document.getElementById("tg-posts-list")?.addEventListener("click", (e) => {
-    const row = e.target.closest("[data-tg-post]");
-    if (row) openTelegramPost(row.dataset.tgPost);
+function telegramMenuItems(kind, hasContact) {
+  if (kind === "post") return [
+    { action: "open", label: "Открыть вакансию" },
+    { action: "info", label: "Информация о вакансии" },
+    { action: "remove-post", label: "Удалить вакансию из приложения", danger: true },
+    ...(hasContact ? [{ action: "remove-contact", label: "Убрать контакт из приложения", danger: true }] : []),
+  ];
+  return [
+    { action: "open", label: "Открыть переписку" },
+    { action: "info", label: "Информация о контакте" },
+    { action: "remove-contact", label: "Убрать контакт из приложения", danger: true },
+    { action: "delete-dialog", label: "Удалить переписку в Telegram", danger: true },
+  ];
+}
+
+let talkMenuTarget = null;
+
+function setTalkListTab(tab, reload = true) {
+  const tabs = document.getElementById("talk-source-tabs");
+  if (!tabs) return;
+  talkListTab = tab;
+  updateTalkListCount();
+  tabs.querySelectorAll("[data-talk-list-tab]").forEach((button) => {
+    const selected = button.dataset.talkListTab === tab;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-selected", String(selected));
   });
+  document.getElementById("talk-chats-block").hidden = tab !== "chats";
+  document.getElementById("replies-kind").hidden = tab !== "chats" || (!lastRepliesEntries.length && !telegramConversationsCache.length);
+  document.getElementById("tg-posts-block").hidden = tab !== "posts";
+  if (reload && tab === "posts") renderTelegramPosts();
+}
+
+function setTalkContextOpen(open) {
+  const drawer = document.getElementById("talk-context");
+  const toggle = document.getElementById("talk-context-toggle");
+  drawer.hidden = !open;
+  toggle.setAttribute("aria-expanded", String(open));
+  if (open) document.getElementById("talk-context-close").focus();
+  else toggle.focus();
+}
+
+function setTalkToolsOpen(open) {
+  const panel = document.getElementById("talk-tools-panel");
+  const toggle = document.getElementById("talk-tools-toggle");
+  if (!panel || !toggle) return;
+  panel.hidden = !open;
+  toggle.setAttribute("aria-expanded", String(open));
+  if (open) document.getElementById("talk-tools-close")?.focus();
+  else toggle.focus();
+}
+
+function closeTalkMenu() {
+  document.getElementById("talk-context-menu").hidden = true;
+  talkMenuTarget = null;
+}
+
+function showTalkMenu(event) {
+  const row = event.target.closest("[data-tg-post], [data-contact], [data-inbox-index]");
+  if (!row) return;
+  let target = null;
+  if (row.dataset.tgPost) {
+    const post = tgPostsData.posts.find((p) => p.id === row.dataset.tgPost);
+    if (post) {
+      const contact = tgPostContact(post);
+      target = { kind: "post", id: post.id, contact: contact?.kind === "telegram" ? contact.value : "" };
+    }
+  } else if (row.dataset.contact) {
+    target = { kind: "conversation", contact: row.dataset.contact };
+  } else if (row.dataset.inboxIndex != null) {
+    const entry = talkEntries[Number(row.dataset.inboxIndex)];
+    if (entry?.channel === "telegram_dm" && entry.contact) target = { kind: "conversation", contact: entry.contact };
+  }
+  if (!target) return;
+  event.preventDefault();
+  talkMenuTarget = target;
+  const menu = document.getElementById("talk-context-menu");
+  menu.innerHTML = telegramMenuItems(target.kind, !!target.contact)
+    .map((item) => `<button type="button" role="menuitem" data-menu-action="${item.action}"${item.danger ? ' class="is-danger"' : ""}>${item.label}</button>`)
+    .join("");
+  menu.hidden = false;
+  const rect = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(event.clientX, window.innerWidth - rect.width - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(event.clientY, window.innerHeight - rect.height - 8))}px`;
+  menu.querySelector("button")?.focus();
+}
+
+async function handleTalkMenuAction(action) {
+  const target = talkMenuTarget;
+  closeTalkMenu();
+  if (!target) return;
+  if (action === "open" || action === "info") {
+    if (target.kind === "post") openTelegramPost(target.id);
+    else await openTelegramConversation(target.contact);
+    if (action === "info") setTalkContextOpen(true);
+    return;
+  }
+  if (action === "delete-dialog") {
+    await openTelegramConversation(target.contact);
+    document.getElementById("tg-chat-delete").click();
+    return;
+  }
+  const removingPost = action === "remove-post" && target.kind === "post";
+  const removingContact = action === "remove-contact" && !!target.contact;
+  if (!removingPost && !removingContact) return;
+  const description = removingPost ? "вакансию" : `контакт @${target.contact}`;
+  const confirmed = await showConfirm(`Удалить ${description} из приложения? В Telegram ничего не удалится. Повторный поиск не вернёт эту запись.`);
+  if (!confirmed) return;
+  try {
+    const path = removingPost
+      ? `/api/telegram/posts/${encodeURIComponent(target.id)}`
+      : `/api/telegram/contacts/${encodeURIComponent(target.contact)}/local`;
+    await api(path, { method: "DELETE" });
+    const activeRemoved = removingPost
+      ? activeTgPostId === target.id
+      : activeTelegramContact === target.contact || (activeTgPostId && tgPostsData.posts.some((p) => p.id === activeTgPostId && tgPostContact(p)?.value === target.contact));
+    if (activeRemoved) {
+      activeTelegramContact = null;
+      closeTelegramPost();
+      document.getElementById("tg-chat-panel").style.display = "none";
+      document.getElementById("tg-chat-empty").style.display = "";
+      document.getElementById("talk-context-body").innerHTML = "";
+      setTalkContextOpen(false);
+    }
+    lastTgPostsSnapshot = "";
+    await render.replies();
+    showToast(`${removingPost ? "Вакансия" : "Контакт"} удалён из приложения`, "success");
+  } catch (error) {
+    showToast(error.message.replace(/^\d+: /, ""), "error");
+  }
+}
+
+function initTalkExtras() {
+  const tabs = document.getElementById("talk-source-tabs");
+  if (tabs) {
+    tabs.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-talk-list-tab]");
+      if (button) setTalkListTab(button.dataset.talkListTab);
+    });
+    setTalkListTab("chats", false);
+  }
+  document.getElementById("talk-tools-toggle")?.addEventListener("click", () => {
+    setTalkToolsOpen(document.getElementById("talk-tools-panel").hidden);
+  });
+  document.getElementById("talk-tools-close")?.addEventListener("click", () => setTalkToolsOpen(false));
+  document.getElementById("talk-context-toggle")?.addEventListener("click", () => {
+    setTalkContextOpen(document.getElementById("talk-context").hidden);
+  });
+  document.getElementById("talk-context-close")?.addEventListener("click", () => setTalkContextOpen(false));
+  const talkList = document.querySelector?.(".talk-list");
+  talkList?.addEventListener("contextmenu", showTalkMenu);
+  talkList?.addEventListener("keydown", (event) => {
+    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) showTalkMenu(event);
+  });
+  document.getElementById("talk-context-menu")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-menu-action]");
+    if (button) handleTalkMenuAction(button.dataset.menuAction);
+  });
+  document.addEventListener?.("click", (event) => {
+    if (!event.target.closest?.("#talk-context-menu")) closeTalkMenu();
+  });
+  document.addEventListener?.("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeTalkMenu();
+      if (!document.getElementById("talk-tools-panel").hidden) setTalkToolsOpen(false);
+      if (!document.getElementById("talk-context").hidden) setTalkContextOpen(false);
+    }
+  });
+  document.getElementById("tg-chat-older")?.addEventListener("click", async () => {
+    const contact = activeTelegramContact;
+    const oldest = telegramLoadedHistory.messages[0]?.id;
+    if (!contact || !oldest) return;
+    const button = document.getElementById("tg-chat-older");
+    button.disabled = true;
+    try {
+      const page = await api(`/api/telegram/history/${encodeURIComponent(contact)}?before_id=${oldest}`);
+      if (activeTelegramContact !== contact || page.source !== "telegram") return;
+      const seen = new Set(telegramLoadedHistory.messages.map((m) => m.id));
+      telegramLoadedHistory = {
+        contact,
+        messages: [...page.messages.filter((m) => !seen.has(m.id)), ...telegramLoadedHistory.messages],
+        hasMore: page.has_more,
+      };
+      document.getElementById("tg-chat-messages").innerHTML = telegramLoadedHistory.messages
+        .map((m) => `<div class="chat-bubble ${m.direction === "out" ? "out" : "in"}">${escapeHtml(m.text || "")}<span class="chat-bubble-time">${formatChatTime(m.at)}</span></div>`)
+        .join("");
+      button.hidden = !page.has_more;
+    } catch (error) {
+      showToast(`Не удалось загрузить старые сообщения: ${error.message}`, "error");
+    } finally {
+      button.disabled = false;
+    }
+  });
+  document.getElementById("tg-posts-more")?.addEventListener("click", () => {
+    tgPostsVisibleLimit += 200;
+    lastTgPostsSnapshot = "";
+    renderTelegramPosts();
+  });
+  for (const id of ["tg-posts-list", "tg-chat-posts-list"]) {
+    document.getElementById(id)?.addEventListener("click", (e) => {
+      const row = e.target.closest("[data-tg-post]");
+      if (row) openTelegramPost(row.dataset.tgPost);
+    });
+  }
   const panel = document.getElementById("tg-post-panel");
   panel?.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-post-action]");
     if (btn) {
+      if (btn.dataset.postAction === "resume-menu") {
+        const menu = document.getElementById("tg-post-resume-menu");
+        if (menu) {
+          menu.hidden = !menu.hidden;
+          btn.setAttribute("aria-expanded", String(!menu.hidden));
+        }
+        return;
+      }
       tgPostAction(btn.dataset.postAction, btn);
       return;
     }
@@ -8779,9 +9237,8 @@ function initTalkExtras() {
     const who = e.target.closest("[data-post-contact]");
     if (who && activeTgPostId) {
       const post = tgPostsData.posts.find((p) => p.id === activeTgPostId);
-      if (post && post.draft?.contact !== who.dataset.postContact) {
-        post.draft = null;
-        post.contacts = [...post.contacts].sort((a, b) => (a.value === who.dataset.postContact ? -1 : b.value === who.dataset.postContact ? 1 : 0));
+      if (post && tgPostContact(post)?.value !== who.dataset.postContact) {
+        tgPostContactChoice = { ...tgPostContactChoice, [post.id]: who.dataset.postContact };
         openTelegramPost(activeTgPostId);
       }
     }
@@ -8790,10 +9247,14 @@ function initTalkExtras() {
   panel?.addEventListener("change", async (e) => {
     if (e.target.id !== "tg-post-text") return;
     const post = tgPostsData.posts.find((p) => p.id === activeTgPostId);
-    if (!post?.draft || !e.target.value.trim()) return;
+    const draft = post ? tgPostDraft(post) : null;
+    if (!draft || !e.target.value.trim()) return;
+    const text = e.target.value;
     try {
-      await api(`/api/hr-drafts/${post.draft.code}`, { method: "PUT", body: JSON.stringify({ text: e.target.value }) });
-      post.draft.text = e.target.value;
+      await api(`/api/hr-drafts/${draft.code}`, { method: "PUT", body: JSON.stringify({ text }) });
+      tgPostsData = { ...tgPostsData, posts: tgPostsData.posts.map((p) =>
+        p.id === post.id && p.draft?.code === draft.code ? { ...p, draft: { ...p.draft, text } } : p
+      ) };
     } catch (err) {
       showToast(err.message.replace(/^\d+: /, ""), "error");
     }

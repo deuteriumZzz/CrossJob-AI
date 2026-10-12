@@ -133,13 +133,30 @@ class ContactBook:
         Компания без названия (пост в Telegram без компании) заводится
         по первому контакту — иначе все такие посты слиплись бы в одну.
         Повторный контакт не дублируется. Возвращает ключ компании."""
-        key = company_key(company) or (
-            f"@{contacts[0]['value']}" if contacts else ""
-        )
-        if not key:
-            return ""
         now = datetime.now().astimezone().isoformat()
         with state_file_lock(self.path):
+            had_contacts = bool(contacts)
+            if any(item.get("kind") == "telegram" for item in contacts):
+                from src.job_sources.telegram_conversations import (
+                    TelegramConversations,
+                )
+
+                dismissed = TelegramConversations(
+                    self.path.parent / "telegram_conversations.json"
+                )
+                contacts = [
+                    item
+                    for item in contacts
+                    if item.get("kind") != "telegram"
+                    or not dismissed.is_dismissed(str(item.get("value", "")))
+                ]
+            if had_contacts and not contacts:
+                return ""
+            key = company_key(company) or (
+                f"@{contacts[0]['value']}" if contacts else ""
+            )
+            if not key:
+                return ""
             data = self._load()
             if key not in data["companies"]:
                 # «Acme», «ACME LLC» и acme.io — одна компания: ищем по домену
@@ -213,6 +230,42 @@ class ContactBook:
             ]
             self._save(data)
         return removed
+
+    def remove_telegram_contact(self, value: str) -> int:
+        """Remove one Telegram handle, preserving other contacts."""
+        wanted = value.lower().lstrip("@")
+        removed = 0
+
+        def keep(item: dict) -> bool:
+            if item.get("kind") != "telegram":
+                return True
+            handle = str(item.get("value", "")).lower().lstrip("@")
+            return handle != wanted
+
+        with state_file_lock(self.path):
+            data = self._load()
+            for key, card in list(data["companies"].items()):
+                contacts = card.get("contacts", [])
+                kept = [item for item in contacts if keep(item)]
+                removed += len(contacts) - len(kept)
+                if len(kept) == len(contacts):
+                    continue
+                if not kept and key.lower() == f"@{wanted}":
+                    del data["companies"][key]
+                else:
+                    card["contacts"] = kept
+            if removed:
+                self._save(data)
+        return removed
+
+    def has_telegram_contact(self, value: str) -> bool:
+        wanted = value.lower().lstrip("@")
+        return any(
+            item.get("kind") == "telegram"
+            and str(item.get("value", "")).lower().lstrip("@") == wanted
+            for card in self.all().values()
+            for item in card.get("contacts", [])
+        )
 
     def restore(self, cards: list[dict]) -> None:
         with state_file_lock(self.path):

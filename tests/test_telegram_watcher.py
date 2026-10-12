@@ -3,9 +3,12 @@ import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from src.job_sources.contact_book import ContactBook
 from src.job_sources.telegram import watcher as w
 from src.job_sources.telegram.client import _SESSION_LOCK, TelegramSourceClient
+from src.job_sources.telegram.contact import post_recipient_options
 from src.job_sources.telegram_conversations import TelegramConversations
 from src.webui import api
 from tests.test_webui_api import client  # noqa: F401  (fixture)
@@ -23,6 +26,123 @@ def test_match_keywords_and_defaults():
         "python",
         "backend",
     ]
+
+
+def test_legacy_post_recovers_explicit_recipient_without_changing_file(
+    tmp_path,
+):
+    post = {
+        "link": "https://t.me/prog_itjobs/42",
+        "channel": "prog_itjobs",
+        "text": "Python developer\nКанал @prog_itjobs\nСвязь: @nextbit_hr",
+        "contacts": [],
+    }
+    post_id = w.save_watch_post(tmp_path, post)
+    recovered = w.get_watch_post(tmp_path, post_id)
+    assert recovered["contacts"] == [
+        {"kind": "telegram", "value": "nextbit_hr"}
+    ]
+    assert recovered["recipient_options"] == [
+        {"kind": "telegram", "value": "nextbit_hr", "source": "explicit"}
+    ]
+    assert post["contacts"] == []
+    assert "recipient_options" not in (
+        tmp_path / w.WATCH_POSTS_FILE
+    ).read_text(encoding="utf-8")
+
+
+def test_recipient_options_keep_multiple_explicit_addresses_and_ambiguity():
+    explicit = (
+        "Python developer\nКанал @prog_itjobs\n"
+        "Связь: @nextbit_hr или hr@acme.io\n"
+        "Публикации: @other_jobs"
+    )
+    assert post_recipient_options(explicit, "prog_itjobs") == [
+        {"kind": "email", "value": "hr@acme.io", "source": "explicit"},
+        {"kind": "telegram", "value": "nextbit_hr", "source": "explicit"},
+    ]
+    ambiguous = "Python developer, @first_hr и @second_hr"
+    assert post_recipient_options(ambiguous, "prog_itjobs") == []
+    assert post_recipient_options(
+        "Python developer, @only_hr", "prog_itjobs"
+    ) == [{"kind": "telegram", "value": "only_hr", "source": "single"}]
+
+
+def test_contact_line_excludes_handle_labeled_as_source_channel():
+    text = (
+        "Python developer\nКонтакты: @dinara_yusss, @itvacancykz\n"
+        "Вакансия опубликована в @itvacancykz"
+    )
+    assert post_recipient_options(text, "wntddev") == [
+        {"kind": "telegram", "value": "dinara_yusss", "source": "explicit"}
+    ]
+
+
+def test_resaving_post_preserves_manual_contact_and_removed_status(tmp_path):
+    post = {
+        "link": "https://t.me/geekjobs/64",
+        "channel": "geekjobs",
+        "text": "Python developer без адреса для отклика",
+        "contacts": [],
+    }
+    post_id = w.save_watch_post(tmp_path, post)
+    w.update_watch_post(
+        tmp_path,
+        post_id,
+        contacts=[
+            {"kind": "telegram", "value": "hr_anna", "source": "manual"}
+        ],
+        status="removed",
+    )
+    w.save_watch_post(tmp_path, {**post, "contacts": []})
+    saved = w.get_watch_post(tmp_path, post_id)
+    assert saved["status"] == "removed"
+    assert saved["contacts"] == [
+        {"kind": "telegram", "value": "hr_anna", "source": "manual"}
+    ]
+    assert saved["recipient_options"] == [
+        {"kind": "telegram", "value": "hr_anna", "source": "manual"}
+    ]
+
+
+def test_stored_hidden_contact_is_available_even_when_absent_from_post_text(
+    tmp_path,
+):
+    post_id = w.save_watch_post(
+        tmp_path,
+        {
+            "link": "https://t.me/jobs_feed/8",
+            "source": "hirify",
+            "channel": "jobs_feed",
+            "text": "Python developer, source @jobs_feed",
+            "contacts": [
+                {
+                    "kind": "telegram",
+                    "value": "private_hr",
+                    "source": "Hirify: контакты",
+                }
+            ],
+        },
+    )
+    saved = w.get_watch_post(tmp_path, post_id)
+    assert saved["recipient_options"] == [
+        {"kind": "telegram", "value": "private_hr", "source": "hirify"}
+    ]
+
+
+def test_hirify_channel_line_is_not_inferred_as_recipient(tmp_path):
+    post_id = w.save_watch_post(
+        tmp_path,
+        {
+            "link": "https://hirify.me/jobs/python-42",
+            "source": "hirify",
+            "text": "Python developer\nКанал: @jobs_it\n",
+            "contacts": [],
+        },
+    )
+    saved = w.get_watch_post(tmp_path, post_id)
+    assert saved["contacts"] == []
+    assert saved["recipient_options"] == []
 
 
 def test_llm_check_post_is_unavailable_without_key():
@@ -1139,6 +1259,217 @@ def test_unverified_post_reaches_bot_without_auto_send_or_base(monkeypatch):
     assert "⚠️ не проверено ИИ" in payload["text"]
 
 
+def test_automatic_send_is_visible_as_queued_then_sent(monkeypatch, tmp_path):
+    monkeypatch.setattr(w, "_llm_check_post", lambda *args: (True, ""))
+    watcher = _llm_watcher(
+        str(tmp_path),
+        {
+            "auto_message": True,
+            "message_delay_min_seconds": 0,
+            "message_delay_max_seconds": 0,
+        },
+    )
+    monkeypatch.setattr(
+        watcher, "_auto_message_text", lambda *args: ("Hello HR", "")
+    )
+    asyncio.run(watcher._on_channel_post(_event("Python Dev, @anna_hr")))
+
+    posts = w.list_watch_posts(tmp_path)
+    assert len(posts) == 1
+    post_id, queued = next(iter(posts.items()))
+    assert queued["status"] == "queued"
+    assert queued["contacts"] == [{"kind": "telegram", "value": "anna_hr"}]
+    assert queued["send_id"] in w.pending_telegram_sends(tmp_path)
+
+    sent = []
+    w.flush_pending_telegram_sends(
+        lambda contact, text: sent.append((contact, text)), tmp_path, None
+    )
+    assert sent == [("anna_hr", "Hello HR")]
+    done = w.get_watch_post(tmp_path, post_id)
+    assert done["status"] == "sent"
+    assert done["sent_at"]
+
+
+def test_automatic_send_uses_explicit_recipient_among_other_mentions(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(w, "_llm_check_post", lambda *args: (True, ""))
+    watcher = _llm_watcher(str(tmp_path), {"auto_message": True})
+    monkeypatch.setattr(
+        watcher, "_auto_message_text", lambda *args: ("Hello HR", "")
+    )
+    asyncio.run(
+        watcher._on_channel_post(
+            _event(
+                "Python developer\nПубликация @other_jobs\nСвязь: @nextbit_hr"
+            )
+        )
+    )
+    [post] = w.list_watch_posts(tmp_path).values()
+    assert post["status"] == "queued"
+    assert post["contact"] == "nextbit_hr"
+    assert post["recipient_options"] == [
+        {"kind": "telegram", "value": "nextbit_hr", "source": "explicit"}
+    ]
+
+
+def test_automatic_send_does_not_guess_between_two_unnamed_contacts(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(w, "_llm_check_post", lambda *args: (True, ""))
+    monkeypatch.setattr(w, "bot_request", lambda *args: {})
+    watcher = _llm_watcher(str(tmp_path), {"auto_message": True})
+    asyncio.run(
+        watcher._on_channel_post(
+            _event("Python developer, @first_hr, @second_hr")
+        )
+    )
+    [post] = w.list_watch_posts(tmp_path).values()
+    assert post.get("status", "new") == "new"
+    assert post["recipient_options"] == []
+    assert w.pending_telegram_sends_count(tmp_path) == 0
+
+
+def test_failed_auto_send_needs_review_instead_of_false_sent(tmp_path):
+    post = {
+        "channel": "geekjobs",
+        "link": "https://t.me/geekjobs/12",
+        "title": "Python",
+        "text": "Python",
+        "contacts": [{"kind": "telegram", "value": "anna_hr"}],
+        "status": "queued",
+    }
+    post_id = w.save_watch_post(tmp_path, post)
+    w.queue_telegram_send(
+        tmp_path, "anna_hr", "Hello", post["link"], 0, 0, post=post
+    )
+
+    def fail_send(contact, text):
+        raise TimeoutError("No acknowledgement")
+
+    w.flush_pending_telegram_sends(fail_send, tmp_path, None)
+    assert w.get_watch_post(tmp_path, post_id)["status"] == "send_unknown"
+    assert (
+        TelegramConversations(tmp_path / "telegram_conversations.json").all()
+        == []
+    )
+
+
+def test_channel_deletion_removes_matching_parser_post_only(tmp_path):
+    watcher = _llm_watcher(str(tmp_path), {})
+    watcher._channel_names_by_chat_id = {-1001: "geekjobs"}
+    removed = w.save_watch_post(
+        tmp_path,
+        {
+            "channel": "geekjobs",
+            "link": "https://t.me/geekjobs/5",
+            "text": "Python",
+        },
+    )
+    kept = w.save_watch_post(
+        tmp_path,
+        {
+            "channel": "geekjobs",
+            "link": "https://t.me/geekjobs/6",
+            "text": "Python",
+        },
+    )
+
+    asyncio.run(
+        watcher._on_channel_deleted(
+            SimpleNamespace(chat_id=-1001, deleted_ids=[5])
+        )
+    )
+
+    assert w.get_watch_post(tmp_path, removed)["status"] == "source_deleted"
+    assert w.get_watch_post(tmp_path, kept).get("status", "new") == "new"
+
+
+@pytest.mark.parametrize(
+    "stored_channel", ["@geekjobs", "https://t.me/geekjobs"]
+)
+def test_channel_deletion_matches_legacy_channel_formats(
+    tmp_path, stored_channel
+):
+    watcher = _llm_watcher(str(tmp_path), {})
+    watcher._channel_names_by_chat_id = {-1001: "geekjobs"}
+    post_id = w.save_watch_post(
+        tmp_path,
+        {
+            "channel": stored_channel,
+            "link": "https://t.me/geekjobs/5",
+            "text": "Python",
+        },
+    )
+
+    asyncio.run(
+        watcher._on_channel_deleted(
+            SimpleNamespace(chat_id=-1001, deleted_ids=[5])
+        )
+    )
+    assert w.get_watch_post(tmp_path, post_id)["status"] == "source_deleted"
+
+
+def test_reconnect_deletion_matches_legacy_url_channel(tmp_path):
+    watcher = _llm_watcher(str(tmp_path), {})
+    post_id = w.save_watch_post(
+        tmp_path,
+        {
+            "channel": "https://t.me/geekjobs",
+            "link": "https://t.me/geekjobs/5",
+            "text": "Python",
+        },
+    )
+
+    class OnlineClient:
+        async def get_messages(self, entity, ids):
+            return [None for _ in ids]
+
+    watcher.client = OnlineClient()
+    asyncio.run(watcher._reconcile_channel_deletions("entity", "geekjobs"))
+    assert w.get_watch_post(tmp_path, post_id)["status"] == "source_deleted"
+
+
+def test_reconnect_reconciles_deletions_without_erasing_on_network_error(
+    tmp_path,
+):
+    watcher = _llm_watcher(str(tmp_path), {})
+    removed = w.save_watch_post(
+        tmp_path,
+        {
+            "channel": "geekjobs",
+            "link": "https://t.me/geekjobs/5",
+            "text": "Python",
+        },
+    )
+    kept = w.save_watch_post(
+        tmp_path,
+        {
+            "channel": "geekjobs",
+            "link": "https://t.me/geekjobs/6",
+            "text": "Python",
+        },
+    )
+
+    class OfflineClient:
+        async def get_messages(self, entity, ids):
+            raise OSError("offline")
+
+    watcher.client = OfflineClient()
+    asyncio.run(watcher._reconcile_channel_deletions("entity", "geekjobs"))
+    assert w.get_watch_post(tmp_path, removed).get("status", "new") == "new"
+
+    class OnlineClient:
+        async def get_messages(self, entity, ids):
+            return [SimpleNamespace(id=i) if i == 6 else None for i in ids]
+
+    watcher.client = OnlineClient()
+    asyncio.run(watcher._reconcile_channel_deletions("entity", "geekjobs"))
+    assert w.get_watch_post(tmp_path, removed)["status"] == "source_deleted"
+    assert w.get_watch_post(tmp_path, kept).get("status", "new") == "new"
+
+
 def test_buttons_mark_contacts_already_written_or_queued():
     from datetime import datetime
 
@@ -1252,6 +1583,27 @@ def test_pending_telegram_send_attaches_resume_file_after_text():
         )
         assert sent_files == [("hr_user", "/tmp/resume.pdf")]
         assert w.pending_telegram_sends_count(out) == 0
+
+
+def test_auto_queue_skips_contact_already_messaged_before_flush(tmp_path):
+    post = {
+        "channel": "geekjobs",
+        "link": "https://t.me/geekjobs/18",
+        "title": "Developer",
+        "text": "Developer @anna_hr",
+        "contacts": [{"kind": "telegram", "value": "anna_hr"}],
+    }
+    post_id = w.save_watch_post(tmp_path, post)
+    w.queue_telegram_send(tmp_path, "anna_hr", "Hello", post["link"], 0, 0)
+    TelegramConversations(
+        tmp_path / "telegram_conversations.json"
+    ).record_outbound("anna_hr", "Already sent")
+    sent = []
+    w.flush_pending_telegram_sends(
+        lambda contact, text: sent.append((contact, text)), tmp_path, None
+    )
+    assert sent == []
+    assert w.get_watch_post(tmp_path, post_id)["status"] == "skipped_contacted"
 
 
 def test_call_runs_sync_style_client_method_inside_gateway_loop():

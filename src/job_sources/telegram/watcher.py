@@ -24,7 +24,15 @@ from typing import Any, Callable, Coroutine, Optional, Sequence
 from src.job_sources.contact_book import ContactBook, contacts_from_text
 from src.job_sources.hr_replies import _looks_russian, generate_first_message
 from src.job_sources.resume_routing import resolve_resume
-from src.job_sources.telegram.client import _SESSION_LOCK, normalize_channel
+from src.job_sources.telegram.client import (
+    _SESSION_LOCK,
+    message_receipt,
+    normalize_channel,
+)
+from src.job_sources.telegram.contact import (
+    normalize_post_contacts,
+    post_recipient_options,
+)
 from src.job_sources.telegram_conversations import TelegramConversations
 from src.job_sources.telegram_notify import (
     bot_credentials,
@@ -271,6 +279,9 @@ class TelegramWatcher(threading.Thread):
         self._stopping = threading.Event()
         self._seen: OrderedDict[str, None] = OrderedDict()
         self._backfills_in_progress: set[str] = set()
+        self._channel_names_by_chat_id: dict[int, str] = {}
+        self._last_deleted_reconcile_at = 0.0
+        self._reconcile_in_progress: set[str] = set()
 
     # --- запуск/остановка -------------------------------------------
 
@@ -417,6 +428,7 @@ class TelegramWatcher(threading.Thread):
             # _serve повторяется при переподключении — без снятия старых
             # обработчиков каждый пост приходил бы по несколько раз.
             self.client.remove_event_handler(self._on_channel_post)
+            self.client.remove_event_handler(self._on_channel_deleted)
             self.client.remove_event_handler(self._on_private_message)
             if not await self.client.is_user_authorized():
                 logger.error(
@@ -426,6 +438,9 @@ class TelegramWatcher(threading.Thread):
                 self._stopping.set()
                 return
             await self._subscribe()
+            self.client.add_event_handler(
+                self._on_channel_deleted, events.MessageDeleted()
+            )
             self.client.add_event_handler(
                 self._on_private_message,
                 events.NewMessage(incoming=True, func=lambda e: e.is_private),
@@ -444,11 +459,15 @@ class TelegramWatcher(threading.Thread):
         Канал, который видим впервые, — досматриваем его историю за
         последние N дней (см. _backfill_channel): вакансия могла быть
         опубликована до того, как канал добавили, и всё ещё быть открыта."""
-        from telethon import events
+        from telethon import events, utils
         from telethon.tl.functions.channels import JoinChannelRequest
 
         backfilled = _load_backfilled_channels(self.output_folder)
         chats = []
+        self._channel_names_by_chat_id = {}
+        reconcile_deleted = (
+            time.monotonic() - self._last_deleted_reconcile_at > 300
+        )
         for channel in self.channels:
             try:
                 entity = await self.client.get_entity(channel)
@@ -459,6 +478,20 @@ class TelegramWatcher(threading.Thread):
                         "получать посты"
                     )
                 chats.append(entity)
+                try:
+                    chat_id = utils.get_peer_id(entity)
+                except (TypeError, ValueError):
+                    chat_id = None
+                if chat_id is not None:
+                    self._channel_names_by_chat_id[chat_id] = channel
+                if (
+                    reconcile_deleted
+                    and channel not in self._reconcile_in_progress
+                ):
+                    self._reconcile_in_progress.add(channel)
+                    asyncio.ensure_future(
+                        self._reconcile_channel_deletions(entity, channel)
+                    )
                 if (
                     channel not in backfilled
                     and channel not in self._backfills_in_progress
@@ -475,6 +508,8 @@ class TelegramWatcher(threading.Thread):
         self.client.add_event_handler(
             self._on_channel_post, events.NewMessage(chats=chats)
         )
+        if reconcile_deleted:
+            self._last_deleted_reconcile_at = time.monotonic()
         logger.info(
             f"Telegram-шлюз: слушаю {len(chats)} каналов, слова: "
             f"{', '.join(self.keywords) or '—'}"
@@ -548,12 +583,97 @@ class TelegramWatcher(threading.Thread):
             if channels and channels != self.channels:
                 self.channels = channels
                 await self._subscribe()
+            elif (
+                self.channels
+                and time.monotonic() - self._last_deleted_reconcile_at > 300
+            ):
+                await self._subscribe()
 
     async def _on_channel_post(self, event) -> None:
         self.last_post_at = time.time()
         chat = await event.get_chat()
-        channel = getattr(chat, "username", None) or str(event.chat_id)
+        channel = (
+            getattr(chat, "username", None)
+            or self._channel_names_by_chat_id.get(event.chat_id)
+            or str(event.chat_id)
+        )
         await self._handle_post(channel, event.message)
+
+    async def _on_channel_deleted(self, event) -> None:
+        """Убрать из интерфейса пост, удалённый в подключённом канале."""
+        channel = self._channel_names_by_chat_id.get(event.chat_id)
+        if channel is None:
+            return  # у личных чатов Telegram не всегда сообщает chat_id
+        deleted = set(event.deleted_ids)
+        for post_id, post in list_watch_posts(self.output_folder).items():
+            if normalize_channel(post.get("channel", "")).lower() != (
+                normalize_channel(channel).lower()
+            ):
+                continue
+            try:
+                message_id = int(post["link"].rstrip("/").rsplit("/", 1)[-1])
+            except (KeyError, ValueError):
+                continue
+            if message_id in deleted:
+                if post.get("send_id"):
+                    cancel_telegram_send(self.output_folder, post["send_id"])
+                update_watch_post(
+                    self.output_folder,
+                    post_id,
+                    status="source_deleted",
+                    deleted_at=datetime.now().astimezone().isoformat(),
+                )
+
+    async def _reconcile_channel_deletions(self, entity, channel: str) -> None:
+        """Сверить старые сохранённые посты после простоя шлюза."""
+        try:
+            by_message_id: dict[int, str] = {}
+            for post_id, post in list_watch_posts(self.output_folder).items():
+                if (
+                    normalize_channel(post.get("channel", "")).lower()
+                    != normalize_channel(channel).lower()
+                ):
+                    continue
+                if post.get("status") == "source_deleted":
+                    continue
+                try:
+                    message_id = int(
+                        post["link"].rstrip("/").rsplit("/", 1)[-1]
+                    )
+                except (KeyError, ValueError):
+                    continue
+                by_message_id[message_id] = post_id
+            ids = list(by_message_id)
+            for start in range(0, len(ids), 100):
+                batch = ids[start : start + 100]
+                try:
+                    messages = await self.client.get_messages(
+                        entity, ids=batch
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"Не удалось сверить посты @{channel} с "
+                        f"Telegram: {exc}"
+                    )
+                    return
+                if len(messages) != len(batch):
+                    return  # неполный ответ — не считать посты удалёнными
+                found = {m.id for m in messages if m is not None}
+                for message_id in set(batch) - found:
+                    post_id = by_message_id[message_id]
+                    post = get_watch_post(self.output_folder, post_id) or {}
+                    if post.get("send_id"):
+                        cancel_telegram_send(
+                            self.output_folder, post["send_id"]
+                        )
+                    update_watch_post(
+                        self.output_folder,
+                        post_id,
+                        status="source_deleted",
+                        deleted_at=datetime.now().astimezone().isoformat(),
+                    )
+        finally:
+            self._reconcile_in_progress.discard(channel)
 
     async def _handle_post(self, channel: str, message) -> None:
         """Общая логика для живого поста (_on_channel_post) и досмотра
@@ -574,6 +694,7 @@ class TelegramWatcher(threading.Thread):
 
         link = f"https://t.me/{channel}/{message.id}"
         contacts = contacts_from_text(text, exclude=(channel,))
+        recipient_options = post_recipient_options(text, channel)
         title = text.splitlines()[0][:120]
         post = {
             "channel": channel,
@@ -613,7 +734,9 @@ class TelegramWatcher(threading.Thread):
                     )
         self.matched_count += 1
 
-        telegram_contacts = [c for c in contacts if c["kind"] == "telegram"]
+        telegram_contacts = [
+            c for c in recipient_options if c["kind"] == "telegram"
+        ]
         if (
             tg_prefs.get("auto_message")
             and not unverified
@@ -654,7 +777,15 @@ class TelegramWatcher(threading.Thread):
                         resume_path,
                     )
                     return
-                queue_telegram_send(
+                delivered = {
+                    **post,
+                    "contacts": [
+                        {"kind": c["kind"], "value": c["value"]}
+                        for c in contacts
+                    ],
+                    "unverified": False,
+                }
+                entry_id = queue_telegram_send(
                     self.output_folder,
                     contact_value,
                     intro_text,
@@ -668,7 +799,20 @@ class TelegramWatcher(threading.Thread):
                         MAX_TELEGRAM_MESSAGE_DELAY_SECONDS,
                     ),
                     resume_path,
-                    post=post,
+                    post=delivered,
+                )
+                send_after = pending_telegram_sends(self.output_folder)[
+                    entry_id
+                ]["send_after"]
+                save_watch_post(
+                    self.output_folder,
+                    {
+                        **delivered,
+                        "status": "queued",
+                        "contact": contact_value,
+                        "send_id": entry_id,
+                        "send_after": send_after,
+                    },
                 )
                 logger.info(
                     f"Telegram auto_message: в очередь для @{contact_value}"
@@ -1080,7 +1224,7 @@ def pending_telegram_sends_count(output_folder: Path) -> int:
 
 
 def flush_pending_telegram_sends(
-    send_fn: Callable[[str, str], None],
+    send_fn: Callable[[str, str], Any],
     output_folder: Path,
     active_hours: tuple[int, int] | None,
     send_file_fn: Optional[Callable[[str, Any], Any]] = None,
@@ -1135,13 +1279,48 @@ def flush_pending_telegram_sends(
         output_folder / "telegram_conversations.json"
     )
     for entry_id, entry in due_entries.items():
+        post_id = hashlib.sha1(entry["job_link"].encode("utf-8")).hexdigest()[
+            :10
+        ]
+        if not entry.get("scheduled") and conversations.already_contacted(
+            entry["contact"]
+        ):
+            post = get_watch_post(output_folder, post_id) or {}
+            if post.get("status") != "sent":
+                update_watch_post(
+                    output_folder,
+                    post_id,
+                    status="skipped_contacted",
+                    send_id="",
+                )
+            continue
         try:
-            send_fn(entry["contact"], entry["text"])
+            sent_message = send_fn(entry["contact"], entry["text"])
+            message_id, sent_at = message_receipt(sent_message)
             conversations.record_outbound(
-                entry["contact"], entry["text"], job_link=entry["job_link"]
+                entry["contact"],
+                entry["text"],
+                job_link=entry["job_link"],
+                message_id=message_id,
+                sent_at=sent_at,
+            )
+            update_watch_post(
+                output_folder,
+                post_id,
+                status="sent",
+                contact=entry["contact"],
+                sent_at=sent_at.isoformat(),
+                remote_message_id=message_id,
+                send_id="",
             )
             if on_sent is not None:
-                on_sent(entry)
+                try:
+                    on_sent(entry)
+                except Exception as exc:
+                    logger.warning(
+                        f"Сообщение Telegram отправлено, но уведомление "
+                        f"не ушло: {exc}"
+                    )
             logger.info(f"Автоотправка Telegram: @{entry['contact']}")
             resume_path = entry.get("resume_path")
             if resume_path and send_file_fn is not None:
@@ -1153,6 +1332,9 @@ def flush_pending_telegram_sends(
                         f"@{entry['contact']}: {e}"
                     )
         except Exception as e:
+            update_watch_post(
+                output_folder, post_id, status="send_unknown", send_id=""
+            )
             logger.warning(
                 f"Не удалось отправить отложенное сообщение "
                 f"@{entry['contact']}: {e}"
@@ -1176,6 +1358,15 @@ def remember_telegram_post_contact(
         for c in contacts
         if str(c.get("value") or "").strip()
         and c.get("kind") in {"telegram", "email", "linkedin"}
+    ]
+    dismissed = TelegramConversations(
+        output_folder / "telegram_conversations.json"
+    )
+    contacts = [
+        contact
+        for contact in contacts
+        if contact["kind"] != "telegram"
+        or not dismissed.is_dismissed(contact["value"])
     ]
     if not contacts:
         return
@@ -1248,7 +1439,6 @@ def contact_notes(output_folder: Path, contacts: list[dict]) -> dict[str, str]:
 # --- Кнопки под вакансией: посты, резюме и письма для Telegram ----------
 
 WATCH_POSTS_FILE = ".watch_posts.json"
-_WATCH_POSTS_LIMIT = 500
 TELEGRAM_FOLDER = (
     "telegram"  # data_folder/telegram — резюме и письма для Telegram
 )
@@ -1272,15 +1462,51 @@ def save_watch_post(output_folder: Path, post: dict) -> str:
             data = {}
         # Поверх прежней записи: бот пересохраняет пост, уже записанный в
         # _handle_post, — статус из чата приложения и found_at не теряются.
-        data[post_id] = {
+        previous = data.get(post_id, {})
+        fresh_contacts = (
+            post.get("contacts") or []
+            if "contacts" in post
+            else previous.get("contacts") or []
+        )
+        manual_contacts = [
+            contact
+            for contact in previous.get("contacts") or []
+            if isinstance(contact, dict) and contact.get("source") == "manual"
+        ]
+        manual_by_key = {
+            (
+                contact.get("kind"),
+                str(contact.get("value", "")).lower(),
+            ): contact
+            for contact in manual_contacts
+        }
+        merged_contacts = [
+            manual_by_key.get(
+                (contact.get("kind"), str(contact.get("value", "")).lower()),
+                contact,
+            )
+            for contact in fresh_contacts
+        ]
+        seen_contacts = {
+            (contact.get("kind"), str(contact.get("value", "")).lower())
+            for contact in merged_contacts
+        }
+        merged_contacts.extend(
+            contact
+            for key, contact in manual_by_key.items()
+            if key not in seen_contacts
+        )
+        saved = {
             "found_at": datetime.now()
             .astimezone()
             .isoformat(timespec="seconds"),
-            **data.get(post_id, {}),
+            **previous,
             **post,
+            "contacts": merged_contacts,
         }
-        if len(data) > _WATCH_POSTS_LIMIT:
-            data = dict(list(data.items())[-_WATCH_POSTS_LIMIT:])
+        if previous.get("status") == "removed":
+            saved["status"] = "removed"
+        data[post_id] = saved
         path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     return post_id
 
@@ -1295,7 +1521,14 @@ def list_watch_posts(output_folder: Path) -> dict[str, dict]:
     path = output_folder / WATCH_POSTS_FILE
     try:
         with state_file_lock(path):
-            return json.loads(path.read_text(encoding="utf-8"))
+            posts = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(posts, dict):
+            return {}
+        return {
+            post_id: normalize_post_contacts(post)
+            for post_id, post in posts.items()
+            if isinstance(post, dict)
+        }
     except (OSError, ValueError):
         return {}
 

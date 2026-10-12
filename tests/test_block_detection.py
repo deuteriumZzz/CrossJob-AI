@@ -61,6 +61,18 @@ def test_long_vacancy_mentioning_captcha_is_not_a_block():
         raise_if_blocked(vacancy + " Подтвердите, что вы не робот")
 
 
+def test_short_vacancy_can_ignore_weak_keyword_with_page_evidence():
+    vacancy = "Python-разработчик: опыт обхода captcha-сервисов"
+    raise_if_blocked(vacancy, ignore_weak_keywords=True)
+    with pytest.raises(PlatformBlockedError):
+        raise_if_blocked("Проверка безопасности: captcha")
+    with pytest.raises(PlatformBlockedError):
+        raise_if_blocked(
+            vacancy + " Подтвердите, что вы не робот",
+            ignore_weak_keywords=True,
+        )
+
+
 def test_raise_if_blocked_raises_on_cloudflare_interstitial():
     # Регрессия: himalayas.app отдавал Cloudflare-интерстишл
     # ("Один момент…" / Ray ID), который не совпадал ни с одним

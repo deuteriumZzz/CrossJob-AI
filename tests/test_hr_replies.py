@@ -606,11 +606,19 @@ def test_company_email_does_not_leak_hashtags_from_telegram_title(monkeypatch):
     card = {
         "company": "Мой Офис",
         "contacts": [],
-        "vacancies": [{"title": "#junior #middle #удаленка", "text": "Нужен Python"}],
+        "vacancies": [
+            {"title": "#junior #middle #удаленка", "text": "Нужен Python"}
+        ],
     }
 
     hr_replies.generate_company_email(
-        Path("cv.pdf"), "Дмитрий", "#junior #middle #удаленка", card, "", "k", {}
+        Path("cv.pdf"),
+        "Дмитрий",
+        "#junior #middle #удаленка",
+        card,
+        "",
+        "k",
+        {},
     )
 
     # в самом промте хештеги упомянуты как пример запрета — смотрим данные

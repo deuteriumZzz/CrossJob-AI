@@ -161,4 +161,32 @@ def test_market_endpoint(client):  # noqa: F811
     body = client.get("/api/analytics/market").json()
     assert body["salaries"][0]["currency"] == "RUB"
     assert {s["skill"] for s in body["skills"]} == {"Python", "Kubernetes"}
+    assert all(s["in_resume"] is None for s in body["skills"])
     assert body["regions"] == {"🌍 откуда угодно": 1}
+
+
+def test_market_compares_with_resume_pdf_not_stale_yaml(
+    client,  # noqa: F811
+    monkeypatch,
+):
+    ctx = api.get_ctx()
+    (ctx.config["dataFolder"] / "resume.pdf").write_bytes(b"%PDF test")
+    ctx.plain_text_resume_file.write_text("stale YAML without skills")
+    job = Job(
+        role="Python Dev",
+        company="Acme",
+        source="headhunter",
+        external_id="resume-skill-1",
+        description="Python and Kubernetes",
+    )
+    ctx.applied_log.record(job, "", "", "applied", 8, [])
+    monkeypatch.setattr(
+        api, "extract_pdf_text", lambda path: "Python, Kubernetes"
+    )
+
+    body = client.get("/api/analytics/market").json()
+
+    assert {row["skill"]: row["in_resume"] for row in body["skills"]} == {
+        "Python": True,
+        "Kubernetes": True,
+    }

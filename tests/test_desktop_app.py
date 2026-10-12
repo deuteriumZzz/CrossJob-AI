@@ -91,6 +91,10 @@ def test_main_probes_setup_status_not_status(monkeypatch):
     data_folder is set up, so readiness would never be confirmed."""
     probed_urls = []
 
+    # A running desktop app may hold the process-wide lock while tests run.
+    monkeypatch.setattr(
+        desktop_app, "_try_acquire_single_instance", lambda: None
+    )
     monkeypatch.setattr(
         desktop_app, "_kill_stale_browser_processes", lambda: None
     )

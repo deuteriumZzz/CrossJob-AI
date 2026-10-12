@@ -100,6 +100,11 @@ def test_extract_skills_and_demand():
     ]
 
 
+def test_skill_demand_does_not_claim_missing_skill_without_resume():
+    demand = skill_demand([{"skills": ["Python"]}], None)
+    assert demand[0]["in_resume"] is None
+
+
 def test_us_only_filtered_by_default_and_configurable():
     job = Job(
         role="Python Dev",

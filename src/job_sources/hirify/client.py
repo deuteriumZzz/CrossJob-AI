@@ -34,7 +34,13 @@ PAGE_WAIT_SECONDS = 4
 # между страницами и один повтор после ожидания.
 POLITE_PAUSE_SECONDS = (1.2, 2.8)
 RATE_LIMIT_WAIT_SECONDS = 25
-_LOGIN_MARKERS = ("нужен аккаунт", "войти через google", "введите email")
+_LOGIN_MARKERS = (
+    "нужен аккаунт",
+    "войти через google",
+    "введите email",
+    "sign in to see contacts",
+    "log in to see contacts",
+)
 
 
 def _raise_if_blocked(response: httpx.Response, expected: str) -> None:
@@ -46,7 +52,12 @@ def _raise_if_blocked(response: httpx.Response, expected: str) -> None:
     raise_if_blocked(response)
 
 
-_CONTACT_BUTTON_TEXTS = ("показать контакты", "контакты")
+_CONTACT_BUTTON_TEXTS = (
+    "показать контакты",
+    "контакты",
+    "show contacts",
+    "contacts",
+)
 
 
 class HirifyClient:

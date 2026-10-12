@@ -55,20 +55,13 @@ _WEAK_KEYWORDS = frozenset({"captcha", "доступ ограничен", "acces
 _LONG_PAGE_CHARS = 5000
 
 
-# Одиночные слова встречаются в обычных вакансиях («обход captcha-сервисов»
-# в описании парсинг-вакансии 9.10 останавливал весь HH на час при каждом
-# заходе). Страница-заглушка короткая, а настоящий текст вакансии длинный —
-# на длинной странице такие слова не считаем блокировкой; точные фразы
-# («подтвердите, что вы не робот», Ray ID…) работают на любой длине.
-_WEAK_KEYWORDS = frozenset({"captcha", "доступ ограничен", "access denied"})
-_LONG_PAGE_CHARS = 5000
-
-
 class PlatformBlockedError(Exception):
     """Площадка вернула капчу/бан вместо обычного ответа."""
 
 
-def raise_if_blocked(response_or_html) -> None:
+def raise_if_blocked(
+    response_or_html, *, ignore_weak_keywords: bool = False
+) -> None:
     """Принимает либо httpx.Response (проверяет status_code + text),
     либо голую HTML/текстовую строку. Для Selenium-страниц сюда нужно
     передавать visible_text(driver), а не driver.page_source — см. её
@@ -80,7 +73,7 @@ def raise_if_blocked(response_or_html) -> None:
     lowered = text.lower()
     long_page = len(lowered) > _LONG_PAGE_CHARS
     for keyword in _BLOCK_KEYWORDS:
-        if long_page and keyword in _WEAK_KEYWORDS:
+        if (long_page or ignore_weak_keywords) and keyword in _WEAK_KEYWORDS:
             continue
         if keyword in lowered:
             raise PlatformBlockedError(
@@ -88,14 +81,18 @@ def raise_if_blocked(response_or_html) -> None:
             )
 
 
-def raise_if_page_blocked(driver) -> None:
+def raise_if_page_blocked(
+    driver, *, ignore_weak_keywords: bool = False
+) -> None:
     """raise_if_blocked для открытой Selenium-страницы — с её адресом в
     ошибке. Ошибка уходит в Telegram (notify), и адрес приходит ссылкой:
     открыл — прошёл капчу руками. Раньше ссылка была только при
     редиректе HH на /account/captcha; при капче, найденной по тексту
     страницы (8.10), сообщение приходило без неё."""
     try:
-        raise_if_blocked(visible_text(driver))
+        raise_if_blocked(
+            visible_text(driver), ignore_weak_keywords=ignore_weak_keywords
+        )
     except PlatformBlockedError as e:
         raise PlatformBlockedError(f"{e}: {driver.current_url}") from None
 

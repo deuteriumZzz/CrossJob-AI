@@ -16,6 +16,7 @@ from typing import Any, Callable, Literal, Optional, Tuple
 import click
 import inquirer
 import yaml
+from filelock import Timeout as FileLockTimeout
 from pdfminer.high_level import extract_text as extract_pdf_text
 from selenium.webdriver.common.by import By
 
@@ -96,9 +97,7 @@ from src.job_sources.habr_career.auth import HabrCareerSession
 from src.job_sources.habr_career.client import HabrCareerClient
 from src.job_sources.habr_career.source import HabrCareerSource
 from src.job_sources.headhunter.browser_client import HeadHunterBrowserClient
-from src.job_sources.headhunter.browser_mapping import (
-    hh_html_vacancy_to_job,
-)
+from src.job_sources.headhunter.browser_mapping import hh_html_vacancy_to_job
 from src.job_sources.headhunter.browser_negotiation_states import (
     list_negotiation_states,
 )
@@ -140,7 +139,14 @@ from src.job_sources.himalayas.apply import (
 from src.job_sources.himalayas.auth import HimalayasSession
 from src.job_sources.himalayas.source import HimalayasSource
 from src.job_sources.hirify.client import HirifyClient
+from src.job_sources.hirify.mapping import hirify_apply_contacts
 from src.job_sources.hirify.source import HirifySource
+from src.job_sources.hirify.workspace import (
+    HirifyLoginRequired,
+    backfill_hirify_vacancies,
+    refresh_hirify_post_contacts,
+    save_hirify_vacancy,
+)
 from src.job_sources.hr_replies import (
     CATEGORY_LABELS,
     CATEGORY_STAGE,
@@ -229,6 +235,7 @@ from src.job_sources.talanto.source import TalantoSource
 from src.job_sources.telegram.client import (
     TelegramSourceClient,
     TelegramStatusClient,
+    message_receipt,
 )
 from src.job_sources.telegram.contact import extract_contact
 from src.job_sources.telegram.post_parser import parse_post
@@ -240,7 +247,9 @@ from src.job_sources.telegram.watcher import (
     active_watcher,
     block_post_contacts,
     flush_pending_telegram_sends,
+    gateway_state,
     get_watch_post,
+    list_watch_posts,
     pending_telegram_sends,
     remember_telegram_post_contact,
     save_telegram_letter,
@@ -275,7 +284,7 @@ from src.libs.resume_and_cover_builder import (
 from src.logging import logger
 from src.resume_schemas.job_application_profile import JobApplicationProfile
 from src.resume_schemas.resume import Resume
-from src.scheduler import DEFAULT_INTERVAL_HOURS, Scheduler
+from src.scheduler import DEFAULT_INTERVAL_HOURS, DEFER_TO_NEXT_TURN, Scheduler
 from src.scheduler_state import load_state, record_run_result
 from src.utils.chrome_utils import HTML_to_PDF, init_browser
 from src.utils.constants import (
@@ -1529,6 +1538,75 @@ def _notify_hh_blocked(parameters: dict, error: Exception) -> None:
     )
 
 
+HH_CAPTCHA_WAIT_SECONDS = 180
+HH_CAPTCHA_POLL_SECONDS = 2
+
+
+class HhCaptchaDeferred(Exception):
+    """The manual challenge was not completed during this HH turn."""
+
+
+def _is_hh_manual_captcha(error: PlatformBlockedError) -> bool:
+    message = str(error).casefold()
+    return any(
+        phrase in message
+        for phrase in (
+            "captcha",
+            "капч",
+            "робот",
+            "verify you are a human",
+            "подозрительная активность",
+            "проверка безопасности",
+        )
+    )
+
+
+def _run_hh_action_with_captcha_wait(
+    action: Callable[[], Any],
+    client: HeadHunterBrowserClient,
+    parameters: dict,
+    stop_event: Optional[threading.Event],
+    deadline: Optional[float],
+) -> tuple[Any, Optional[float]]:
+    """Retry the interrupted HH action if the user clears its open captcha."""
+    while True:
+        try:
+            return action(), deadline
+        except PlatformBlockedError as error:
+            if not _is_hh_manual_captcha(error):
+                raise
+            if deadline is None:
+                deadline = time.monotonic() + HH_CAPTCHA_WAIT_SECONDS
+                notify(
+                    parameters,
+                    f"hh.ru: нужна ручная капча ({error}). У вас есть "
+                    "3 минуты в открытом браузере. Если успеете, "
+                    "продолжу HH; иначе перейду к следующей площадке.",
+                    category="headhunter",
+                )
+            while time.monotonic() < deadline:
+                if stop_event is not None and stop_event.is_set():
+                    raise HhCaptchaDeferred() from error
+                if client.captcha_cleared():
+                    logger.info("Капча hh.ru пройдена; продолжаю этот ход.")
+                    break
+                remaining = deadline - time.monotonic()
+                delay = min(HH_CAPTCHA_POLL_SECONDS, max(0, remaining))
+                if stop_event is not None:
+                    stop_event.wait(delay)
+                else:
+                    time.sleep(delay)
+            else:
+                logger.warning("Капча hh.ru не пройдена за 3 минуты.")
+                notify(
+                    parameters,
+                    "hh.ru: капча пока не пройдена. Перехожу к следующей "
+                    "площадке; HH повторю на его следующем ходе в круге.",
+                    category="headhunter",
+                )
+                raise HhCaptchaDeferred() from error
+
+
 def _search_and_apply_headhunter_with_session(
     parameters: dict,
     llm_api_key: str,
@@ -1598,9 +1676,18 @@ def _search_and_apply_headhunter_with_session(
             except Exception as e:
                 logger.warning(f"Не удалось поднять резюме на HH: {e}")
 
-        source: JobSource = HeadHunterBrowserSource(client)
+        source = HeadHunterBrowserSource(client)
+        captcha_deadline = None
         try:
-            jobs = source.search(parameters)
+            jobs, captcha_deadline = _run_hh_action_with_captcha_wait(
+                lambda: source.search(parameters),
+                client,
+                parameters,
+                stop_event,
+                captcha_deadline,
+            )
+        except HhCaptchaDeferred:
+            return DEFER_TO_NEXT_TURN
         except PlatformBlockedError as e:
             logger.error(f"hh.ru appears to have blocked us: {e}")
             mark_blocked(output_folder, "headhunter")
@@ -1617,19 +1704,23 @@ def _search_and_apply_headhunter_with_session(
         )
         sent_count = 0
         job_max_applications = _job_max_applications(parameters, "headhunter")
+        processed_all = True
         for job in jobs:
             if stop_event is not None and stop_event.is_set():
+                processed_all = False
                 logger.info(
                     "Stop requested — прерываю перед следующей вакансией."
                 )
                 break
             if sent_count >= job_max_applications:
+                processed_all = False
                 logger.info(
                     f"Reached JOB_MAX_APPLICATIONS "
                     f"({job_max_applications}) for this run."
                 )
                 break
             if _total_daily_limit_reached(parameters, applied_log):
+                processed_all = False
                 break
             if applied_log.already_applied(job):
                 continue
@@ -1647,6 +1738,7 @@ def _search_and_apply_headhunter_with_session(
                 auto_apply
                 and applied_log.applied_today_count(job.source) >= daily_limit
             ):
+                processed_all = False
                 logger.info(
                     f"Reached daily application limit "
                     f"({daily_limit}) for {job.source} today."
@@ -1709,10 +1801,22 @@ def _search_and_apply_headhunter_with_session(
                     )
 
                 try:
-                    applied, cover_letter = client.apply(
-                        job.link, _cover_letter_fn, _ai_answer_fn
+                    (applied, cover_letter), captcha_deadline = (
+                        _run_hh_action_with_captcha_wait(
+                            lambda: client.apply(
+                                job.link, _cover_letter_fn, _ai_answer_fn
+                            ),
+                            client,
+                            parameters,
+                            stop_event,
+                            captcha_deadline,
+                        )
                     )
+                except HhCaptchaDeferred:
+                    processed_all = False
+                    return DEFER_TO_NEXT_TURN
                 except PlatformBlockedError as e:
+                    processed_all = False
                     # ponytail: раньше это ловилось общим except ниже и
                     # просто continue'ило на следующую вакансию — бот
                     # долбил driver.get() по всем оставшимся вакансиям в
@@ -1725,6 +1829,7 @@ def _search_and_apply_headhunter_with_session(
                     _notify_hh_blocked(parameters, e)
                     break
                 except Exception as e:
+                    processed_all = False
                     logger.exception(
                         "Failed to apply/generate cover letter for "
                         f"{job.role} at {job.company}, skipping this "
@@ -1790,6 +1895,7 @@ def _search_and_apply_headhunter_with_session(
                         resume_pdf_path, job, llm_api_key
                     )
                 except Exception as e:
+                    processed_all = False
                     logger.exception(
                         f"Failed to generate cover letter for {job.role} at "
                         f"{job.company}, skipping this vacancy: {e}"
@@ -1815,6 +1921,9 @@ def _search_and_apply_headhunter_with_session(
                     job.source, job.external_id
                 )
             sent_count += 1
+
+        if processed_all:
+            source.commit_scan_cursor()
 
         _log_funnel_summary(
             "headhunter",
@@ -4033,6 +4142,49 @@ def search_hirify(
     needs_login = False
     tg_handles: list[str] = []
     with HirifyClient(output_folder / ".chrome_profile_hirify") as client:
+        # Ранние вакансии могли сохраниться до входа или до исправления
+        # подписи кнопки контактов. Они уже помечены просмотренными, поэтому
+        # обычный поиск больше не возвращает их для повторной проверки.
+        backfill_hirify_vacancies(output_folder)
+        for post_id, post in list_watch_posts(output_folder).items():
+            if stop_event is not None and stop_event.is_set():
+                break
+            if (
+                _daily_count(output_folder, HIRIFY_CONTACTS_FILE)
+                >= contacts_per_day
+            ):
+                break
+            if (
+                post.get("source") != "hirify"
+                or post.get("contacts")
+                or post.get("status") in ("removed", "source_deleted")
+            ):
+                continue
+            try:
+                refreshed = refresh_hirify_post_contacts(
+                    output_folder, post_id, client
+                )
+            except HirifyLoginRequired:
+                needs_login = True
+                break
+            except PlatformBlockedError as e:
+                mark_blocked(output_folder, "hirify")
+                logger.warning(f"Hirify: повтор контактов заблокирован: {e}")
+                notify(
+                    parameters,
+                    f"Hirify: похоже на блокировку ({e}). Источник "
+                    "поставлен на паузу на час.",
+                    category="hirify",
+                )
+                return
+            except ValueError as e:
+                logger.info(f"Hirify: контакты старой вакансии {post_id}: {e}")
+            except Exception as e:
+                logger.warning(f"Hirify: повтор контактов {post_id}: {e}")
+            else:
+                with_contacts += 1
+                tg_handles.extend(refreshed["channels"])
+            _daily_count_add(output_folder, HIRIFY_CONTACTS_FILE)
         try:
             jobs = HirifySource(client).search(parameters)
         except PlatformBlockedError as e:
@@ -4078,9 +4230,7 @@ def search_hirify(
                     "source": "Hirify: текст вакансии",
                     "source_url": job.link,
                 }
-                for c in contacts_from_text(
-                    job.description, bare_mentions=False
-                )
+                for c in hirify_apply_contacts(job.description)
             ]
             channels: list[str] = []
             if (
@@ -4102,8 +4252,9 @@ def search_hirify(
                 except Exception as e:
                     logger.warning(f"Hirify: контакты {job.role}: {e}")
                     info = {"text": "", "channels": [], "needs_login": False}
-                _daily_count_add(output_folder, HIRIFY_CONTACTS_FILE)
                 needs_login = bool(info.get("needs_login"))
+                if not needs_login:
+                    _daily_count_add(output_folder, HIRIFY_CONTACTS_FILE)
                 channels = list(info.get("channels") or [])
                 contacts += [
                     {
@@ -4111,8 +4262,8 @@ def search_hirify(
                         "source": "Hirify: контакты",
                         "source_url": job.link,
                     }
-                    for c in contacts_from_text(
-                        info.get("text", ""), bare_mentions=False
+                    for c in hirify_apply_contacts(
+                        info.get("text", ""), tuple(channels)
                     )
                 ]
 
@@ -4133,6 +4284,7 @@ def search_hirify(
                     "score": fit.score,
                 },
             )
+            save_hirify_vacancy(output_folder, job, contacts)
             in_book.add(job.link)
             tg_handles += [
                 c["value"] for c in contacts if c["kind"] == "telegram"
@@ -4151,8 +4303,9 @@ def search_hirify(
             notify(
                 parameters,
                 "Hirify: контакты HR и каналы видны только после входа. "
-                "Один раз войдите в аккаунт hirify.me в окне бота "
-                "(scripts/hirify_login.py).",
+                "Откройте «Общение» → «Вакансии», выберите вакансию "
+                "Hirify и нажмите «Получить контакты из Hirify». "
+                "Если сессия закончилась, приложение предложит повторный вход.",
                 category="hirify",
             )
     new_channels: list[str] = []
@@ -5554,10 +5707,13 @@ def _process_pending_form_approvals(
         return
 
     output_folder: Path = parameters["outputFileDirectory"]
-    if active_watcher() is not None:
+    if gateway_state()["alive"]:
         return  # бота читает постоянный шлюз
     try:
         updates = poll_bot_updates(bot_token, output_folder)
+    except FileLockTimeout:
+        logger.debug("Telegram bot updates are being polled elsewhere")
+        return
     except Exception as e:
         logger.warning(f"Failed to poll Telegram for form commands: {e}")
         return
@@ -6384,9 +6540,9 @@ def check_telegram_commands(parameters: dict, llm_api_key: str) -> None:
     """Раз в несколько минут проверяет Telegram на команды дистанционного
     управления (/status, /pause <площадка>, /resume <площадка>) — тот
     же bot_token/chat_id, что уведомления и подтверждение анкет HH, но
-    свой offset-файл (poll_control_commands) и не завязано на
-    headhunter.auto_reply, в отличие от _process_pending_form_approvals
-    (та гоняется только вместе с проверкой чата HH)."""
+    общий offset-файл и не завязано на headhunter.auto_reply, в отличие
+    от _process_pending_form_approvals (та гоняется только вместе с
+    проверкой чата HH)."""
     secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
     notifications = secrets.get("notifications") or {}
     bot_token = notifications.get("telegram_bot_token")
@@ -6396,10 +6552,19 @@ def check_telegram_commands(parameters: dict, llm_api_key: str) -> None:
 
     output_folder: Path = parameters["outputFileDirectory"]
     _maybe_send_daily_digest(parameters, bot_token, chat_id)
-    if active_watcher() is not None:
-        return  # бота читает постоянный шлюз — кнопки и команды сразу
+    # active_watcher() становится None при обрыве пользовательской
+    # Telethon-сессии, но отдельный поток бота продолжает long polling.
+    # Не запускаем второй getUpdates в этот период.
+    if gateway_state()["alive"]:
+        return
     try:
         updates = poll_bot_updates(bot_token, output_folder)
+    except FileLockTimeout:
+        # Другой процесс приложения уже читает бота. Он владеет общим
+        # offset; пропуск этого хода не теряет обновления и не является
+        # ошибкой соединения.
+        logger.debug("Telegram bot updates are being polled elsewhere")
+        return
     except Exception as e:
         logger.warning(f"Failed to poll Telegram bot updates: {e}")
         return
@@ -6641,7 +6806,7 @@ def check_telegram_replies(parameters: dict, llm_api_key: str) -> None:
     личный диалог самого пользователя, автоматически отвечать в него
     от его имени не тот случай)."""
     flush_telegram_scheduled(parameters)
-    if active_watcher() is not None:
+    if gateway_state()["alive"]:
         return  # ответы HR шлюз ловит сам, в момент прихода
     secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
     tg_secrets = secrets.get("telegram") or {}
@@ -6690,7 +6855,7 @@ def flush_telegram_scheduled(parameters: dict) -> None:
     автоотправка), когда шлюза нет: он, если работает, отправляет их сам.
     Зовётся из проверки ответов Telegram и из тикера окна."""
     output_folder: Path = parameters["outputFileDirectory"]
-    if active_watcher() is not None or is_paused(output_folder):
+    if gateway_state()["alive"] or is_paused(output_folder):
         return
     now = datetime.now().astimezone()
 
@@ -6788,6 +6953,9 @@ def _handle_vacancy_button(
         found = get_watch_post(output_folder, parts[1])
         if found is None:
             raise ValueError("пост устарел — откройте его по ссылке")
+        if found.get("status", "new") != "new":
+            done("⚠️ Эта вакансия уже обработана или удалена")
+            return
         post = found
         contact = post["contacts"][int(parts[2])]
         russian = _looks_russian(post.get("text") or post.get("title", ""))
@@ -6863,16 +7031,32 @@ def _handle_vacancy_button(
                     )
                     time.sleep(delay)
         with _telegram_client(parameters) as client:
-            client.send_message(contact["value"], text)
+            sent_message = client.send_message(contact["value"], text)
+            message_id, sent_at = message_receipt(sent_message)
+            TelegramConversations(
+                output_folder / "telegram_conversations.json"
+            ).record_outbound(
+                contact["value"],
+                text,
+                job_link=post["link"],
+                message_id=message_id,
+                sent_at=sent_at,
+            )
+            remember_telegram_post_contact(output_folder, [contact], post)
+            update_watch_post(
+                output_folder,
+                parts[1],
+                status="sent",
+                contact=contact["value"],
+                sent_at=sent_at.isoformat(),
+                remote_message_id=message_id,
+            )
             if resume_index >= 0:
-                client.send_file(contact["value"], resumes[resume_index])
-        TelegramConversations(
-            output_folder / "telegram_conversations.json"
-        ).record_outbound(contact["value"], text, job_link=post["link"])
-        remember_telegram_post_contact(output_folder, [contact], post)
-        update_watch_post(
-            output_folder, parts[1], status="sent", contact=contact["value"]
-        )
+                try:
+                    client.send_file(contact["value"], resumes[resume_index])
+                except Exception as exc:
+                    done(f"⚠️ Текст отправлен, резюме не ушло: {exc}")
+                    return
         done(
             f"✅ Отправлено @{contact['value']}"
             + (" + резюме" if resume_index >= 0 else "")
@@ -6996,15 +7180,27 @@ def _handle_vacancy_button(
             and resume_index >= 0
             and draft.get("channel", "telegram") == "telegram"
         ):
-            with _telegram_client(parameters) as client:
-                client.send_file(draft["contact"], resumes[resume_index])
-            result += " + резюме"
-        if result.startswith("Отправлено") and draft.get("post_id"):
+            try:
+                with _telegram_client(parameters) as client:
+                    client.send_file(draft["contact"], resumes[resume_index])
+            except Exception as exc:
+                result = (
+                    f"Текст отправлен @{draft['contact']}, "
+                    f"но резюме не ушло: {exc}"
+                )
+            else:
+                result += " + резюме"
+        if (
+            result.startswith("Отправлено")
+            and draft.get("post_id")
+            and is_email
+        ):
             update_watch_post(
                 output_folder,
                 draft["post_id"],
                 status="sent",
                 contact=draft.get("contact", ""),
+                sent_at=datetime.now().astimezone().isoformat(),
             )
         done(("✅ " if result.startswith("Отправлено") else "⚠️ ") + result)
     elif parts[0] == "x":
@@ -7318,6 +7514,10 @@ def send_hr_draft(
     draft = drafts.get(code)
     if draft is None:
         return f"Черновик {code} не найден (уже отправлен или пропущен)."
+    if draft.get("post_id"):
+        post = get_watch_post(output_folder, draft["post_id"])
+        if post is not None and post.get("status", "new") != "new":
+            return "Вакансия уже обработана или удалена в Telegram."
     message = text.strip() or draft["text"]
     secrets = ConfigValidator.load_yaml(parameters["secretsFile"])
     if draft.get("channel") == "email":
@@ -7335,14 +7535,28 @@ def send_hr_draft(
             tg_secrets["api_hash"],
             output_folder / ".telegram_session",
         ) as client:
-            client.send_message(draft["contact"], message)
+            sent_message = client.send_message(draft["contact"], message)
     except Exception as e:
         return f"Не удалось отправить @{draft['contact']}: {e}"
+    message_id, sent_at = message_receipt(sent_message)
     TelegramConversations(
         output_folder / "telegram_conversations.json"
     ).record_outbound(
-        draft["contact"], message, job_link=draft.get("job_link", "")
+        draft["contact"],
+        message,
+        job_link=draft.get("job_link", ""),
+        message_id=message_id,
+        sent_at=sent_at,
     )
+    if draft.get("post_id"):
+        update_watch_post(
+            output_folder,
+            draft["post_id"],
+            status="sent",
+            contact=draft["contact"],
+            sent_at=sent_at.isoformat(),
+            remote_message_id=message_id,
+        )
     _remember_draft_post(output_folder, draft)
     drafts.remove(code)
     return f"Отправлено @{draft['contact']}."

@@ -4,6 +4,7 @@ import re
 import time
 from pathlib import Path
 from typing import Callable, Optional
+from urllib.parse import urlparse
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -129,6 +130,50 @@ class HeadHunterBrowserClient:
             f"hh.ru redirected to captcha page ({driver.current_url})"
         )
 
+    def _raise_if_vacancy_blocked(self, driver) -> None:
+        """Учитываем реальную карточку вакансии, даже если она короткая и
+        упоминает captcha. Явные фразы проверки и редирект всё ещё блокируют.
+        """
+        is_vacancy_url = urlparse(driver.current_url).path.startswith(
+            "/vacancy/"
+        )
+        visible_vacancy = False
+        if is_vacancy_url:
+            title = driver.find_elements(
+                By.CSS_SELECTOR, '[data-qa="vacancy-title"]'
+            )
+            description = driver.find_elements(
+                By.CSS_SELECTOR, '[data-qa="vacancy-description"]'
+            )
+            visible_vacancy = bool(
+                title
+                and description
+                and title[0].is_displayed()
+                and description[0].is_displayed()
+            )
+        if visible_vacancy:
+            raise_if_page_blocked(driver, ignore_weak_keywords=True)
+        else:
+            raise_if_page_blocked(driver)
+        self._raise_if_captcha_redirect(driver)
+
+    def captcha_cleared(self) -> bool:
+        """Whether the user has completed the challenge in our open tab."""
+        driver = self._driver
+        if driver is None:
+            return False
+        try:
+            host = urlparse(driver.current_url).hostname or ""
+            if host != "hh.ru" and not host.endswith(".hh.ru"):
+                return False
+            self._raise_if_vacancy_blocked(driver)
+        except PlatformBlockedError:
+            return False
+        except Exception as error:
+            logger.warning(f"Не удалось проверить капчу HH: {error}")
+            return False
+        return True
+
     def search_vacancies_html(
         self,
         query: str,
@@ -186,8 +231,7 @@ class HeadHunterBrowserClient:
         try:
             driver.get(f"{HH_BASE}/vacancy/{vacancy_id}")
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
-            raise_if_page_blocked(driver)
-            self._raise_if_captcha_redirect(driver)
+            self._raise_if_vacancy_blocked(driver)
             return driver.page_source
         finally:
             if owns_it:
@@ -217,8 +261,7 @@ class HeadHunterBrowserClient:
         try:
             driver.get(vacancy_url)
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
-            raise_if_page_blocked(driver)
-            self._raise_if_captcha_redirect(driver)
+            self._raise_if_vacancy_blocked(driver)
 
             buttons = driver.find_elements(
                 By.CSS_SELECTOR, '[data-qa="vacancy-response-link-top"]'

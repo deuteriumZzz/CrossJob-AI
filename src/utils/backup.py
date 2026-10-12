@@ -16,6 +16,10 @@ BACKUP_FILES = (
     "campaigns.json",
     "applied_log.json",
     "telegram_conversations.json",
+    ".watch_posts.json",
+    ".pending_telegram_sends.json",
+    ".telegram_backfilled_channels.json",
+    ".night_posts.json",
     ".hr_reply_drafts.json",
 )
 KEEP_DAYS = 7

@@ -108,20 +108,20 @@ def extract_skills(text: str) -> list[str]:
     return [name for name, rx in _SKILL_RES.items() if rx.search(text)]
 
 
-def skill_demand(entries: list[dict], resume_text: str) -> list[dict]:
+def skill_demand(entries: list[dict], resume_text: str | None) -> list[dict]:
     """Доля вакансий, где навык упомянут, и есть ли он в резюме —
     только по записям, где навыки уже извлечены (новые отклики)."""
     with_skills = [e for e in entries if "skills" in e]
     if not with_skills:
         return []
     counts = Counter(s for e in with_skills for s in e["skills"])
-    have = set(extract_skills(resume_text))
+    have = set(extract_skills(resume_text)) if resume_text else None
     return [
         {
             "skill": skill,
             "count": count,
             "share": round(count / len(with_skills) * 100, 1),
-            "in_resume": skill in have,
+            "in_resume": skill in have if have is not None else None,
         }
         for skill, count in counts.most_common()
     ]

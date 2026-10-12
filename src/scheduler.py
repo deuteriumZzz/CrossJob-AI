@@ -23,6 +23,7 @@ from src.utils.pause_all import is_paused
 
 DEFAULT_INTERVAL_HOURS = 3
 MIN_FREE_DISK_BYTES = 2 * 1024**3
+DEFER_TO_NEXT_TURN = object()
 
 # Площадки, участвующие в "постоянном цикле" (limits.continuous_cycle_enabled)
 # — реальный поиск+отклик на job-бордах. telegram — свой живой шлюз
@@ -164,7 +165,7 @@ class Scheduler:
             AppliedLog(self.output_folder / "applied_log.json").seen_ids(name)
         )
 
-    def _call_source(self, name: str, platform_turn: bool) -> None:
+    def _call_source(self, name: str, platform_turn: bool) -> Any:
         """Запуск источника; источник со stop_event получает его, и он сам
         срабатывает через TURN_TIME_LIMIT_SECONDS."""
         fn = self.source_map[name]
@@ -172,16 +173,19 @@ class Scheduler:
         # останавливаться (stop_event): и у площадок круга, и у сборщиков
         # Базы (Talanto, Hirify), которым раньше он не включался.
         if "stop_event" not in inspect.signature(fn).parameters:
-            fn(self.parameters, self.llm_api_key)
-            return
-        stop = threading.Event()
+            return fn(self.parameters, self.llm_api_key)
+        stop = (
+            self.stop_event
+            if TURN_TIME_LIMIT_SECONDS is None
+            else threading.Event()
+        )
         timer = None
         if TURN_TIME_LIMIT_SECONDS:
             timer = threading.Timer(TURN_TIME_LIMIT_SECONDS, stop.set)
             timer.daemon = True
             timer.start()
         try:
-            fn(self.parameters, self.llm_api_key, stop_event=stop)
+            return fn(self.parameters, self.llm_api_key, stop_event=stop)
         finally:
             if timer is not None:
                 timer.cancel()
@@ -333,7 +337,7 @@ class Scheduler:
             seen_before = self._seen_count(name) if platform_turn else 0
             logger.info(f"[scheduler] ход: {name}")
             try:
-                self._call_source(name, platform_turn)
+                result = self._call_source(name, platform_turn)
             except Exception as e:
                 logger.exception(f"[scheduler] {name} failed: {e}")
                 record_run_result(
@@ -348,6 +352,14 @@ class Scheduler:
                     self.parameters,
                     f"CrossJob-AI (демон): {name} упал во время "
                     f"планового запуска — {e}",
+                )
+                continue
+            if result is DEFER_TO_NEXT_TURN:
+                # The manual captcha window has ended. Requeue from the
+                # end of this turn so older due platforms go first.
+                next_run = self.now_fn() + timedelta(hours=interval_hours)
+                record_run_result(
+                    self.output_folder, name, "blocked", next_run, run_at
                 )
                 continue
             idle_streak: Optional[int] = None
