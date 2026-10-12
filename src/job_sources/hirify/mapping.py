@@ -49,6 +49,14 @@ def _posting(html: str) -> Optional[dict]:
     return None
 
 
+# «Локация: …, офисный формат», «гибридный формат», «работа в офисе».
+_OFFICE_IN_TEXT = re.compile(
+    r"(офисн\w+\s+формат|гибридн\w+\s+формат|работа\s+в\s+офисе|"
+    r"формат\s+работы\s*:\s*(офис|гибрид))",
+    re.IGNORECASE,
+)
+
+
 def parse_job(html: str, job_id: str) -> Optional[tuple[Job, dict]]:
     """(Job, meta) со страницы вакансии; None — разметки вакансии нет.
     meta: posted_at (ISO), employment (FULL_TIME…), remote (bool)."""
@@ -57,7 +65,14 @@ def parse_job(html: str, job_id: str) -> Optional[tuple[Job, dict]]:
         return None
     org = item.get("hiringOrganization") or {}
     company = org.get("name", "") if isinstance(org, dict) else str(org)
-    remote = item.get("jobLocationType") == "TELECOMMUTE"
+    description = strip_html(str(item.get("description", "")))
+    # Метка Hirify (TELECOMMUTE) бывает неверной: у вакансии «Локация:
+    # Новосибирск, офисный формат» она стояла как удалёнка (9.10) — текст
+    # вакансии про формат главнее метки.
+    remote = (
+        item.get("jobLocationType") == "TELECOMMUTE"
+        and not _OFFICE_IN_TEXT.search(description)
+    )
     countries = []
     for place in item.get("applicantLocationRequirements") or []:
         if isinstance(place, dict) and place.get("name"):
@@ -72,7 +87,7 @@ def parse_job(html: str, job_id: str) -> Optional[tuple[Job, dict]]:
             filter(None, ["Remote" if remote else "", *countries])
         ),
         link=item.get("url") or f"{BASE_URL}/jobs/{job_id}",
-        description=strip_html(str(item.get("description", ""))),
+        description=description,
         source="hirify",
         external_id=job_id,
     )

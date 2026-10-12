@@ -109,3 +109,26 @@ def test_source_returns_filtered_jobs():
         )
         == []
     )
+
+
+def test_office_text_overrides_telecommute_label():
+    """9.10: Совкомбанк — «Новосибирск, офисный формат», а метка Hirify
+    TELECOMMUTE; для поиска «только удалёнка» вакансия не подходит."""
+    import json as _json
+
+    from src.job_sources.hirify.mapping import parse_job
+
+    def page(desc):
+        data = {
+            "@type": "JobPosting",
+            "title": "Python",
+            "jobLocationType": "TELECOMMUTE",
+            "description": desc,
+            "hiringOrganization": {"name": "Bank"},
+        }
+        return f'<script type="application/ld+json">{_json.dumps(data)}</script>'
+
+    _, office = parse_job(page("Локация: Новосибирск, офисный формат"), "1")
+    _, remote = parse_job(page("Локация: удалённо, гибкий график"), "2")
+    assert office["remote"] is False
+    assert remote["remote"] is True
