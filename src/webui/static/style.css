@@ -131,6 +131,18 @@
     transition-delay: 0ms !important;
     scroll-behavior: auto !important;
   }
+
+  .btn:hover:not(:disabled),
+  .btn:active:not(:disabled),
+  .icon-btn:hover,
+  .icon-btn:active {
+    transform: none !important;
+  }
+
+  .toast::after {
+    animation: none;
+    transform: none;
+  }
 }
 
 * {
@@ -2621,7 +2633,7 @@ kbd {
   position: fixed;
   inset: 0;
   z-index: 1800;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .tour-highlight {
@@ -4236,8 +4248,7 @@ h4 {
 
 .btn:hover:not(:disabled) {
   border-color: var(--border-hover);
-  background: var(--surface-2);
-  transform: none;
+  background: var(--surface-3);
 }
 
 .btn:active:not(:disabled) {
@@ -4254,6 +4265,17 @@ h4 {
 
 .btn-primary:hover:not(:disabled) {
   opacity: 0.92;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 3px 10px color-mix(in srgb, var(--text) 8%, transparent);
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--text) 12%, transparent);
+  }
 }
 
 .btn-secondary {
@@ -4313,12 +4335,23 @@ h4 {
   color: var(--text-2);
   cursor: pointer;
   transition: background-color var(--t-hover) var(--ease),
-    color var(--t-hover) var(--ease);
+    color var(--t-hover) var(--ease),
+    transform var(--t-press) var(--ease);
 }
 
 .icon-btn:hover {
   background: var(--surface-2);
   color: var(--text);
+}
+
+.icon-btn:active {
+  transform: scale(0.96);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .icon-btn:hover {
+    transform: translateY(-1px);
+  }
 }
 
 /* Поля ввода и выпадающие списки — одна система. */
@@ -4473,6 +4506,8 @@ tbody tr:hover {
 
 /* Уведомления: поднимаются снизу. */
 .toast {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -4484,6 +4519,24 @@ tbody tr:hover {
   font-size: 13px;
   box-shadow: var(--shadow-float);
   animation: toast-in 280ms var(--spring) both;
+}
+
+.toast::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 2px;
+  background: var(--toast-progress-color, var(--text-3));
+  transform-origin: left center;
+  animation: toast-progress var(--toast-duration, 3500ms) linear forwards;
+  pointer-events: none;
+}
+
+.toast.success { --toast-progress-color: var(--good); }
+.toast.error { --toast-progress-color: var(--bad); }
+
+@keyframes toast-progress {
+  to { transform: scaleX(0); }
 }
 
 .toast-dot {
@@ -5803,7 +5856,10 @@ input.num-input {
   .btn,
   nav.tabs button,
   .row,
-  .side-link {
+  .side-link,
+  .base-row-open,
+  .job-row-open,
+  .table-sort-button {
     min-height: 44px;
   }
 }
@@ -6302,6 +6358,18 @@ input.num-input {
   transition-duration: 1ms !important;
   transition-delay: 0ms !important;
   scroll-behavior: auto !important;
+}
+
+:root[data-motion="reduce"] .btn:hover:not(:disabled),
+:root[data-motion="reduce"] .btn:active:not(:disabled),
+:root[data-motion="reduce"] .icon-btn:hover,
+:root[data-motion="reduce"] .icon-btn:active {
+  transform: none !important;
+}
+
+:root[data-motion="reduce"] .toast::after {
+  animation: none;
+  transform: none;
 }
 
 @media (max-width: 900px) {
@@ -7610,6 +7678,51 @@ a.btn-primary:hover {
 .base-row:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: -2px;
+}
+
+.base-row-open {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.base-row-open:hover .row-title,
+.base-row-open:focus-visible .row-title {
+  color: var(--link-hover);
+}
+
+.base-row-open:focus-visible,
+.job-row-open:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.job-row-open {
+  width: 100%;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.job-row-open:hover .row-title,
+.job-row-open:focus-visible .row-title {
+  color: var(--link-hover);
 }
 
 .base-row .row-sub {

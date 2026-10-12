@@ -288,7 +288,8 @@ function fmtTime(iso) {
 }
 
 // «Уменьшить движение»: из системы или Настройки → Вид → «Анимации: выключить».
-let REDUCE_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+let REDUCE_MOTION = motionQuery.matches;
 (function applyLookPrefs() {
   try {
     const density = localStorage.getItem("cj-density");
@@ -300,6 +301,23 @@ let REDUCE_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)").matche
     }
   } catch (e) {}
 })();
+
+function syncReducedMotionPreference(preference = null) {
+  let manuallyReduced = preference === "reduce";
+  if (preference === null) {
+    try {
+      manuallyReduced = localStorage.getItem("cj-motion") === "reduce";
+    } catch (e) {}
+  }
+  REDUCE_MOTION = manuallyReduced || motionQuery.matches;
+  if (REDUCE_MOTION) clearPointerEffects();
+}
+
+if (typeof motionQuery.addEventListener === "function") {
+  motionQuery.addEventListener("change", syncReducedMotionPreference);
+} else if (typeof motionQuery.addListener === "function") {
+  motionQuery.addListener(syncReducedMotionPreference);
+}
 
 function countUp(el, target, duration = 700, start = 0) {
   if (REDUCE_MOTION) {
@@ -931,10 +949,10 @@ function renderContactsList() {
       const p = card.primary;
       const more = card.contacts.length - 1;
       return `
-      <tr class="base-row${fresh.has(card.key) ? " row-fresh" : ""}${card.key === focusContactKey ? " is-focused" : ""}" data-card-key="${escapeHtml(card.key)}" tabindex="0">
-        <td class="base-check"><input type="checkbox" data-select="${escapeHtml(card.key)}" aria-label="Выбрать" ${baseState.selected.has(card.key) ? "checked" : ""} /></td>
-        <td><div class="row-main"><span class="row-title">${escapeHtml(card.company || p?.value || "Без названия")}</span>
-          <span class="row-sub">${p ? `${escapeHtml(p.kind === "telegram" ? "@" + p.value : p.value)}${more > 0 ? ` · +${more}` : ""}` : "контакта нет"}${card.hr ? ` · ${escapeHtml(card.hr)}` : ""}</span></div></td>
+      <tr class="base-row${fresh.has(card.key) ? " row-fresh" : ""}${card.key === focusContactKey ? " is-focused" : ""}" data-card-key="${escapeHtml(card.key)}">
+        <td class="base-check"><input type="checkbox" data-select="${escapeHtml(card.key)}" aria-label="Выбрать компанию ${escapeHtml(card.company || p?.value || "Без названия")}" ${baseState.selected.has(card.key) ? "checked" : ""} /></td>
+        <td><button type="button" class="base-row-open" aria-label="Открыть карточку компании: ${escapeHtml(card.company || p?.value || "Без названия")}"><span class="row-title">${escapeHtml(card.company || p?.value || "Без названия")}</span>
+          <span class="row-sub">${p ? `${escapeHtml(p.kind === "telegram" ? "@" + p.value : p.value)}${more > 0 ? ` · +${more}` : ""}` : "контакта нет"}${card.hr ? ` · ${escapeHtml(card.hr)}` : ""}</span></button></td>
         <td class="small col-source muted">${card.source_kinds.map((k) => SOURCE_KIND[k]).join(", ")}</td>
         <td>${statusPill(card.status)}</td>
         <td class="small col-last">${card.last ? `${escapeHtml(truncate(card.last.text, 60))}<div class="muted">${fmtDay(card.last.at)}</div>` : "—"}</td>
@@ -948,12 +966,10 @@ function renderContactsList() {
       if (e.target.closest("input, a, button")) return;
       openCompanyDrawer(row.dataset.cardKey);
     });
-    // С клавиатуры: Tab до строки, Enter/пробел — открыть карточку.
-    row.addEventListener("keydown", (e) => {
-      if ((e.key === "Enter" || e.key === " ") && e.target === row) {
-        e.preventDefault();
-        openCompanyDrawer(row.dataset.cardKey);
-      }
+  });
+  el.querySelectorAll(".base-row-open").forEach((button) => {
+    button.addEventListener("click", () => {
+      openCompanyDrawer(button.closest(".base-row").dataset.cardKey);
     });
   });
   if (openKey) {
@@ -3639,9 +3655,9 @@ const render = {
       .map((e, i) => {
         const stage = e.effective_stage ? STAGE_LABELS[e.effective_stage] : "";
         const tone = e.status === "applied" ? (e.effective_stage === "rejected" ? "bad" : e.effective_stage ? "good" : "") : e.status === "dry_run" ? "" : "muted";
-        return `<tr class="job-row reveal" tabindex="0" data-row-index="${i}" style="transition-delay:${staggerDelay(i, 25)}">
+        return `<tr class="job-row reveal" data-row-index="${i}" style="transition-delay:${staggerDelay(i, 25)}">
           <td class="mono small muted nowrap">${fmtDay(e.applied_at)}</td>
-          <td><div class="job-cell">${plogoHtml(e.source)}<span class="row-main"><span class="row-title">${escapeHtml(e.company || "—")}</span><span class="row-sub">${escapeHtml(e.title)}${e.remote_region ? ` · ${REGION_LABELS[e.remote_region] || ""}` : ""}</span></span></div></td>
+          <td><button type="button" class="job-row-open job-cell" aria-label="Открыть вакансию ${escapeHtml(e.title)} в компании ${escapeHtml(e.company || "без названия")}">${plogoHtml(e.source)}<span class="row-main"><span class="row-title">${escapeHtml(e.company || "—")}</span><span class="row-sub">${escapeHtml(e.title)}${e.remote_region ? ` · ${REGION_LABELS[e.remote_region] || ""}` : ""}</span></span></button></td>
           <td class="small nowrap">${escapeHtml(e.salary || "—")}</td>
           <td><span class="status-text ${tone}">${escapeHtml(statusLabel(e.status))}</span>${stage ? `<span class="stage-tag">${escapeHtml(stage)}</span>` : ""}${e.apply_anyway && isSkipped(e) ? `<span class="stage-tag">отклик запланирован</span>` : ""}${e.feedback ? `<span class="stage-tag" title="${escapeHtml(e.feedback.reason || "")}">ваша пометка</span>` : ""}</td>
           <td class="num mono">${e.score ?? "—"}${e.score != null ? `<span class="muted"> / 10</span>` : ""}</td>
@@ -3722,7 +3738,7 @@ const render = {
       <div class="candidate-row stagger-item" style="animation-delay:${staggerDelay(i)}">
         <input type="checkbox" value="${escapeHtml(c)}" class="blacklist-check" />
         <span>${escapeHtml(c)}</span>
-        <button class="btn btn-secondary btn-small block-hh-employer" data-company="${escapeHtml(c)}" title="Заблокировать работодателя на hh.ru (серверный бан, только для HeadHunter)">Скрыть на hh.ru</button>
+        <button type="button" class="btn btn-secondary btn-small block-hh-employer" data-company="${escapeHtml(c)}" title="Заблокировать работодателя на hh.ru (серверный бан, только для HeadHunter)">Скрыть на hh.ru</button>
       </div>`
       )
       .join("");
@@ -4722,6 +4738,7 @@ function showToast(message, type = "info", duration = 3500) {
   if (!container) return;
   const el = document.createElement("div");
   el.className = `toast ${type}`;
+  el.style.setProperty("--toast-duration", `${Math.max(1, duration)}ms`);
   el.innerHTML = `<span class="toast-dot"></span><span>${escapeHtml(message)}</span>`;
   container.appendChild(el);
   if (window.gsap && !REDUCE_MOTION) {
@@ -4744,6 +4761,7 @@ function showSavedToast(message, undo = null, duration = 6000) {
   if (!container) return;
   const el = document.createElement("div");
   el.className = "toast success";
+  el.style.setProperty("--toast-duration", `${Math.max(1, duration)}ms`);
   el.innerHTML = `<svg class="toast-check" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>${escapeHtml(message)}</span>${undo ? `<button type="button" class="toast-action">Отменить</button>` : ""}`;
   container.appendChild(el);
   const timer = setTimeout(() => el.remove(), duration);
@@ -5013,10 +5031,10 @@ function initLookPane() {
     const reduce = e.target.value === "reduce";
     if (reduce) document.documentElement.dataset.motion = "reduce";
     else delete document.documentElement.dataset.motion;
-    REDUCE_MOTION = reduce || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     try {
       localStorage.setItem("cj-motion", e.target.value);
     } catch (err) {}
+    syncReducedMotionPreference(e.target.value);
     showSavedToast(reduce ? "Анимации выключены" : "Анимации как в системе");
   });
 }
@@ -5838,7 +5856,7 @@ function selectHistoryRow(i, open = false) {
   if (!rows.length) return;
   historySelected = Math.max(0, Math.min(rows.length - 1, i));
   rows.forEach((r, n) => r.classList.toggle("is-selected", n === historySelected));
-  rows[historySelected].focus({ preventScroll: false });
+  rows[historySelected].querySelector(".job-row-open")?.focus({ preventScroll: false });
   if (open) openJobDrawer(historyRows[historySelected]);
 }
 
@@ -5848,14 +5866,6 @@ function initJobsView() {
     const row = ev.target.closest(".job-row");
     if (!row || ev.target.closest("a")) return;
     selectHistoryRow(Number(row.dataset.rowIndex), true);
-  });
-  tbody.addEventListener("keydown", (ev) => {
-    const row = ev.target.closest(".job-row");
-    if (!row) return;
-    if (ev.key === "Enter" || ev.key === " ") {
-      ev.preventDefault();
-      selectHistoryRow(Number(row.dataset.rowIndex), true);
-    }
   });
   document.getElementById("platform-drawer").addEventListener("click", (ev) => {
     const btn = ev.target.closest("[data-job-action]");
@@ -6679,9 +6689,20 @@ function initKeyboardShortcuts() {
 // ---------- Cursor-spotlight + magnetic primary buttons ----------
 // Один делегированный слушатель на весь документ вместо одного на
 // карточку — дешевле при десятках карточек на Обзоре.
+function clearPointerEffects() {
+  document.querySelectorAll(".btn-primary.is-magnetic").forEach((button) => {
+    button.style.transform = "";
+    button.classList.remove("is-magnetic");
+  });
+  document.querySelectorAll(".source-card, .provider-card").forEach((card) => {
+    card.style.removeProperty("--spot-x");
+    card.style.removeProperty("--spot-y");
+  });
+}
+
 function initPointerEffects() {
-  if (REDUCE_MOTION) return;
   document.addEventListener("mousemove", (e) => {
+    if (REDUCE_MOTION) return;
     const card = e.target.closest(".source-card, .provider-card");
     if (card) {
       const rect = card.getBoundingClientRect();
@@ -6768,51 +6789,102 @@ const TOUR_STEPS = [
 ];
 
 function initOnboardingTour() {
-  if (localStorage.getItem("cj-seen-tour") === "1") return;
+  try {
+    if (localStorage.getItem("cj-seen-tour") === "1") return;
+  } catch (e) {}
   let step = 0;
+  const previouslyFocused = document.activeElement;
   const overlay = document.createElement("div");
   overlay.className = "tour-overlay";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", "Обзор приложения");
   const highlight = document.createElement("div");
   highlight.className = "tour-highlight";
   const tooltip = document.createElement("div");
   tooltip.className = "tour-tooltip";
+  let activeTarget = null;
   overlay.append(highlight, tooltip);
 
-  function renderStep() {
-    const { tab, text } = TOUR_STEPS[step];
-    const btn = document.querySelector(`nav.tabs button[data-tab="${tab}"]`);
-    if (!btn) return finish();
-    const rect = btn.getBoundingClientRect();
+  function positionStep() {
+    if (!activeTarget) return;
+    const rect = activeTarget.getBoundingClientRect();
     Object.assign(highlight.style, {
       top: `${rect.top - 4}px`,
       left: `${rect.left - 4}px`,
       width: `${rect.width + 8}px`,
       height: `${rect.height + 8}px`,
     });
+    const viewportPadding = 12;
+    const tooltipWidth = Math.max(1, Math.min(260, window.innerWidth - viewportPadding * 2));
+    tooltip.style.width = `${tooltipWidth}px`;
+    const tooltipHeight = tooltip.getBoundingClientRect().height || 150;
+    tooltip.style.top = `${Math.max(viewportPadding, Math.min(rect.top, window.innerHeight - tooltipHeight - viewportPadding))}px`;
+    tooltip.style.left = `${Math.max(viewportPadding, Math.min(rect.right + 16, window.innerWidth - tooltipWidth - viewportPadding))}px`;
+  }
+
+  function renderStep() {
+    const { tab, text } = TOUR_STEPS[step];
+    activeTarget = document.querySelector(`nav.tabs button[data-tab="${tab}"]`);
+    if (!activeTarget) return finish();
     const isLast = step === TOUR_STEPS.length - 1;
+    overlay.setAttribute("aria-label", `Обзор приложения, шаг ${step + 1} из ${TOUR_STEPS.length}`);
     tooltip.innerHTML = `
       <button type="button" class="tour-skip" id="tour-skip" title="Пропустить" aria-label="Пропустить">✕</button>
-      <p>${escapeHtml(text)}</p>
+      <p id="tour-description" aria-live="polite">${escapeHtml(text)}</p>
       <div class="tour-actions">
         <span class="tour-step">${step + 1} / ${TOUR_STEPS.length}</span>
         <button type="button" class="btn btn-primary btn-small" id="tour-next">${isLast ? "Готово" : "Дальше"}</button>
       </div>`;
-    tooltip.style.top = `${Math.min(rect.top, window.innerHeight - 160)}px`;
-    tooltip.style.left = `${Math.min(rect.right + 16, window.innerWidth - 280)}px`;
-    document.getElementById("tour-next").addEventListener("click", () => {
+    positionStep();
+    const nextButton = document.getElementById("tour-next");
+    nextButton.addEventListener("click", () => {
       step += 1;
       if (step >= TOUR_STEPS.length) finish();
       else renderStep();
     });
     document.getElementById("tour-skip").addEventListener("click", finish);
+    nextButton.focus();
   }
 
+  const onKeydown = (event) => {
+    if (event.key === "Escape") {
+      finish();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = [
+      ...tooltip.querySelectorAll(
+        'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+      ),
+    ];
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && (document.activeElement === first || !tooltip.contains(document.activeElement))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && (document.activeElement === last || !tooltip.contains(document.activeElement))) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
   function finish() {
-    localStorage.setItem("cj-seen-tour", "1");
+    document.removeEventListener("keydown", onKeydown);
+    window.removeEventListener("resize", positionStep);
+    try {
+      localStorage.setItem("cj-seen-tour", "1");
+    } catch (e) {}
     overlay.remove();
+    if (previouslyFocused && typeof previouslyFocused.focus === "function") {
+      previouslyFocused.focus();
+    }
   }
 
   document.body.appendChild(overlay);
+  document.addEventListener("keydown", onKeydown);
+  window.addEventListener("resize", positionStep);
   renderStep();
 }
 

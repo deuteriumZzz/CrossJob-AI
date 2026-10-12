@@ -6,7 +6,7 @@
 <title>CrossJob-AI</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%278%27 fill=%27%23121417%27/%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%275%27 fill=%27%232fb36b%27/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="/vendor/fonts/fonts.css" />
-<link rel="stylesheet" href="/style.css?v=69" />
+<link rel="stylesheet" href="/style.css?v=72" />
 </head>
 <body>
 <div id="setup-screen" class="setup-screen" style="display:none" data-ui="shell.first-run">
@@ -26,7 +26,7 @@
     <label class="setup-label" for="setup-api-key">API-ключ OpenAI (llm_api_key)</label>
     <input id="setup-api-key" type="text" placeholder="sk-… (необязательно, можно вписать позже)" autocomplete="off" />
     <div class="filters">
-      <button id="setup-init" class="btn btn-primary">Создать data_folder и продолжить</button>
+      <button type="button" id="setup-init" class="btn btn-primary">Создать data_folder и продолжить</button>
       <span id="setup-status" class="muted small"></span>
     </div>
   </div>
@@ -44,29 +44,29 @@
 
     <nav class="tabs" aria-label="Разделы">
       <div class="tab-indicator" id="nav-tab-indicator"></div>
-      <button data-tab="overview" class="active" title="Главная — что ждёт вашего решения и как идут дела" data-ui="nav.home nav.home.badge">
+      <button type="button" data-tab="overview" class="active" title="Главная — что ждёт вашего решения и как идут дела" data-ui="nav.home nav.home.badge">
         <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7 8 2.5 13.5 7v6a.5.5 0 0 1-.5.5H10V10H6v3.5H3a.5.5 0 0 1-.5-.5V7Z"/></svg>
         <span class="tab-label">Главная</span>
         <span id="overview-error-badge" class="tab-badge" style="display:none"></span>
       </button>
-      <button data-tab="history" title="Вакансии — куда бот откликнулся, что пропустил и почему" data-ui="nav.jobs">
+      <button type="button" data-tab="history" title="Вакансии — куда бот откликнулся, что пропустил и почему" data-ui="nav.jobs">
         <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4.5" width="12" height="9" rx="1.5"/><path d="M5.5 4.5V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5"/></svg>
         <span class="tab-label">Вакансии</span>
       </button>
-      <button data-tab="replies" title="Общение — работодатели, письма и Telegram" data-ui="nav.talk nav.talk.badge">
+      <button type="button" data-tab="replies" title="Общение — работодатели, письма и Telegram" data-ui="nav.talk nav.talk.badge">
         <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v5a1.5 1.5 0 0 1-1.5 1.5H7.2L4.5 13v-2A1.5 1.5 0 0 1 3 9.5v-5Z"/></svg>
         <span class="tab-label">Общение</span>
         <span id="telegram-unread-badge" class="tab-badge" style="display:none"></span>
       </button>
-      <button data-tab="contacts" title="Компании — ваша база компаний и HR и письма им" data-ui="nav.companies">
+      <button type="button" data-tab="contacts" title="Компании — ваша база компаний и HR и письма им" data-ui="nav.companies">
         <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="m2.5 4.5 5.5 4 5.5-4"/></svg>
         <span class="tab-label">Компании</span>
       </button>
-      <button data-tab="analytics" title="Аналитика — что приносит ответы" data-ui="nav.analytics">
+      <button type="button" data-tab="analytics" title="Аналитика — что приносит ответы" data-ui="nav.analytics">
         <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13V8M8 13V3M13 13v-7"/></svg>
         <span class="tab-label">Аналитика</span>
       </button>
-      <button data-tab="settings" title="Настройки — поиск, площадки, письма, система" data-ui="nav.settings" class="nav-gear">
+      <button type="button" data-tab="settings" title="Настройки — поиск, площадки, письма, система" data-ui="nav.settings" class="nav-gear">
         <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M14.2 8h-1.6M3.4 8H1.8M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1M12.4 12.4l-1.1-1.1M4.7 4.7 3.6 3.6"/></svg>
         <span class="tab-label">Настройки</span>
       </button>
@@ -90,7 +90,7 @@
       <div class="daemon-controls">
         <span id="daemon-badge" class="badge off" data-ui="bot.status"><span class="badge-dot"></span><span class="btn-label">бот остановлен</span></span>
         <div class="daemon-buttons">
-          <button id="daemon-toggle" class="btn btn-primary" title="Запустить бота" data-ui="bot.toggle">
+          <button type="button" id="daemon-toggle" class="btn btn-primary" title="Запустить бота" data-ui="bot.toggle">
             <svg aria-hidden="true" class="icon-play" viewBox="0 0 20 20" fill="none"><path d="M6.5 4.7v10.6a1 1 0 0 0 1.53.85l8.4-5.3a1 1 0 0 0 0-1.7l-8.4-5.3a1 1 0 0 0-1.53.85Z" fill="currentColor"/></svg>
             <svg aria-hidden="true" class="icon-pause" viewBox="0 0 20 20" fill="none"><rect x="5" y="5" width="10" height="10" rx="1.5" fill="currentColor"/></svg>
             <span class="btn-label">Запустить</span>
@@ -99,7 +99,7 @@
       </div>
       <div id="activity" class="activity" role="status" data-ui="bot.activity"></div>
     </div>
-    <button id="sidebar-collapse-toggle" class="sidebar-collapse-toggle" title="Свернуть меню (Ctrl/⌘+B)" aria-label="Свернуть меню" data-ui="nav.collapse">
+    <button type="button" id="sidebar-collapse-toggle" class="sidebar-collapse-toggle" title="Свернуть меню (Ctrl/⌘+B)" aria-label="Свернуть меню" data-ui="nav.collapse">
       <svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="M12.5 4.5 7 10l5.5 5.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
   </aside>
@@ -748,20 +748,20 @@
               <li>Введите номер телефона и код, который пришлёт Telegram. Вход нужен один раз — дальше бот его помнит.</li>
             </ol>
             <div class="filters">
-              <button id="telegram-status-refresh" class="btn btn-secondary">Проверить подключение</button>
+              <button type="button" id="telegram-status-refresh" class="btn btn-secondary">Проверить подключение</button>
               <span id="telegram-status-note" class="muted small"></span>
             </div>
             <div class="filters" id="telegram-login-row">
               <input type="text" id="telegram-login-phone" placeholder="Номер телефона, напр. +79991234567" class="flex-grow-field" />
-              <button id="telegram-login-send-code" class="btn btn-primary">Прислать код</button>
+              <button type="button" id="telegram-login-send-code" class="btn btn-primary">Прислать код</button>
             </div>
             <div class="filters" id="telegram-login-code-row" style="display:none">
               <input type="text" id="telegram-login-code" placeholder="Код из Telegram" />
-              <button id="telegram-login-submit-code" class="btn btn-primary">Подтвердить</button>
+              <button type="button" id="telegram-login-submit-code" class="btn btn-primary">Подтвердить</button>
             </div>
             <div class="filters" id="telegram-login-password-row" style="display:none">
               <input type="password" id="telegram-login-password" placeholder="Пароль двухфакторной аутентификации" class="flex-grow-field" />
-              <button id="telegram-login-submit-password" class="btn btn-primary">Войти</button>
+              <button type="button" id="telegram-login-submit-password" class="btn btn-primary">Войти</button>
             </div>
             <p class="muted small" id="telegram-login-status"></p>
           </details>
@@ -774,59 +774,59 @@
       <div class="settings-pane card" id="settings-llm" role="tabpanel" aria-labelledby="settings-llm-tab">
         <div class="pane-head"><div><h3>Провайдер ИИ</h3><p class="pane-lead">Кто оценивает вакансии и пишет письма. Переключение применяется сразу, без перезапуска.</p></div></div>
         <div id="settings-llm-provider-block" class="pane-group"><h4>Основной провайдер</h4><div data-ui="settings.llm.provider"><div class="provider-grid" id="provider-grid">
-          <button class="provider-card" data-provider="openai" title="OpenAI">
+          <button type="button" class="provider-card" data-provider="openai" title="OpenAI">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3.4" fill="currentColor"/></svg>
             <span>OpenAI</span>
           </button>
-          <button class="provider-card" data-provider="groq" title="Groq">
+          <button type="button" class="provider-card" data-provider="groq" title="Groq">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><path d="M13 3 5 13h5l-1 8 8-10h-5l1-8Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
             <span>Groq</span>
           </button>
-          <button class="provider-card" data-provider="gemini" title="Gemini">
+          <button type="button" class="provider-card" data-provider="gemini" title="Gemini">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><path d="M12 3c0 4.5-3.5 8-8 8 4.5 0 8 3.5 8 9 0-5.5 3.5-9 8-9-4.5 0-8-3.5-8-8Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
             <span>Gemini</span>
           </button>
-          <button class="provider-card" data-provider="deepseek" title="DeepSeek">
+          <button type="button" class="provider-card" data-provider="deepseek" title="DeepSeek">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="m19.5 19.5-4.3-4.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
             <span>DeepSeek</span>
           </button>
-          <button class="provider-card" data-provider="nvidia" title="NVIDIA NIM">
+          <button type="button" class="provider-card" data-provider="nvidia" title="NVIDIA NIM">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><path d="M4 18V6l16 12V6" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>
             <span>NVIDIA</span>
           </button>
-          <button class="provider-card" data-provider="openrouter" title="OpenRouter">
+          <button type="button" class="provider-card" data-provider="openrouter" title="OpenRouter">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="2.4" fill="currentColor"/><path d="M12 4v3.6M12 16.4V20M4 12h3.6M16.4 12H20M6.3 6.3l2.5 2.5M15.2 15.2l2.5 2.5M6.3 17.7l2.5-2.5M15.2 8.8l2.5-2.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
             <span>OpenRouter</span>
           </button>
-          <button class="provider-card" data-provider="mistral" title="Mistral AI">
+          <button type="button" class="provider-card" data-provider="mistral" title="Mistral AI">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><path d="M4 18V9l4 5 4-7 4 7 4-5v9" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>
             <span>Mistral</span>
           </button>
-          <button class="provider-card" data-provider="cohere" title="Cohere">
+          <button type="button" class="provider-card" data-provider="cohere" title="Cohere">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="8" cy="9" r="3.4" stroke="currentColor" stroke-width="1.6"/><circle cx="16" cy="9" r="3.4" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="16" r="3.4" stroke="currentColor" stroke-width="1.6"/></svg>
             <span>Cohere</span>
           </button>
-          <button class="provider-card" data-provider="huggingface" title="Hugging Face">
+          <button type="button" class="provider-card" data-provider="huggingface" title="Hugging Face">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.6"/><path d="M9 11v.6M15 11v.6M8.2 14.5c1.6 2 6 2 7.6 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
             <span>HuggingFace</span>
           </button>
-          <button class="provider-card" data-provider="ollama_cloud" title="Ollama Cloud">
+          <button type="button" class="provider-card" data-provider="ollama_cloud" title="Ollama Cloud">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><rect x="4" y="6" width="16" height="13" rx="4" stroke="currentColor" stroke-width="1.6"/><circle cx="9" cy="12.5" r="1.3" fill="currentColor"/><circle cx="15" cy="12.5" r="1.3" fill="currentColor"/><path d="M9 4.5v2M15 4.5v2M12 2v2.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
             <span>Ollama Cloud</span>
           </button>
-          <button class="provider-card" data-provider="llm7" title="LLM7.io">
+          <button type="button" class="provider-card" data-provider="llm7" title="LLM7.io">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><path d="M5 5h14L11 13v6l2 1v.2H9V20l2-1v-6L5 5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
             <span>LLM7.io</span>
           </button>
-          <button class="provider-card" data-provider="cloudflare" title="Cloudflare Workers AI">
+          <button type="button" class="provider-card" data-provider="cloudflare" title="Cloudflare Workers AI">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><path d="M4 15c0-3 2.5-5 5.5-5 1 0 2 .3 2.8.9C13 9.2 14.7 8 16.7 8c3 0 5.3 2.3 5.3 5.2 0 .3 0 .5-.1.8H4.5c-.3-.6-.5-1.3-.5-2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
             <span>Cloudflare</span>
           </button>
-          <button class="provider-card" data-provider="vercel" title="Vercel AI Gateway">
+          <button type="button" class="provider-card" data-provider="vercel" title="Vercel AI Gateway">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><path d="M12 4 21 19H3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
             <span>Vercel</span>
           </button>
-          <button class="provider-card" data-provider="ollama" title="Ollama">
+          <button type="button" class="provider-card" data-provider="ollama" title="Ollama">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><rect x="4" y="6" width="16" height="13" rx="4" stroke="currentColor" stroke-width="1.6"/><circle cx="9" cy="12.5" r="1.3" fill="currentColor"/><circle cx="15" cy="12.5" r="1.3" fill="currentColor"/><path d="M9 4.5v2M15 4.5v2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
             <span>Ollama</span>
           </button>
@@ -978,6 +978,6 @@
 </div>
 
 <script src="/vendor/gsap.min.js"></script>
-<script src="/app.js?v=90"></script>
+<script src="/app.js?v=94"></script>
 </body>
 </html>
