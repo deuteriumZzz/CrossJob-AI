@@ -1179,6 +1179,19 @@ def test_mail_guard_warmup_window_and_bounces(tmp_path):
     )
     assert not g.plan(params, tmp_path, saturday)["can_send"]
     assert g.next_window(saturday, g.settings(params)).weekday() == 0
+    no_hours = {
+        "direct": {"email_daily_limit": 50, "send_hours_enabled": False}
+    }
+    assert g.plan(no_hours, tmp_path, evening)["can_send"]
+    assert not g.plan(no_hours, tmp_path, saturday)["can_send"]
+    all_time = {
+        "direct": {
+            "email_daily_limit": 50,
+            "send_hours_enabled": False,
+            "weekdays_only": False,
+        }
+    }
+    assert g.plan(all_time, tmp_path, saturday)["can_send"]
 
     bounced = {
         f"b{i}@x.io": {

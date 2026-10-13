@@ -4,8 +4,8 @@
   новый для рассылок ящик начинает с 15 писем в день и прибавляет по 5
   за каждый день, когда письма уже уходили, — пока не дойдёт до вашего
   лимита. Резкий рост с нуля до сотен писем — главный признак спама.
-- Только в рабочее время (по умолчанию будни 9–19) — письма в 3 ночи
-  выдают бота.
+- Рабочие часы (по умолчанию будни 9–19) можно отключить — тогда отправка
+  не ждёт начала или конца временного окна.
 - Паузы случайные и растянуты на весь рабочий день, иногда — перерыв
   подольше («отошёл за кофе»).
 - Много возвратов за сутки (адреса не существуют) — стоп до завтра:
@@ -68,6 +68,7 @@ def settings(parameters: dict) -> dict:
         "warmup": direct.get("warmup", True) is not False,
         "send_from": int(direct.get("send_from", 9)),
         "send_to": int(direct.get("send_to", 19)),
+        "send_hours_enabled": direct.get("send_hours_enabled", True) is not False,
         "weekdays_only": direct.get("weekdays_only", True) is not False,
         # Возвратов за сутки до стопа — настраивается (Защита почты), но не
         # выключается: волна возвратов уводит в спам письма и живым HR.
@@ -81,6 +82,8 @@ def settings(parameters: dict) -> dict:
 def _in_window(moment: datetime, s: dict) -> bool:
     if s["weekdays_only"] and moment.weekday() >= 5:
         return False
+    if not s.get("send_hours_enabled", True):
+        return True
     return s["send_from"] <= moment.hour < s["send_to"]
 
 
@@ -88,6 +91,11 @@ def next_window(moment: datetime, s: dict) -> datetime:
     """Ближайшее начало времени отправки (или сейчас, если оно идёт)."""
     if _in_window(moment, s):
         return moment
+    if not s.get("send_hours_enabled", True):
+        day = moment.replace(hour=0, minute=0, second=0, microsecond=0)
+        while s["weekdays_only"] and day.weekday() >= 5:
+            day += timedelta(days=1)
+        return day
     day = moment.replace(
         hour=s["send_from"], minute=0, second=0, microsecond=0
     )
@@ -122,10 +130,16 @@ def plan(
     elif sent_today >= limit:
         reason = f"Дневной лимит писем ({limit}) исчерпан — продолжу завтра"
     elif not in_window:
-        reason = (
-            "Вне времени отправки — продолжу "
-            f"{next_window(now, s).strftime('%d.%m в %H:%M')}"
-        )
+        if s.get("send_hours_enabled", True):
+            reason = (
+                "Вне времени отправки — продолжу "
+                f"{next_window(now, s).strftime('%d.%m в %H:%M')}"
+            )
+        else:
+            reason = (
+                "Выходной день — продолжу "
+                f"{next_window(now, s).strftime('%d.%m в %H:%M')}"
+            )
     return {
         **s,
         "limit": limit,
@@ -142,9 +156,12 @@ def plan(
 
 def human_pause(p: dict, now: datetime | None = None) -> float:
     """Пауза до следующего письма: оставшиеся письма дня равномерно по
-    оставшемуся рабочему времени, ±50% случайно, иногда перерыв."""
+    оставшемуся времени отправки, ±50% случайно, иногда перерыв."""
     now = now or datetime.now().astimezone()
-    end = now.replace(hour=p["send_to"], minute=0, second=0, microsecond=0)
+    end_hour = p["send_to"] if p.get("send_hours_enabled", True) else 24
+    end = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
+        hours=end_hour
+    )
     left = max(1, p["left_today"])
     pace = max(0.0, (end - now).total_seconds()) / left
     pause = random.uniform(0.5, 1.5) * pace

@@ -11,32 +11,40 @@ const repliesCode = source.slice(source.indexOf("  async replies() {"), source.i
 const contactCode = source.slice(source.indexOf("function tgPostContact("), source.indexOf("function tgPostResumeChoice("));
 const panelCode = source.slice(source.indexOf("function tgPostPanelHtml("), source.indexOf("function tgPostContextHtml("));
 const actionCode = source.slice(source.indexOf("async function tgPostAction("), source.indexOf("async function blockContact("));
+const refreshCode = source.slice(source.indexOf("function refreshTelegramPostsPanel()"), source.indexOf("function closeTelegramPost()"));
 const extrasCode = source.slice(source.indexOf("function initTalkExtras()"));
 
 function setup() {
   const elements = Object.fromEntries(
-    ["tg-posts-block", "tg-posts-count", "tg-posts-list", "tg-chat-posts-list", "tg-posts-more", "tg-chat-later", "tg-chat-empty", "replies-rows", "tg-post-panel", "talk-context-body"].map(
+    ["tg-posts-block", "tg-posts-count", "tg-posts-list", "tg-chat-posts-list", "tg-posts-more", "tg-chat-later", "tg-chat-empty", "replies-rows", "replies-load-error", "tg-post-panel", "talk-context-body"].map(
       (id) => [id, { hidden: true, innerHTML: "", textContent: "", style: {}, listeners: {}, setAttribute() {}, removeAttribute() {}, replaceChildren() { this.innerHTML = ""; }, addEventListener(event, callback) { this.listeners[event] = callback; } }]
     )
   );
   const state = { posts: [], inboxError: false };
   const context = vm.createContext({
-    document: { getElementById: (id) => elements[id], querySelectorAll: () => [] },
+    document: { getElementById: (id) => elements[id], querySelectorAll: () => [], body: { contains: () => true } },
+    REDUCE_MOTION: false,
     repliesKind: "",
     repliesLoaded: false,
     lastRepliesCount: 0,
     lastRepliesSnapshot: null,
     lastRepliesEntries: [],
+    syncTalkMobilePaneAccessibility() {},
     renderDraftsQueue() {},
     renderHhRemindersQueue() {},
     renderRepliesRows() {},
     updateTalkListCount() {},
     fireConfetti() {},
-    showToast() {},
+    showToast(message) { state.toast = message; },
     openTelegramPost() { state.openCount = (state.openCount || 0) + 1; },
     animatePostRecipientSelection() {},
     async refreshTelegramPost() {},
     tgPostResumeChoice: () => "",
+    renderRetryState(container, message, retry) {
+      container.innerHTML = message;
+      state.postsRetryMessage = message;
+      state.postsRetry = retry;
+    },
     escapeHtml: (value) => String(value),
     emptyStateHtml: (message) => `<p>${message}</p>`,
     plogoHtml: () => "",
@@ -49,6 +57,7 @@ function setup() {
         return {};
       }
       if (path.startsWith("/api/telegram/posts?scope=all&limit=200&offset=")) {
+        if (state.postsError) throw new Error("Posts unavailable");
         const offset = Number(path.split("offset=")[1]);
         return { posts: structuredClone(state.posts.slice(offset, offset + 200)), total: state.posts.length, resume_options: [], sent_today: 0, daily_limit: 15 };
       }
@@ -59,7 +68,14 @@ function setup() {
       throw new Error(`Unexpected request: ${path}`);
     },
   });
-  vm.runInContext(`${postsCode}\n${closeCode}\n${contactCode}\n${panelCode}\n${actionCode}\n${extrasCode}\nconst render = { ${repliesCode} telegram() {} };`, context);
+  context.testButton = {
+    disabled: false,
+    textContent: "",
+    setAttribute() {},
+    removeAttribute() {},
+    classList: { add() {}, remove() {}, contains: () => false },
+  };
+  vm.runInContext(`${postsCode}\n${closeCode}\n${refreshCode}\n${contactCode}\n${panelCode}\n${actionCode}\n${extrasCode}\nconst render = { ${repliesCode} telegram() {} };`, context);
   const run = async (code) => {
     await vm.runInContext(code, context);
     await new Promise((resolve) => setImmediate(resolve));
@@ -149,9 +165,54 @@ test("an inbox error does not prevent posts from loading", async () => {
   const { elements, state, run } = setup();
   state.inboxError = true;
   state.posts = [{ id: "post-2", channel: "jobs", title: "Designer", contacts: [] }];
-  await assert.rejects(run("render.replies()"), /Inbox unavailable/);
+  await run("render.replies()");
   assert.equal(elements["tg-posts-block"].hidden, false);
   assert.match(elements["tg-posts-list"].innerHTML, /Designer/);
+  assert.equal(elements["replies-load-error"].hidden, false);
+  assert.match(elements["replies-load-error"].innerHTML, /входящие: Inbox unavailable/);
+});
+
+test("a Telegram posts error displays a retry action and recovers on retry", async () => {
+  const { elements, state, run } = setup();
+  state.postsError = true;
+
+  await assert.rejects(run("renderTelegramPosts()"), /Posts unavailable/);
+
+  assert.match(state.postsRetryMessage, /Не удалось загрузить вакансии из Telegram/);
+  assert.match(elements["tg-posts-list"].innerHTML, /Не удалось загрузить вакансии из Telegram/);
+  assert.equal(typeof state.postsRetry, "function");
+
+  state.postsError = false;
+  state.posts = [{ id: "post-recovered", channel: "jobs", title: "Recovered", contacts: [] }];
+  await state.postsRetry();
+  assert.match(elements["tg-posts-list"].innerHTML, /Recovered/);
+});
+
+test("background posts refresh catches failures while replies exposes a retry state", async () => {
+  const { elements, state, run } = setup();
+  state.postsError = true;
+
+  await run("refreshTelegramPostsPanel()");
+  assert.match(elements["tg-posts-list"].innerHTML, /Не удалось загрузить вакансии из Telegram/);
+
+  await run("render.replies()");
+  assert.equal(elements["replies-load-error"].hidden, false);
+  assert.match(elements["replies-load-error"].innerHTML, /вакансии из Telegram/);
+});
+
+test("post action recovery does not reject when the refresh retry also fails", async () => {
+  const { state, run } = setup();
+  state.posts = [{
+    id: "post-refresh-fail",
+    channel: "jobs",
+    title: "Developer",
+    contacts: [{ kind: "telegram", value: "hr" }],
+  }];
+
+  await run("renderTelegramPosts(); activeTgPostId = 'post-refresh-fail'; refreshTelegramPost = async () => { throw new Error('Posts unavailable'); };");
+  await run("tgPostAction('draft', testButton)");
+
+  assert.match(state.toast, /Posts unavailable/);
 });
 
 test("polling retains the chosen recipient when requesting a draft", async () => {
@@ -168,7 +229,7 @@ test("polling retains the chosen recipient when requesting a draft", async () =>
       ? { dataset: { postContact: "second_hr" } } : null,
   } });
   await run("render.replies()");
-  await run("tgPostAction('draft', {})");
+  await run("tgPostAction('draft', testButton)");
   assert.equal(state.draftedContact, "second_hr");
   elements["tg-post-panel"].listeners.click({ target: {
     closest: (selector) => selector === "[data-post-contact]"
@@ -298,7 +359,7 @@ test("AI rewrite sends rewrite flag for the selected recipient", async () => {
     contacts: [{ kind: "telegram", value: "hr" }],
     draft: { code: "draft-6", contact: "hr", text: "Old text" } }];
   await run("renderTelegramPosts()");
-  await run("activeTgPostId = 'post-6'; tgPostAction('rewrite', { disabled: false, textContent: '' })");
+  await run("activeTgPostId = 'post-6'; tgPostAction('rewrite', testButton)");
   assert.equal(state.draftRequest.contact, "hr");
   assert.equal(state.draftRequest.rewrite, true);
 });

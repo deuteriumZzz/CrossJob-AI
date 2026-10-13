@@ -3916,7 +3916,7 @@ function renderMailGuard(p) {
     <div class="kv-list flat">
       <div class="kv"><span>Возвратов за сутки</span><span class="mono ${p.bounce_stopped ? "err-text" : ""}">${p.recent_bounces} · стоп после ${p.bounce_stop}</span></div>
       ${p.warmup ? `<div class="kv"><span>Разогрев ящика</span><span>день ${p.warmup_day}${p.limit < p.daily_limit ? `, до ${p.daily_limit} — постепенно` : ""}</span></div>` : ""}
-      <div class="kv"><span>Когда отправляю</span><span>${p.weekdays_only ? "по будням" : "каждый день"}, ${p.send_from}:00–${p.send_to}:00</span></div>
+      <div class="kv"><span>Когда отправляю</span><span>${p.send_hours_enabled !== false ? `${p.weekdays_only ? "по будням" : "каждый день"}, ${p.send_from}:00–${p.send_to}:00` : p.weekdays_only ? "по будням, в любое время" : "круглосуточно"}</span></div>
       <div class="kv"><span>Сейчас</span><span>${p.can_send ? "можно отправлять" : escapeHtml(p.reason || "пауза")}</span></div>
     </div>`;
   bindGotoSettings(el);
@@ -4910,7 +4910,7 @@ function renderRepliesRows({ animateContent = false } = {}) {
       repliesKind = b.dataset.kind;
       renderRepliesRows({ animateContent: event.detail > 0 });
       lastTgPostsSnapshot = "";
-      renderTelegramPosts();
+      refreshTelegramPostsPanel();
     })
   );
 
@@ -5078,6 +5078,8 @@ async function openTelegramConversation(contact, fromInbox = false, keepTab = fa
   if (contactChanged) {
     document.getElementById("tg-chat-suggestions").innerHTML = "";
     document.getElementById("tg-chat-input").value = "";
+    const retry = document.getElementById("tg-chat-retry");
+    if (retry) retry.hidden = true;
     const chatStatus = document.getElementById("tg-chat-status");
     chatStatus.textContent = "";
     chatStatus.classList.remove("is-error", "is-success", "is-sending");
@@ -7153,7 +7155,9 @@ async function sendAllHhRemindersAsIs(items, statusEl, refresh) {
 function mailPlanText(p) {
   if (!p) return "";
   const warm = p.warmup && p.limit < p.daily_limit ? ` (разогрев, день ${p.warmup_day} — до ${p.daily_limit} дойдёт постепенно)` : "";
-  const when = `${p.weekdays_only ? "будни" : "каждый день"} ${p.send_from}:00–${p.send_to}:00`;
+  const when = p.send_hours_enabled !== false
+    ? `${p.weekdays_only ? "будни" : "каждый день"} ${p.send_from}:00–${p.send_to}:00`
+    : p.weekdays_only ? "будни, в любое время" : "круглосуточно";
   return `Сегодня отправлено ${p.sent_today} из ${p.limit}${warm} · отправка: ${when}${p.can_send ? "" : ` · пауза: ${p.reason}`}`;
 }
 
@@ -7173,6 +7177,9 @@ async function loadOutreachSettings() {
   document.getElementById("outreach-email-limit").value = s.email_daily_limit;
   document.getElementById("outreach-send-from").value = s.send_from;
   document.getElementById("outreach-send-to").value = s.send_to;
+  document.getElementById("outreach-send-hours-enabled").checked = s.send_hours_enabled !== false;
+  document.getElementById("outreach-send-from").disabled = s.send_hours_enabled === false;
+  document.getElementById("outreach-send-to").disabled = s.send_hours_enabled === false;
   document.getElementById("outreach-weekdays").checked = s.weekdays_only;
   document.getElementById("outreach-warmup").checked = s.warmup;
   document.getElementById("outreach-auto-send").checked = s.auto_send;
@@ -7206,6 +7213,7 @@ async function saveOutreachSettings() {
     email_daily_limit: num("outreach-email-limit"),
     send_from: num("outreach-send-from"),
     send_to: num("outreach-send-to"),
+    send_hours_enabled: document.getElementById("outreach-send-hours-enabled").checked,
     weekdays_only: document.getElementById("outreach-weekdays").checked,
     warmup: document.getElementById("outreach-warmup").checked,
     auto_send: document.getElementById("outreach-auto-send").checked,
@@ -8723,7 +8731,7 @@ function initDashboard() {
       renderRepliesRows();
       renderTelegramConversationRows(telegramConversationsCache);
       lastTgPostsSnapshot = "";
-      renderTelegramPosts();
+      refreshTelegramPostsPanel();
     });
 
   document
@@ -9516,6 +9524,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     copyToClipboard(prompt.value, e.currentTarget, prompt);
   });
   document.getElementById("outreach-save").addEventListener("click", saveOutreachSettings);
+  document.getElementById("outreach-send-hours-enabled").addEventListener("change", (event) => {
+    document.getElementById("outreach-send-from").disabled = !event.target.checked;
+    document.getElementById("outreach-send-to").disabled = !event.target.checked;
+  });
   initTelegramChannelEditor();
   document.getElementById("tgq-save").addEventListener("click", saveTelegramWatch);
   document.getElementById("import-btn").addEventListener("click", () => document.getElementById("import-file").click());
@@ -9956,7 +9968,15 @@ async function renderTelegramPosts() {
     }
     data = { ...data, posts };
   } catch (e) {
-    return;
+    const postsList = document.getElementById("tg-posts-list");
+    if (postsList && typeof renderRetryState === "function") {
+      renderRetryState(
+        postsList,
+        `Не удалось загрузить вакансии из Telegram: ${e.message}`,
+        () => renderTelegramPosts()
+      );
+    }
+    throw e;
   }
   const previousPostIds = new Set(tgPostsData.posts.map((post) => post.id));
   const hadPostSnapshot = Boolean(lastTgPostsSnapshot);
@@ -10021,6 +10041,10 @@ async function renderTelegramPosts() {
     document.getElementById("tg-chat-empty").style.display = "";
     document.getElementById("talk-context-body").innerHTML = "";
   }
+}
+
+function refreshTelegramPostsPanel() {
+  return renderTelegramPosts().catch(() => {});
 }
 
 function closeTelegramPost() {
@@ -10326,7 +10350,7 @@ async function tgPostAction(action, btn) {
   } catch (err) {
     if (action === "sync-hirify" && /^409:.*Войдите в Hirify/s.test(err.message)) hirifyLoginRequired.add(post.id);
     showToast(err.message.replace(/^\d+: /, ""), "error");
-    if (document.body.contains(btn)) await refreshTelegramPost(post.id);
+    if (document.body.contains(btn)) await refreshTelegramPost(post.id).catch(() => {});
   } finally {
     if (document.body.contains(btn)) {
       btn.disabled = wasDisabled;
@@ -10512,7 +10536,7 @@ function setTalkListTab(tab, reload = true) {
   document.getElementById("talk-chats-block").hidden = tab !== "chats";
   document.getElementById("replies-kind").hidden = tab !== "chats" || (!lastRepliesEntries.length && !telegramConversationsCache.length);
   document.getElementById("tg-posts-block").hidden = tab !== "posts";
-  if (reload && tab === "posts") renderTelegramPosts();
+  if (reload && tab === "posts") refreshTelegramPostsPanel();
 }
 
 const talkMotionVisibilityAnimations = new WeakMap();
@@ -10667,6 +10691,7 @@ async function handleTalkMenuAction(action, animate = false) {
 }
 
 function initTalkExtras() {
+  syncTalkMobilePaneAccessibility();
   if (typeof window !== "undefined") {
     window.matchMedia?.("(max-width: 760px)")?.addEventListener?.("change", () => {
       syncTalkMobilePaneAccessibility();
@@ -10757,7 +10782,7 @@ function initTalkExtras() {
   document.getElementById("tg-posts-more")?.addEventListener("click", () => {
     tgPostsVisibleLimit += 200;
     lastTgPostsSnapshot = "";
-    renderTelegramPosts();
+    refreshTelegramPostsPanel();
   });
   for (const id of ["tg-posts-list", "tg-chat-posts-list"]) {
     document.getElementById(id)?.addEventListener("click", (e) => {

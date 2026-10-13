@@ -243,3 +243,26 @@ test("mobile pane hides the inactive conversation from keyboard and assistive te
   assert.equal(thread.inert, false);
   assert.equal(thread.attributes["aria-hidden"], "false");
 });
+
+test("mobile pane accessibility is synchronized on initial messenger setup", () => {
+  const initStart = source.indexOf("function initTalkExtras()");
+  const initEnd = source.indexOf('document.getElementById("talk-tools-toggle")', initStart);
+  const init = source.slice(initStart, initEnd);
+  assert.ok(initStart >= 0 && initEnd > initStart);
+  const initialSync = init.indexOf("syncTalkMobilePaneAccessibility()");
+  const resizeListener = init.indexOf("window.matchMedia");
+  assert.ok(initialSync >= 0 && resizeListener >= 0);
+  assert.ok(initialSync < resizeListener, "initial pane sync must run before installing the resize listener");
+});
+
+test("changing Telegram conversations hides a stale retry action", () => {
+  const start = source.indexOf("async function openTelegramConversation(");
+  const end = source.indexOf("\n}", start) + 2;
+  const conversation = source.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  const changedStart = conversation.indexOf("if (contactChanged) {");
+  const changedEnd = conversation.indexOf("\n  }", changedStart) + 4;
+  const changedState = conversation.slice(changedStart, changedEnd);
+  assert.ok(changedStart >= 0 && changedEnd > changedStart);
+  assert.match(changedState, /tg-chat-retry[\s\S]*?retry\.hidden = true/);
+});

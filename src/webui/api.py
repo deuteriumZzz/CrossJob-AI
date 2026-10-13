@@ -1146,6 +1146,7 @@ class OutreachSettings(BaseModel):
     bounce_stop: Optional[int] = None
     send_from: Optional[int] = None
     send_to: Optional[int] = None
+    send_hours_enabled: Optional[bool] = None
     weekdays_only: Optional[bool] = None
     follow_up_days: Optional[int] = None
     digest_enabled: Optional[bool] = None
@@ -1278,6 +1279,10 @@ def post_outreach_settings(
         )
     if body.weekdays_only is not None:
         set_source_field(prefs, "direct", "weekdays_only", body.weekdays_only)
+    if body.send_hours_enabled is not None:
+        set_source_field(
+            prefs, "direct", "send_hours_enabled", body.send_hours_enabled
+        )
     if (
         body.send_from is not None
         and body.send_to is not None

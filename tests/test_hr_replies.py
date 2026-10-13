@@ -253,6 +253,7 @@ def test_outreach_settings_roundtrip(client):  # noqa: F811
             "hunter_api_key": "hunter-key-123456",
             "follow_up_days": 5,
             "digest_hour": 8,
+            "send_hours_enabled": False,
             "skip_us_only": False,
             "skip_europe_only": True,
         },
@@ -260,6 +261,7 @@ def test_outreach_settings_roundtrip(client):  # noqa: F811
     assert s["email_connected"] is True
     assert s["follow_up_days"] == 5
     assert s["digest_hour"] == 8
+    assert s["send_hours_enabled"] is False
     assert (s["skip_us_only"], s["skip_europe_only"]) == (False, True)
     assert s["hunter_preview"] == "hunt…3456"
 
@@ -267,6 +269,7 @@ def test_outreach_settings_roundtrip(client):  # noqa: F811
     secrets = main.ConfigValidator.load_yaml(ctx.secrets_file)
     assert secrets["email"]["app_password"] == "abcdefghijklmnop"
     assert ctx.config["direct"]["follow_up_days"] == 5
+    assert ctx.config["direct"]["send_hours_enabled"] is False
     assert ctx.config["excluded_remote_regions"] == ["europe_only"]
     assert "abcdefgh" not in str(client.get("/api/settings/outreach").json())
 
