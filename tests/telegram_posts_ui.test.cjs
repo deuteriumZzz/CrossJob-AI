@@ -16,7 +16,7 @@ const extrasCode = source.slice(source.indexOf("function initTalkExtras()"));
 function setup() {
   const elements = Object.fromEntries(
     ["tg-posts-block", "tg-posts-count", "tg-posts-list", "tg-chat-posts-list", "tg-posts-more", "tg-chat-later", "tg-chat-empty", "replies-rows", "tg-post-panel", "talk-context-body"].map(
-      (id) => [id, { hidden: true, innerHTML: "", textContent: "", style: {}, listeners: {}, replaceChildren() { this.innerHTML = ""; }, addEventListener(event, callback) { this.listeners[event] = callback; } }]
+      (id) => [id, { hidden: true, innerHTML: "", textContent: "", style: {}, listeners: {}, setAttribute() {}, removeAttribute() {}, replaceChildren() { this.innerHTML = ""; }, addEventListener(event, callback) { this.listeners[event] = callback; } }]
     )
   );
   const state = { posts: [], inboxError: false };
@@ -34,6 +34,7 @@ function setup() {
     fireConfetti() {},
     showToast() {},
     openTelegramPost() { state.openCount = (state.openCount || 0) + 1; },
+    animatePostRecipientSelection() {},
     async refreshTelegramPost() {},
     tgPostResumeChoice: () => "",
     escapeHtml: (value) => String(value),

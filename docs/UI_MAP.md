@@ -294,8 +294,8 @@
 |---|---|---|---|
 | `settings.fit-preset` | `#limit-fit-preset` | Строгость подбора | = |
 | `settings.letter-style` | `#limit-cover-letter-style` | Стиль сопроводительного письма | = |
-| `settings.min-score` | `#limit-min-score` | Порог отсева (Ещё) | = |
-| `settings.fit-score` | `#limit-suitability-score` | Уверенное совпадение от (Ещё) | = |
+| `settings.min-score` | `#limit-min-score`, `#limit-min-score-slider` | Порог отсева + шкала оценки | = |
+| `settings.fit-score` | `#limit-suitability-score`, `#limit-suitability-score-slider` | Уверенное совпадение + шкала оценки | = |
 | `settings.limit.total` | `#limit-total` | Всего откликов в день | = |
 | `settings.limit.daily` | `#limit-daily`, `#limit-linkedin` | Дневной лимит по умолчанию: HH и остальные / LinkedIn | = |
 | `settings.limit.per-run` | `#limit-per-run` | Максимум за один заход (Ещё) | = |

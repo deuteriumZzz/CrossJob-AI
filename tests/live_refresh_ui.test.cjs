@@ -120,7 +120,7 @@ test("replies refresh waits for conversation and post requests", async () => {
   let finishPosts;
   const settled = { done: false };
   const context = vm.createContext({
-    document: { getElementById: () => ({ innerHTML: "" }) },
+    document: { getElementById: () => ({ innerHTML: "", removeAttribute() {} }) },
     repliesLoaded: true,
     lastRepliesCount: 0,
     lastRepliesSnapshot: "[]",
@@ -145,7 +145,7 @@ test("a Telegram refresh error does not hide new inbox replies", async () => {
   const end = source.indexOf("  async analytics() {", start);
   const seen = { rows: 0 };
   const context = vm.createContext({
-    document: { getElementById: () => ({ innerHTML: "" }) },
+    document: { getElementById: () => ({ innerHTML: "", removeAttribute() {} }) },
     repliesLoaded: true,
     lastRepliesCount: 1,
     lastRepliesSnapshot: "[]",

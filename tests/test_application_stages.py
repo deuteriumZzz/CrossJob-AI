@@ -85,7 +85,12 @@ def test_inbox_merges_hh_replies_and_telegram_dialogs(client):  # noqa: F811
     assert [i["channel"] for i in items] == ["telegram_dm", "headhunter"]
     assert items[0]["contact"] == "hr_anna"
     assert items[0]["title"] == "Dev tg"
+    assert items[0]["applied_at"]
+    assert items[0]["sent_at"]
+    assert items[0]["replied_at"] == "2030-01-01T00:00:00+00:00"
     assert items[1]["stage"] == "interview"
+    assert items[1]["applied_at"]
+    assert items[1]["state_at"]
 
     response = client.post(
         "/api/applications/stage",

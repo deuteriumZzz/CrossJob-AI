@@ -87,3 +87,159 @@ test("conversation list includes unsent vacancy threads without losing the separ
   assert.match(source, /tg-chat-posts-list/);
   assert.match(source, /#tg-posts-list \.talk-row, #tg-chat-posts-list \.talk-row/);
 });
+
+test("mobile messenger provides a back-to-list action and keeps both panes in one viewport", () => {
+  assert.match(html, /id="talk-thread-back"[^>]*aria-label="Вернуться к списку разговоров"/);
+  assert.match(css, /\.shell\.is-messenger \.talk-layout\.is-mobile-thread-open \.talk-list\s*\{[^}]*visibility:\s*hidden/s);
+  assert.match(css, /\.shell\.is-messenger \.talk-layout\.is-mobile-thread-open \.talk-thread\s*\{[^}]*visibility:\s*visible/s);
+  assert.match(css, /prefers-reduced-motion:\s*reduce/);
+  assert.match(source, /function setTalkMobilePane\(pane, animate = false\)/);
+  assert.match(source, /setTalkMobilePane\("thread", animatePane\)/);
+  assert.match(source, /setTalkMobilePane\("list", event\.detail > 0\)/);
+  assert.match(source, /openTelegramConversation\(activeTelegramContact, false, true, true, false, true\)/);
+  assert.match(source, /if \(!preservePane\) setTalkMobilePane\("thread", animatePane\)/);
+  assert.match(source, /function setTalkMobilePane\(pane, animate = false\)[\s\S]*?\.talk-list[\s\S]*?\.talk-thread[\s\S]*?aria-hidden/);
+});
+
+test("Telegram refresh preserves a reader's scroll position and offers a new-message jump", () => {
+  assert.match(html, /id="tg-chat-new-messages"[^>]*hidden/);
+  assert.match(source, /preserveScroll = false/);
+  assert.match(source, /openTelegramConversation\(activeTelegramContact, false, true, true, false, true\)/);
+  assert.match(source, /shouldStickToBottom\(/);
+  assert.match(source, /Показать новые сообщения/);
+  assert.match(source, /behavior: REDUCE_MOTION \? "auto" : "smooth"/);
+  assert.match(source, /syncTelegramMessageBubbles\(messages, visibleMessages, newlyReceivedKeys\)/);
+});
+
+test("old Telegram history does not inflate the new-message counter", () => {
+  const start = source.indexOf("function telegramMessageKey(message)");
+  const end = source.indexOf("function providerLabel(", start);
+  const context = vm.createContext({});
+  vm.runInContext(source.slice(start, end), context);
+  const count = vm.runInContext(`countNewerTelegramMessages(
+    [{ id: 8, at: "2026-10-12T10:00:00Z" }, { id: 9, at: "2026-10-12T10:01:00Z" }],
+    [{ id: 2, at: "2026-10-12T09:00:00Z" }, { id: 8, at: "2026-10-12T10:00:00Z" }, { id: 9, at: "2026-10-12T10:01:00Z" }, { id: 10, at: "2026-10-12T10:02:00Z" }]
+  )`, context);
+  assert.equal(count, 1);
+});
+
+test("context panel orders recorded application, message, and reply events", () => {
+  const start = source.indexOf("function talkTimelineHtml(entry)");
+  const end = source.indexOf("function talkContextHtml(", start);
+  const context = vm.createContext({
+    escapeHtml: (value) => String(value),
+    fmtTime: (value) => value,
+    INBOX_KIND: { replied: { title: "Ответили" } },
+  });
+  vm.runInContext(source.slice(start, end), context);
+  const html = vm.runInContext(`talkTimelineHtml({
+    channel: "email",
+    applied_at: "2026-01-01T00:00:00Z",
+    sent_at: "2026-01-02T00:00:00Z",
+    replied_at: "2026-01-03T00:00:00Z"
+  })`, context);
+  assert.ok(html.indexOf("Отклик отправлен") < html.indexOf("Письмо отправлено"));
+  assert.ok(html.indexOf("Письмо отправлено") < html.indexOf("Ответ работодателя"));
+});
+
+test("refresh keeps the selected inbox row tied to its record when new rows arrive", () => {
+  assert.match(source, /function inboxEntryKey\(entry\)/);
+  assert.match(source, /inboxEntryKey\(e\) === selectedInboxKey/);
+});
+
+test("mobile pane and near-bottom helpers behave without changing the current pane on desktop", () => {
+  const start = source.indexOf("function setTalkMobilePane(");
+  const end = source.indexOf("function setTalkListTab(", start);
+  const classes = new Set();
+  const layout = {
+    classList: {
+      toggle(name, value) { value ? classes.add(name) : classes.delete(name); },
+      contains(name) { return classes.has(name); },
+    },
+  };
+  const context = vm.createContext({
+    document: { querySelector: () => layout },
+    window: { matchMedia: () => ({ matches: false }) },
+  });
+  vm.runInContext(source.slice(start, end), context);
+  vm.runInContext('setTalkMobilePane("thread")', context);
+  assert.equal(classes.has("is-mobile-thread-open"), true);
+  vm.runInContext('setTalkMobilePane("list")', context);
+  assert.equal(classes.has("is-mobile-thread-open"), false);
+  assert.equal(vm.runInContext("shouldStickToBottom({ scrollTop: 400, clientHeight: 200, scrollHeight: 590 })", context), true);
+  assert.equal(vm.runInContext("shouldStickToBottom({ scrollTop: 100, clientHeight: 200, scrollHeight: 590 })", context), false);
+});
+
+test("conversation sending has explicit busy and recipient feedback", () => {
+  assert.match(html, /id="tg-chat-status"[^>]*aria-live="polite"/);
+  assert.match(html, /id="tg-chat-retry"[^>]*hidden/);
+  assert.match(source, /sendingTelegramMessage/);
+  assert.match(source, /aria-busy/);
+  assert.match(source, /retry\.hidden = false/);
+  assert.match(source, /@\$\{contact\}/);
+});
+
+test("background Telegram polling does not repeatedly steal keyboard focus", () => {
+  const start = source.indexOf("function setTalkMobilePane(");
+  const end = source.indexOf("function setTalkListTab(", start);
+  const classes = new Set();
+  let focusCount = 0;
+  const layout = {
+    classList: {
+      toggle(name, value) { value ? classes.add(name) : classes.delete(name); },
+      contains(name) { return classes.has(name); },
+    },
+    querySelector: () => ({ focus() { focusCount++; } }),
+  };
+  const context = vm.createContext({
+    document: { querySelector: () => layout },
+    window: { matchMedia: () => ({ matches: true }) },
+  });
+  vm.runInContext(source.slice(start, end), context);
+  vm.runInContext('setTalkMobilePane("thread")', context);
+  vm.runInContext('setTalkMobilePane("thread")', context);
+  assert.equal(focusCount, 1);
+});
+
+test("mobile pane hides the inactive conversation from keyboard and assistive technology", () => {
+  const start = source.indexOf("function setTalkMobilePane(");
+  const end = source.indexOf("function shouldStickToBottom(", start);
+  const classes = new Set();
+  const makePane = () => ({
+    inert: false,
+    attributes: {},
+    setAttribute(name, value) { this.attributes[name] = value; },
+    focus() {},
+  });
+  const list = makePane();
+  const thread = makePane();
+  let mobile = true;
+  const layout = {
+    classList: {
+      toggle(name, value) { value ? classes.add(name) : classes.delete(name); },
+      contains(name) { return classes.has(name); },
+    },
+    querySelector(selector) { return selector === ".talk-list" ? list : thread; },
+  };
+  const context = vm.createContext({
+    document: { querySelector: () => layout },
+    window: { matchMedia: () => ({ matches: mobile }) },
+  });
+  vm.runInContext(source.slice(start, end), context);
+  vm.runInContext('setTalkMobilePane("thread")', context);
+  assert.equal(list.inert, true);
+  assert.equal(list.attributes["aria-hidden"], "true");
+  assert.equal(thread.inert, false);
+  assert.equal(thread.attributes["aria-hidden"], "false");
+  vm.runInContext('setTalkMobilePane("list")', context);
+  assert.equal(list.inert, false);
+  assert.equal(list.attributes["aria-hidden"], "false");
+  assert.equal(thread.inert, true);
+  assert.equal(thread.attributes["aria-hidden"], "true");
+  mobile = false;
+  vm.runInContext("syncTalkMobilePaneAccessibility()", context);
+  assert.equal(list.inert, false);
+  assert.equal(list.attributes["aria-hidden"], "false");
+  assert.equal(thread.inert, false);
+  assert.equal(thread.attributes["aria-hidden"], "false");
+});

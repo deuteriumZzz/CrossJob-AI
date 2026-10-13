@@ -91,11 +91,49 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+function highlightText(value, query) {
+  const text = String(value ?? "");
+  const needle = String(query ?? "").trim();
+  if (!needle) return escapeHtml(text);
+  const source = text.toLocaleLowerCase();
+  const search = needle.toLocaleLowerCase();
+  let cursor = 0;
+  let result = "";
+  let match = source.indexOf(search, cursor);
+  while (match !== -1) {
+    result += `${escapeHtml(text.slice(cursor, match))}<mark class="search-highlight">${escapeHtml(text.slice(match, match + needle.length))}</mark>`;
+    cursor = match + needle.length;
+    match = source.indexOf(search, cursor);
+  }
+  return result + escapeHtml(text.slice(cursor));
+}
+
 const htmlSnapshots = new WeakMap();
+const contentFadeCleanups = new WeakMap();
 function setHtmlIfChanged(element, html) {
   if (htmlSnapshots.get(element) === html) return false;
+  const replacesSkeleton = Boolean(element.querySelector(".skeleton"));
   element.innerHTML = html;
   htmlSnapshots.set(element, html);
+  if (replacesSkeleton && !REDUCE_MOTION) {
+    contentFadeCleanups.get(element)?.();
+    element.classList.remove("content-fade-in");
+    void element.offsetWidth;
+    element.classList.add("content-fade-in");
+    let onAnimationEnd;
+    const clearFade = () => {
+      element.removeEventListener("animationend", onAnimationEnd);
+      element.removeEventListener("animationcancel", onAnimationEnd);
+      if (contentFadeCleanups.get(element) === clearFade) contentFadeCleanups.delete(element);
+      element.classList.remove("content-fade-in");
+    };
+    onAnimationEnd = (event) => {
+      if (event.target === element) clearFade();
+    };
+    contentFadeCleanups.set(element, clearFade);
+    element.addEventListener("animationend", onAnimationEnd);
+    element.addEventListener("animationcancel", onAnimationEnd);
+  }
   return true;
 }
 
@@ -123,23 +161,39 @@ function tagItemsOf(textarea) {
     .filter(Boolean);
 }
 
-function renderTagChips(textarea) {
+function renderTagChips(textarea, motion = null) {
   const chips = textarea._tagChipsEl;
   if (!chips) return;
   const items = tagItemsOf(textarea);
   chips.innerHTML = items
     .map(
-      (item, i) =>
-        `<span class="tag-chip">${escapeHtml(item)}<button type="button" class="tag-chip-remove" data-i="${i}" aria-label="Удалить">×</button></span>`
+      (item, i) => {
+        const enterClass = motion?.phase === "enter" && motion.item === item ? " tag-chip-enter" : "";
+        return `<span class="tag-chip${enterClass}">${escapeHtml(item)}<button type="button" class="tag-chip-remove" data-i="${i}" aria-label="Удалить">×</button></span>`;
+      }
     )
     .join("");
   chips.querySelectorAll(".tag-chip-remove").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const current = tagItemsOf(textarea);
-      current.splice(parseInt(btn.dataset.i, 10), 1);
-      textarea.value = current.join("\n");
-      renderTagChips(textarea);
-      tagChanged(textarea);
+      const index = Number.parseInt(btn.dataset.i, 10);
+      const valueAtClick = textarea.value;
+      const item = tagItemsOf(textarea)[index];
+      if (!item) return;
+      const remove = () => {
+        if (textarea.value !== valueAtClick) return;
+        const current = tagItemsOf(textarea);
+        current.splice(index, 1);
+        textarea.value = current.join("\n");
+        renderTagChips(textarea);
+        tagChanged(textarea);
+      };
+      const chip = btn.closest(".tag-chip");
+      if (REDUCE_MOTION || typeof chip?.animate !== "function") return remove();
+      btn.disabled = true;
+      chip.animate(
+        [{ opacity: 1, transform: "scale(1)" }, { opacity: 0, transform: "scale(.94)" }],
+        { duration: 130, easing: "cubic-bezier(0.23, 1, 0.32, 1)" }
+      ).finished.then(remove, remove);
     });
   });
 }
@@ -182,7 +236,7 @@ function initTagInput(textarea) {
     if (!items.includes(value)) {
       items.push(value);
       textarea.value = items.join("\n");
-      renderTagChips(textarea);
+      renderTagChips(textarea, { phase: "enter", item: value });
       tagChanged(textarea);
     }
     input.value = "";
@@ -319,7 +373,11 @@ if (typeof motionQuery.addEventListener === "function") {
   motionQuery.addListener(syncReducedMotionPreference);
 }
 
+const countAnimationFrames = new WeakMap();
 function countUp(el, target, duration = 700, start = 0) {
+  const previousFrame = countAnimationFrames.get(el);
+  if (previousFrame) cancelAnimationFrame(previousFrame);
+  countAnimationFrames.delete(el);
   if (REDUCE_MOTION) {
     el.textContent = target;
     return;
@@ -327,28 +385,38 @@ function countUp(el, target, duration = 700, start = 0) {
   const startTime = performance.now();
   const ease = (t) => 1 - Math.pow(1 - t, 3);
   function tick(now) {
+    if (REDUCE_MOTION) {
+      el.textContent = target;
+      countAnimationFrames.delete(el);
+      return;
+    }
     const progress = Math.min(1, (now - startTime) / duration);
     const value = Math.round(start + (target - start) * ease(progress));
     el.textContent = value;
-    if (progress < 1) requestAnimationFrame(tick);
+    if (progress < 1) countAnimationFrames.set(el, requestAnimationFrame(tick));
+    else countAnimationFrames.delete(el);
   }
-  requestAnimationFrame(tick);
+  countAnimationFrames.set(el, requestAnimationFrame(tick));
+}
+
+const shownCounts = {};
+function animateCountValue(el, id, target) {
+  const value = Number.parseInt(target, 10) || 0;
+  const before = shownCounts[id];
+  shownCounts[id] = value;
+  if (before !== undefined && before !== value) {
+    const visible = Number.parseInt(el.textContent, 10);
+    countUp(el, value, 520, Number.isFinite(visible) ? visible : before);
+    el.classList.add("count-changed");
+    setTimeout(() => el.classList.remove("count-changed"), 1100);
+  } else if (before === undefined) el.textContent = String(value);
 }
 
 // Цифры на карточках плавно досчитываются с прошлого значения до нового —
 // видно, что изменилось. Первый показ — без анимации.
-const shownCounts = {};
 function animateCounts(root) {
   root.querySelectorAll("[data-count]").forEach((el) => {
-    const id = el.dataset.count;
-    const value = parseInt(el.textContent, 10) || 0;
-    const before = shownCounts[id];
-    shownCounts[id] = value;
-    if (before !== undefined && before !== value) {
-      countUp(el, value, 700, before);
-      el.classList.add("count-changed");
-      setTimeout(() => el.classList.remove("count-changed"), 1600);
-    }
+    animateCountValue(el, el.dataset.count, el.textContent);
   });
 }
 
@@ -474,7 +542,100 @@ const VIEW_GROUP = Object.fromEntries(
     views.map(([view]) => [view, group])
   )
 );
+const NAV_GROUP_LABELS = {
+  overview: "Главная",
+  history: "Вакансии",
+  replies: "Общение",
+  contacts: "Компании",
+  analytics: "Аналитика",
+  settings: "Настройки",
+};
+const VALID_VIEWS = new Set(Object.keys(VIEW_GROUP));
+const FAVORITE_VIEWS_KEY = "cj-favorite-views";
+let favoriteViews = readFavoriteViews();
 let currentView = "overview";
+
+function readFavoriteViews() {
+  try {
+    const stored = JSON.parse(localStorage.getItem("cj-favorite-views") || "[]");
+    return Array.isArray(stored) ? [...new Set(stored.filter((view) => VALID_VIEWS.has(view)))] : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function toggleFavoriteView(view) {
+  if (!VALID_VIEWS.has(view)) return;
+  favoriteViews = favoriteViews.includes(view)
+    ? favoriteViews.filter((item) => item !== view)
+    : [...favoriteViews, view];
+  try {
+    localStorage.setItem(FAVORITE_VIEWS_KEY, JSON.stringify(favoriteViews));
+  } catch (e) {}
+  renderFavoriteViews();
+  renderPageFavorites();
+}
+
+function renderFavoriteViews() {
+  const container = document.getElementById("favorite-nav");
+  if (!container) return;
+  container.innerHTML = favoriteViews.length
+    ? `<span class="favorite-nav-label">Избранное</span>${favoriteViews.map((view) => {
+        const label = NAV_GROUPS[VIEW_GROUP[view]].find(([id]) => id === view)?.[1] || NAV_GROUP_LABELS[VIEW_GROUP[view]];
+        return `<button type="button" class="favorite-nav-item${view === currentView ? " active" : ""}" data-favorite-view="${view}" aria-label="Открыть раздел: ${escapeHtml(label)}" aria-current="${view === currentView ? "page" : "false"}" title="${escapeHtml(label)}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m8 1.8 1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6L8 1.8Z"/></svg><span>${escapeHtml(label)}</span></button>`;
+      }).join("")}`
+    : "";
+  container.querySelectorAll("[data-favorite-view]").forEach((button) => {
+    button.addEventListener("click", () => switchTab(button.dataset.favoriteView));
+  });
+}
+
+function renderPageFavorites() {
+  document.querySelectorAll("main .view").forEach((view) => {
+    const heading = view.querySelector(".page-title h2");
+    if (!heading) return;
+    let button = heading.parentElement.querySelector(":scope > [data-favorite-toggle]");
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.className = "page-favorite";
+      button.setAttribute("data-favorite-toggle", "");
+      button.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m8 1.8 1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6L8 1.8Z"/></svg>';
+      heading.insertAdjacentElement("afterend", button);
+      button.addEventListener("click", () => toggleFavoriteView(view.id.replace(/^view-/, "")));
+    }
+    const viewId = view.id.replace(/^view-/, "");
+    const active = favoriteViews.includes(viewId);
+    const label = heading.textContent.trim();
+    button.classList.toggle("is-favorite", active);
+    button.setAttribute("aria-pressed", String(active));
+    button.setAttribute("aria-label", active ? `Убрать «${label}» из избранного` : `Добавить «${label}» в избранное`);
+    button.title = active ? "Убрать из избранного" : "Добавить в избранное";
+  });
+}
+
+function renderPageBreadcrumb(view) {
+  const group = VIEW_GROUP[view];
+  const views = NAV_GROUPS[group] || [];
+  const pageTitle = document.querySelector(`#view-${view} .page-title`);
+  if (!pageTitle) return;
+  let breadcrumb = pageTitle.querySelector(":scope > .page-breadcrumbs");
+  if (views.length < 2 || views[0][0] === view) {
+    breadcrumb?.remove();
+    return;
+  }
+  if (!breadcrumb) {
+    breadcrumb = document.createElement("nav");
+    breadcrumb.className = "page-breadcrumbs";
+    breadcrumb.setAttribute("aria-label", "Путь раздела");
+    pageTitle.prepend(breadcrumb);
+  }
+  const groupLabel = NAV_GROUP_LABELS[group];
+  breadcrumb.innerHTML = `<details class="breadcrumb-parent"><summary>${escapeHtml(groupLabel)}</summary><div class="breadcrumb-menu">${views.map(([id, label]) => `<button type="button" data-breadcrumb-view="${id}"${id === view ? ' aria-current="page"' : ""}>${escapeHtml(label)}</button>`).join("")}</div></details><span class="breadcrumb-separator" aria-hidden="true">›</span><span aria-current="page">${escapeHtml(views.find(([id]) => id === view)?.[1] || "")}</span>`;
+  breadcrumb.querySelectorAll("[data-breadcrumb-view]").forEach((button) => {
+    button.addEventListener("click", () => switchTab(button.dataset.breadcrumbView));
+  });
+}
 
 function renderSubnav(group, view) {
   const subnav = document.getElementById("subnav");
@@ -495,6 +656,42 @@ function renderSubnav(group, view) {
   });
 }
 
+function showViewRenderFailure(name, error) {
+  const view = document.getElementById(`view-${name}`);
+  if (!view) return;
+  let host = view.querySelector(":scope > .view-load-error");
+  if (!host) {
+    host = document.createElement("div");
+    host.className = "view-load-error";
+    view.prepend(host);
+  }
+  renderRetryState(host, `Не удалось загрузить раздел: ${error.message}`, async () => {
+    try {
+      await render[name]?.();
+      host.remove();
+    } catch (retryError) {
+      showViewRenderFailure(name, retryError);
+    }
+  });
+}
+
+function clearViewRenderFailure(name) {
+  document.getElementById(`view-${name}`)
+    ?.querySelector(":scope > .view-load-error")
+    ?.remove();
+}
+
+let navigationInputModality = "pointer";
+function setNavigationInputModality(event) {
+  navigationInputModality = event.type === "pointerdown" ? "pointer" : "keyboard";
+}
+document.addEventListener("pointerdown", setNavigationInputModality, true);
+document.addEventListener("keydown", setNavigationInputModality, true);
+
+function shouldAnimateNavigation() {
+  return navigationInputModality === "pointer";
+}
+
 function switchTab(name) {
   if (name === "telegram") {
     name = "replies";
@@ -503,6 +700,9 @@ function switchTab(name) {
   if (!VIEW_GROUP[name]) name = "overview";
   const prevName = currentView;
   currentView = name;
+  renderFavoriteViews();
+  renderPageFavorites();
+  renderPageBreadcrumb(name);
   const group = VIEW_GROUP[name];
   document
     .querySelectorAll("nav.tabs button")
@@ -513,7 +713,7 @@ function switchTab(name) {
     .querySelectorAll("main .view")
     .forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
   document.getElementById("app-shell")?.classList.toggle("is-messenger", name === "replies");
-  if (prevName && prevName !== name) {
+  if (prevName && prevName !== name && shouldAnimateNavigation()) {
     directionalReveal(document.getElementById(`view-${name}`), prevName, name);
   }
   // URL отражает текущую вкладку — иначе обновление страницы (F5) всегда
@@ -521,7 +721,21 @@ function switchTab(name) {
   // или таблицу в Истории. replaceState, а не location.hash — не плодит
   // отдельную запись в истории браузера на каждый клик по вкладке.
   history.replaceState(null, "", `#${name}`);
-  render[name]?.();
+  try {
+    const pendingRender = render[name]?.();
+    if (pendingRender && typeof pendingRender.catch === "function") {
+      pendingRender.then(
+        () => clearViewRenderFailure(name),
+        (error) => {
+          console.error(`Не удалось загрузить раздел ${name}`, error);
+          showViewRenderFailure(name, error);
+        }
+      );
+    } else clearViewRenderFailure(name);
+  } catch (error) {
+    console.error(`Не удалось загрузить раздел ${name}`, error);
+    showViewRenderFailure(name, error);
+  }
   moveTabIndicator(
     document.getElementById("nav-tab-indicator"),
     document.querySelector(`nav.tabs button[data-tab="${group}"]`)
@@ -560,8 +774,23 @@ let llmCatalog = { models: {}, api_key_previews: {}, provider_base_urls: {} };
 // set_fallback_base_urls().
 const PROVIDERS_NEEDING_BASE_URL = new Set(["cloudflare"]);
 let activeTelegramContact = null;
+let sendingTelegramMessage = false;
 let telegramLoadedHistory = { contact: null, messages: [], hasMore: false };
 let telegramConversationsCache = [];
+
+function updateTelegramComposerState() {
+  const input = document.getElementById("tg-chat-input");
+  const button = document.getElementById("tg-chat-send");
+  if (!input || !button) return;
+  input.style.height = "auto";
+  input.style.height = `${Math.min(132, input.scrollHeight)}px`;
+  input.style.overflowY = input.scrollHeight > 132 ? "auto" : "hidden";
+  const disabled = !activeTelegramContact || !input.value.trim() || sendingTelegramMessage;
+  button.disabled = disabled;
+  button.title = disabled && !sendingTelegramMessage
+    ? activeTelegramContact ? "Введите сообщение" : "Сначала выберите диалог"
+    : "Отправить сообщение";
+}
 
 function formatChatTime(iso) {
   try {
@@ -573,6 +802,85 @@ function formatChatTime(iso) {
     });
   } catch {
     return iso;
+  }
+}
+
+function telegramMessageKey(message) {
+  return String(message.id ?? `${message.at || ""}|${message.direction || "in"}|${message.text || ""}`);
+}
+
+function newerTelegramMessageKeys(previous, next) {
+  if (!previous.length) return new Set();
+  const known = new Set(previous.map(telegramMessageKey));
+  const numericIds = previous.map((message) => Number(message.id)).filter(Number.isFinite);
+  const latestId = numericIds.length ? Math.max(...numericIds) : null;
+  const latestAt = Math.max(...previous.map((message) => Date.parse(message.at) || 0));
+  return new Set(next.filter((message) => {
+    if (known.has(telegramMessageKey(message))) return false;
+    const id = Number(message.id);
+    if (latestId !== null && Number.isFinite(id)) return id > latestId;
+    return (Date.parse(message.at) || 0) > latestAt;
+  }).map(telegramMessageKey));
+}
+
+function countNewerTelegramMessages(previous, next) {
+  return newerTelegramMessageKeys(previous, next).size;
+}
+
+function mergeTelegramMessages(primary, secondary) {
+  const merged = new Map(primary.map((message) => [telegramMessageKey(message), message]));
+  secondary.forEach((message) => {
+    if (!merged.has(telegramMessageKey(message))) merged.set(telegramMessageKey(message), message);
+  });
+  return Array.from(merged.values()).sort((a, b) => {
+    const timeDifference = (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0);
+    if (timeDifference) return timeDifference;
+    const aId = Number(a.id);
+    const bId = Number(b.id);
+    return Number.isFinite(aId) && Number.isFinite(bId) ? aId - bId : 0;
+  });
+}
+
+function syncTelegramMessageBubbles(container, messages, animateKeys = new Set()) {
+  const existing = new Map(Array.from(container.children, (node) => [node.dataset.messageKey, node]));
+  const wanted = new Set();
+  let cursor = container.firstElementChild;
+  for (const message of messages) {
+    const key = telegramMessageKey(message);
+    wanted.add(key);
+    let node = existing.get(key);
+    const messageText = String(message.text || "");
+    const messageTime = formatChatTime(message.at);
+    if (node) {
+      node.classList.toggle("out", message.direction === "out");
+      node.classList.toggle("in", message.direction !== "out");
+      if (node.dataset.messageText !== messageText || node.dataset.messageTime !== messageTime) {
+        const time = node.querySelector(".chat-bubble-time") || document.createElement("span");
+        time.className = "chat-bubble-time";
+        time.textContent = messageTime;
+        node.replaceChildren(document.createTextNode(messageText), time);
+        node.dataset.messageText = messageText;
+        node.dataset.messageTime = messageTime;
+      }
+    }
+    if (node && node === cursor) {
+      existing.delete(key);
+      cursor = cursor.nextElementSibling;
+      continue;
+    }
+    if (!node) {
+      const template = document.createElement("template");
+      template.innerHTML = `<div class="chat-bubble ${message.direction === "out" ? "out" : "in"}${animateKeys.has(key) ? " chat-bubble--enter" : ""}" data-message-key="${escapeHtml(key)}">${escapeHtml(messageText)}<span class="chat-bubble-time">${escapeHtml(messageTime)}</span></div>`;
+      node = template.content.firstElementChild;
+      node.dataset.messageText = messageText;
+      node.dataset.messageTime = messageTime;
+    }
+    container.insertBefore(node, cursor);
+    cursor = node.nextElementSibling;
+    existing.delete(key);
+  }
+  for (const node of Array.from(container.children)) {
+    if (!node.dataset.messageKey || !wanted.has(node.dataset.messageKey)) node.remove();
   }
 }
 
@@ -842,7 +1150,36 @@ let lastContacts = [];
 let focusContactKey = null;
 const baseState = { status: "", sort: "last", dir: -1, selected: new Set(), open: new Set(), page: 0, size: 50 };
 let baseFiltered = [];
+let pendingBaseSortPositions = null;
 let baseSeen = new Map(); // ключ → updated_at с прошлого показа — что подсветить // ключи всех компаний под текущим фильтром — для «Выбрать все по фильтру»
+
+function captureBaseRowPositions(animate) {
+  if (!animate || REDUCE_MOTION || !window.matchMedia("(hover: hover) and (pointer: fine)").matches) return null;
+  return new Map(
+    [...document.querySelectorAll("#contacts-list .base-row")]
+      .map((row) => [row.dataset.cardKey, row.getBoundingClientRect().top])
+  );
+}
+
+function animateBaseRowReorder(positions) {
+  if (!positions?.size || REDUCE_MOTION || typeof Element.prototype.animate !== "function") return;
+  requestAnimationFrame(() => {
+    const styles = getComputedStyle(document.documentElement);
+    const duration = Number.parseFloat(styles.getPropertyValue("--motion-move")) || 220;
+    const easing = styles.getPropertyValue("--motion-ease-in-out").trim() || "ease-in-out";
+    document.querySelectorAll("#contacts-list .base-row").forEach((row) => {
+      const previousTop = positions.get(row.dataset.cardKey);
+      if (previousTop == null) return;
+      const delta = previousTop - row.getBoundingClientRect().top;
+      if (Math.abs(delta) < 1) return;
+      const animation = row.animate(
+        [{ transform: `translateY(${delta}px)` }, { transform: "translateY(0)" }],
+        { duration, easing }
+      );
+      animation.onfinish = () => animation.cancel();
+    });
+  });
+}
 
 function contactHref(c) {
   if (c.kind === "telegram") return `https://t.me/${encodeURIComponent(c.value)}`;
@@ -865,12 +1202,67 @@ function statusPill(status) {
   return `<span class="status-pill st-${status}">${CONTACT_STATUS[status] || status}</span>`;
 }
 
+function renderActiveFilters(view) {
+  const isHistory = view === "history";
+  const container = document.getElementById(isHistory ? "history-active-filters" : "contacts-active-filters");
+  if (!container) return;
+  const filters = isHistory
+    ? [
+        { id: "source", label: "Площадка", value: document.getElementById("filter-source").selectedOptions[0]?.textContent, active: !!document.getElementById("filter-source").value },
+        { id: "query", label: "Поиск", value: document.getElementById("filter-query").value.trim(), active: !!document.getElementById("filter-query").value.trim() },
+      ]
+    : [
+        { id: "source", label: "Источник", value: document.getElementById("contacts-filter-source").selectedOptions[0]?.textContent, active: !!document.getElementById("contacts-filter-source").value },
+        { id: "contact", label: "Контакт", value: document.getElementById("contacts-filter-contact").selectedOptions[0]?.textContent, active: !!document.getElementById("contacts-filter-contact").value },
+        { id: "query", label: "Поиск", value: document.getElementById("contacts-filter-query").value.trim(), active: !!document.getElementById("contacts-filter-query").value.trim() },
+      ];
+  const active = filters.filter((filter) => filter.active);
+  container.innerHTML = active.length
+    ? `${active.map((filter) => `<button type="button" class="active-filter-chip" data-remove-filter="${filter.id}" aria-label="Убрать фильтр ${escapeHtml(filter.label)}: ${escapeHtml(filter.value)}"><span>${escapeHtml(filter.label)}: ${escapeHtml(filter.value)}</span><span aria-hidden="true">×</span></button>`).join("")}<button type="button" class="active-filters-clear" data-clear-filters>Сбросить</button>`
+    : "";
+  container.querySelectorAll("[data-remove-filter]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      const fields = isHistory
+        ? { source: "filter-source", query: "filter-query" }
+        : { source: "contacts-filter-source", contact: "contacts-filter-contact", query: "contacts-filter-query" };
+      const field = document.getElementById(fields[button.dataset.removeFilter]);
+      if (field) field.value = "";
+      if (isHistory) {
+        lastHistorySnapshot = "";
+        render.history({ animateRows: event.detail > 0 });
+      } else {
+        baseState.page = 0;
+        renderContactsList();
+      }
+    });
+  });
+  container.querySelector("[data-clear-filters]")?.addEventListener("click", (event) => {
+    filters.forEach(({ id }) => {
+      const fields = isHistory
+        ? { source: "filter-source", query: "filter-query" }
+        : { source: "contacts-filter-source", contact: "contacts-filter-contact", query: "contacts-filter-query" };
+      const field = document.getElementById(fields[id]);
+      if (field) field.value = "";
+    });
+    if (isHistory) {
+      lastHistorySnapshot = "";
+      render.history({ animateRows: event.detail > 0 });
+    } else {
+      baseState.page = 0;
+      renderContactsList();
+    }
+  });
+}
+
 function renderContactsList() {
   const el = document.getElementById("contacts-list");
+  const sortPositions = pendingBaseSortPositions;
+  pendingBaseSortPositions = null;
   const source = document.getElementById("contacts-filter-source").value;
   const contactFilter = document.getElementById("contacts-filter-contact").value;
   const query = document.getElementById("contacts-filter-query").value.trim().toLowerCase();
   fillFileOptions();
+  renderActiveFilters("contacts");
 
   // Счётчики — они же фильтры по статусу.
   const counts = {};
@@ -951,14 +1343,15 @@ function renderContactsList() {
       return `
       <tr class="base-row${fresh.has(card.key) ? " row-fresh" : ""}${card.key === focusContactKey ? " is-focused" : ""}" data-card-key="${escapeHtml(card.key)}">
         <td class="base-check"><input type="checkbox" data-select="${escapeHtml(card.key)}" aria-label="Выбрать компанию ${escapeHtml(card.company || p?.value || "Без названия")}" ${baseState.selected.has(card.key) ? "checked" : ""} /></td>
-        <td><button type="button" class="base-row-open" aria-label="Открыть карточку компании: ${escapeHtml(card.company || p?.value || "Без названия")}"><span class="row-title">${escapeHtml(card.company || p?.value || "Без названия")}</span>
-          <span class="row-sub">${p ? `${escapeHtml(p.kind === "telegram" ? "@" + p.value : p.value)}${more > 0 ? ` · +${more}` : ""}` : "контакта нет"}${card.hr ? ` · ${escapeHtml(card.hr)}` : ""}</span></button></td>
+        <td><button type="button" class="base-row-open" aria-label="Открыть карточку компании: ${escapeHtml(card.company || p?.value || "Без названия")}"><span class="row-title">${highlightText(card.company || p?.value || "Без названия", query)}</span>
+          <span class="row-sub">${p ? `${highlightText(p.kind === "telegram" ? "@" + p.value : p.value, query)}${more > 0 ? ` · +${more}` : ""}` : "контакта нет"}${card.hr ? ` · ${highlightText(card.hr, query)}` : ""}</span></button></td>
         <td class="small col-source muted">${card.source_kinds.map((k) => SOURCE_KIND[k]).join(", ")}</td>
         <td>${statusPill(card.status)}</td>
         <td class="small col-last">${card.last ? `${escapeHtml(truncate(card.last.text, 60))}<div class="muted">${fmtDay(card.last.at)}</div>` : "—"}</td>
       </tr>`;
     })
     .join("");
+  animateBaseRowReorder(sortPositions);
   const openKey = focusContactKey;
   focusContactKey = null;
   el.querySelectorAll(".base-row").forEach((row) => {
@@ -1193,22 +1586,27 @@ function renderBaseBulk() {
           else baseFiltered.forEach((k) => baseState.selected.add(k));
           renderContactsList();
           return;
-        } else if (action === "write") {
-          await api("/api/campaigns", { method: "POST", body: JSON.stringify({ keys }) });
-          baseState.selected.clear();
-          showToast("Рассылка создана — подготовьте письма", "success");
-          switchTab("outreach");
-          return;
-        } else if (action === "delete") {
-          const { removed } = await api("/api/contacts/bulk", { method: "POST", body: JSON.stringify({ keys, action }) });
-          baseState.selected.clear();
-          showUndo(`Удалено компаний: ${removed.length}`, async () => {
-            await api("/api/contacts/restore", { method: "POST", body: JSON.stringify({ cards: removed }) });
-            render.contacts();
-          });
-        } else {
-          await api("/api/contacts/bulk", { method: "POST", body: JSON.stringify({ keys, action }) });
         }
+        await withButtonLoading(b, async () => {
+          if (action === "write") {
+            await api("/api/campaigns", { method: "POST", body: JSON.stringify({ keys }) });
+            baseState.selected.clear();
+            showToast("Рассылка создана — подготовьте письма", "success");
+            switchTab("outreach");
+            return;
+          }
+          if (action === "delete") {
+            const { removed } = await api("/api/contacts/bulk", { method: "POST", body: JSON.stringify({ keys, action }) });
+            baseState.selected.clear();
+            showUndo(`Удалено компаний: ${removed.length}`, async () => {
+              await api("/api/contacts/restore", { method: "POST", body: JSON.stringify({ cards: removed }) });
+              render.contacts();
+            });
+            return;
+          }
+          await api("/api/contacts/bulk", { method: "POST", body: JSON.stringify({ keys, action }) });
+        });
+        if (action === "write") return;
       } catch (err) {
         showToast(err.message.replace(/^\d+: /, ""), "error");
       }
@@ -1223,13 +1621,18 @@ function showUndo(text, undo) {
   const bar = document.createElement("div");
   bar.id = "undo-bar";
   bar.className = "undo-bar";
+  bar.style.setProperty("--undo-duration", "10000ms");
   bar.innerHTML = `<span>${escapeHtml(text)}</span><button type="button" class="btn btn-secondary btn-small">Отменить</button>`;
   document.body.appendChild(bar);
   const timer = setTimeout(() => bar.remove(), 10000);
   bar.querySelector("button").addEventListener("click", async () => {
     clearTimeout(timer);
     bar.remove();
-    await undo();
+    try {
+      await undo();
+    } catch (err) {
+      showToast(err.message.replace(/^\d+: /, ""), "error");
+    }
   });
 }
 
@@ -1246,6 +1649,7 @@ async function renderResults() {
   try {
     r = await api(`/api/results?days=${statsPeriodDays}`);
   } catch (e) {
+    renderRetryState(el, `Не удалось загрузить результаты: ${e.message}`, renderResults);
     return;
   }
   const w = r.week;
@@ -1285,6 +1689,26 @@ async function renderResults() {
 }
 
 // «Отклики по неделям»: 13 недель, площадной график с перекрестием.
+let weeklyChartSnapshot = null;
+let weeklyChartValues = null;
+let weeklyChartAnimationFrame = 0;
+
+function animateWeeklyChart(svg) {
+  if (REDUCE_MOTION || !svg) return;
+  const line = svg.querySelector(".chart-line");
+  const length = line?.getTotalLength?.() || 0;
+  if (!line || !length) return;
+  line.style.strokeDasharray = `${length} ${length}`;
+  line.style.strokeDashoffset = String(length);
+  void line.getBBox();
+  svg.classList.add("is-entering");
+  line.addEventListener("animationend", () => {
+    line.style.strokeDasharray = "none";
+    line.style.strokeDashoffset = "0";
+    svg.classList.remove("is-entering");
+  }, { once: true });
+}
+
 function renderWeeklyChart(entries) {
   const el = document.getElementById("weekly-chart");
   const readout = document.getElementById("weekly-readout");
@@ -1298,14 +1722,22 @@ function renderWeeklyChart(entries) {
     const ago = Math.floor((now - new Date(e.applied_at)) / (7 * 86400000));
     if (ago >= 0 && ago < weeks) counts[weeks - 1 - ago] += 1;
   });
+  const snapshot = JSON.stringify(counts);
+  if (snapshot === weeklyChartSnapshot && el.querySelector("svg")) return;
+  const animate = snapshot !== weeklyChartSnapshot;
+  const previousCounts = weeklyChartValues;
+  weeklyChartSnapshot = snapshot;
+  weeklyChartValues = counts.slice();
   const W = 640;
   const H = 180;
   const pad = { l: 28, r: 8, t: 10, b: 22 };
-  const max = Math.max(4, ...counts);
+  const max = Math.max(4, ...counts, ...(previousCounts || []));
   const x = (i) => pad.l + (i * (W - pad.l - pad.r)) / (weeks - 1);
   const y = (v) => H - pad.b - (v / max) * (H - pad.t - pad.b);
-  const line = counts.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(" ");
-  const area = `${line} L${x(weeks - 1).toFixed(1)} ${H - pad.b} L${x(0).toFixed(1)} ${H - pad.b} Z`;
+  const linePath = (values) => values.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(" ");
+  const areaPath = (values) => `${linePath(values)} L${x(weeks - 1).toFixed(1)} ${H - pad.b} L${x(0).toFixed(1)} ${H - pad.b} Z`;
+  const line = linePath(counts);
+  const area = areaPath(counts);
   const ticks = [0, Math.round(max / 2), max];
   const label = (i) => (i === weeks - 1 ? "эта неделя" : `${weeks - 1 - i} нед. назад`);
   // Линии и заливка тянутся по ширине карточки (preserveAspectRatio=none,
@@ -1321,6 +1753,24 @@ function renderWeeklyChart(entries) {
     <span class="chart-dot" hidden></span>
     <div class="area-axis small muted"><span>13 нед. назад</span><span>8 нед.</span><span>4 нед.</span><span>эта неделя</span></div>`;
   const svg = el.querySelector("svg");
+  if (animate && previousCounts && !REDUCE_MOTION) {
+    cancelAnimationFrame(weeklyChartAnimationFrame);
+    const chartLine = svg.querySelector(".chart-line");
+    const chartArea = svg.querySelector(".chart-area");
+    const startedAt = performance.now();
+    const duration = 360;
+    const tick = (now) => {
+      const t = Math.min(1, (now - startedAt) / duration);
+      const eased = 1 - (1 - t) ** 3;
+      const values = counts.map((value, i) => previousCounts[i] + (value - previousCounts[i]) * eased);
+      chartLine.setAttribute("d", linePath(values));
+      chartArea.setAttribute("d", areaPath(values));
+      if (t < 1) weeklyChartAnimationFrame = requestAnimationFrame(tick);
+    };
+    weeklyChartAnimationFrame = requestAnimationFrame(tick);
+  } else if (animate) {
+    animateWeeklyChart(svg);
+  }
   const cross = svg.querySelector(".crosshair");
   const dot = el.querySelector(".chart-dot");
   const show = (clientX) => {
@@ -1357,6 +1807,11 @@ let lastStatus = null;
 let lastRunNow = null;
 let lastOutreach = null;
 let lastTelegramWatch = null;
+const platformStatusSignatures = new Map();
+let lastLiveFeedKeys = null;
+let lastInboxStageByKey = new Map();
+let lastDraftCodes = null;
+let lastHhReminderCodes = null;
 // Площадка, чья шторка открыта сейчас: опрос Главной обновляет её
 // шапку (состояние, счётчик), пока человек ничего в ней не правит.
 let openDrawerSource = null;
@@ -1385,6 +1840,9 @@ function skeletonRowsList(n) {
 // своих каналов: key, name, logo, dot, statusText, counter, pct.
 function platformRowHtml(m) {
   const pct = m.pct == null ? null : Math.max(0, Math.min(100, m.pct));
+  const signature = `${m.dot}|${m.statusText}|${!!m.running}`;
+  const statusChanged = platformStatusSignatures.has(m.key) && platformStatusSignatures.get(m.key) !== signature;
+  platformStatusSignatures.set(m.key, signature);
   const bar = pct == null
     ? `<span class="bar is-empty" aria-hidden="true"></span>`
     : `<span class="bar" aria-hidden="true"><span class="${pct >= 100 ? "full" : pct >= 70 ? "warn" : ""}" style="width:${pct}%"></span></span>`;
@@ -1393,7 +1851,7 @@ function platformRowHtml(m) {
       ${m.logo}
       <span class="row-main">
         <span class="row-title">${escapeHtml(m.name)}</span>
-        <span class="row-sub"><span class="dot ${m.dot}"></span><span class="row-sub-text">${escapeHtml(m.statusText)}</span></span>
+        <span class="row-sub"><span class="dot ${m.dot}${statusChanged ? " status-changed" : ""}"></span><span class="row-sub-text${statusChanged ? " status-changed" : ""}">${escapeHtml(m.statusText)}</span></span>
       </span>
       ${m.counter != null ? `<span class="row-count mono">${escapeHtml(m.counter)}</span>` : ""}
       ${bar}
@@ -1656,7 +2114,7 @@ function sourceFiltersHtml(s, salary) {
     return fieldRowHtml({
       title: "Зарплата для скрининга LinkedIn",
       hint: "USD в год, диапазоном",
-      control: `<input type="text" class="d-linkedin-salary" value="${escapeHtml(salary.linkedin_salary_range_usd || "")}" placeholder="60000-80000" aria-label="Зарплата для скрининга LinkedIn" /><span class="d-salary-hint field-hint"></span>`,
+      control: `<input type="text" class="d-linkedin-salary" value="${escapeHtml(salary.linkedin_salary_range_usd || "")}" placeholder="60000-80000" aria-label="Зарплата для скрининга LinkedIn" /><span class="d-salary-hint field-hint" aria-live="polite"></span>`,
       ui: "drawer.linkedin-salary",
     });
   }
@@ -1687,7 +2145,7 @@ function sourceFiltersHtml(s, salary) {
       ${fieldRowHtml({ title: "Поднимать резюме", control: switchHtml("d-auto-bump", s.auto_bump_resume, "Поднимать резюме на HH"), ui: "drawer.bump" })}
       ${fieldRowHtml({ title: "Напомнить о себе, если молчат, через", hint: "Дней; 0 — не напоминать. Готовые напоминания — в «Общении»", control: `<input type="number" class="d-reminder-days num-input" min="0" value="${s.reminder_follow_up_days ?? 7}" aria-label="Напомнить через дней" />`, ui: "drawer.reminder-days" })}
       ${fieldRowHtml({ title: "Отправлять напоминания сами", hint: "Выключено — ждут вашего «Отправить» в «Общении»", control: switchHtml("d-auto-reminder", s.auto_reminder, "Отправлять напоминания сами") })}
-      ${fieldRowHtml({ title: "Зарплата для ответов HR", hint: "Подставляется в автоответ в чате", control: `<input type="text" class="d-hh-salary" value="${escapeHtml(salary.hh_salary_expectations || "")}" placeholder="250000-300000 RUR" aria-label="Зарплата для ответов HR" /><span class="d-salary-hint field-hint"></span>`, ui: "drawer.hh-salary" })}`;
+      ${fieldRowHtml({ title: "Зарплата для ответов HR", hint: "Подставляется в автоответ в чате", control: `<input type="text" class="d-hh-salary" value="${escapeHtml(salary.hh_salary_expectations || "")}" placeholder="250000-300000 RUR" aria-label="Зарплата для ответов HR" /><span class="d-salary-hint field-hint" aria-live="polite"></span>`, ui: "drawer.hh-salary" })}`;
   }
   return "";
 }
@@ -1824,14 +2282,18 @@ function bindSourceDrawer(body, s) {
       const v = input.value.trim();
       const ok = !v || /^\d{4,}\s*[-–]\s*\d{4,}(\s*\S+)?$/.test(v);
       if (hint) {
-        hint.textContent = ok ? "" : `Ожидается диапазон вида «${input.placeholder}»`;
+        const message = ok ? "" : `Ожидается диапазон вида «${input.placeholder}»`;
+        if (hint.textContent !== message) hint.textContent = message;
         hint.classList.toggle("warn-text", !ok);
+        hint.classList.toggle("has-error", !ok);
       }
+      input.setAttribute("aria-invalid", String(!ok));
       return ok;
     };
     input.addEventListener("input", validate);
     validate();
     input.addEventListener("change", async () => {
+      if (!validate()) return;
       const key = input.classList.contains("d-hh-salary") ? "hh_salary_expectations" : "linkedin_salary_range_usd";
       try {
         await api("/api/settings/salary", { method: "POST", body: JSON.stringify({ [key]: input.value.trim() }) });
@@ -1988,6 +2450,7 @@ function openMailDrawer(refresh = false) {
     body: `<div id="own-mail-card" data-ui="home.pipeline">${pipelineCardHtml(o)}</div>`,
     foot: `<button type="button" class="btn btn-primary" data-drawer-action="outreach">Открыть рассылку</button>`,
   });
+  animateCounts(body);
   bindPipelineCard(body, o);
   body.querySelectorAll("[data-own-go]").forEach((b) =>
     b.addEventListener("click", () => {
@@ -2155,7 +2618,7 @@ function bindPipelineCard(el, o) {
         }
         return refreshOwnChannels();
       }
-      if (action === "stop" && !confirm("Остановить рассылку? Неотправленные письма останутся — продолжить можно в любой момент.")) return;
+      if (action === "stop" && !(await showConfirm("Остановить рассылку? Неотправленные письма останутся — продолжить можно в любой момент."))) return;
       b.disabled = true;
       try {
         if (action === "create") {
@@ -2194,7 +2657,10 @@ function openSideDrawer(titleOrOpts, bodyHtml) {
   foot.innerHTML = o.foot || "";
   foot.hidden = !o.foot;
   const overlay = document.getElementById("platform-drawer-overlay");
-  const wasOpen = overlay.style.display !== "none";
+  const wasClosing = overlay.classList.contains("is-closing");
+  clearTimeout(drawerCloseTimer);
+  overlay.classList.remove("is-closing");
+  const wasOpen = overlay.style.display !== "none" && !wasClosing;
   overlay.style.display = "flex";
   if (!wasOpen) trapFocus(document.getElementById("platform-drawer"));
   return body;
@@ -2208,13 +2674,8 @@ function openPromptDrawer() {
       <button type="button" class="btn btn-secondary btn-small" id="drawer-prompt-copy">Скопировать промт</button>
       <button type="button" class="btn btn-primary btn-small" id="drawer-upload">Загрузить файл</button>
     </div>`);
-  body.querySelector("#drawer-prompt-copy").addEventListener("click", async (e) => {
-    try {
-      await navigator.clipboard.writeText(body.querySelector("#drawer-prompt").value);
-      e.target.textContent = "✓ Скопировано";
-    } catch (err) {
-      body.querySelector("#drawer-prompt").select();
-    }
+  body.querySelector("#drawer-prompt-copy").addEventListener("click", (e) => {
+    copyToClipboard(body.querySelector("#drawer-prompt").value, e.currentTarget, body.querySelector("#drawer-prompt"));
   });
   body.querySelector("#drawer-upload").addEventListener("click", () => {
     importToDrawer = true;
@@ -2681,7 +3142,73 @@ function renderTelegramResumes() {
   renderResumes();
 }
 
-async function renderResumes() {
+let resumeUploadBusy = false;
+let resumeUploadExtraNames = null;
+
+function setResumeUploadStatus(message = "", tone = "") {
+  const status = document.getElementById("tgq-resume-status");
+  if (!status) return;
+  status.textContent = message;
+  status.dataset.tone = tone;
+}
+
+function setResumeUploadBusy(busy) {
+  resumeUploadBusy = busy;
+  const table = document.getElementById("resume-table");
+  if (table) {
+    table.setAttribute("aria-busy", String(busy));
+  table.querySelectorAll("button").forEach((button) => { button.disabled = busy; });
+  }
+  ["tgq-resume-add", "resume-dropzone-pick"].forEach((id) => {
+    const button = document.getElementById(id);
+    if (button) button.disabled = busy;
+  });
+  const dropzone = document.getElementById("resume-dropzone");
+  if (dropzone) {
+    dropzone.classList.toggle("is-uploading", busy);
+    dropzone.setAttribute("aria-busy", String(busy));
+  }
+}
+
+function validateResumePdf(file) {
+  if (!file || !/\.pdf$/i.test(file.name)) {
+    throw new Error("Поддерживаются только файлы PDF.");
+  }
+  if (!file.size) throw new Error("Файл пустой. Выберите другое резюме.");
+}
+
+function storedTelegramResumeName(filename) {
+  const stem = filename.replace(/\.pdf$/i, "").replace(/[^\p{L}\p{N}_-]+/gu, "_").replace(/^_+|_+$/g, "") || "resume";
+  return `${stem.slice(0, 60)}.pdf`;
+}
+
+async function animateResumeRowExit(row) {
+  if (REDUCE_MOTION || !row || typeof row.animate !== "function") return;
+  const height = row.getBoundingClientRect().height;
+  const style = getComputedStyle(row);
+  const animation = row.animate([
+    {
+      height: `${height}px`,
+      opacity: 1,
+      transform: "translateX(0)",
+      paddingTop: style.paddingTop,
+      paddingBottom: style.paddingBottom,
+      borderTopWidth: style.borderTopWidth,
+    },
+    {
+      height: "0px",
+      opacity: 0,
+      transform: "translateX(-6px)",
+      paddingTop: "0px",
+      paddingBottom: "0px",
+      borderTopWidth: "0px",
+    },
+  ], { duration: 170, easing: "cubic-bezier(0.23, 1, 0.32, 1)", fill: "forwards" });
+  row.style.overflow = "hidden";
+  await animation.finished.catch(() => {});
+}
+
+async function renderResumes({ animateKey = "" } = {}) {
   const el = document.getElementById("resume-table");
   const routingEl = document.getElementById("resume-routing");
   if (!el) return;
@@ -2689,15 +3216,17 @@ async function renderResumes() {
   try {
     r = await api("/api/resumes");
   } catch (e) {
+    renderRetryState(el, `Не удалось загрузить резюме: ${e.message}`, renderResumes);
     return;
   }
+  resumeUploadExtraNames = new Set(r.extra.map((file) => file.name));
   const fileCell = (f, missing) =>
     f.exists
       ? `<span class="resume-file" title="${escapeHtml(f.name)}"><span class="pdf-badge" aria-hidden="true">PDF</span><span class="resume-name">${escapeHtml(f.name)}</span></span>
          <span class="muted small">${Math.max(1, Math.round(f.size / 1024))} КБ · ${fmtDay(f.updated_at)}</span>`
       : `<span class="${missing === "err" ? "err-text" : "muted"} small">${missing === "err" ? "не загружено" : "не загружено — берётся основное"}</span>`;
-  const row = (title, where, file, action) => `
-    <div class="resume-row" role="row">
+  const row = (title, where, file, action, kind = "") => `
+    <div class="resume-row${animateKey === kind ? " resume-row-enter" : ""}" role="row" ${kind ? `data-resume-kind="${escapeHtml(kind)}"` : ""}>
       <div role="cell"><b>${title}</b></div>
       <div role="cell" class="muted small">${where}</div>
       <div role="cell" class="resume-file-cell">${file}</div>
@@ -2709,25 +3238,57 @@ async function renderResumes() {
     </div>
     ${row("Основное", "hh, geekjob, GetMatch, Хабр Карьера, Telegram; письма на русском",
       fileCell(r.primary, "err"),
-      `<button type="button" class="btn btn-${r.primary.exists ? "ghost" : "primary"} btn-small" data-upload="primary">${r.primary.exists ? "Заменить" : "Загрузить"}</button>`)}
+      `<button type="button" class="btn btn-${r.primary.exists ? "ghost" : "primary"} btn-small" data-upload="primary" ${resumeUploadBusy ? "disabled" : ""}>${r.primary.exists ? "Заменить" : "Загрузить"}</button>`, "primary")}
     ${row("Для международных", "LinkedIn, Wellfound, Himalayas; письма на английском",
       fileCell(r.linkedin, "soft"),
-      `<button type="button" class="btn btn-ghost btn-small" data-upload="linkedin">${r.linkedin.exists ? "Заменить" : "Загрузить"}</button>`)}
+      `<button type="button" class="btn btn-ghost btn-small" data-upload="linkedin" ${resumeUploadBusy ? "disabled" : ""}>${r.linkedin.exists ? "Заменить" : "Загрузить"}</button>`, "linkedin")}
     ${r.extra
       .map((f) =>
         row("Дополнительное", "своя кнопка «+ резюме» под вакансией в Telegram; можно выбрать в рассылке",
           fileCell(f),
-          `<button type="button" class="btn btn-ghost btn-small" data-delete-extra="${escapeHtml(f.name)}" aria-label="Удалить ${escapeHtml(f.name)}">Удалить</button>`)
+          `<button type="button" class="btn btn-ghost btn-small" data-delete-extra="${escapeHtml(f.name)}" aria-label="Удалить ${escapeHtml(f.name)}">Удалить</button>`, `extra:${f.name}`)
       )
       .join("")}
     ${r.extra.length ? "" : `<div class="resume-row resume-empty"><div class="muted small">Дополнительных пока нет — например, резюме под другую роль. Кнопка «Добавить резюме» выше.</div></div>`}`;
+  if (resumeUploadBusy) el.querySelectorAll("button").forEach((button) => { button.disabled = true; });
   el.querySelectorAll("[data-upload]").forEach((b) =>
     b.addEventListener("click", () => document.getElementById(`resume-upload-${b.dataset.upload}`).click())
   );
+  el.querySelectorAll('[data-resume-kind="primary"], [data-resume-kind="linkedin"]').forEach((rowEl) => {
+    rowEl.addEventListener("dragenter", (event) => {
+      if (resumeUploadBusy || ![...event.dataTransfer.types].includes("Files")) return;
+      event.preventDefault();
+      rowEl.classList.add("is-drop-target");
+    });
+    rowEl.addEventListener("dragover", (event) => {
+      if (resumeUploadBusy || ![...event.dataTransfer.types].includes("Files")) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+    });
+    rowEl.addEventListener("dragleave", (event) => {
+      if (!rowEl.contains(event.relatedTarget)) rowEl.classList.remove("is-drop-target");
+    });
+    rowEl.addEventListener("drop", (event) => {
+      if (resumeUploadBusy) return;
+      const file = event.dataTransfer.files?.[0];
+      if (!file) return;
+      event.preventDefault();
+      rowEl.classList.remove("is-drop-target");
+      uploadResumeFile(rowEl.dataset.resumeKind, file);
+    });
+  });
   el.querySelectorAll("[data-delete-extra]").forEach((b) =>
     b.addEventListener("click", async () => {
-      await api(`/api/telegram/resumes/${encodeURIComponent(b.dataset.deleteExtra)}`, { method: "DELETE" });
-      renderResumes();
+      await withButtonLoading(b, async () => {
+        try {
+          await api(`/api/telegram/resumes/${encodeURIComponent(b.dataset.deleteExtra)}`, { method: "DELETE" });
+          await animateResumeRowExit(b.closest(".resume-row"));
+          showToast("Дополнительное резюме удалено", "success");
+          await renderResumes();
+        } catch (err) {
+          showToast(err.message.replace(/^\d+: /, ""), "error");
+        }
+      });
     })
   );
 
@@ -2776,20 +3337,86 @@ async function renderResumes() {
   });
 }
 
-async function uploadTelegramResumes(files) {
-  const status = document.getElementById("tgq-resume-status");
-  for (const file of files) {
-    status.textContent = `Загружаю ${file.name}…`;
-    const form = new FormData();
-    form.append("file", file);
-    const response = await fetch("/api/telegram/resumes", { method: "POST", body: form });
-    if (!response.ok) {
-      status.textContent = `${file.name}: ${(await response.json()).detail || "ошибка"}`;
-      return;
-    }
-    renderTelegramResumes((await response.json()).resumes);
+async function uploadResumeFile(kind, file) {
+  if (resumeUploadBusy) {
+    setResumeUploadStatus("Дождитесь завершения текущей загрузки.", "error");
+    return false;
   }
-  status.textContent = "Сохранено";
+  try {
+    validateResumePdf(file);
+    if (kind === "extra" && file.size > 20 * 1024 * 1024) {
+      throw new Error("Дополнительное резюме должно быть не больше 20 МБ.");
+    }
+  } catch (error) {
+    setResumeUploadStatus(error.message, "error");
+    return false;
+  }
+
+  setResumeUploadBusy(true);
+  const targetName = kind === "primary" ? "Основное резюме" : kind === "linkedin" ? "Международное резюме" : file.name;
+  setResumeUploadStatus(`Загружается «${file.name}» в раздел «${targetName}»…`, "loading");
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    if (kind === "extra") {
+      if (!resumeUploadExtraNames) {
+        const current = await api("/api/resumes");
+        resumeUploadExtraNames = new Set(current.extra.map((item) => item.name));
+      }
+      const storedName = storedTelegramResumeName(file.name);
+      if (resumeUploadExtraNames.has(storedName)) {
+        throw new Error(`Резюме «${storedName}» уже есть. Переименуйте файл, чтобы не заменить его случайно.`);
+      }
+      const response = await fetch("/api/telegram/resumes", { method: "POST", body: formData });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || "Не удалось загрузить файл.");
+      resumeUploadExtraNames = new Set((payload.resumes || []).map((item) => item.name));
+      await renderResumes({ animateKey: `extra:${storedName}` });
+      setResumeUploadStatus(`«${file.name}» добавлено.`, "success");
+      return true;
+    }
+
+    await api(`/api/resume/upload?kind=${kind}`, { method: "POST", headers: {}, body: formData });
+    await renderResumes({ animateKey: kind });
+    if (kind === "primary") {
+      setResumeUploadStatus("Файл загружен. Обновляю текст резюме для писем…", "loading");
+      try {
+        await api("/api/resume/refresh-plain-text", { method: "POST" });
+        setResumeUploadStatus("Резюме обновлено — письма будут использовать новый файл.", "success");
+      } catch (error) {
+        setResumeUploadStatus(`Файл загружен, но ИИ не смог перечитать его: ${error.message.replace(/^\d+: /, "")}`, "error");
+      }
+    } else {
+      setResumeUploadStatus("Международное резюме обновлено.", "success");
+    }
+    return true;
+  } catch (error) {
+    setResumeUploadStatus(`Не удалось загрузить «${file.name}»: ${error.message.replace(/^\d+: /, "")}`, "error");
+    return false;
+  } finally {
+    setResumeUploadBusy(false);
+  }
+}
+
+async function uploadTelegramResumes(files) {
+  const validFiles = [];
+  const rejected = [];
+  for (const file of files) {
+    try { validateResumePdf(file); validFiles.push(file); }
+    catch (error) { rejected.push(`${file.name}: ${error.message}`); }
+  }
+  if (!validFiles.length) {
+    if (rejected.length) setResumeUploadStatus(rejected.join(" "), "error");
+    return;
+  }
+  let uploaded = 0;
+  const failed = [...rejected];
+  for (const file of validFiles) {
+    if (await uploadResumeFile("extra", file)) uploaded += 1;
+    else failed.push(document.getElementById("tgq-resume-status")?.textContent || file.name);
+  }
+  if (failed.length) setResumeUploadStatus(`${uploaded ? `Добавлено: ${uploaded}. ` : ""}${failed.join(" ")}`, "error");
+  else if (uploaded > 1) setResumeUploadStatus(`Добавлено резюме: ${uploaded}.`, "success");
 }
 
 async function saveTelegramWatch() {
@@ -2952,14 +3579,19 @@ async function renderLiveFeed() {
   }
   try {
     const { lines } = await api("/api/logs?lines=120");
-    const rows = (lines || [])
+    const parsedRows = (lines || [])
       .filter((l) => / (INFO|WARNING|ERROR) +\|/.test(l) && !l.includes("api.telegram.org"))
       .slice(-8)
       .reverse()
       .map((l) => {
         const [, time = "", level = "", , msg = l] = l.match(/^\S+ (\S+) \| (\w+) *\| ([^-]*) - (.*)$/) || [];
-        return `<div class="feed-row${level === "INFO" ? "" : " is-warn"}"><span class="mono feed-time">${escapeHtml(time.slice(0, 5))}</span><span>${escapeHtml(msg.slice(0, 160))}</span></div>`;
+        return { key: `${time}|${msg}`, time, level, message: msg.slice(0, 160) };
       });
+    const rows = parsedRows.map((row) => {
+      const entering = lastLiveFeedKeys && !lastLiveFeedKeys.has(row.key) && !REDUCE_MOTION;
+      return `<div class="feed-row${row.level === "INFO" ? "" : " is-warn"}${entering ? " feed-row-enter" : ""}"><span class="mono feed-time">${escapeHtml(row.time.slice(0, 5))}</span><span>${escapeHtml(row.message)}</span></div>`;
+    });
+    lastLiveFeedKeys = new Set(parsedRows.map((row) => row.key));
     setHtmlIfChanged(body, rows.join("") || `<p class="feed-stopped">Пока тихо — бот ждёт следующего хода.</p>`);
   } catch (e) {
     /* лента необязательна */
@@ -3248,9 +3880,9 @@ async function loadCampaigns() {
     btn.addEventListener("click", async () => {
       const id = btn.dataset.campaign;
       const action = btn.dataset.action;
-      if (action === "send" && !confirm("Отправить письма через Gmail с резюме во вложении?")) return;
-      if (action === "followups" && !confirm("Отправить напоминания через Gmail в те же ветки писем?")) return;
-      if (action === "delete" && !confirm("Удалить рассылку? Неотправленные письма тоже удалятся.")) return;
+      if (action === "send" && !(await showConfirm("Отправить письма через Gmail с резюме во вложении?"))) return;
+      if (action === "followups" && !(await showConfirm("Отправить напоминания через Gmail в те же ветки писем?"))) return;
+      if (action === "delete" && !(await showConfirm("Удалить рассылку? Неотправленные письма тоже удалятся."))) return;
       btn.disabled = true;
       try {
         if (action === "delete") {
@@ -3400,6 +4032,66 @@ async function setHomeMode(mode) {
   render.overview();
 }
 
+function syncRadioGroupTabStops(group) {
+  if (!group) return null;
+  const radios = [...group.querySelectorAll('[role="radio"]:not(:disabled)')];
+  const selected = radios.find((radio) => radio.getAttribute("aria-checked") === "true") || radios[0] || null;
+  radios.forEach((radio) => {
+    radio.tabIndex = radio === selected ? 0 : -1;
+  });
+  return selected;
+}
+
+function initRadioGroupKeyboard() {
+  document.querySelectorAll('[role="radiogroup"]').forEach(syncRadioGroupTabStops);
+  const radioGroupsObserver = new MutationObserver((records) => {
+    records.forEach((record) => record.addedNodes.forEach((node) => {
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      if (node.matches('[role="radiogroup"]')) syncRadioGroupTabStops(node);
+      node.querySelectorAll?.('[role="radiogroup"]').forEach(syncRadioGroupTabStops);
+    }));
+  });
+  radioGroupsObserver.observe(document.body, { childList: true, subtree: true });
+  let tabNavigationPending = false;
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Tab") {
+      tabNavigationPending = true;
+      setTimeout(() => { tabNavigationPending = false; }, 0);
+      return;
+    }
+    const current = event.target.closest?.('[role="radio"]');
+    if (!current || !["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(event.key)) return;
+    const group = current.closest('[role="radiogroup"]');
+    const radios = [...(group?.querySelectorAll('[role="radio"]:not(:disabled)') || [])];
+    if (radios.length < 2) return;
+    event.preventDefault();
+    const direction = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : -1;
+    const currentIndex = radios.indexOf(current);
+    const next = radios[(currentIndex + direction + radios.length) % radios.length];
+    next.click();
+    if (next.isConnected) next.focus();
+    syncRadioGroupTabStops(group);
+  });
+  document.addEventListener("focusin", (event) => {
+    if (!tabNavigationPending) return;
+    const radio = event.target.closest?.('[role="radio"]');
+    const group = radio?.closest('[role="radiogroup"]');
+    if (!group) return;
+    tabNavigationPending = false;
+    const selected = syncRadioGroupTabStops(group);
+    if (selected && selected !== radio) selected.focus();
+  });
+  document.addEventListener("click", (event) => {
+    const radio = event.target.closest?.('[role="radio"]');
+    const group = radio?.closest('[role="radiogroup"]');
+    if (!radio || !group || radio.disabled) return;
+    group.querySelectorAll('[role="radio"]').forEach((option) => {
+      option.setAttribute("aria-checked", String(option === radio));
+    });
+    syncRadioGroupTabStops(group);
+  });
+}
+
 function renderHomeLimit(status, stats) {
   const el = document.getElementById("home-limit");
   if (!el) return;
@@ -3432,7 +4124,7 @@ function kpiCardHtml({ label, help, value, prev, prevLabel, series, i }) {
       <span class="tiptext" role="tooltip">${escapeHtml(help)}</span>
     </div>
     <div class="kpi-main">
-      <span class="kpi-value mono" data-target="${value}">0</span>
+      <span class="kpi-value mono" data-count="kpi-${i}">${value}</span>
       ${sp ? `<svg class="spark" viewBox="0 0 96 32" aria-hidden="true"><path d="${sp.area}" class="spark-area"/><path d="${sp.line}" class="spark-line"/></svg>` : ""}
     </div>
     <div class="kpi-delta"><span class="trend-${tone}">${arrow}</span>${escapeHtml(text)}</div>
@@ -3455,7 +4147,7 @@ async function renderKpis(stats) {
     cards.push({ label: "Ответов работодателей", help: "Ответы, приглашения и офферы за 7 дней — с площадок, из Telegram и на письма рассылки.", value: results.week.replies, prev: results.prev.replies, prevLabel: "неделей раньше", series: null });
   }
   if (!setHtmlIfChanged(el, cards.map((c, i) => kpiCardHtml({ ...c, i })).join(""))) return;
-  el.querySelectorAll(".kpi-value").forEach((v) => countUp(v, parseInt(v.dataset.target, 10)));
+  animateCounts(el);
 }
 
 async function renderHomeSplit() {
@@ -3617,7 +4309,8 @@ const render = {
     overviewLoaded = true;
   },
 
-  async history() {
+  async history({ animateRows: requestedRowMotion = false } = {}) {
+    const firstHistoryLoad = !historyLoaded;
     const source = document.getElementById("filter-source").value;
     const q = document.getElementById("filter-query").value;
     const params = new URLSearchParams();
@@ -3635,18 +4328,26 @@ const render = {
         .catch(() => {});
     }
 
+    const historyViewKey = JSON.stringify([params.toString(), historyChip]);
+    const previousStatusByKey = lastHistoryViewKey === historyViewKey
+      ? new Map(historyRows.map((entry) => [historyEntryKey(entry), historyStatusSignature(entry)]))
+      : new Map();
     const historySnapshot = JSON.stringify({ params: params.toString(), chip: historyChip, all });
     if (historySnapshot === lastHistorySnapshot) return;
     lastHistorySnapshot = historySnapshot;
+    lastHistoryViewKey = historyViewKey;
 
     renderHistoryChips(all);
+    renderActiveFilters("history");
     const entries = all.filter(HISTORY_CHIPS[historyChip].test);
+    const animateRows = firstHistoryLoad || (requestedRowMotion && !REDUCE_MOTION);
     lastHistoryEntries = entries;
     const today = all.filter((e) => e.status === "applied" && (e.applied_at || "").slice(0, 10) === new Date().toISOString().slice(0, 10)).length;
     document.getElementById("history-today").textContent = `сегодня ${today} ${plural(today, "отклик", "отклика", "откликов")}`;
     document.getElementById("history-count").textContent = `показано ${entries.length}`;
     if (!entries.length) {
-      tbody.innerHTML = `<tr><td colspan="5">${emptyStateHtml("Ничего не нашлось. Сбросьте фильтр или поищите по другому слову.")}</td></tr>`;
+      historyRows = [];
+      tbody.innerHTML = `<tr><td colspan="5">${emptyStateHtml("Ничего не нашлось. Сбросьте фильтр или поищите по другому слову.", requestedRowMotion || firstHistoryLoad)}</td></tr>`;
       updateHistoryScrollHint();
       return;
     }
@@ -3655,32 +4356,57 @@ const render = {
       .map((e, i) => {
         const stage = e.effective_stage ? STAGE_LABELS[e.effective_stage] : "";
         const tone = e.status === "applied" ? (e.effective_stage === "rejected" ? "bad" : e.effective_stage ? "good" : "") : e.status === "dry_run" ? "" : "muted";
-        return `<tr class="job-row reveal" data-row-index="${i}" style="transition-delay:${staggerDelay(i, 25)}">
+        const statusChanged = previousStatusByKey.has(historyEntryKey(e))
+          && previousStatusByKey.get(historyEntryKey(e)) !== historyStatusSignature(e);
+        return `<tr class="job-row${animateRows ? " reveal" : ""}" data-row-index="${i}"${animateRows ? ` style="transition-delay:${staggerDelay(i, 25)}"` : ""}>
           <td class="mono small muted nowrap">${fmtDay(e.applied_at)}</td>
-          <td><button type="button" class="job-row-open job-cell" aria-label="Открыть вакансию ${escapeHtml(e.title)} в компании ${escapeHtml(e.company || "без названия")}">${plogoHtml(e.source)}<span class="row-main"><span class="row-title">${escapeHtml(e.company || "—")}</span><span class="row-sub">${escapeHtml(e.title)}${e.remote_region ? ` · ${REGION_LABELS[e.remote_region] || ""}` : ""}</span></span></button></td>
+          <td><button type="button" class="job-row-open job-cell" aria-label="Открыть вакансию ${escapeHtml(e.title)} в компании ${escapeHtml(e.company || "без названия")}">${plogoHtml(e.source)}<span class="row-main"><span class="row-title">${highlightText(e.company || "—", q)}</span><span class="row-sub">${highlightText(e.title, q)}${e.remote_region ? ` · ${REGION_LABELS[e.remote_region] || ""}` : ""}</span></span></button></td>
           <td class="small nowrap">${escapeHtml(e.salary || "—")}</td>
-          <td><span class="status-text ${tone}">${escapeHtml(statusLabel(e.status))}</span>${stage ? `<span class="stage-tag">${escapeHtml(stage)}</span>` : ""}${e.apply_anyway && isSkipped(e) ? `<span class="stage-tag">отклик запланирован</span>` : ""}${e.feedback ? `<span class="stage-tag" title="${escapeHtml(e.feedback.reason || "")}">ваша пометка</span>` : ""}</td>
+          <td><span class="status-text ${tone}${statusChanged ? " status-changed" : ""}">${escapeHtml(statusLabel(e.status))}</span>${stage ? `<span class="stage-tag${statusChanged ? " status-changed" : ""}">${escapeHtml(stage)}</span>` : ""}${e.apply_anyway && isSkipped(e) ? `<span class="stage-tag">отклик запланирован</span>` : ""}${e.feedback ? `<span class="stage-tag" title="${escapeHtml(e.feedback.reason || "")}">ваша пометка</span>` : ""}</td>
           <td class="num mono">${e.score ?? "—"}${e.score != null ? `<span class="muted"> / 10</span>` : ""}</td>
         </tr>`;
       })
       .join("");
     updateHistoryScrollHint();
-    observeReveal(tbody);
+    if (animateRows) observeReveal(tbody);
   },
 
   async replies() {
+    const firstRepliesLoad = !repliesLoaded;
     const tbody = document.getElementById("replies-rows");
-    if (!repliesLoaded) tbody.innerHTML = `<div class="skeleton" style="height:90px;margin-bottom:10px"></div>`.repeat(3);
+    const loadError = document.getElementById("replies-load-error");
+    if (loadError) loadError.hidden = true;
+    if (!repliesLoaded) {
+      tbody.setAttribute("aria-busy", "true");
+      tbody.innerHTML = Array.from({ length: 4 }, () => `<div class="talk-row-skeleton" aria-hidden="true"><span class="skeleton talk-skeleton-avatar"></span><span class="talk-skeleton-copy"><span class="skeleton talk-skeleton-title"></span><span class="skeleton talk-skeleton-meta"></span><span class="skeleton talk-skeleton-preview"></span></span></div>`).join("");
+    }
 
-    const [inboxResult] = await Promise.allSettled([
+    const [inboxResult, draftsResult, remindersResult, telegramResult, postsResult] = await Promise.allSettled([
       api("/api/inbox"),
       renderDraftsQueue(),
       renderHhRemindersQueue(),
       render.telegram(),
       renderTelegramPosts(),
     ]);
-    if (inboxResult.status === "rejected") throw inboxResult.reason;
+    const failures = [
+      inboxResult.status === "rejected" && `входящие: ${inboxResult.reason.message}`,
+      draftsResult.status === "rejected" && `черновики: ${draftsResult.reason.message}`,
+      remindersResult.status === "rejected" && `напоминания HH: ${remindersResult.reason.message}`,
+      telegramResult.status === "rejected" && `Telegram: ${telegramResult.reason.message}`,
+      postsResult.status === "rejected" && `вакансии из Telegram: ${postsResult.reason.message}`,
+    ].filter(Boolean);
+    if (failures.length && loadError && typeof renderRetryState === "function") {
+      renderRetryState(loadError, `Не удалось обновить ${failures.join("; ")}.`, () => render.replies());
+      loadError.hidden = false;
+    }
+    if (inboxResult.status === "rejected") {
+      tbody.removeAttribute("aria-busy");
+      if (!repliesLoaded) tbody.replaceChildren();
+      if (!loadError) throw inboxResult.reason;
+      return;
+    }
     const entries = inboxResult.value;
+    tbody.removeAttribute("aria-busy");
     // Конфетти — только на реально новый ответ, появившийся после
     // первой загрузки за сессию, не на каждое открытие вкладки с уже
     // существующими данными.
@@ -3691,11 +4417,14 @@ const render = {
     lastRepliesCount = entries.length;
     repliesLoaded = true;
 
+    const freshness = document.getElementById("talk-refresh-status");
+    if (freshness) freshness.textContent = `Обновлено · ${new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
+
     const repliesSnapshot = JSON.stringify(entries);
     if (repliesSnapshot === lastRepliesSnapshot) return;
     lastRepliesSnapshot = repliesSnapshot;
     lastRepliesEntries = entries;
-    renderRepliesRows();
+    renderRepliesRows({ animateContent: firstRepliesLoad });
   },
 
   async analytics() {
@@ -3707,18 +4436,33 @@ const render = {
     gapsEl.innerHTML = Array.from({ length: 3 }, () => `<li><div class="skeleton" style="height:14px"></div></li>`).join("");
     candidatesEl.innerHTML = Array.from({ length: 2 }, () => `<div class="skeleton" style="height:20px;margin-bottom:6px"></div>`).join("");
 
-    const [gaps, candidates, funnel, market] = await Promise.all([
+    const [gapsResult, candidatesResult, funnelResult, marketResult] = await Promise.allSettled([
       api("/api/analytics/gaps"),
       api("/api/analytics/blacklist-candidates"),
       api("/api/analytics/funnel"),
       api("/api/analytics/market"),
     ]);
-    renderFunnel(funnel);
-    renderMarket(market);
+    if (funnelResult.status === "fulfilled") {
+      renderFunnel(funnelResult.value);
+    } else {
+      renderRetryState(document.getElementById("funnel"), `Не удалось загрузить воронку: ${funnelResult.reason.message}`, () => render.analytics());
+    }
+    if (marketResult.status === "fulfilled") {
+      renderMarket(marketResult.value);
+    } else {
+      const retryMarket = () => render.analytics();
+      ["skill-demand", "vacancy-sources", "salary-stats"].forEach((id) => {
+        renderRetryState(document.getElementById(id), `Не удалось загрузить данные рынка: ${marketResult.reason.message}`, retryMarket);
+      });
+    }
     renderOffers();
 
-    const gapMax = gaps.length ? Math.max(...gaps.map(([, c]) => c)) : 1;
-    gapsEl.innerHTML = gaps.length
+    const gaps = gapsResult.status === "fulfilled" ? gapsResult.value : null;
+    if (gaps === null) {
+      renderRetryState(gapsEl, `Не удалось загрузить дефицит навыков: ${gapsResult.reason.message}`, () => render.analytics(), "li");
+    }
+    const gapMax = gaps?.length ? Math.max(...gaps.map(([, c]) => c)) : 1;
+    if (gaps !== null) gapsEl.innerHTML = gaps.length
       ? gaps
           .map(
             ([gap, count], i) =>
@@ -3728,31 +4472,44 @@ const render = {
       : `<li>${emptyStateHtml("Пока нет данных.")}</li>`;
     growFunnelBars(gapsEl);
 
-    if (!candidates.length) {
+    if (candidatesResult.status === "rejected") {
+      renderRetryState(candidatesEl, `Не удалось загрузить кандидатов: ${candidatesResult.reason.message}`, () => render.analytics());
+    } else if (!candidatesResult.value.length) {
       candidatesEl.innerHTML = emptyStateHtml("Нет кандидатов на чёрный список.");
-      return;
-    }
-    candidatesEl.innerHTML = candidates
+    } else {
+      const candidates = candidatesResult.value;
+      candidatesEl.innerHTML = candidates
       .map(
         (c, i) => `
       <div class="candidate-row stagger-item" style="animation-delay:${staggerDelay(i)}">
-        <input type="checkbox" value="${escapeHtml(c)}" class="blacklist-check" />
+        <input type="checkbox" value="${escapeHtml(c)}" class="blacklist-check" aria-label="Кандидат: ${escapeHtml(c)}" />
         <span>${escapeHtml(c)}</span>
         <button type="button" class="btn btn-secondary btn-small block-hh-employer" data-company="${escapeHtml(c)}" title="Заблокировать работодателя на hh.ru (серверный бан, только для HeadHunter)">Скрыть на hh.ru</button>
       </div>`
       )
       .join("");
+    }
   },
 
   async settings() {
-    loadOutreachSettings(); // заполняет и сводку, и фильтры удалёнки на других вкладках
-    loadAccounts();
+    const loadError = document.getElementById("settings-load-error");
+    loadError.hidden = true;
+    loadOutreachSettings().catch(showSettingsLoadError); // заполняет сводку и фильтры удалёнки на других вкладках
+    loadAccounts().catch(showSettingsLoadError);
     refreshTelegramAccount();
-    const [status, salary, limits] = await Promise.all([
-      api("/api/status"),
-      api("/api/settings/salary"),
-      api("/api/settings/limits"),
-    ]);
+    let status;
+    let salary;
+    let limits;
+    try {
+      [status, salary, limits] = await Promise.all([
+        api("/api/status"),
+        api("/api/settings/salary"),
+        api("/api/settings/limits"),
+      ]);
+    } catch (err) {
+      showSettingsLoadError(err);
+      return;
+    }
     renderAutoAll(status);
     renderAutoChat(status);
 
@@ -3782,7 +4539,7 @@ const render = {
       });
       document.getElementById("search-posted-within").value = String(search.posted_within_days || 0);
       renderFilterCoverage();
-    });
+    }).catch(showSettingsLoadError);
 
     api("/api/settings/llm").then((llm) => {
       llmCatalog = {
@@ -3796,9 +4553,9 @@ const render = {
       document.getElementById("llm-fallback-enabled").checked =
         llm.fallback_enabled !== false;
       renderFallbackOrder(llm);
-    });
+    }).catch(showSettingsLoadError);
 
-    api("/api/settings/llm/status").then(applyLLMProviderStatus);
+    api("/api/settings/llm/status").then(applyLLMProviderStatus).catch(showSettingsLoadError);
     refreshTelegramConnectStatus();
 
     api("/api/settings/autostart").then((autostart) => {
@@ -3809,7 +4566,7 @@ const render = {
       note.textContent = autostart.supported
         ? ""
         : "Не поддерживается на этой ОС.";
-    });
+    }).catch(showSettingsLoadError);
 
     api("/api/settings/daemon_service").then((svc) => {
       const toggle = document.getElementById("daemon-service-toggle");
@@ -3819,7 +4576,7 @@ const render = {
       note.textContent = svc.supported
         ? ""
         : "Не поддерживается на этой ОС (или в собранном приложении).";
-    });
+    }).catch(showSettingsLoadError);
 
     document.getElementById("limit-total").value =
       limits.total_daily_application_limit || "";
@@ -3832,6 +4589,7 @@ const render = {
     document.getElementById("limit-min-score").value = limits.job_min_score;
     document.getElementById("limit-suitability-score").value =
       limits.job_suitability_score;
+    updateFitThresholdPreview();
     document.getElementById("limit-history-retention").value = String(
       limits.application_retention_days || 0
     );
@@ -3866,7 +4624,7 @@ const render = {
         .llm_exhausted_today
         ? ""
         : "none";
-    });
+    }).catch(showSettingsLoadError);
 
     // Площадки — тем же списком, что на Главной; строка открывает ту же
     // шторку. Готовность (чего не хватает) — в тексте строки.
@@ -3910,9 +4668,11 @@ const render = {
     const unreadCount = conversations.filter((c) => c.unread).length;
     const navBadge = document.getElementById("telegram-unread-badge");
     if (unreadCount > 0) {
-      navBadge.textContent = String(unreadCount);
+      animateCountValue(navBadge, "telegram-unread", unreadCount);
       navBadge.style.display = "";
     } else {
+      shownCounts["telegram-unread"] = 0;
+      navBadge.textContent = "0";
       navBadge.style.display = "none";
     }
 
@@ -3925,6 +4685,7 @@ const render = {
       (c) => c.contact.toLowerCase() === activeTelegramContact.toLowerCase()
     )) {
       activeTelegramContact = null;
+      updateTelegramComposerState();
       telegramLoadedHistory = { contact: null, messages: [], hasMore: false };
       document.getElementById("tg-chat-panel").style.display = "none";
       document.getElementById("tg-chat-delete").hidden = true;
@@ -3935,14 +4696,17 @@ const render = {
     // сообщения одновременно ("диалогов нет" + "выберите один из них").
     const chatEmpty = document.getElementById("tg-chat-empty");
     if (!activeTelegramContact) {
+      const previousText = chatEmpty.textContent;
+      const wasVisible = chatEmpty.style.display !== "none";
       chatEmpty.textContent = conversations.length
         ? "Выберите диалог слева."
         : "Диалогов пока нет — появятся здесь, как только кто-то напишет.";
+      if (!wasVisible || previousText !== chatEmpty.textContent) animateTalkEmptyState();
     }
     renderTelegramConversationRows(conversations);
 
     if (activeTelegramContact) {
-      await openTelegramConversation(activeTelegramContact, false, true);
+      await openTelegramConversation(activeTelegramContact, false, true, true, false, true);
     }
   },
 
@@ -3951,11 +4715,26 @@ const render = {
     const params = new URLSearchParams({ lines: "300" });
     if (source) params.set("source", source);
     const pre = document.getElementById("log-output");
+    const errorPanel = document.getElementById("log-error");
+    const loading = document.getElementById("log-loading");
     if (!logsLoaded) {
-      pre.innerHTML = `<div class="skeleton" style="height:14px;width:90%;margin-bottom:8px"></div><div class="skeleton" style="height:14px;width:75%;margin-bottom:8px"></div><div class="skeleton" style="height:14px;width:85%"></div>`;
+      loading.hidden = false;
+      pre.hidden = true;
     }
 
-    const data = await api(`/api/logs?${params}`);
+    let data;
+    try {
+      data = await api(`/api/logs?${params}`);
+    } catch (err) {
+      renderRetryState(errorPanel, `Не удалось загрузить журнал: ${err.message}`, () => render.logs());
+      errorPanel.hidden = false;
+      pre.hidden = !logsLoaded;
+      loading.hidden = true;
+      return;
+    }
+    errorPanel.hidden = true;
+    loading.hidden = true;
+    pre.hidden = false;
     logsLoaded = true;
 
     // ponytail: тот же фикс — иначе pre.textContent сбрасывал
@@ -3979,7 +4758,8 @@ function renderTelegramConversationRows(conversations) {
   const list = document.getElementById("tg-conv-list");
   const query = document.getElementById("replies-filter-query")?.value.trim().toLowerCase() || "";
   const shown = query ? conversations.filter((c) =>
-    `${c.contact} ${c.last_message?.text || ""}`.toLowerCase().includes(query)
+    [c.contact, c.company, c.title, c.channel, c.last_message?.text]
+      .filter(Boolean).join(" ").toLowerCase().includes(query)
   ) : conversations;
   if (!shown.length) {
     list.innerHTML = `<p class="muted small">${query ? "Диалоги не найдены." : "Пока нет диалогов."}</p>`;
@@ -3988,12 +4768,12 @@ function renderTelegramConversationRows(conversations) {
   list.innerHTML = shown.map((c) => `
     <div class="conv-item${c.contact === activeTelegramContact ? " active" : ""}" data-contact="${escapeHtml(c.contact)}" role="button" tabindex="0">
       ${plogoHtml("telegram")}
-      <span class="conv-copy"><span class="conv-contact">${c.unread ? '<span class="conv-unread-dot"></span>' : ""}@${escapeHtml(c.contact)}</span>
-      <span class="conv-preview">${escapeHtml(c.last_message?.text || "")}</span></span>
+      <span class="conv-copy"><span class="conv-contact">${c.unread ? '<span class="conv-unread-dot"></span>' : ""}@${highlightText(c.contact, query)}</span>
+      <span class="conv-preview">${highlightText(c.last_message?.text || "", query)}</span></span>
       <small class="conv-time">${c.last_activity_at ? escapeHtml(fmtDay(c.last_activity_at)) : ""}</small>
     </div>`).join("");
   list.querySelectorAll(".conv-item").forEach((el) => {
-    el.addEventListener("click", () => openTelegramConversation(el.dataset.contact));
+    el.addEventListener("click", (event) => openTelegramConversation(el.dataset.contact, false, false, false, event.detail > 0));
     el.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
@@ -4060,7 +4840,17 @@ const INBOX_KIND = {
 let repliesKind = "";
 
 let selectedInboxIndex = -1;
+let selectedInboxKey = null;
 let talkEntries = [];
+
+function inboxEntryKey(entry) {
+  const identity = entry.external_id
+    ? `id:${entry.external_id}`
+    : entry.contact
+    ? `contact:${entry.contact}`
+    : `link:${entry.link || entry.company || entry.title || ""}`;
+  return `${entry.source || entry.channel || ""}|${identity}`;
+}
 
 function telegramConversationCount(conversations, inboxEntries) {
   const contacts = new Set();
@@ -4079,12 +4869,24 @@ function updateTalkListCount() {
   const conversations = telegramConversationCount(telegramConversationsCache, lastRepliesEntries);
   const otherReplies = lastRepliesEntries.filter((entry) => entry.channel !== "telegram_dm").length;
   const activePosts = tgPostsData.posts.filter((post) => !["hidden", "blocked"].includes(post.status)).length;
-  badge.textContent = String(talkListTab === "posts" ? (tgPostsData.total ?? tgPostsData.posts.length) : activePosts + conversations + otherReplies);
+  const count = talkListTab === "posts" ? (tgPostsData.total ?? tgPostsData.posts.length) : activePosts + conversations + otherReplies;
+  animateCountValue(badge, `talk-list-${talkListTab}`, count);
 }
 
-function renderRepliesRows() {
+function renderRepliesRows({ animateContent = false } = {}) {
   const list = document.getElementById("replies-rows");
   const query = document.getElementById("replies-filter-query").value.trim().toLowerCase();
+  const activeFilters = document.getElementById("replies-active-filters");
+  if (activeFilters) {
+    activeFilters.innerHTML = query
+      ? `<button type="button" class="active-filter-chip" data-clear-replies-query aria-label="Убрать фильтр Поиск: ${escapeHtml(query)}"><span>Поиск: ${escapeHtml(query)}</span><span aria-hidden="true">×</span></button>`
+      : "";
+    activeFilters.querySelector("[data-clear-replies-query]")?.addEventListener("click", (event) => {
+      document.getElementById("replies-filter-query").value = "";
+      renderRepliesRows({ animateContent: event.detail > 0 });
+      renderTelegramConversationRows(telegramConversationsCache);
+    });
+  }
   const groupOf = (e) => (INBOX_KIND[e.stage] || INBOX_KIND.replied).group;
   const counts = { interview: 0, replied: 0, rejected: 0, telegram: 0 };
   lastRepliesEntries.forEach((e) => {
@@ -4100,12 +4902,13 @@ function renderRepliesRows() {
   ];
   const chipBox = document.getElementById("replies-kind");
   chipBox.innerHTML = chips
-    .map(([k, label, n]) => `<button type="button" class="chip${k === repliesKind ? " active" : ""}" data-kind="${k}" aria-pressed="${k === repliesKind}">${label} <b>${n}</b></button>`)
+    .map(([k, label, n]) => `<button type="button" class="chip${k === repliesKind ? " active" : ""}" data-kind="${k}" aria-pressed="${k === repliesKind}">${label} <b data-count="replies-${k}">${n}</b></button>`)
     .join("");
+  animateCounts(chipBox);
   chipBox.querySelectorAll("[data-kind]").forEach((b) =>
-    b.addEventListener("click", () => {
+    b.addEventListener("click", (event) => {
       repliesKind = b.dataset.kind;
-      renderRepliesRows();
+      renderRepliesRows({ animateContent: event.detail > 0 });
       lastTgPostsSnapshot = "";
       renderTelegramPosts();
     })
@@ -4116,8 +4919,12 @@ function renderRepliesRows() {
       if (e.channel !== "telegram_dm") return false;
     } else if (repliesKind ? groupOf(e) !== repliesKind : groupOf(e) === "rejected") return false;
     if (!query) return true;
-    return [e.company, e.title, e.text, e.contact].filter(Boolean).some((v) => v.toLowerCase().includes(query));
+    return [e.company, e.title, e.text, e.contact, e.source, e.label, e.link]
+      .filter(Boolean).some((value) => String(value).toLowerCase().includes(query));
   });
+  const nextStageByKey = new Map(lastRepliesEntries.map((entry) => [inboxEntryKey(entry), entry.stage || ""]));
+  const changedStages = new Set([...nextStageByKey].filter(([key, stage]) => lastInboxStageByKey.has(key) && lastInboxStageByKey.get(key) !== stage).map(([key]) => key));
+  lastInboxStageByKey = nextStageByKey;
   talkEntries = entries;
   if (!entries.length) {
     list.innerHTML = "";
@@ -4136,19 +4943,39 @@ function renderRepliesRows() {
     .map((e, i) => {
       const kind = INBOX_KIND[e.stage] || INBOX_KIND.replied;
       const preview = e.channel === "telegram_dm" || e.channel === "email" ? e.text : e.title;
-      return `<button type="button" class="row talk-row inbox-${kind.group}${e.unread ? " is-unread" : ""}${i === selectedInboxIndex ? " is-selected" : ""}" data-inbox-index="${i}">
+      return `<button type="button" class="row talk-row inbox-${kind.group}${e.unread ? " is-unread" : ""}${inboxEntryKey(e) === selectedInboxKey ? " is-selected" : ""}" data-inbox-index="${i}">
         ${logo(e)}
         <span class="row-main">
-          <span class="talk-row-top"><span class="row-title">${escapeHtml(e.company || (e.contact ? "@" + e.contact : "—"))}</span><span class="muted small nowrap">${fmtDay(e.at)}</span></span>
-          <span class="row-sub"><span class="talk-kind kind-${kind.group}">${escapeHtml(kind.title)}</span>${e.unread ? `<span class="tab-badge">новое</span>` : ""}${e.draft ? `<span class="stage-tag">черновик готов</span>` : ""}</span>
-          <span class="talk-preview small muted">${escapeHtml(truncate(preview || where(e), 110))}</span>
+          <span class="talk-row-top"><span class="row-title">${highlightText(e.company || (e.contact ? "@" + e.contact : "—"), query)}</span><span class="muted small nowrap">${fmtDay(e.at)}</span></span>
+          <span class="row-sub"><span class="talk-kind kind-${kind.group}${changedStages.has(inboxEntryKey(e)) ? " status-changed" : ""}">${escapeHtml(kind.title)}</span>${e.unread ? `<span class="tab-badge">новое</span>` : ""}${e.draft ? `<span class="stage-tag">черновик готов</span>` : ""}</span>
+          <span class="talk-preview small muted">${highlightText(truncate(preview || where(e), 110), query)}</span>
         </span>
       </button>`;
     })
     .join("");
+  if (animateContent && !REDUCE_MOTION) {
+    list.classList.remove("talk-list-content-arrive");
+    void list.offsetWidth;
+    list.classList.add("talk-list-content-arrive");
+    list.addEventListener("animationend", (event) => {
+      if (event.target === list) list.classList.remove("talk-list-content-arrive");
+    }, { once: true });
+  }
   list.querySelectorAll("[data-inbox-index]").forEach((btn) =>
-    btn.addEventListener("click", () => selectInboxItem(Number(btn.dataset.inboxIndex)))
+    btn.addEventListener("click", (event) => selectInboxItem(Number(btn.dataset.inboxIndex), event.detail > 0))
   );
+}
+
+function talkTimelineHtml(entry) {
+  const events = [];
+  if (entry.applied_at) events.push({ label: "Отклик отправлен", at: entry.applied_at });
+  if (entry.sent_at) events.push({ label: entry.channel === "email" ? "Письмо отправлено" : "Сообщение отправлено", at: entry.sent_at });
+  if (entry.replied_at) events.push({ label: "Ответ работодателя", at: entry.replied_at });
+  else if (entry.stage && (entry.state_at || (entry.channel !== "email" && entry.at))) events.push({ label: (INBOX_KIND[entry.stage] || INBOX_KIND.replied).title, at: entry.state_at || entry.at });
+  else if (entry.at) events.push({ label: "Последнее сообщение", at: entry.at });
+  events.sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0));
+  if (!events.length) return "";
+  return `<section class="talk-timeline-wrap" aria-label="История событий"><strong class="field-title">История</strong><ol class="talk-timeline">${events.map((event, index) => `<li style="--timeline-index:${index}"><span class="talk-timeline-dot" aria-hidden="true"></span><span><b>${escapeHtml(event.label)}</b><time datetime="${escapeHtml(event.at)}">${escapeHtml(fmtTime(event.at))}</time></span></li>`).join("")}</ol></section>`;
 }
 
 function talkContextHtml(e) {
@@ -4158,6 +4985,7 @@ function talkContextHtml(e) {
   return `<div class="field-block"><div class="field-title">${escapeHtml(e.company || "—")}</div>
       <div class="field-hint">${escapeHtml(e.title || "")}</div>
       <div class="field-hint">${where}${e.label ? " · " + escapeHtml(e.label) : ""}</div></div>
+    ${talkTimelineHtml(e)}
     ${stage}
     <div class="talk-actions">
       ${e.channel === "email" && e.link ? `<a class="btn btn-small" href="${escapeHtml(e.link)}" target="_blank" rel="noopener">Открыть в Gmail ↗</a>` : ""}
@@ -4169,10 +4997,24 @@ function talkContextHtml(e) {
     </div>`;
 }
 
-function showTalkContext(e) {
+function animateTalkTimeline(body) {
+  if (REDUCE_MOTION || !body?.querySelector(".talk-timeline li")) return;
+  const items = Array.from(body.querySelectorAll(".talk-timeline li"));
+  items.forEach((item) => item.classList.remove("is-entering"));
+  void body.offsetWidth;
+  const generation = String((Number(body.dataset.motionGeneration) || 0) + 1);
+  body.dataset.motionGeneration = generation;
+  items.forEach((item) => item.classList.add("is-entering"));
+  items[items.length - 1]?.addEventListener("animationend", () => {
+    if (body.dataset.motionGeneration === generation) items.forEach((item) => item.classList.remove("is-entering"));
+  }, { once: true });
+}
+
+function showTalkContext(e, animate = false) {
   const body = document.getElementById("talk-context-body");
   body.classList.remove("muted", "small");
   body.innerHTML = e ? talkContextHtml(e) : "";
+  if (animate) animateTalkTimeline(body);
   bindStageSelects(body);
   body.querySelectorAll("[data-talk-action]").forEach((btn) =>
     btn.addEventListener("click", async () => {
@@ -4201,17 +5043,20 @@ function showTalkContext(e) {
   document.getElementById("tg-chat-delete").hidden = !(e && e.channel === "telegram_dm") && !activeTelegramContact;
 }
 
-function selectInboxItem(i) {
+function selectInboxItem(i, animatePane = false) {
   const e = talkEntries[i];
   if (!e) return;
   selectedInboxIndex = i;
+  selectedInboxKey = inboxEntryKey(e);
+  setTalkMobilePane("thread", animatePane);
   document.querySelectorAll("#replies-rows .talk-row").forEach((r, n) => r.classList.toggle("is-selected", n === i));
-  showTalkContext(e);
+  showTalkContext(e, true);
   if (e.channel === "telegram_dm") {
-    openTelegramConversation(e.contact, true);
+    openTelegramConversation(e.contact, true, false, false, animatePane);
     return;
   }
   activeTelegramContact = null;
+  updateTelegramComposerState();
   closeTelegramPost();
   document.querySelectorAll("#tg-conv-list .conv-item").forEach((el) => el.classList.remove("active"));
   document.getElementById("tg-chat-panel").style.display = "none";
@@ -4219,28 +5064,36 @@ function selectInboxItem(i) {
   document.getElementById("tg-chat-delete").hidden = true;
   const kind = INBOX_KIND[e.stage] || INBOX_KIND.replied;
   const panel = document.getElementById("talk-item-panel");
-  panel.hidden = false;
+  setTalkMotionVisibility(panel, true, animatePane);
   panel.innerHTML = `<div class="thread-head"><h3 class="m0">${escapeHtml(kind.title)}</h3><span class="muted small">${fmtTime(e.at)}</span></div>
     <div class="field-hint">${escapeHtml([e.company, e.title].filter(Boolean).join(" — "))}</div>
     ${e.text ? `<div class="chat-bubble in">${escapeHtml(e.text)}</div>` : `<div class="letter-text muted">Текст ответа — на сайте площадки. Этап выставлен по статусу отклика.</div>`}
     ${e.draft ? `<div class="fix is-warn"><span class="dot warn"></span><div class="fix-body">Черновик ответа готов — вверху, в «Ждут вашего решения».</div></div>` : ""}`;
 }
 
-async function openTelegramConversation(contact, fromInbox = false, keepTab = false) {
+async function openTelegramConversation(contact, fromInbox = false, keepTab = false, preserveScroll = false, animatePane = false, preservePane = false) {
   if (!keepTab) setTalkListTab("chats", false);
-  if (activeTelegramContact !== contact) {
+  if (!preservePane) setTalkMobilePane("thread", animatePane);
+  const contactChanged = activeTelegramContact !== contact;
+  if (contactChanged) {
     document.getElementById("tg-chat-suggestions").innerHTML = "";
     document.getElementById("tg-chat-input").value = "";
+    const chatStatus = document.getElementById("tg-chat-status");
+    chatStatus.textContent = "";
+    chatStatus.classList.remove("is-error", "is-success", "is-sending");
+    updateTelegramNewMessagesIndicator(0);
     telegramLoadedHistory = { contact, messages: [], hasMore: false };
   }
   activeTelegramContact = contact;
+  updateTelegramComposerState();
   closeTelegramPost();
   document.getElementById("talk-item-panel").hidden = true;
   if (!fromInbox) {
     selectedInboxIndex = -1;
+    selectedInboxKey = null;
     document.querySelectorAll("#replies-rows .talk-row").forEach((r) => r.classList.remove("is-selected"));
     const match = lastRepliesEntries.find((x) => x.channel === "telegram_dm" && x.contact === contact);
-    if (match) showTalkContext(match);
+    if (match) showTalkContext(match, contactChanged);
     else {
       const body = document.getElementById("talk-context-body");
       body.innerHTML = `<div class="field-block"><div class="field-title">@${escapeHtml(contact)}</div><div class="field-hint">Telegram · ответов пока нет</div></div><div class="talk-actions"><a class="btn btn-small" href="https://t.me/${encodeURIComponent(contact)}" target="_blank" rel="noopener">Открыть в Telegram ↗</a>${blockContactButtonHtml(contact)}</div>`;
@@ -4253,26 +5106,47 @@ async function openTelegramConversation(contact, fromInbox = false, keepTab = fa
       el.classList.toggle("active", el.dataset.contact === contact)
     );
 
+  const messages = document.getElementById("tg-chat-messages");
+  const previouslyLoadedMessages = telegramLoadedHistory.contact === contact
+    ? telegramLoadedHistory.messages
+    : [];
+  const previousScrollTop = messages.scrollTop;
+  const stickToBottom = !preserveScroll || shouldStickToBottom(messages);
   const conv = await api(`/api/telegram/conversations/${contact}`);
   document.getElementById("tg-chat-empty").style.display = "none";
   document.getElementById("tg-chat-panel").style.display = "";
+  if (contactChanged && animatePane) animateConversationChange(document.getElementById("tg-chat-panel"));
   document.getElementById("tg-chat-contact").textContent = `@${contact}`;
 
-  const messages = document.getElementById("tg-chat-messages");
   const older = document.getElementById("tg-chat-older");
   older.hidden = true;
-  const bubbles = (list) =>
-    list
-      .map((m) => `<div class="chat-bubble ${m.direction === "out" ? "out" : "in"}">${escapeHtml(m.text || "")}<span class="chat-bubble-time">${formatChatTime(m.at)}</span></div>`)
-      .join("");
-  messages.innerHTML = bubbles(conv.messages);
-  messages.scrollTop = messages.scrollHeight;
+  const visibleMessages = previouslyLoadedMessages.length
+    ? mergeTelegramMessages(previouslyLoadedMessages, conv.messages)
+    : conv.messages;
+  const newlyReceivedKeys = preserveScroll
+    ? newerTelegramMessageKeys(previouslyLoadedMessages, conv.messages)
+    : new Set();
+  syncTelegramMessageBubbles(messages, visibleMessages, newlyReceivedKeys);
+  telegramLoadedHistory = {
+    contact,
+    messages: visibleMessages,
+    hasMore: telegramLoadedHistory.contact === contact && telegramLoadedHistory.hasMore,
+  };
+  if (stickToBottom) messages.scrollTop = messages.scrollHeight;
+  else messages.scrollTop = previousScrollTop;
+  const newerCount = countNewerTelegramMessages(previouslyLoadedMessages, conv.messages);
+  updateTelegramNewMessagesIndicator(stickToBottom ? 0 : newerCount, preserveScroll && !stickToBottom && newerCount > 0);
   // Полная переписка из самого Telegram — и то, что писали через бота, и
   // руками в Telegram (журнал приложения знает только своё). Есть, пока
   // работает шлюз; иначе остаётся журнал приложения.
   api(`/api/telegram/history/${encodeURIComponent(contact)}`)
     .then((h) => {
       if (activeTelegramContact !== contact || h.source !== "telegram") return;
+      const previouslyKnownMessages = telegramLoadedHistory.contact === contact
+        ? telegramLoadedHistory.messages
+        : [];
+      const newMessageKeys = newerTelegramMessageKeys(previouslyKnownMessages, h.messages);
+      const newMessageCount = newMessageKeys.size;
       const freshIds = new Set(h.messages.map((m) => m.id));
       const old = telegramLoadedHistory.contact === contact
         ? telegramLoadedHistory.messages.filter((m) => !freshIds.has(m.id) && m.id < h.messages[0]?.id)
@@ -4283,8 +5157,12 @@ async function openTelegramConversation(contact, fromInbox = false, keepTab = fa
         hasMore: old.length ? telegramLoadedHistory.hasMore : h.has_more,
       };
       older.hidden = !telegramLoadedHistory.hasMore;
-      messages.innerHTML = bubbles(telegramLoadedHistory.messages);
-      messages.scrollTop = messages.scrollHeight;
+      const historyStickToBottom = !preserveScroll || shouldStickToBottom(messages);
+      const historyScrollTop = messages.scrollTop;
+      syncTelegramMessageBubbles(messages, telegramLoadedHistory.messages, newMessageKeys);
+      if (historyStickToBottom) messages.scrollTop = messages.scrollHeight;
+      else messages.scrollTop = historyScrollTop;
+      updateTelegramNewMessagesIndicator(historyStickToBottom ? 0 : newMessageCount, preserveScroll && !historyStickToBottom && newMessageCount > 0);
     })
     .catch(() => {});
 
@@ -4714,8 +5592,8 @@ function updateProviderVisibility() {
 // Тот же концентрический мотив, что в лого (brand-mark) — приглушённый
 // и без ядра, чтобы empty-state читался как "эхо" бренда, а не
 // дженерик-иконка пустой коробки, как раньше.
-function emptyStateHtml(message) {
-  return `<div class="empty-state">
+function emptyStateHtml(message, animate = false) {
+  return `<div class="empty-state${animate && !REDUCE_MOTION ? " empty-state-enter" : ""}">
     <svg viewBox="0 0 40 40" fill="none" width="36" height="36">
       <circle cx="20" cy="20" r="17" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 4" opacity="0.3"/>
       <circle cx="20" cy="20" r="10" stroke="currentColor" stroke-width="1.6" opacity="0.35"/>
@@ -4724,12 +5602,58 @@ function emptyStateHtml(message) {
   </div>`;
 }
 
+function renderRetryState(container, message, retry, elementName = "div") {
+  if (!container) return;
+  const state = document.createElement(elementName);
+  state.className = "inline-retry";
+  state.setAttribute("role", "alert");
+  const text = document.createElement("span");
+  text.textContent = message || "Не удалось загрузить данные.";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "btn btn-small";
+  button.textContent = "Повторить";
+  button.addEventListener("click", async () => {
+    try {
+      await withButtonLoading(button, retry);
+    } catch (err) {
+      if (text.isConnected) text.textContent = `Повторить не удалось: ${err.message}`;
+    }
+  });
+  state.append(text, button);
+  container.replaceChildren(state);
+}
+
+function showSettingsLoadError(error) {
+  const container = document.getElementById("settings-load-error");
+  if (!container) return;
+  container.hidden = false;
+  renderRetryState(container, `Не удалось загрузить часть настроек: ${error.message}`, () => render.settings());
+}
+
 // Всплывающие сообщения этого окна — в «Уведомлениях» (вкладка «В окне»):
 // пропустили уведомление — его можно перечитать.
 const toastLog = [];
 function logToast(message, type) {
   toastLog.unshift({ at: new Date().toISOString(), text: String(message), kind: type === "error" ? "failure" : "activity", status: "window" });
   toastLog.length = Math.min(toastLog.length, 50);
+}
+
+function revealToast(el) {
+  if (REDUCE_MOTION) {
+    el.classList.add("is-visible");
+    return;
+  }
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (el.isConnected) el.classList.add("is-visible");
+  }));
+}
+
+function dismissToast(el) {
+  if (!el?.isConnected) return;
+  const finish = () => el.remove();
+  el.classList.add("is-closing");
+  setTimeout(finish, REDUCE_MOTION ? 30 : 220);
 }
 
 function showToast(message, type = "info", duration = 3500) {
@@ -4741,16 +5665,8 @@ function showToast(message, type = "info", duration = 3500) {
   el.style.setProperty("--toast-duration", `${Math.max(1, duration)}ms`);
   el.innerHTML = `<span class="toast-dot"></span><span>${escapeHtml(message)}</span>`;
   container.appendChild(el);
-  if (window.gsap && !REDUCE_MOTION) {
-    gsap.fromTo(el, { opacity: 0, x: 24 }, { opacity: 1, x: 0, duration: 0.3, ease: "power2.out" });
-  }
-  setTimeout(() => {
-    if (window.gsap && !REDUCE_MOTION) {
-      gsap.to(el, { opacity: 0, x: 24, duration: 0.25, ease: "power2.in", onComplete: () => el.remove() });
-    } else {
-      el.remove();
-    }
-  }, duration);
+  revealToast(el);
+  setTimeout(() => dismissToast(el), duration);
 }
 
 // «Сохранено» с кнопкой «Отменить»: изменение уже записано, отмена
@@ -4764,10 +5680,11 @@ function showSavedToast(message, undo = null, duration = 6000) {
   el.style.setProperty("--toast-duration", `${Math.max(1, duration)}ms`);
   el.innerHTML = `<svg class="toast-check" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>${escapeHtml(message)}</span>${undo ? `<button type="button" class="toast-action">Отменить</button>` : ""}`;
   container.appendChild(el);
-  const timer = setTimeout(() => el.remove(), duration);
+  revealToast(el);
+  const timer = setTimeout(() => dismissToast(el), duration);
   el.querySelector(".toast-action")?.addEventListener("click", async () => {
     clearTimeout(timer);
-    el.remove();
+    dismissToast(el);
     try {
       await undo();
     } catch (err) {
@@ -4789,9 +5706,9 @@ function moveTabIndicator(indicator, btn) {
   const btnRect = btn.getBoundingClientRect();
   const x = btnRect.left - parentRect.left;
   const y = btnRect.top - parentRect.top;
-  indicator.style.transform = `translate(${x}px, ${y}px)`;
-  indicator.style.width = `${btnRect.width}px`;
-  indicator.style.height = `${btnRect.height}px`;
+  const scaleX = parentRect.width ? btnRect.width / parentRect.width : 1;
+  const scaleY = parentRect.height ? btnRect.height / parentRect.height : 1;
+  indicator.style.transform = `translate(${x}px, ${y}px) scale(${scaleX}, ${scaleY})`;
   indicator.style.opacity = "1";
 }
 
@@ -5061,15 +5978,55 @@ function settingsSearchIndex() {
   return items;
 }
 
+let settingsSearchActiveIndex = 0;
+
 function hideSettingsSearch() {
   const box = document.getElementById("settings-search-results");
   if (!box || box.hidden) return;
   box.hidden = true;
   document.querySelector(".settings-content")?.classList.remove("is-searching");
+  const input = document.getElementById("settings-find-input");
+  input?.setAttribute("aria-expanded", "false");
+  input?.removeAttribute("aria-activedescendant");
+}
+
+function updateSettingsSearchActive() {
+  const list = document.getElementById("settings-search-list");
+  const input = document.getElementById("settings-find-input");
+  if (!list || !input) return;
+  const options = [...list.querySelectorAll('[role="option"]')];
+  options.forEach((option, index) => {
+    const active = index === settingsSearchActiveIndex;
+    option.setAttribute("aria-selected", String(active));
+    if (active) input.setAttribute("aria-activedescendant", option.id);
+  });
+  if (!options.length) input.removeAttribute("aria-activedescendant");
+  options[settingsSearchActiveIndex]?.scrollIntoView({ block: "nearest" });
+}
+
+function openSettingsSearchHit(hitIndex) {
+  const items = document.getElementById("settings-search-list")?.__items || [];
+  const item = items[hitIndex];
+  if (!item) return;
+  const input = document.getElementById("settings-find-input");
+  input.value = "";
+  hideSettingsSearch();
+  switchSettingsTab(item.pane);
+  let parent = item.field.parentElement;
+  while (parent) {
+    if (parent.tagName === "DETAILS") parent.open = true;
+    parent = parent.parentElement;
+  }
+  item.field.scrollIntoView({ block: "center", behavior: REDUCE_MOTION ? "auto" : "smooth" });
+  item.field.classList.remove("field-found");
+  void item.field.offsetWidth;
+  item.field.classList.add("field-found");
+  item.field.querySelector("input, select, textarea, button")?.focus({ preventScroll: true });
 }
 
 function renderSettingsSearch(query) {
   const box = document.getElementById("settings-search-results");
+  const input = document.getElementById("settings-find-input");
   const q = query.trim().toLowerCase();
   if (!q) {
     hideSettingsSearch();
@@ -5081,29 +6038,29 @@ function renderSettingsSearch(query) {
     return words.every((w) => text.includes(w));
   });
   box.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+  settingsSearchActiveIndex = 0;
   document.querySelector(".settings-content").classList.add("is-searching");
   box.innerHTML = `<div class="card-head"><h3>${found.length ? `Найдено настроек: ${found.length}` : "Ничего не нашлось"}</h3><span class="muted small">${found.length ? "нажмите — откроется раздел, и поле подсветится" : "попробуйте «лимит», «резюме» или «Telegram»"}</span></div>
-    <div class="settings-hits">${found
+    <div class="settings-hits" id="settings-search-list" role="listbox" aria-label="Найденные настройки">${found
       .slice(0, 40)
-      .map((it, i) => `<button type="button" class="row settings-hit" data-hit="${i}"><span class="row-main"><span class="row-title">${escapeHtml(it.title)}</span><span class="row-sub">${escapeHtml(it.path)}${it.hint ? " · " + escapeHtml(truncate(it.hint, 90)) : ""}</span></span>${CHEVRON_SVG}</button>`)
+      .map((it, i) => {
+        const meta = `${it.path}${it.hint ? " · " + truncate(it.hint, 90) : ""}`;
+        return `<div id="settings-option-${i}" class="row settings-hit" role="option" aria-selected="${i === 0}" data-hit="${i}" tabindex="-1"><span class="row-main"><span class="row-title">${highlightText(it.title, q)}</span><span class="row-sub">${highlightText(meta, q)}</span></span>${CHEVRON_SVG}</div>`;
+      })
       .join("")}</div>`;
-  box.querySelectorAll("[data-hit]").forEach((b) =>
-    b.addEventListener("click", () => {
-      const it = found[Number(b.dataset.hit)];
-      document.getElementById("settings-find-input").value = "";
-      switchSettingsTab(it.pane);
-      let parent = it.field.parentElement;
-      while (parent) {
-        if (parent.tagName === "DETAILS") parent.open = true;
-        parent = parent.parentElement;
+  const list = document.getElementById("settings-search-list");
+  list.__items = found.slice(0, 40);
+  list.querySelectorAll("[data-hit]").forEach((option) => {
+    option.addEventListener("click", () => openSettingsSearchHit(Number(option.dataset.hit)));
+    option.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openSettingsSearchHit(Number(option.dataset.hit));
       }
-      it.field.scrollIntoView({ block: "center", behavior: REDUCE_MOTION ? "auto" : "smooth" });
-      it.field.classList.remove("field-found");
-      void it.field.offsetWidth;
-      it.field.classList.add("field-found");
-      it.field.querySelector("input, select, textarea, button")?.focus({ preventScroll: true });
-    })
-  );
+    });
+  });
+  updateSettingsSearchActive();
 }
 
 function initSettingsSearch() {
@@ -5114,8 +6071,16 @@ function initSettingsSearch() {
     if (e.key === "Escape") {
       input.value = "";
       hideSettingsSearch();
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      const items = document.getElementById("settings-search-list")?.__items || [];
+      if (!items.length) return;
+      e.preventDefault();
+      const direction = e.key === "ArrowDown" ? 1 : -1;
+      settingsSearchActiveIndex = (settingsSearchActiveIndex + direction + items.length) % items.length;
+      updateSettingsSearchActive();
     } else if (e.key === "Enter") {
-      document.querySelector("#settings-search-results [data-hit]")?.click();
+      e.preventDefault();
+      openSettingsSearchHit(settingsSearchActiveIndex);
     }
   });
 }
@@ -5316,7 +6281,7 @@ function renderCommandResults(query) {
   results.innerHTML = items
     .map(
       (it, i) =>
-        `<div id="command-option-${i}" class="command-item${i === 0 ? " active" : ""}" role="option" aria-selected="${i === 0}" data-index="${i}"><span>${escapeHtml(it.label)}</span><span class="muted">${escapeHtml(it.hint)}</span></div>`
+        `<div id="command-option-${i}" class="command-item${i === 0 ? " active" : ""}" role="option" aria-selected="${i === 0}" data-index="${i}"><span>${highlightText(it.label, query)}</span><span class="muted">${escapeHtml(it.hint)}</span></div>`
     )
     .join("");
   document.getElementById("command-input").setAttribute("aria-activedescendant", "command-option-0");
@@ -5385,6 +6350,7 @@ function releaseFocusTrap(container) {
 function openCommandPalette() {
   const overlay = document.getElementById("command-overlay");
   const input = document.getElementById("command-input");
+  overlay.classList.add("is-instant");
   overlay.style.display = "flex";
   input.setAttribute("aria-expanded", "true");
   input.value = "";
@@ -5429,7 +6395,6 @@ function showConfirm(message) {
     };
     const onKey = (e) => {
       if (e.key === "Escape") cleanup(false);
-      if (e.key === "Enter") cleanup(true);
     };
     okBtn.addEventListener("click", onOk);
     cancelBtn.addEventListener("click", onCancel);
@@ -5501,13 +6466,25 @@ function initCommandPalette() {
     .addEventListener("click", closePlatformDrawer);
 }
 
+let drawerCloseTimer = null;
+
 function closePlatformDrawer() {
   const overlay = document.getElementById("platform-drawer-overlay");
   if (overlay.style.display === "none") return;
-  overlay.style.display = "none";
   openDrawerSource = null;
   drawerDirty = false;
   releaseFocusTrap(document.getElementById("platform-drawer"));
+  if (REDUCE_MOTION) {
+    overlay.style.display = "none";
+    overlay.classList.remove("is-closing");
+    return;
+  }
+  overlay.classList.add("is-closing");
+  clearTimeout(drawerCloseTimer);
+  drawerCloseTimer = setTimeout(() => {
+    overlay.style.display = "none";
+    overlay.classList.remove("is-closing");
+  }, 240);
 }
 
 function isPlatformDrawerOpen() {
@@ -5520,6 +6497,13 @@ let historyChip = "all";
 let historyRows = [];
 let historySelected = -1;
 let jobThresholds = null;
+let lastHistoryViewKey = "";
+function historyEntryKey(entry) {
+  return `${entry.source || ""}|${entry.id ?? entry.external_id ?? entry.link ?? entry.url ?? `${entry.company || ""}|${entry.title || ""}`}`;
+}
+function historyStatusSignature(entry) {
+  return `${entry.status || ""}|${entry.effective_stage || ""}|${entry.applied_at || ""}`;
+}
 const isSkipped = (e) => (e.status || "").startsWith("skipped");
 const HISTORY_CHIPS = {
   all: { label: "Все", test: (e) => e.effective_stage !== "rejected" },
@@ -5541,12 +6525,12 @@ function renderHistoryChips(all) {
     })
     .join("");
   box.querySelectorAll("[data-chip]").forEach((b) =>
-    b.addEventListener("click", () => {
+    b.addEventListener("click", (event) => {
       historyChip = b.dataset.chip;
       // Старые фильтры — для совместимости со ссылками на «Вакансии».
       document.getElementById("filter-show-rejected").checked = historyChip === "rejected";
       lastHistorySnapshot = "";
-      render.history();
+      render.history({ animateRows: event.detail > 0 });
     })
   );
 }
@@ -5851,13 +6835,32 @@ async function handleJobAction(btn) {
   }
 }
 
-function selectHistoryRow(i, open = false) {
+let historyTargetHighlightTimer = null;
+
+function highlightHistoryTarget(row) {
+  const previous = document.querySelector("#history-rows .job-row.is-target-highlight");
+  if (historyTargetHighlightTimer) clearTimeout(historyTargetHighlightTimer);
+  previous?.classList.remove("is-target-highlight");
+  if (REDUCE_MOTION || !row) return;
+  row.classList.remove("is-target-highlight");
+  void row.offsetWidth;
+  row.classList.add("is-target-highlight");
+  historyTargetHighlightTimer = setTimeout(() => {
+    row.classList.remove("is-target-highlight");
+    historyTargetHighlightTimer = null;
+  }, 900);
+}
+
+function selectHistoryRow(i, open = false, animate = false) {
   const rows = document.querySelectorAll("#history-rows .job-row");
   if (!rows.length) return;
   historySelected = Math.max(0, Math.min(rows.length - 1, i));
   rows.forEach((r, n) => r.classList.toggle("is-selected", n === historySelected));
   rows[historySelected].querySelector(".job-row-open")?.focus({ preventScroll: false });
-  if (open) openJobDrawer(historyRows[historySelected]);
+  if (open) {
+    if (animate) highlightHistoryTarget(rows[historySelected]);
+    openJobDrawer(historyRows[historySelected]);
+  }
 }
 
 function initJobsView() {
@@ -5865,7 +6868,7 @@ function initJobsView() {
   tbody.addEventListener("click", (ev) => {
     const row = ev.target.closest(".job-row");
     if (!row || ev.target.closest("a")) return;
-    selectHistoryRow(Number(row.dataset.rowIndex), true);
+    selectHistoryRow(Number(row.dataset.rowIndex), true, ev.detail > 0);
   });
   document.getElementById("platform-drawer").addEventListener("click", (ev) => {
     const btn = ev.target.closest("[data-job-action]");
@@ -5884,7 +6887,7 @@ function initJobsView() {
   ["filter-source"].forEach((id) =>
     document.getElementById(id).addEventListener("change", () => {
       lastHistorySnapshot = "";
-      render.history();
+      render.history({ animateRows: shouldAnimateNavigation() });
     })
   );
   let qTimer = null;
@@ -5931,7 +6934,7 @@ function rowActionsHtml(e, i) {
 // клик глушит propagation — иначе он же переключал бы разворот карточки.
 function decisionCardHtml(item) {
   return `
-    <details class="hr-draft" data-draft-code="${escapeHtml(item.code)}">
+    <details class="hr-draft${item.animate ? " hr-draft-enter" : ""}" data-draft-code="${escapeHtml(item.code)}">
       <summary>
         <div class="hr-draft-summary-text">
           <div class="muted small">${item.headlineHtml}</div>
@@ -5999,13 +7002,16 @@ async function renderDraftsQueue() {
   const el = document.getElementById("drafts-queue");
   const drafts = await api("/api/hr-drafts");
   if (!drafts.length) {
+    lastDraftCodes = new Set();
     el.style.display = "none";
     return;
   }
   const KIND = { reply: "Ответ HR", follow_up: "Напоминание", email: "Письмо HR" };
   el.style.display = "";
+  const currentCodes = new Set(drafts.map((draft) => String(draft.code)));
   const items = drafts.map((d) => ({
     code: d.code,
+    animate: lastDraftCodes !== null && !lastDraftCodes.has(String(d.code)),
     text: d.text,
     rows: 4,
     sendLabel: "Отправить",
@@ -6031,6 +7037,7 @@ async function renderDraftsQueue() {
       await api(`/api/hr-drafts/${d.code}/skip`, { method: "POST" });
     },
   }));
+  lastDraftCodes = currentCodes;
   el.innerHTML = `
     <div class="hr-draft-queue-head">
       <h3 class="m0"><span class="dot warn"></span> Ждут вашего «Отправить» · ${drafts.length}</h3>
@@ -6059,6 +7066,7 @@ async function renderHhRemindersQueue() {
     return;
   }
   if (!reminders.length) {
+    lastHhReminderCodes = new Set();
     el.style.display = hhReminderBatchSummary ? "" : "none";
     document.getElementById("hh-reminders-list").innerHTML = hhReminderBatchSummary
       ? `<p class="muted small" role="status">${escapeHtml(hhReminderBatchSummary)}</p>`
@@ -6067,8 +7075,10 @@ async function renderHhRemindersQueue() {
   }
   el.style.display = "";
   document.getElementById("hh-reminders-count").textContent = `· ${reminders.length} ${plural(reminders.length, "отклик", "отклика", "откликов")}`;
+  const currentCodes = new Set(reminders.map((reminder) => String(reminder.external_id)));
   const items = reminders.map((r) => ({
     code: r.external_id,
+    animate: lastHhReminderCodes !== null && !lastHhReminderCodes.has(String(r.external_id)),
     text: r.text,
     rows: 3,
     sendLabel: "Напомнить",
@@ -6084,6 +7094,7 @@ async function renderHhRemindersQueue() {
     },
     skip: null,
   }));
+  lastHhReminderCodes = currentCodes;
   document.getElementById("hh-reminders-list").innerHTML = `
     <div class="hr-draft-queue-head">
       <span></span>
@@ -6188,6 +7199,7 @@ async function loadOutreachSettings() {
 
 async function saveOutreachSettings() {
   const status = document.getElementById("outreach-save-status");
+  const button = document.getElementById("outreach-save");
   const num = (id) => parseInt(document.getElementById(id).value, 10);
   const body = {
     email_address: document.getElementById("outreach-email").value.trim(),
@@ -6212,14 +7224,22 @@ async function saveOutreachSettings() {
   if (password) body.email_app_password = password;
   const hunter = document.getElementById("outreach-hunter").value.trim();
   if (hunter) body.hunter_api_key = hunter;
-  try {
-    await api("/api/settings/outreach", { method: "POST", body: JSON.stringify(body) });
-    document.getElementById("outreach-hunter").value = "";
-    status.textContent = "Сохранено";
-    loadOutreachSettings();
-  } catch (err) {
-    status.textContent = err.message;
-  }
+  status.textContent = "Сохранение…";
+  let saved = false;
+  await withButtonLoading(button, async () => {
+    try {
+      await api("/api/settings/outreach", { method: "POST", body: JSON.stringify(body) });
+      document.getElementById("outreach-hunter").value = "";
+      status.textContent = "Сохранено";
+      showToast("Настройки почты сохранены", "success");
+      await loadOutreachSettings();
+      saved = true;
+    } catch (err) {
+      status.textContent = `Не удалось сохранить: ${err.message.replace(/^\d+: /, "")}`;
+      showToast(status.textContent, "error");
+    }
+  });
+  return saved;
 }
 
 // Что бот делает прямо сейчас — видно с любой страницы, клик ведёт туда.
@@ -6271,7 +7291,7 @@ function renderAutoAll(status) {
     : "ни одна площадка не включена";
   box.onchange = async () => {
     const enable = box.checked;
-    if (enable && !confirm(`Бот начнёт сам отправлять отклики на ${on.length} ${plural(on.length, "площадке", "площадках", "площадках")} — до дневного лимита каждой. Включить?`)) {
+    if (enable && !(await showConfirm(`Бот начнёт сам отправлять отклики на ${on.length} ${plural(on.length, "площадке", "площадках", "площадках")} — до дневного лимита каждой. Включить?`))) {
       renderAutoAll(status);
       return;
     }
@@ -6307,7 +7327,7 @@ function renderAutoChat(status) {
     : "HeadHunter сейчас выключен";
   box.onchange = async () => {
     const enable = box.checked;
-    if (enable && !confirm("Бот начнёт сам отвечать работодателям в чатах HH, досылать письма и напоминать о себе. Приглашения и вопросы про время и деньги по-прежнему приходят вам. Включить?")) {
+    if (enable && !(await showConfirm("Бот начнёт сам отвечать работодателям в чатах HH, досылать письма и напоминать о себе. Приглашения и вопросы про время и деньги по-прежнему приходят вам. Включить?"))) {
       renderAutoChat(status);
       return;
     }
@@ -6430,7 +7450,7 @@ async function saveDigest() {
 
 async function testOutreachEmail() {
   const status = document.getElementById("outreach-email-status");
-  await saveOutreachSettings();
+  if (!(await saveOutreachSettings())) return;
   status.textContent = "Отправляю письмо себе…";
   try {
     await api("/api/settings/outreach/test-email", { method: "POST" });
@@ -6454,8 +7474,9 @@ function showOverlay(id) {
 function hideOverlay(overlay) {
   if (!overlay || overlay.style.display === "none") return;
   releaseFocusTrap(overlay);
-  if (REDUCE_MOTION) {
+  if (REDUCE_MOTION || overlay.id === "command-overlay") {
     overlay.style.display = "none";
+    overlay.classList.remove("is-closing", "is-instant");
     return;
   }
   overlay.classList.add("is-closing");
@@ -6671,6 +7692,21 @@ function initKeyboardShortcuts() {
       return;
     }
     if (isTyping) return;
+    if (e.key === "/") {
+      const searchByView = {
+        history: "filter-query",
+        replies: "replies-filter-query",
+        contacts: "contacts-filter-query",
+        settings: "settings-find-input",
+        logs: "log-search",
+      };
+      const search = document.getElementById(searchByView[currentView]);
+      if (search && !search.disabled && search.getClientRects().length) {
+        e.preventDefault();
+        search.focus();
+      }
+      return;
+    }
     if (e.key === "?") {
       e.preventDefault();
       const overlay = document.getElementById("shortcuts-overlay");
@@ -6701,28 +7737,37 @@ function clearPointerEffects() {
 }
 
 function initPointerEffects() {
+  let pointerFrame = 0;
+  let latestPointer = null;
   document.addEventListener("mousemove", (e) => {
     if (REDUCE_MOTION) return;
-    const card = e.target.closest(".source-card, .provider-card");
-    if (card) {
-      const rect = card.getBoundingClientRect();
-      card.style.setProperty("--spot-x", `${e.clientX - rect.left}px`);
-      card.style.setProperty("--spot-y", `${e.clientY - rect.top}px`);
-    }
-    const btn = e.target.closest(".btn-primary:not(:disabled)");
-    document.querySelectorAll(".btn-primary.is-magnetic").forEach((el) => {
-      if (el !== btn) {
-        el.style.transform = "";
-        el.classList.remove("is-magnetic");
+    latestPointer = { target: e.target, clientX: e.clientX, clientY: e.clientY };
+    if (pointerFrame) return;
+    pointerFrame = requestAnimationFrame(() => {
+      pointerFrame = 0;
+      if (REDUCE_MOTION || !latestPointer) return;
+      const { target, clientX, clientY } = latestPointer;
+      const card = target.closest(".source-card, .provider-card");
+      if (card) {
+        const rect = card.getBoundingClientRect();
+        card.style.setProperty("--spot-x", `${clientX - rect.left}px`);
+        card.style.setProperty("--spot-y", `${clientY - rect.top}px`);
+      }
+      const btn = target.closest(".btn-primary:not(:disabled)");
+      document.querySelectorAll(".btn-primary.is-magnetic").forEach((el) => {
+        if (el !== btn) {
+          el.style.transform = "";
+          el.classList.remove("is-magnetic");
+        }
+      });
+      if (btn) {
+        btn.classList.add("is-magnetic");
+        const rect = btn.getBoundingClientRect();
+        const dx = (clientX - (rect.left + rect.width / 2)) * 0.15;
+        const dy = (clientY - (rect.top + rect.height / 2)) * 0.25;
+        btn.style.transform = `translate(${dx}px, ${dy}px)`;
       }
     });
-    if (btn) {
-      btn.classList.add("is-magnetic");
-      const rect = btn.getBoundingClientRect();
-      const dx = (e.clientX - (rect.left + rect.width / 2)) * 0.15;
-      const dy = (e.clientY - (rect.top + rect.height / 2)) * 0.25;
-      btn.style.transform = `translate(${dx}px, ${dy}px)`;
-    }
   });
 }
 
@@ -6994,7 +8039,13 @@ function renderMarket(market) {
 async function renderActivityHeatmap() {
   const el = document.getElementById("activity-heatmap");
   if (!el) return;
-  const entries = await api("/api/applications");
+  let entries;
+  try {
+    entries = await api("/api/applications");
+  } catch (err) {
+    renderRetryState(el, `Не удалось загрузить активность: ${err.message}`, renderActivityHeatmap);
+    return;
+  }
   renderWeeklyChart(entries);
   const counts = new Map();
   entries.forEach((e) => {
@@ -7013,9 +8064,14 @@ async function renderActivityHeatmap() {
     const count = counts.get(key) || 0;
     const level = count === 0 ? 0 : count >= 5 ? 3 : count >= 2 ? 2 : 1;
     const human = d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", weekday: "short" });
-    cells.push(`<div class="heatmap-cell" data-level="${level}" data-label="${human}: ${count} ${plural(count, "отклик", "отклика", "откликов")}" title="${human}: ${count}"></div>`);
+    cells.push({
+      date: key,
+      level,
+      label: `${human}: ${count} ${plural(count, "отклик", "отклика", "откликов")}`,
+      title: `${human}: ${count}`,
+    });
   }
-  el.innerHTML = cells.join("");
+  syncHeatmapCells(el, cells, el.childElementCount === 0);
   const readout = document.getElementById("heatmap-readout");
   el.onmouseover = (e) => {
     const c = e.target.closest(".heatmap-cell");
@@ -7024,18 +8080,76 @@ async function renderActivityHeatmap() {
   el.onmouseleave = () => readout && (readout.textContent = "отклики за 13 недель");
 }
 
-function copyToClipboard(text, btn) {
-  navigator.clipboard.writeText(text).then(() => {
-    btn.classList.add("copied");
-    const original = btn.innerHTML;
-    btn.innerHTML = `<svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="m4 10.5 4 4 8-9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+function syncHeatmapCells(container, cells, animateEntrance = false) {
+  if (!container) return;
+  const existing = new Map(Array.from(container.children, (cell) => [cell.dataset.date, cell]));
+  let cursor = container.firstElementChild;
+  for (const item of cells) {
+    let cell = existing.get(item.date);
+    existing.delete(item.date);
+    if (!cell) {
+      cell = document.createElement("div");
+      cell.className = "heatmap-cell";
+      cell.dataset.date = item.date;
+      container.insertBefore(cell, cursor);
+    } else if (cell !== cursor) {
+      container.insertBefore(cell, cursor);
+    }
+    cell.dataset.level = String(item.level);
+    cell.dataset.label = item.label;
+    cell.title = item.title;
+    cursor = cell.nextElementSibling;
+  }
+  existing.forEach((cell) => cell.remove());
+  if (animateEntrance && !REDUCE_MOTION && cells.length) {
+    container.classList.remove("is-entering");
+    void container.offsetWidth;
+    container.classList.add("is-entering");
+    container.addEventListener("animationend", (event) => {
+      if (event.target === container) container.classList.remove("is-entering");
+    }, { once: true });
+  }
+}
+
+const copyFeedbackState = new WeakMap();
+
+async function copyToClipboard(text, btn, fallbackField) {
+  let state;
+  if (btn) {
+    state = copyFeedbackState.get(btn) || { original: btn.innerHTML, timer: null };
+    clearTimeout(state.timer);
+    btn.classList.remove("copied");
+    btn.innerHTML = state.original;
+    copyFeedbackState.set(btn, state);
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    if (btn) {
+      btn.classList.add("copied");
+      btn.innerHTML = state.original.includes("<svg")
+        ? `<svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="m4 10.5 4 4 8-9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+        : "✓ Скопировано";
+      clearTimeout(state.timer);
+      state.timer = setTimeout(() => {
+        btn.classList.remove("copied");
+        btn.innerHTML = state.original;
+        copyFeedbackState.delete(btn);
+      }, 1400);
+      copyFeedbackState.set(btn, state);
+    }
     const announcer = document.getElementById("sr-announcer");
     if (announcer) announcer.textContent = "Скопировано";
-    setTimeout(() => {
+    return true;
+  } catch (err) {
+    if (btn) {
       btn.classList.remove("copied");
-      btn.innerHTML = original;
-    }, 1400);
-  });
+      btn.innerHTML = state.original;
+      copyFeedbackState.delete(btn);
+    }
+    fallbackField?.select();
+    showToast("Не удалось скопировать. Проверьте разрешение браузера на буфер обмена.", "error");
+    return false;
+  }
 }
 
 const COPY_ICON_SVG = `<svg viewBox="0 0 20 20" fill="none"><rect x="7" y="7" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M4.5 13V4.5a1 1 0 0 1 1-1H13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`;
@@ -7173,6 +8287,83 @@ function updateDocumentTitleBadge() {
   document.title = count ? `(${count}) ${BASE_DOCUMENT_TITLE}` : BASE_DOCUMENT_TITLE;
 }
 
+function formatFitScoreThreshold(value) {
+  const score = Number(value);
+  return Number.isInteger(score) ? String(score) : score.toFixed(1).replace(".", ",");
+}
+
+function pulseSettingChanges(targets) {
+  if (REDUCE_MOTION) return;
+  targets.filter(Boolean).forEach((target) => {
+    target.classList.remove("setting-change-pulse");
+    void target.offsetWidth;
+    target.classList.add("setting-change-pulse");
+    target.addEventListener("animationend", () => target.classList.remove("setting-change-pulse"), { once: true });
+  });
+}
+
+function updateFitThresholdPreview(changed = "", sourceField = "") {
+  const minField = document.getElementById("limit-min-score");
+  const fitField = document.getElementById("limit-suitability-score");
+  const minSlider = document.getElementById("limit-min-score-slider");
+  const fitSlider = document.getElementById("limit-suitability-score-slider");
+  const board = document.getElementById("fit-threshold-board");
+  if (!minField || !fitField || !minSlider || !fitSlider || !board) return;
+
+  let min = changed === "min"
+    ? Number(minSlider.value)
+    : minField.value === "" ? Number(minSlider.value) : Number(minField.value);
+  let fit = changed === "fit"
+    ? Number(fitSlider.value)
+    : fitField.value === "" ? Number(fitSlider.value) : Number(fitField.value);
+  if (!Number.isFinite(min)) min = Number(minSlider.value) || 4;
+  if (!Number.isFinite(fit)) fit = Number(fitSlider.value) || 7;
+  min = Math.round(Math.max(0, Math.min(10, min)) * 2) / 2;
+  fit = Math.round(Math.max(0, Math.min(10, fit)) * 2) / 2;
+
+  if (min > fit) {
+    if (changed === "min") fit = min;
+    else min = fit;
+  }
+
+  const minText = formatFitScoreThreshold(min);
+  const fitText = formatFitScoreThreshold(fit);
+  board.classList.toggle("is-thresholds-equal", min === fit);
+  const minPercent = `${min * 10}%`;
+  const fitPercent = `${fit * 10}%`;
+  board.style.setProperty("--fit-min-position", minPercent);
+  board.style.setProperty("--fit-strong-position", fitPercent);
+  minSlider.value = minText.replace(",", ".");
+  fitSlider.value = fitText.replace(",", ".");
+  if (sourceField !== minField.id) minField.value = minText.replace(",", ".");
+  if (sourceField !== fitField.id) fitField.value = fitText.replace(",", ".");
+
+  document.getElementById("fit-threshold-marker-min-value").textContent = minText;
+  document.getElementById("fit-threshold-marker-fit-value").textContent = fitText;
+  document.getElementById("fit-threshold-min-output").value = minText;
+  document.getElementById("fit-threshold-fit-output").value = fitText;
+  const summary = `Пропускать ниже ${minText} · сильное совпадение от ${fitText}`;
+  document.getElementById("fit-threshold-live").textContent = summary;
+  minSlider.setAttribute("aria-valuetext", `Пропускать оценки ниже ${minText}`);
+  fitSlider.setAttribute("aria-valuetext", `Сильное совпадение от ${fitText}`);
+  const weakBand = min === fit ? "слабого диапазона нет" : `от ${minText} до ${fitText} слабое совпадение`;
+  document.getElementById("fit-threshold-scale").setAttribute(
+    "aria-label",
+    `Шкала оценки: ниже ${minText} пропускать, ${weakBand}, от ${fitText} сильное совпадение`
+  );
+
+  const explanation = min === fit
+    ? `Ниже ${minText} бот пропустит вакансию. От ${fitText} — уверенное совпадение; диапазона слабых совпадений нет.`
+    : `От ${minText} до значений ниже ${fitText} бот отправит отклик как на слабое совпадение. Ниже ${minText} — пропустит, от ${fitText} — уверенное совпадение.`;
+  document.getElementById("fit-threshold-explainer").textContent = explanation;
+  if (changed && !REDUCE_MOTION) {
+    board.classList.remove("is-updating");
+    void board.offsetWidth;
+    board.classList.add("is-updating");
+    board.addEventListener("animationend", () => board.classList.remove("is-updating"), { once: true });
+  }
+}
+
 function initDashboard() {
   const titleBadgeObserver = new MutationObserver(updateDocumentTitleBadge);
   ["telegram-unread-badge", "overview-error-badge"].forEach((id) => {
@@ -7210,6 +8401,7 @@ function initDashboard() {
   initLookPane();
   initSettingsSearch();
   initJobsView();
+  initRadioGroupKeyboard();
   document.querySelectorAll("#stats-period [data-days]").forEach((b) =>
     b.addEventListener("click", () => {
       statsPeriodDays = Number(b.dataset.days);
@@ -7554,11 +8746,19 @@ function initDashboard() {
       ) {
         return;
       }
-      await api("/api/blacklist", {
-        method: "POST",
-        body: JSON.stringify({ companies }),
+      const button = document.getElementById("blacklist-add");
+      await withButtonLoading(button, async () => {
+        try {
+          await api("/api/blacklist", {
+            method: "POST",
+            body: JSON.stringify({ companies }),
+          });
+          showToast(`Добавлено в чёрный список: ${companies.length}`, "success");
+          await render.analytics();
+        } catch (err) {
+          showToast(err.message.replace(/^\d+: /, ""), "error");
+        }
       });
-      render.analytics();
     });
 
   // Делегирование клика: список кандидатов перерисовывается на каждый
@@ -7573,13 +8773,26 @@ function initDashboard() {
       if (!(await showConfirm(`Заблокировать "${company}" на hh.ru? Это серверная блокировка, отменить её сложнее, чем локальный чёрный список.`))) {
         return;
       }
-      btn.disabled = true;
-      btn.textContent = "…";
-      await api("/api/headhunter/block-employer", {
-        method: "POST",
-        body: JSON.stringify({ company }),
+      const label = btn.textContent;
+      let blocked = false;
+      await withButtonLoading(btn, async () => {
+        btn.textContent = "…";
+        try {
+          await api("/api/headhunter/block-employer", {
+            method: "POST",
+            body: JSON.stringify({ company }),
+          });
+          blocked = true;
+          showToast(`Запрошена блокировка работодателя «${company}» на hh.ru`, "success");
+        } catch (err) {
+          btn.textContent = label;
+          showToast(err.message.replace(/^\d+: /, ""), "error");
+        }
       });
-      btn.textContent = "Запрошено";
+      if (blocked) {
+        btn.disabled = true;
+        btn.textContent = "Запрошено";
+      }
     });
 
   Promise.all([
@@ -7623,30 +8836,11 @@ function initDashboard() {
 
   ["primary", "linkedin"].forEach((kind) => {
     const input = document.getElementById(`resume-upload-${kind}`);
-    const status = document.getElementById("tgq-resume-status");
     input.addEventListener("change", async () => {
       const file = input.files[0];
       if (!file) return;
-      status.textContent = `Загружаю ${file.name}…`;
-      const formData = new FormData();
-      formData.append("file", file);
-      try {
-        await api(`/api/resume/upload?kind=${kind}`, { method: "POST", headers: {}, body: formData });
-        renderResumes();
-        if (kind === "primary") {
-          // ИИ перечитывает новое резюме — из него берутся имя, опыт и навыки для писем.
-          status.textContent = "Загружено. ИИ перечитывает резюме…";
-          api("/api/resume/refresh-plain-text", { method: "POST" })
-            .then(() => (status.textContent = "Резюме обновлено — письма пойдут уже по нему"))
-            .catch((e) => (status.textContent = `Загружено, но ИИ не смог его прочитать: ${e.message.replace(/^\d+: /, "")}`));
-        } else {
-          status.textContent = "Резюме обновлено";
-        }
-      } catch (e) {
-        status.textContent = `Ошибка: ${e.message.replace(/^\d+: /, "")}`;
-      } finally {
-        input.value = "";
-      }
+      await uploadResumeFile(kind, file);
+      input.value = "";
     });
   });
 
@@ -7765,6 +8959,11 @@ function initDashboard() {
       }
       statusEl.textContent = "Готово.";
       await render.settings();
+      pulseSettingChanges([
+        document.getElementById("limit-daily"),
+        document.getElementById("limit-linkedin"),
+        document.getElementById("limit-per-run"),
+      ]);
     } catch (e) {
       statusEl.textContent = `Ошибка: ${e.message}`;
     }
@@ -7780,10 +8979,9 @@ function initDashboard() {
     .getElementById("limits-preset-aggressive")
     .addEventListener("click", () => applyRiskPreset(25, 12, 8, 2));
 
-  // Строгость подбора — просто подставляет значения в те же два
-  // числовых поля (min-score/suitability-score), которые и так уже
-  // выше в этой панели, ничего сама не сохраняет — жмут "Сохранить"
-  // как и при ручном вводе чисел. Не переиспользует applyRiskPreset:
+  // Строгость подбора подставляет значения в те же поля порогов и
+  // обновляет шкалу. Изменения сохраняются общей кнопкой «Сохранить».
+  // Не переиспользует applyRiskPreset:
   // тот шлёт запрос и трогает лимиты откликов, а не балл фита.
   const FIT_PRESETS = {
     soft: [2, 5],
@@ -7797,8 +8995,21 @@ function initDashboard() {
       if (!preset) return;
       document.getElementById("limit-min-score").value = preset[0];
       document.getElementById("limit-suitability-score").value = preset[1];
+      updateFitThresholdPreview();
+      pulseSettingChanges([
+        document.getElementById("limit-min-score-slider")?.closest(".fit-threshold-editor"),
+        document.getElementById("limit-suitability-score-slider")?.closest(".fit-threshold-editor"),
+      ]);
     });
 
+  document.getElementById("limit-min-score-slider").addEventListener("input", () => {
+    updateFitThresholdPreview("min");
+    document.getElementById("limit-fit-preset").value = "";
+  });
+  document.getElementById("limit-suitability-score-slider").addEventListener("input", () => {
+    updateFitThresholdPreview("fit");
+    document.getElementById("limit-fit-preset").value = "";
+  });
   document.querySelectorAll("#provider-grid .provider-card").forEach((card) => {
     card.addEventListener("click", () => {
       // Модель и ключ привязаны к провайдеру — переключение карточки
@@ -7877,15 +9088,15 @@ function initDashboard() {
     .getElementById("telegram-status-refresh")
     .addEventListener("click", () => render.telegram());
 
-  document
-    .getElementById("telegram-login-send-code")
-    .addEventListener("click", async () => {
-      const status = document.getElementById("telegram-login-status");
-      const phone = document.getElementById("telegram-login-phone").value.trim();
-      if (!phone) {
-        status.textContent = "Введите номер телефона.";
-        return;
-      }
+  const sendTelegramCodeButton = document.getElementById("telegram-login-send-code");
+  sendTelegramCodeButton.addEventListener("click", async () => {
+    const status = document.getElementById("telegram-login-status");
+    const phone = document.getElementById("telegram-login-phone").value.trim();
+    if (!phone) {
+      status.textContent = "Введите номер телефона.";
+      return;
+    }
+    await withButtonLoading(sendTelegramCodeButton, async () => {
       status.textContent = "Отправляю код…";
       try {
         await api("/api/telegram/login/start", {
@@ -7898,16 +9109,17 @@ function initDashboard() {
         status.textContent = `Ошибка: ${e.message}`;
       }
     });
+  });
 
-  document
-    .getElementById("telegram-login-submit-code")
-    .addEventListener("click", async () => {
-      const status = document.getElementById("telegram-login-status");
-      const code = document.getElementById("telegram-login-code").value.trim();
-      if (!code) {
-        status.textContent = "Введите код.";
-        return;
-      }
+  const submitTelegramCodeButton = document.getElementById("telegram-login-submit-code");
+  submitTelegramCodeButton.addEventListener("click", async () => {
+    const status = document.getElementById("telegram-login-status");
+    const code = document.getElementById("telegram-login-code").value.trim();
+    if (!code) {
+      status.textContent = "Введите код.";
+      return;
+    }
+    await withButtonLoading(submitTelegramCodeButton, async () => {
       status.textContent = "Проверяю код…";
       try {
         const result = await api("/api/telegram/login/code", {
@@ -7916,31 +9128,27 @@ function initDashboard() {
         });
         if (result.needs_password) {
           status.textContent = "Включена двухфакторка — введите пароль.";
-          document.getElementById(
-            "telegram-login-password-row"
-          ).style.display = "";
+          document.getElementById("telegram-login-password-row").style.display = "";
         } else {
           status.textContent = "Вход выполнен.";
-          document.getElementById("telegram-login-code-row").style.display =
-            "none";
+          document.getElementById("telegram-login-code-row").style.display = "none";
           await render.telegram();
         }
       } catch (e) {
         status.textContent = `Ошибка: ${e.message}`;
       }
     });
+  });
 
-  document
-    .getElementById("telegram-login-submit-password")
-    .addEventListener("click", async () => {
-      const status = document.getElementById("telegram-login-status");
-      const password = document.getElementById(
-        "telegram-login-password"
-      ).value;
-      if (!password) {
-        status.textContent = "Введите пароль.";
-        return;
-      }
+  const submitTelegramPasswordButton = document.getElementById("telegram-login-submit-password");
+  submitTelegramPasswordButton.addEventListener("click", async () => {
+    const status = document.getElementById("telegram-login-status");
+    const password = document.getElementById("telegram-login-password").value;
+    if (!password) {
+      status.textContent = "Введите пароль.";
+      return;
+    }
+    await withButtonLoading(submitTelegramPasswordButton, async () => {
       status.textContent = "Проверяю пароль…";
       try {
         await api("/api/telegram/login/password", {
@@ -7948,23 +9156,23 @@ function initDashboard() {
           body: JSON.stringify({ password }),
         });
         status.textContent = "Вход выполнен.";
-        document.getElementById("telegram-login-password-row").style.display =
-          "none";
+        document.getElementById("telegram-login-password-row").style.display = "none";
         await render.telegram();
       } catch (e) {
         status.textContent = `Ошибка: ${e.message}`;
       }
     });
+  });
 
-  document
-    .getElementById("tg-settings-save")
-    .addEventListener("click", async () => {
-      const status = document.getElementById("tg-settings-status");
+  const saveTelegramSettingsButton = document.getElementById("tg-settings-save");
+  saveTelegramSettingsButton.addEventListener("click", async () => {
+    const status = document.getElementById("tg-settings-status");
+    const numOrNull = (id) => {
+      const v = document.getElementById(id).value.trim();
+      return v === "" ? null : Number(v);
+    };
+    await withButtonLoading(saveTelegramSettingsButton, async () => {
       status.textContent = "Сохранение…";
-      const numOrNull = (id) => {
-        const v = document.getElementById(id).value.trim();
-        return v === "" ? null : Number(v);
-      };
       try {
         const saved = await api("/api/settings/telegram", {
           method: "POST",
@@ -7985,33 +9193,67 @@ function initDashboard() {
         status.textContent = `Ошибка: ${e.message}`;
       }
     });
+  });
+
+  function setTelegramChatStatus(message, kind = "") {
+    const status = document.getElementById("tg-chat-status");
+    status.textContent = message;
+    status.classList.remove("is-error", "is-success", "is-sending");
+    if (kind) status.classList.add(`is-${kind}`);
+  }
 
   async function sendTelegramMessage() {
-    if (!activeTelegramContact) return;
+    if (!activeTelegramContact || sendingTelegramMessage) return;
     const input = document.getElementById("tg-chat-input");
     const text = input.value.trim();
     if (!text) return;
-    const status = document.getElementById("tg-chat-status");
-    status.textContent = "Отправка…";
+    const contact = activeTelegramContact;
+    const button = document.getElementById("tg-chat-send");
+    const retry = document.getElementById("tg-chat-retry");
+    sendingTelegramMessage = true;
+    retry.hidden = true;
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    button.textContent = "Отправка…";
+    setTelegramChatStatus("Отправка…", "sending");
     try {
       await api(
-        `/api/telegram/conversations/${activeTelegramContact}/send`,
+        `/api/telegram/conversations/${contact}/send`,
         { method: "POST", body: JSON.stringify({ text }) }
       );
       input.value = "";
-      status.textContent = "";
-      await openTelegramConversation(activeTelegramContact, true);
+      updateTelegramComposerState();
+      setTelegramChatStatus(`Отправлено · @${contact}`, "success");
+      try {
+        await openTelegramConversation(contact, true);
+      } catch (refreshError) {
+        setTelegramChatStatus(`Отправлено @${contact}, но историю не удалось обновить: ${refreshError.message}`, "success");
+      }
     } catch (e) {
-      status.textContent = `Ошибка: ${e.message}`;
+      setTelegramChatStatus(`Ошибка: ${e.message}`, "error");
+      retry.hidden = false;
+    } finally {
+      sendingTelegramMessage = false;
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+      button.textContent = "Отправить";
+      updateTelegramComposerState();
     }
   }
 
   document
     .getElementById("tg-chat-send")
     .addEventListener("click", sendTelegramMessage);
-  document.getElementById("tg-chat-input").addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter") sendTelegramMessage();
+  document.getElementById("tg-chat-retry")?.addEventListener("click", sendTelegramMessage);
+  const chatInput = document.getElementById("tg-chat-input");
+  chatInput.addEventListener("input", updateTelegramComposerState);
+  chatInput.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
+      ev.preventDefault();
+      sendTelegramMessage();
+    }
   });
+  updateTelegramComposerState();
   document.getElementById("tg-chat-later").addEventListener("click", sendTelegramMessageLater);
   document.getElementById("tg-chat-suggest").addEventListener("click", suggestTelegramReplies);
 
@@ -8046,6 +9288,7 @@ function initDashboard() {
           method: "DELETE",
         });
         activeTelegramContact = null;
+        updateTelegramComposerState();
         document.getElementById("tg-chat-panel").style.display = "none";
         document.getElementById("tg-chat-empty").style.display = "";
         document.getElementById("tg-chat-delete").hidden = true;
@@ -8268,14 +9511,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("settings-direct").addEventListener("change", saveDirectSetting);
   document.getElementById("offer-add").addEventListener("click", addOffer);
   document.getElementById("ai-prompt-open").addEventListener("click", openPromptDrawer);
-  document.getElementById("ai-prompt-copy").addEventListener("click", async (e) => {
-    try {
-      await navigator.clipboard.writeText(document.getElementById("ai-prompt").value);
-      e.target.textContent = "✓ Скопировано";
-      setTimeout(() => (e.target.textContent = "Скопировать промт"), 2000);
-    } catch (err) {
-      document.getElementById("ai-prompt").select(); // без доступа к буферу — выделить для Cmd+C
-    }
+  document.getElementById("ai-prompt-copy").addEventListener("click", (e) => {
+    const prompt = document.getElementById("ai-prompt");
+    copyToClipboard(prompt.value, e.currentTarget, prompt);
   });
   document.getElementById("outreach-save").addEventListener("click", saveOutreachSettings);
   initTelegramChannelEditor();
@@ -8292,9 +9530,31 @@ document.addEventListener("DOMContentLoaded", async () => {
     e.target.value = "";
   });
   document.getElementById("tgq-greeting").addEventListener("input", updateGreetingPreview);
-  document.getElementById("tgq-resume-add").addEventListener("click", () =>
-    document.getElementById("tgq-resume-file").click()
-  );
+  const openExtraResumePicker = () => {
+    if (!resumeUploadBusy) document.getElementById("tgq-resume-file").click();
+  };
+  document.getElementById("tgq-resume-add").addEventListener("click", openExtraResumePicker);
+  document.getElementById("resume-dropzone-pick").addEventListener("click", openExtraResumePicker);
+  const resumeDropzone = document.getElementById("resume-dropzone");
+  resumeDropzone.addEventListener("dragenter", (event) => {
+    if (resumeUploadBusy || ![...event.dataTransfer.types].includes("Files")) return;
+    event.preventDefault();
+    resumeDropzone.classList.add("is-dragover");
+  });
+  resumeDropzone.addEventListener("dragover", (event) => {
+    if (resumeUploadBusy || ![...event.dataTransfer.types].includes("Files")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  });
+  resumeDropzone.addEventListener("dragleave", (event) => {
+    if (!resumeDropzone.contains(event.relatedTarget)) resumeDropzone.classList.remove("is-dragover");
+  });
+  resumeDropzone.addEventListener("drop", (event) => {
+    if (resumeUploadBusy || !event.dataTransfer.files?.length) return;
+    event.preventDefault();
+    resumeDropzone.classList.remove("is-dragover");
+    uploadTelegramResumes([...event.dataTransfer.files]);
+  });
   document.getElementById("tgq-resume-file").addEventListener("change", (e) => {
     uploadTelegramResumes([...e.target.files]);
     e.target.value = "";
@@ -8309,27 +9569,31 @@ document.addEventListener("DOMContentLoaded", async () => {
       switchTab(a.dataset.gotoView);
     })
   );
-  document.getElementById("tg-keys-save").addEventListener("click", async () => {
-    try {
-      await api("/api/telegram/keys", {
-        method: "POST",
-        body: JSON.stringify({
-          api_id: document.getElementById("tg-api-id").value,
-          api_hash: document.getElementById("tg-api-hash").value,
-        }),
-      });
-      showToast("Ключи сохранены — теперь введите номер телефона", "success");
-      render.telegram();
-    } catch (err) {
-      showToast(err.message.replace(/^\d+: /, ""), "error");
-    }
+  const saveTelegramKeysButton = document.getElementById("tg-keys-save");
+  saveTelegramKeysButton.addEventListener("click", async () => {
+    await withButtonLoading(saveTelegramKeysButton, async () => {
+      try {
+        await api("/api/telegram/keys", {
+          method: "POST",
+          body: JSON.stringify({
+            api_id: document.getElementById("tg-api-id").value,
+            api_hash: document.getElementById("tg-api-hash").value,
+          }),
+        });
+        showToast("Ключи сохранены — теперь введите номер телефона", "success");
+        render.telegram();
+      } catch (err) {
+        showToast(err.message.replace(/^\d+: /, ""), "error");
+      }
+    });
   });
   document.getElementById("parser-open-base").addEventListener("click", () => {
     document.getElementById("contacts-filter-source").value = "telegram";
     switchTab("contacts");
   });
   document.querySelectorAll("#base-table th[data-sort] button").forEach((button) =>
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
+      pendingBaseSortPositions = captureBaseRowPositions(event.detail > 0);
       const th = button.closest("th[data-sort]");
       baseState.dir = baseState.sort === th.dataset.sort ? -baseState.dir : th.dataset.sort === "company" ? 1 : -1;
       baseState.sort = th.dataset.sort;
@@ -8557,10 +9821,14 @@ async function openNotifications() {
   });
   openDrawerSource = null;
   const list = body.querySelector("#notif-list");
-  const show = (kind) => {
+  const show = (kind, animate = false) => {
     const items = kind === "window" ? toastLog : notifItems.filter((n) => kind === "all" || n.kind === kind);
     list.innerHTML = items.length
-      ? items.map(notifRowHtml).join("")
+      ? items.map((item, index) => {
+          const row = notifRowHtml(item);
+          if (!animate || index > 6) return row;
+          return row.replace('<li class="notif-row', `<li style="animation-delay:${index * 22}ms" class="notif-row notif-row-arrive`);
+        }).join("")
       : `<li>${emptyStateHtml(kind === "failure" ? "Сбоев не было." : kind === "window" ? "В этом окне сообщений ещё не было." : "Пока бот ничего не сообщал.")}</li>`;
   };
   show("all");
@@ -8570,7 +9838,7 @@ async function openNotifications() {
         b.classList.toggle("active", b === btn);
         b.setAttribute("aria-pressed", String(b === btn));
       });
-      show(btn.dataset.notifFilter);
+      show(btn.dataset.notifFilter, shouldAnimateNavigation());
     })
   );
   document.getElementById("notif-settings").addEventListener("click", () => {
@@ -8641,6 +9909,7 @@ async function setPauseAll(paused) {
 let tgPostsData = { posts: [], resume_options: [], sent_today: 0, daily_limit: 15 };
 let talkListTab = "all";
 let activeTgPostId = null;
+let tgPostHistoryState = { postId: null, contact: null, messages: [] };
 let lastTgPostsSnapshot = "";
 let lastTgPostHistorySnapshot = "";
 let tgPostsVisibleLimit = 200;
@@ -8689,6 +9958,13 @@ async function renderTelegramPosts() {
   } catch (e) {
     return;
   }
+  const previousPostIds = new Set(tgPostsData.posts.map((post) => post.id));
+  const hadPostSnapshot = Boolean(lastTgPostsSnapshot);
+  const arrivedPostIds = new Set(
+    hadPostSnapshot && !REDUCE_MOTION && document.visibilityState === "visible"
+      ? data.posts.filter((post) => !previousPostIds.has(post.id)).map((post) => post.id)
+      : []
+  );
   const previousActivePost = tgPostsData.posts.find((p) => p.id === activeTgPostId);
   tgPostsData = data;
   updateTalkListCount();
@@ -8720,16 +9996,18 @@ async function renderTelegramPosts() {
     return;
   }
   const shown = query ? data.posts.filter((p) =>
-    `${p.channel} ${p.title} ${p.text || ""} ${(p.contacts || []).map((c) => c.value).join(" ")}`.toLowerCase().includes(query)
+    `${p.channel} ${p.source} ${p.title} ${p.text || ""} ${p.link || ""} ${(p.contacts || []).map((c) => c.value).join(" ")}`.toLowerCase().includes(query)
   ) : data.posts;
   const postRow = (p) => {
       const b = tgPostBadge(p);
-      return `<button type="button" class="row talk-row${p.id === activeTgPostId ? " is-selected" : ""}" data-tg-post="${escapeHtml(p.id)}">
+      const source = p.source === "hirify" ? "Hirify" : `@${p.channel}`;
+      const recipients = tgPostRecipients(p).map((c) => c.kind === "telegram" ? `@${c.value}` : c.value).join(", ") || "адресат не найден";
+      const arrivalMotion = arrivedPostIds.has(p.id) && !query && showAll ? " talk-post-arrive" : "";
+      return `<button type="button" class="row talk-row${p.id === activeTgPostId ? " is-selected" : ""}${arrivalMotion}" data-tg-post="${escapeHtml(p.id)}">
         ${plogoHtml(p.source === "hirify" ? "hirify" : "telegram")}
         <span class="row-main">
-          <span class="talk-row-top"><span class="row-title">${escapeHtml(truncate(p.title, 70))}</span><span class="muted small nowrap">${p.found_at ? fmtDay(p.found_at) : ""}</span></span>
-          <span class="talk-preview small">${p.source === "hirify" ? "Hirify" : `@${escapeHtml(p.channel)}`} · ${escapeHtml(tgPostRecipients(p).map((c) => c.kind === "telegram" ? `@${c.value}` : c.value).join(", ") || "адресат не найден")}</span>
-          <span class="row-sub small muted">${b.dot ? `<span class="dot ${b.dot}" aria-hidden="true"></span>` : ""}${escapeHtml(b.text)}</span>
+          <span class="talk-row-top"><span class="row-title" title="${escapeHtml(p.title)}">${escapeHtml(truncate(p.title, 90))}</span></span>
+          <span class="talk-post-meta small muted"><span class="talk-post-source">${escapeHtml(source)}</span><span class="talk-post-status">${b.dot ? `<span class="dot ${b.dot}" aria-hidden="true"></span>` : ""}${escapeHtml(b.text)}</span><span class="talk-post-recipient" title="${escapeHtml(recipients)}">${escapeHtml(recipients)}</span><span class="talk-post-date">${p.found_at ? fmtDay(p.found_at) : ""}</span></span>
         </span>
       </button>`;
     };
@@ -8786,6 +10064,15 @@ function tgPostResumeChoice(post) {
   return fit ? fit.name : "";
 }
 
+function animatePostRecipientSelection(panel, animate = false) {
+  const check = panel?.querySelector(".post-recipient.active .post-recipient-check");
+  if (!animate || REDUCE_MOTION || typeof check?.animate !== "function") return;
+  check.animate(
+    [{ opacity: 0.5, transform: "scale(.82)" }, { opacity: 1, transform: "scale(1)" }],
+    { duration: 150, easing: "cubic-bezier(0.23, 1, 0.32, 1)" }
+  );
+}
+
 function tgPostPanelHtml(post) {
   const recipients = tgPostRecipients(post);
   const contact = tgPostContact(post);
@@ -8795,10 +10082,10 @@ function tgPostPanelHtml(post) {
   const full = !isEmail && tgPostsData.sent_today >= tgPostsData.daily_limit;
   const sourceName = post.source === "hirify" ? "Hirify" : `@${escapeHtml(post.channel)}`;
   const recipient = contact ? `${isEmail ? "" : "@"}${escapeHtml(contact.value)}` : "";
-  const head = `<div class="post-head">${plogoHtml(post.source === "hirify" ? "hirify" : "telegram")}<div class="post-head-copy"><h3 class="m0">${escapeHtml(truncate(post.title, 100))}</h3>
+  const head = `<div class="post-head">${plogoHtml(post.source === "hirify" ? "hirify" : "telegram")}<div class="post-head-copy"><h3 class="m0" title="${escapeHtml(post.title)}">${escapeHtml(truncate(post.title, 100))}</h3>
     <span class="muted small">Источник: ${sourceName}${post.found_at ? " · " + escapeHtml(fmtDay(post.found_at)) : ""}</span></div></div>
     <details class="post-text"><summary><span><strong>Исходный пост</strong><small>${escapeHtml(truncate(post.text || post.title, 135))}</small></span><span aria-hidden="true">⌄</span></summary><div class="letter-text">${escapeHtml(post.text || "")}</div><a class="btn btn-small btn-ghost" href="${escapeHtml(post.link)}" target="_blank" rel="noopener">Открыть источник ↗</a></details>`;
-  const contacts = `<div class="post-recipient-section"><div class="post-recipient-heading"><div class="post-section-label">Кому отправить <span class="muted" title="Выберите адресата перед отправкой">ⓘ</span></div><span class="muted small">Источник: ${sourceName}</span></div>
+  const contacts = `<div class="post-recipient-section"><div class="post-recipient-heading"><div class="post-section-label">Кому отправить <span class="muted" title="Выберите адресата перед отправкой">ⓘ</span></div></div>
     ${recipients.length ? `<div class="post-recipient-list" role="radiogroup" aria-label="Кому отправить">${recipients.map((c) => {
       const selected = c.value === contact?.value;
       const address = `${c.kind === "telegram" ? "@" : ""}${escapeHtml(c.value)}`;
@@ -8806,7 +10093,7 @@ function tgPostPanelHtml(post) {
     }).join("")}</div>` : `<p class="muted small">Адресат не найден. Проверьте исходную вакансию и добавьте контакт вручную.</p>`}
     ${post.source === "hirify" ? `<div class="post-hirify-actions">${hirifyLoginRequired.has(post.id) ? `<button type="button" class="btn btn-small btn-ghost" data-post-action="login-hirify">Повторить вход в Hirify</button>` : ""}<button type="button" class="btn btn-small" data-post-action="sync-hirify">Получить контакты из Hirify</button></div>` : ""}
     ${post.status === "new" ? `<details class="post-add-recipient"><summary>+ Добавить адресата</summary><div><select id="tg-post-contact-kind" aria-label="Тип адресата"><option value="telegram">Telegram</option><option value="email">Email</option></select><input id="tg-post-contact-value" type="text" autocomplete="off" placeholder="@username или email" aria-label="Адресат"><button type="button" class="btn btn-small" data-post-action="add-contact">Добавить адресата</button></div></details>` : ""}</div>`;
-  const history = `<section class="post-history" aria-label="Переписка"><div id="tg-post-history" class="post-history-messages"><div class="post-history-empty"><span class="post-history-empty-icon" aria-hidden="true">▢</span><strong>${isEmail ? "Письмо ещё не отправлено" : "Переписки пока нет — она появится после отправки"}</strong><span>${contact ? `Напишите сообщение и отправьте его ${recipient}. Здесь будут все сообщения в этом диалоге.` : "Выберите адресата, чтобы увидеть историю и подготовить сообщение."}</span></div></div></section>`;
+  const history = `<section class="post-history is-empty" aria-label="Переписка"><div id="tg-post-history" class="post-history-messages"><div class="post-history-empty"><span class="post-history-empty-icon" aria-hidden="true">▢</span><strong>${isEmail ? "Письмо ещё не отправлено" : "Переписки пока нет — она появится после отправки"}</strong><span>${contact ? `Напишите сообщение и отправьте его ${recipient}. Здесь будут все сообщения в этом диалоге.` : "Выберите адресата, чтобы увидеть историю и подготовить сообщение."}</span></div></div><button type="button" id="tg-post-new-messages" class="btn btn-small chat-new-messages" aria-live="polite" hidden>Показать новые сообщения</button></section>`;
   const locked = ["sent", "queued", "send_unknown", "skipped_contacted", "hidden", "blocked"].includes(post.status);
   const status = post.status === "sent"
     ? `Сообщение отправлено${post.sent_at ? ` ${escapeHtml(fmtDay(post.sent_at))}` : ""}${recipient ? ` → ${recipient}` : ""}.${post.resume_status === "sent" ? " Резюме тоже отправлено." : post.resume_status === "failed" ? " Резюме не отправилось — его можно отправить отдельно в переписке." : ""}`
@@ -8853,12 +10140,16 @@ function tgPostContextHtml(post) {
     </div>`;
 }
 
-function openTelegramPost(postId) {
+function openTelegramPost(postId, animatePane = false) {
   const post = tgPostsData.posts.find((p) => p.id === postId);
   if (!post) return;
+  setTalkMobilePane("thread", animatePane);
   activeTgPostId = postId;
+  tgPostHistoryState = { postId, contact: null, messages: [] };
   activeTelegramContact = null;
+  updateTelegramComposerState();
   selectedInboxIndex = -1;
+  selectedInboxKey = null;
   document.querySelectorAll("#replies-rows .talk-row, #tg-conv-list .conv-item").forEach((r) => r.classList.remove("is-selected", "active"));
   document.querySelectorAll("#tg-posts-list .talk-row, #tg-chat-posts-list .talk-row").forEach((r) => r.classList.toggle("is-selected", r.dataset.tgPost === postId));
   document.getElementById("tg-chat-panel").style.display = "none";
@@ -8866,8 +10157,17 @@ function openTelegramPost(postId) {
   document.getElementById("talk-item-panel").hidden = true;
   document.getElementById("tg-chat-delete").hidden = true;
   const panel = document.getElementById("tg-post-panel");
-  panel.hidden = false;
+  setTalkMotionVisibility(panel, true, animatePane);
   panel.innerHTML = tgPostPanelHtml(post);
+  const postHistory = panel.querySelector("#tg-post-history");
+  const postNewMessages = panel.querySelector("#tg-post-new-messages");
+  postHistory?.addEventListener("scroll", () => {
+    if (shouldStickToBottom(postHistory) && postNewMessages) setTalkMotionVisibility(postNewMessages, false);
+  }, { passive: true });
+  postNewMessages?.addEventListener("click", () => {
+    postHistory?.scrollTo({ top: postHistory.scrollHeight, behavior: REDUCE_MOTION ? "auto" : "smooth" });
+    setTalkMotionVisibility(postNewMessages, false);
+  });
   lastTgPostHistorySnapshot = "";
   loadTelegramPostHistory(post);
   const ctxBody = document.getElementById("talk-context-body");
@@ -8888,13 +10188,29 @@ async function loadTelegramPostHistory(post) {
     const snapshot = JSON.stringify([post.id, contact.value, page.messages.map((m) => [m.id, m.text, m.at])]);
     if (snapshot === lastTgPostHistorySnapshot) return;
     lastTgPostHistorySnapshot = snapshot;
-    current.innerHTML = page.messages.length
-      ? page.messages.map((m) => `<div class="chat-bubble ${m.direction === "out" ? "out" : "in"}">${escapeHtml(m.text || "")}<span class="chat-bubble-time">${formatChatTime(m.at)}</span></div>`).join("")
-      : `<p class="post-history-empty">Переписки пока нет — она появится здесь после первого сообщения.</p>`;
-    current.scrollTop = current.scrollHeight;
+    const previous = tgPostHistoryState.postId === post.id && tgPostHistoryState.contact === contact.value
+      ? tgPostHistoryState.messages
+      : [];
+    const newMessageKeys = newerTelegramMessageKeys(previous, page.messages);
+    const newMessageCount = newMessageKeys.size;
+    tgPostHistoryState = { postId: post.id, contact: contact.value, messages: page.messages };
+    const wasAtBottom = shouldStickToBottom(current);
+    const previousTop = current.scrollTop;
+    syncTelegramMessageBubbles(current, page.messages, newMessageKeys);
+    current.closest(".post-history")?.classList.toggle("is-empty", page.messages.length === 0);
+    if (wasAtBottom) current.scrollTop = current.scrollHeight;
+    else current.scrollTop = previousTop;
+    const more = document.getElementById("tg-post-new-messages");
+    if (more) {
+      const visible = !wasAtBottom && newMessageCount > 0;
+      setTalkMotionVisibility(more, visible, visible);
+      more.textContent = `Показать новые сообщения · ${newMessageCount}`;
+    }
+    if (!page.messages.length && !current.children.length) current.innerHTML = `<p class="post-history-empty">Переписки пока нет — она появится здесь после первого сообщения.</p>`;
   } catch (error) {
     const current = document.getElementById("tg-post-history");
-    if (activeTgPostId === post.id && current) current.innerHTML = `<p class="post-history-empty">История сейчас недоступна. Проверьте чат Telegram перед отправкой.</p>`;
+    if (activeTgPostId === post.id && current && !current.children.length) current.innerHTML = `<p class="post-history-empty">История сейчас недоступна. Проверьте чат Telegram перед отправкой.</p>`;
+    if (activeTgPostId === post.id && current) current.closest(".post-history")?.classList.toggle("is-empty", !current.querySelector(".chat-bubble"));
   }
 }
 
@@ -8916,8 +10232,11 @@ async function tgPostAction(action, btn) {
   const textEl = document.getElementById("tg-post-text");
   const text = textEl ? textEl.value.trim() : "";
   const resume = tgPostResumeChoice(post);
+  const wasDisabled = btn.disabled;
   const busy = (label) => {
     btn.disabled = true;
+    btn.setAttribute("aria-busy", "true");
+    btn.classList.add("is-loading");
     btn.textContent = label;
   };
   try {
@@ -8925,7 +10244,6 @@ async function tgPostAction(action, btn) {
       busy("Открываю Hirify…");
       const result = await api("/api/hirify/login", { method: "POST" });
       showToast(result.message || "Войдите в Hirify в открывшемся окне", "success");
-      btn.disabled = false;
       btn.textContent = "Повторить вход в Hirify";
     } else if (action === "sync-hirify") {
       busy("Читаю контакты…");
@@ -8989,6 +10307,7 @@ async function tgPostAction(action, btn) {
       showToast("Отправка отменена — черновик снова здесь", "success");
       await refreshTelegramPost(post.id);
     } else if (action === "hide" || action === "block") {
+      busy(action === "hide" ? "Скрываю…" : "Обновляю компанию…");
       await api(`/api/telegram/posts/${post.id}/status`, { method: "POST", body: JSON.stringify({ status: action === "hide" ? "hidden" : "blocked" }) });
       closeTelegramPost();
       document.getElementById("tg-chat-empty").style.display = "";
@@ -9008,6 +10327,12 @@ async function tgPostAction(action, btn) {
     if (action === "sync-hirify" && /^409:.*Войдите в Hirify/s.test(err.message)) hirifyLoginRequired.add(post.id);
     showToast(err.message.replace(/^\d+: /, ""), "error");
     if (document.body.contains(btn)) await refreshTelegramPost(post.id);
+  } finally {
+    if (document.body.contains(btn)) {
+      btn.disabled = wasDisabled;
+      btn.removeAttribute("aria-busy");
+      btn.classList.remove("is-loading");
+    }
   }
 }
 
@@ -9045,6 +10370,7 @@ async function suggestTelegramReplies() {
         const x = suggestions[Number(chip.dataset.suggestion)];
         const input = document.getElementById("tg-chat-input");
         input.value = x.text;
+        updateTelegramComposerState();
         input.focus();
         document.getElementById("tg-chat-attach-resume").classList.toggle("is-suggested", !!x.attach_resume);
         if (x.attach_resume) document.getElementById("tg-chat-status").textContent = "К этому ответу уместно приложить резюме — кнопка «Резюме».";
@@ -9070,9 +10396,13 @@ async function sendTelegramMessageLater() {
   try {
     const res = await api(`/api/telegram/conversations/${contact}/later`, { method: "POST", body: JSON.stringify({ text }) });
     input.value = "";
+    updateTelegramComposerState();
     showSavedToast(`Уйдёт @${contact} ${fmtWhen(res.send_after)}`, async () => {
       await api(`/api/telegram/scheduled/${res.id}`, { method: "DELETE" });
-      if (activeTelegramContact === contact) input.value = text;
+      if (activeTelegramContact === contact) {
+        input.value = text;
+        updateTelegramComposerState();
+      }
     });
   } catch (err) {
     showToast(err.message.replace(/^\d+: /, ""), "error");
@@ -9096,6 +10426,79 @@ function telegramMenuItems(kind, hasContact) {
 
 let talkMenuTarget = null;
 
+function setTalkMobilePane(pane, animate = false) {
+  const layout = document.querySelector(".talk-layout");
+  if (!layout) return;
+  const mobile = window.matchMedia?.("(max-width: 760px)").matches;
+  const wasThreadOpen = layout.classList.contains("is-mobile-thread-open");
+  const willThreadOpen = pane === "thread";
+  const list = layout.querySelector?.(".talk-list");
+  const thread = layout.querySelector?.(".talk-thread");
+  if (mobile && wasThreadOpen !== willThreadOpen) {
+    layout.classList.toggle("is-motion-disabled", !animate || REDUCE_MOTION);
+  }
+  layout.classList.toggle("is-mobile-thread-open", willThreadOpen);
+  for (const [element, hidden] of [[list, mobile && willThreadOpen], [thread, mobile && !willThreadOpen]]) {
+    if (!element) continue;
+    element.inert = hidden;
+    element.setAttribute?.("aria-hidden", String(hidden));
+  }
+  if (mobile && wasThreadOpen !== willThreadOpen) {
+    if (pane === "list") layout.querySelector(".talk-row.is-selected, .conv-item.active")?.focus({ preventScroll: true });
+    else thread?.focus({ preventScroll: true });
+  }
+}
+
+function syncTalkMobilePaneAccessibility() {
+  const layout = document.querySelector(".talk-layout");
+  if (!layout) return;
+  setTalkMobilePane(layout.classList.contains("is-mobile-thread-open") ? "thread" : "list");
+}
+
+let talkResponsiveMotionTimer = null;
+function animateTalkResponsiveChange() {
+  const layout = document.querySelector(".shell.is-messenger .talk-layout");
+  if (!layout || REDUCE_MOTION) return;
+  clearTimeout(talkResponsiveMotionTimer);
+  layout.classList.remove("is-breakpoint-changing");
+  void layout.offsetWidth;
+  layout.classList.add("is-breakpoint-changing");
+  talkResponsiveMotionTimer = setTimeout(() => {
+    layout.classList.remove("is-breakpoint-changing");
+    talkResponsiveMotionTimer = null;
+  }, 190);
+}
+
+function shouldStickToBottom(element, threshold = 48) {
+  return element.scrollTop + element.clientHeight >= element.scrollHeight - threshold;
+}
+
+function updateTelegramNewMessagesIndicator(count, animate = false) {
+  const button = document.getElementById("tg-chat-new-messages");
+  if (!button) return;
+  const total = Math.max(0, Number(count) || 0);
+  const visible = total > 0;
+  setTalkMotionVisibility(button, visible, animate && visible);
+  button.textContent = total ? `Показать новые сообщения · ${total}` : "Показать новые сообщения";
+}
+
+function animateConversationChange(element) {
+  if (REDUCE_MOTION || !element || typeof element.animate !== "function") return;
+  element.animate(
+    [{ opacity: 0.72, transform: "translateY(4px)" }, { opacity: 1, transform: "translateY(0)" }],
+    { duration: 160, easing: "cubic-bezier(0.23, 1, 0.32, 1)" }
+  );
+}
+
+function animateTalkEmptyState() {
+  const element = document.getElementById("tg-chat-empty");
+  if (REDUCE_MOTION || !element || typeof element.animate !== "function") return;
+  element.animate(
+    [{ opacity: 0, transform: "translateY(5px)" }, { opacity: 1, transform: "translateY(0)" }],
+    { duration: 170, easing: "cubic-bezier(0.23, 1, 0.32, 1)" }
+  );
+}
+
 function setTalkListTab(tab, reload = true) {
   const tabs = document.getElementById("talk-source-tabs");
   if (!tabs) return;
@@ -9112,27 +10515,75 @@ function setTalkListTab(tab, reload = true) {
   if (reload && tab === "posts") renderTelegramPosts();
 }
 
-function setTalkContextOpen(open) {
+const talkMotionVisibilityAnimations = new WeakMap();
+
+function setTalkMotionVisibility(element, open, animate = false, axis = "y") {
+  if (!element) return;
+  const previousAnimation = talkMotionVisibilityAnimations.get(element);
+  previousAnimation?.cancel();
+  talkMotionVisibilityAnimations.delete(element);
+
+  if (open) {
+    element.hidden = false;
+    element.inert = false;
+    element.setAttribute("aria-hidden", "false");
+  } else {
+    element.inert = true;
+    element.setAttribute("aria-hidden", "true");
+  }
+
+  if (!animate || REDUCE_MOTION || typeof element.animate !== "function") {
+    element.hidden = !open;
+    return;
+  }
+
+  const offset = axis === "x" ? "translateX(7px)" : "translateY(5px) scale(.99)";
+  const motionStyles = getComputedStyle(document.documentElement);
+  const durationToken = motionStyles.getPropertyValue(open ? "--motion-enter" : "--motion-exit");
+  const duration = Number.parseFloat(durationToken) || (open ? 170 : 120);
+  const easing = motionStyles.getPropertyValue("--motion-ease-out").trim()
+    || "cubic-bezier(0.23, 1, 0.32, 1)";
+  const animation = element.animate(
+    open
+      ? [{ opacity: 0, transform: offset }, { opacity: 1, transform: "translate(0) scale(1)" }]
+    : [{ opacity: 1, transform: "translate(0) scale(1)" }, { opacity: 0, transform: offset }],
+    {
+      duration,
+      easing,
+      fill: "both",
+    }
+  );
+  talkMotionVisibilityAnimations.set(element, animation);
+  animation.onfinish = () => {
+    if (talkMotionVisibilityAnimations.get(element) !== animation) return;
+    talkMotionVisibilityAnimations.delete(element);
+    if (!open) element.hidden = true;
+    animation.cancel();
+  };
+}
+
+function setTalkContextOpen(open, animate = false) {
   const drawer = document.getElementById("talk-context");
   const toggle = document.getElementById("talk-context-toggle");
-  drawer.hidden = !open;
+  setTalkMotionVisibility(drawer, open, animate, "x");
   toggle.setAttribute("aria-expanded", String(open));
   if (open) document.getElementById("talk-context-close").focus();
   else toggle.focus();
 }
 
-function setTalkToolsOpen(open) {
+function setTalkToolsOpen(open, animate = false) {
   const panel = document.getElementById("talk-tools-panel");
   const toggle = document.getElementById("talk-tools-toggle");
   if (!panel || !toggle) return;
-  panel.hidden = !open;
+  setTalkMotionVisibility(panel, open, animate);
   toggle.setAttribute("aria-expanded", String(open));
   if (open) document.getElementById("talk-tools-close")?.focus();
   else toggle.focus();
 }
 
-function closeTalkMenu() {
-  document.getElementById("talk-context-menu").hidden = true;
+function closeTalkMenu(animate = false) {
+  const menu = document.getElementById("talk-context-menu");
+  setTalkMotionVisibility(menu, false, animate);
   talkMenuTarget = null;
 }
 
@@ -9159,16 +10610,19 @@ function showTalkMenu(event) {
   menu.innerHTML = telegramMenuItems(target.kind, !!target.contact)
     .map((item) => `<button type="button" role="menuitem" data-menu-action="${item.action}"${item.danger ? ' class="is-danger"' : ""}>${item.label}</button>`)
     .join("");
-  menu.hidden = false;
+  setTalkMotionVisibility(menu, true, event.type === "contextmenu" || event.detail > 0);
   const rect = menu.getBoundingClientRect();
-  menu.style.left = `${Math.max(8, Math.min(event.clientX, window.innerWidth - rect.width - 8))}px`;
-  menu.style.top = `${Math.max(8, Math.min(event.clientY, window.innerHeight - rect.height - 8))}px`;
+  const anchor = event.type === "contextmenu"
+    ? { left: event.clientX, top: event.clientY }
+    : row.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(anchor.left, window.innerWidth - rect.width - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(anchor.top, window.innerHeight - rect.height - 8))}px`;
   menu.querySelector("button")?.focus();
 }
 
-async function handleTalkMenuAction(action) {
+async function handleTalkMenuAction(action, animate = false) {
   const target = talkMenuTarget;
-  closeTalkMenu();
+  closeTalkMenu(animate);
   if (!target) return;
   if (action === "open" || action === "info") {
     if (target.kind === "post") openTelegramPost(target.id);
@@ -9197,6 +10651,7 @@ async function handleTalkMenuAction(action) {
       : activeTelegramContact === target.contact || (activeTgPostId && tgPostsData.posts.some((p) => p.id === activeTgPostId && tgPostContact(p)?.value === target.contact));
     if (activeRemoved) {
       activeTelegramContact = null;
+      updateTelegramComposerState();
       closeTelegramPost();
       document.getElementById("tg-chat-panel").style.display = "none";
       document.getElementById("tg-chat-empty").style.display = "";
@@ -9212,6 +10667,12 @@ async function handleTalkMenuAction(action) {
 }
 
 function initTalkExtras() {
+  if (typeof window !== "undefined") {
+    window.matchMedia?.("(max-width: 760px)")?.addEventListener?.("change", () => {
+      syncTalkMobilePaneAccessibility();
+      animateTalkResponsiveChange();
+    });
+  }
   const tabs = document.getElementById("talk-source-tabs");
   if (tabs) {
     tabs.addEventListener("click", (event) => {
@@ -9220,14 +10681,25 @@ function initTalkExtras() {
     });
     setTalkListTab("chats", false);
   }
-  document.getElementById("talk-tools-toggle")?.addEventListener("click", () => {
-    setTalkToolsOpen(document.getElementById("talk-tools-panel").hidden);
+  document.getElementById("talk-tools-toggle")?.addEventListener("click", (event) => {
+    const toggle = document.getElementById("talk-tools-toggle");
+    setTalkToolsOpen(toggle.getAttribute("aria-expanded") !== "true", event.detail > 0);
   });
-  document.getElementById("talk-tools-close")?.addEventListener("click", () => setTalkToolsOpen(false));
-  document.getElementById("talk-context-toggle")?.addEventListener("click", () => {
-    setTalkContextOpen(document.getElementById("talk-context").hidden);
+  document.getElementById("talk-tools-close")?.addEventListener("click", (event) => setTalkToolsOpen(false, event.detail > 0));
+  document.getElementById("talk-context-toggle")?.addEventListener("click", (event) => {
+    const toggle = document.getElementById("talk-context-toggle");
+    setTalkContextOpen(toggle.getAttribute("aria-expanded") !== "true", event.detail > 0);
   });
-  document.getElementById("talk-context-close")?.addEventListener("click", () => setTalkContextOpen(false));
+  document.getElementById("talk-context-close")?.addEventListener("click", (event) => setTalkContextOpen(false, event.detail > 0));
+  document.getElementById("talk-thread-back")?.addEventListener("click", (event) => setTalkMobilePane("list", event.detail > 0));
+  const chatMessages = document.getElementById("tg-chat-messages");
+  chatMessages?.addEventListener("scroll", () => {
+    if (shouldStickToBottom(chatMessages)) updateTelegramNewMessagesIndicator(0);
+  }, { passive: true });
+  document.getElementById("tg-chat-new-messages")?.addEventListener("click", () => {
+    chatMessages?.scrollTo({ top: chatMessages.scrollHeight, behavior: REDUCE_MOTION ? "auto" : "smooth" });
+    updateTelegramNewMessagesIndicator(0);
+  });
   const talkList = document.querySelector?.(".talk-list");
   talkList?.addEventListener("contextmenu", showTalkMenu);
   talkList?.addEventListener("keydown", (event) => {
@@ -9235,16 +10707,24 @@ function initTalkExtras() {
   });
   document.getElementById("talk-context-menu")?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-menu-action]");
-    if (button) handleTalkMenuAction(button.dataset.menuAction);
+    if (button) handleTalkMenuAction(button.dataset.menuAction, event.detail > 0);
   });
   document.addEventListener?.("click", (event) => {
-    if (!event.target.closest?.("#talk-context-menu")) closeTalkMenu();
+    if (!event.target.closest?.("#talk-context-menu")) closeTalkMenu(event.detail > 0);
   });
   document.addEventListener?.("keydown", (event) => {
     if (event.key === "Escape") {
       closeTalkMenu();
-      if (!document.getElementById("talk-tools-panel").hidden) setTalkToolsOpen(false);
-      if (!document.getElementById("talk-context").hidden) setTalkContextOpen(false);
+      let closedOverlay = false;
+      if (!document.getElementById("talk-tools-panel").hidden) {
+        setTalkToolsOpen(false);
+        closedOverlay = true;
+      }
+      if (!document.getElementById("talk-context").hidden) {
+        setTalkContextOpen(false);
+        closedOverlay = true;
+      }
+      if (!closedOverlay && window.matchMedia?.("(max-width: 760px)").matches && document.querySelector(".talk-layout.is-mobile-thread-open")) setTalkMobilePane("list");
     }
   });
   document.getElementById("tg-chat-older")?.addEventListener("click", async () => {
@@ -9262,9 +10742,11 @@ function initTalkExtras() {
         messages: [...page.messages.filter((m) => !seen.has(m.id)), ...telegramLoadedHistory.messages],
         hasMore: page.has_more,
       };
-      document.getElementById("tg-chat-messages").innerHTML = telegramLoadedHistory.messages
-        .map((m) => `<div class="chat-bubble ${m.direction === "out" ? "out" : "in"}">${escapeHtml(m.text || "")}<span class="chat-bubble-time">${formatChatTime(m.at)}</span></div>`)
-        .join("");
+      const messages = document.getElementById("tg-chat-messages");
+      const previousHeight = messages.scrollHeight;
+      const previousTop = messages.scrollTop;
+      syncTelegramMessageBubbles(messages, telegramLoadedHistory.messages);
+      messages.scrollTop = previousTop + messages.scrollHeight - previousHeight;
       button.hidden = !page.has_more;
     } catch (error) {
       showToast(`Не удалось загрузить старые сообщения: ${error.message}`, "error");
@@ -9280,7 +10762,7 @@ function initTalkExtras() {
   for (const id of ["tg-posts-list", "tg-chat-posts-list"]) {
     document.getElementById(id)?.addEventListener("click", (e) => {
       const row = e.target.closest("[data-tg-post]");
-      if (row) openTelegramPost(row.dataset.tgPost);
+      if (row) openTelegramPost(row.dataset.tgPost, e.detail > 0);
     });
   }
   const panel = document.getElementById("tg-post-panel");
@@ -9290,8 +10772,9 @@ function initTalkExtras() {
       if (btn.dataset.postAction === "resume-menu") {
         const menu = document.getElementById("tg-post-resume-menu");
         if (menu) {
-          menu.hidden = !menu.hidden;
-          btn.setAttribute("aria-expanded", String(!menu.hidden));
+          const open = btn.getAttribute("aria-expanded") !== "true";
+          setTalkMotionVisibility(menu, open, e.detail > 0);
+          btn.setAttribute("aria-expanded", String(open));
         }
         return;
       }
@@ -9304,6 +10787,7 @@ function initTalkExtras() {
       const keep = document.getElementById("tg-post-text")?.value;
       openTelegramPost(activeTgPostId);
       if (keep != null) document.getElementById("tg-post-text").value = keep;
+      if (e.detail > 0) animateConversationChange(panel.querySelector(".post-attachment"));
       return;
     }
     const who = e.target.closest("[data-post-contact]");
@@ -9312,6 +10796,7 @@ function initTalkExtras() {
       if (post && tgPostContact(post)?.value !== who.dataset.postContact) {
         tgPostContactChoice = { ...tgPostContactChoice, [post.id]: who.dataset.postContact };
         openTelegramPost(activeTgPostId);
+        animatePostRecipientSelection(panel, e.detail > 0);
       }
     }
   });

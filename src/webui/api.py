@@ -1044,6 +1044,8 @@ def get_inbox(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
             "company": e["company"],
             "title": e["title"],
             "link": e["link"],
+            "applied_at": e.get("applied_at"),
+            "state_at": e.get("state_at") or e.get("stage_at"),
             # Этап, поставленный вручную (LinkedIn и др.), бывает без
             # статуса переговоров с площадки.
             "text": e.get("last_known_state") or "",
@@ -1076,6 +1078,10 @@ def get_inbox(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
             "",
         )
         entry = by_link.get(job_link) or {}
+        last_outbound = next(
+            (message for message in reversed(conv["messages"]) if message["direction"] == "out"),
+            None,
+        )
         items.append(
             {
                 "channel": "telegram_dm",
@@ -1084,6 +1090,9 @@ def get_inbox(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
                 "company": entry.get("company", ""),
                 "title": entry.get("title", ""),
                 "link": job_link,
+                "applied_at": entry.get("applied_at"),
+                "sent_at": last_outbound.get("at") if last_outbound else None,
+                "replied_at": inbound[-1]["at"] if inbound else None,
                 "text": (
                     inbound[-1]["text"]
                     if inbound
@@ -1112,6 +1121,8 @@ def get_inbox(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
                     "contact": email,
                     "link": "https://mail.google.com/mail/u/0/"
                     f"#search/from%3A{email}",
+                    "sent_at": item.get("sent_at"),
+                    "replied_at": item.get("replied_at"),
                     "text": "Ответили на письмо из рассылки "
                     f"«{campaign['name']}» — откройте переписку в "
                     "Gmail",
