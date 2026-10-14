@@ -3565,6 +3565,35 @@ let campaignPoll = null;
 
 let importToDrawer = false; // файл выбран с Главной — предпросмотр в боковой панели
 
+const IMPORT_FIELD_LABELS = {
+  company: "Компания",
+  email: "Email",
+  name: "Контакт / HR",
+  position: "Должность контакта",
+  website: "Сайт компании",
+  title: "Вакансия",
+  source_url: "Источник контакта",
+  link: "Ссылка на вакансию",
+  telegram: "Telegram",
+  emphasis: "Заметка / акцент",
+};
+
+async function pollImport(token, file, el) {
+  while (true) {
+    const response = await fetch(`/api/import/preview/${encodeURIComponent(token)}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "Не удалось получить состояние импорта");
+    if (data.state !== "running") return data;
+    const pct = data.total ? Math.round((100 * data.done) / data.total) : 0;
+    el.innerHTML = `<div class="import-progress">
+        <p class="small"><b>${escapeHtml(file.name)}</b>: ${escapeHtml(data.stage)}${data.total ? ` — часть ${data.done} из ${data.total}` : "…"}</p>
+        <div class="progress"><div style="width:${data.total ? pct : 15}%"></div></div>
+        <p class="muted small">Таблицы разбираются без ИИ; PDF и свободный текст могут обрабатываться дольше. Можно переключиться на другую вкладку и вернуться.</p>
+      </div>`;
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+}
+
 async function importPreview(file, el = document.getElementById("import-preview")) {
   const fail = (msg) => (el.innerHTML = `<p class="import-error">${escapeHtml(msg || "Не удалось разобрать файл")}</p>`);
   el.innerHTML = `<p class="muted small">Загружаю ${escapeHtml(file.name)}…</p>`;
@@ -3575,49 +3604,100 @@ async function importPreview(file, el = document.getElementById("import-preview"
     const response = await fetch("/api/import/preview", { method: "POST", body: form });
     data = await response.json();
     if (!response.ok) return fail(data.detail);
-    // Большой файл разбирается в фоне — показываем, что происходит.
-    while (data.state === "running") {
-      const pct = data.total ? Math.round((100 * data.done) / data.total) : 0;
-      el.innerHTML = `<div class="import-progress">
-          <p class="small"><b>${escapeHtml(file.name)}</b>: ${escapeHtml(data.stage)}${data.total ? ` — часть ${data.done} из ${data.total}` : "…"}</p>
-          <div class="progress"><div style="width:${data.total ? pct : 15}%"></div></div>
-          <p class="muted small">Большой PDF разбирается частями, это может занять несколько минут. Можно переключиться на другую вкладку и вернуться.</p>
-        </div>`;
-      await new Promise((r) => setTimeout(r, 1500));
-      const poll = await fetch(`/api/import/preview/${data.token}`);
-      data = await poll.json();
-      if (!poll.ok) return fail(data.detail);
-    }
+    // POST отдаёт token сразу, а статус разбора читается отдельным GET.
+    const token = data.token;
+    if (!token) return fail("Сервер не вернул идентификатор разбора файла.");
+    data = await pollImport(token, file, el);
   } catch (err) {
     return fail(`Нет связи с ботом: ${err.message}`);
   }
   if (data.state === "error") return fail(data.detail);
+  renderImportResult(data, el, file);
+}
+
+function renderImportResult(data, el, file) {
+  const fail = (msg) => (el.innerHTML = `<p class="import-error">${escapeHtml(msg || "Не удалось разобрать файл")}</p>`);
+  const fields = Object.entries(IMPORT_FIELD_LABELS);
+  const headers = data.headers || [];
+  const mapping = data.column_mapping || {};
+  const mappingPanel = headers.length
+    ? `<details class="import-mapping" ${data.state === "needs_mapping" ? "open" : ""}>
+        <summary>Сопоставление столбцов</summary>
+        <p class="muted small">Проверьте, какие столбцы попадут в карточку компании. Неизвестные названия можно назначить вручную.</p>
+        <div class="import-map-grid">${fields.map(([field, label]) => `
+          <label><span>${label}</span><select data-import-field="${field}" aria-label="Столбец: ${label}">
+            <option value="">Не использовать</option>
+            ${headers.map((header, index) => `<option value="${index}" ${mapping[field] != null && Number(mapping[field]) === index ? "selected" : ""}>${index + 1}. ${escapeHtml(header || `Без названия`)}${header ? "" : ` (${index + 1})`}</option>`).join("")}
+          </select></label>`).join("")}</div>
+        <div class="import-map-actions"><button type="button" class="btn btn-small" data-import-map-apply>Проверить сопоставление</button><span class="muted small" data-import-map-status></span></div>
+      </details>`
+    : "";
   const s = data.stats;
   const CHECK = { ok: "✓", unknown: "?", bad: "✗", duplicate: "дубль", written: "писали" };
-  el.innerHTML = `
-    <div class="import-summary">
-      <strong>${escapeHtml(data.filename)}</strong>: строк ${s.total} ·
-      <span class="ok-text">адрес в порядке ${s.ok}</span> ·
-      не проверен ${s.unknown} · <span class="err-text">с ошибкой ${s.bad}</span> ·
-      дублей ${s.duplicate} · уже писали ${s.already_written}
-    </div>
-    <div class="table-wrap import-table"><table>
-      <thead><tr><th>#</th><th>Компания</th><th>Email</th><th>Контакт</th><th>Упор</th><th>Проверка</th></tr></thead>
-      <tbody>${data.items
-        .slice(0, 50)
-        .map(
-          (i) => `<tr class="check-${i.check}">
+  const needsMapping = data.state === "needs_mapping";
+  const preview = needsMapping
+    ? `<p class="import-map-required muted small">${escapeHtml(data.detail || "Выберите столбец компании или email, затем примените сопоставление.")}</p>`
+    : `<div class="import-summary">
+        <strong>${escapeHtml(data.filename)}</strong>: строк ${s.total} ·
+        <span class="ok-text">адрес в порядке ${s.ok}</span> ·
+        не проверен ${s.unknown} · <span class="err-text">с ошибкой ${s.bad}</span> ·
+        дублей ${s.duplicate} · уже писали ${s.already_written}
+      </div>
+      <div class="table-wrap import-table"><table>
+        <thead><tr><th>#</th><th>Компания</th><th>Email</th><th>Контакт</th><th>Упор</th><th>Проверка</th></tr></thead>
+        <tbody>${data.items
+          .slice(0, 50)
+          .map((i) => `<tr class="check-${i.check}">
             <td>${i.row}</td><td>${escapeHtml(i.company)}</td><td>${escapeHtml(i.email)}</td>
             <td>${escapeHtml(i.name)}</td><td>${escapeHtml(truncate(i.emphasis || "", 60))}</td>
-            <td>${CHECK[i.check] || ""} <span class="muted small">${escapeHtml(i.note)}</span></td></tr>`
-        )
-        .join("")}</tbody></table></div>
-    ${data.items.length > 50 ? `<p class="muted small">…и ещё ${data.items.length - 50}</p>` : ""}
-    <div class="filters">
-      <label class="checkbox-row"><input type="checkbox" id="import-unverified" checked /> Добавлять адреса, домен которых не удалось проверить</label>
-      <button type="button" class="btn btn-primary" id="import-commit">Добавить в базу</button>
-      <button type="button" class="btn btn-ghost" id="import-cancel">Отмена</button>
-    </div>`;
+            <td>${CHECK[i.check] || ""} <span class="muted small">${escapeHtml(i.note)}</span></td></tr>`)
+          .join("")}</tbody></table></div>
+      ${data.items.length > 50 ? `<p class="muted small">…и ещё ${data.items.length - 50}</p>` : ""}
+      <div class="filters">
+        <label class="checkbox-row"><input type="checkbox" id="import-unverified" checked /> Добавлять адреса, домен которых не удалось проверить</label>
+        <button type="button" class="btn btn-primary" id="import-commit">Добавить в базу</button>
+        <button type="button" class="btn btn-ghost" id="import-cancel">Отмена</button>
+      </div>`;
+  el.innerHTML = `${mappingPanel}${preview}`;
+
+  const applyButton = el.querySelector("[data-import-map-apply]");
+  const commitButton = el.querySelector("#import-commit");
+  if (applyButton) {
+    const status = el.querySelector("[data-import-map-status]");
+    el.querySelectorAll("[data-import-field]").forEach((select) => {
+      select.addEventListener("change", () => {
+        if (select.value) {
+          el.querySelectorAll("[data-import-field]").forEach((other) => {
+            if (other !== select && other.value === select.value) other.value = "";
+          });
+        }
+        if (commitButton) commitButton.disabled = true;
+        status.textContent = "Сопоставление изменено — примените его перед сохранением.";
+      });
+    });
+    applyButton.addEventListener("click", async () => {
+      const selected = {};
+      el.querySelectorAll("[data-import-field]").forEach((select) => {
+        selected[select.dataset.importField] = select.value === "" ? null : Number(select.value);
+      });
+      applyButton.disabled = true;
+      status.textContent = "Перепроверяю строки…";
+      try {
+        await api(`/api/import/preview/${encodeURIComponent(data.token)}/mapping`, {
+          method: "POST",
+          body: JSON.stringify({ mapping: selected }),
+        });
+        const updated = await pollImport(data.token, file, el);
+        if (updated.state === "error") return fail(updated.detail);
+        renderImportResult(updated, el, file);
+      } catch (error) {
+        applyButton.disabled = false;
+        status.textContent = error.message.replace(/^\d+: /, "");
+      }
+    });
+    if (needsMapping) status.textContent = "Выберите компанию или email, затем проверьте.";
+  }
+  if (!commitButton) return;
   document.getElementById("import-cancel").addEventListener("click", () =>
     el.closest("#platform-drawer") ? closePlatformDrawer() : (el.innerHTML = "")
   );
@@ -3644,6 +3724,43 @@ async function importPreview(file, el = document.getElementById("import-preview"
     } catch (err) {
       showToast(err.message.replace(/^\d+: /, ""), "error");
     }
+  });
+}
+
+function bindImportDropzone() {
+  const zone = document.getElementById("import-dropzone");
+  const picker = document.getElementById("import-dropzone-pick");
+  if (!zone || !picker) return;
+  let dragDepth = 0;
+  const hasFiles = (event) => Array.from(event.dataTransfer?.types || []).includes("Files");
+  const clearDrag = () => {
+    dragDepth = 0;
+    zone.classList.remove("is-dragover");
+  };
+  picker.addEventListener("click", () => document.getElementById("import-file").click());
+  zone.addEventListener("dragenter", (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    dragDepth += 1;
+    zone.classList.add("is-dragover");
+  });
+  zone.addEventListener("dragover", (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  });
+  zone.addEventListener("dragleave", (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) zone.classList.remove("is-dragover");
+  });
+  zone.addEventListener("drop", (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    clearDrag();
+    const file = event.dataTransfer.files?.[0];
+    if (file) importPreview(file);
   });
 }
 
@@ -9652,6 +9769,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     importToDrawer = false;
     e.target.value = "";
   });
+  bindImportDropzone();
   document.getElementById("tgq-greeting").addEventListener("input", updateGreetingPreview);
   const openExtraResumePicker = () => {
     if (!resumeUploadBusy) document.getElementById("tgq-resume-file").click();

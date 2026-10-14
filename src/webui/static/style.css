@@ -3237,6 +3237,40 @@ kbd {
   margin: 14px 0 8px;
   font-size: 13.5px;
 }
+.import-mapping {
+  margin: 0 0 14px;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm, 10px);
+  background: var(--surface-raised, var(--surface));
+}
+.import-mapping summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.import-mapping > p { margin: 8px 0 12px; }
+.import-map-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+.import-map-grid label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.import-map-grid select { width: 100%; min-width: 0; }
+.import-map-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+.import-map-required { margin: 12px 0 0; }
 .import-table {
   max-height: 320px;
   overflow: auto;
@@ -8533,6 +8567,58 @@ a.btn-primary:hover {
   background: var(--surface);
   border: 1px solid var(--border-soft);
 }
+
+.import-dropzone {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
+}
+
+.import-dropzone-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--surface-raised, var(--surface));
+  color: var(--text-2);
+  font-size: 20px;
+  transition: transform 180ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.import-dropzone-copy {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.import-dropzone-copy strong { font-size: 13px; font-weight: 600; }
+.import-dropzone.is-dragover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  transform: translateY(-1px);
+}
+.import-dropzone.is-dragover .import-dropzone-icon {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, var(--surface));
+  transform: translateY(2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .import-dropzone,
+  .import-dropzone-icon { transition: none; }
+}
+
+:root[data-motion="reduce"] .import-dropzone,
+:root[data-motion="reduce"] .import-dropzone-icon { transition: none; }
 
 .empty-state {
   padding: 24px 12px;

@@ -36,7 +36,12 @@ def _xlsx(rows):
         for r_idx, row in enumerate(rows, start=1):
             cs = []
             for c_idx, _ in enumerate(row):
-                cs.append(f'<c r="{"AB"[c_idx]}{r_idx}" t="s"><v>{i}</v></c>')
+                col = ""
+                col_number = c_idx + 1
+                while col_number:
+                    col_number, remainder = divmod(col_number - 1, 26)
+                    col = chr(65 + remainder) + col
+                cs.append(f'<c r="{col}{r_idx}" t="s"><v>{i}</v></c>')
                 i += 1
             cells.append(f'<row r="{r_idx}">{"".join(cs)}</row>')
         z.writestr(
@@ -63,6 +68,105 @@ def test_read_csv_and_xlsx_by_headers():
         "list.xlsx", _xlsx([["Company", "Email"], ["Delta", "jobs@delta.dev"]])
     )
     assert importer.rows_from_table(table)[0]["email"] == "jobs@delta.dev"
+
+
+def test_table_import_skips_title_and_notes_before_headers():
+    table = [
+        ["Удалённые Python вакансии с опубликованными email"],
+        ["Проверено 14.10.2026; адреса явно опубликованы в источниках."],
+        ["Профиль: Python backend, коммерческий опыт."],
+        [
+            "Группа", "Компания", "Страна / команда", "Вакансия",
+            "Удалёнка и география", "Совпадение", "Опубликованный email",
+            "Тип адреса", "На что сделать упор", "Источник", "Статус проверки",
+        ],
+        [
+            "Россия", "Kotelov", "Россия", "Python-разработчик", "Worldwide",
+            "Хорошее совпадение", "hr@kotelov.com", "HR", "Python backend",
+            "https://kotelov.com/hr", "Активная вакансия",
+        ],
+    ]
+
+    [item] = importer.rows_from_table(table)
+
+    assert item["company"] == "Kotelov"
+    assert item["email"] == "hr@kotelov.com"
+    assert item["title"] == "Python-разработчик"
+    assert item["source_url"] == "https://kotelov.com/hr"
+    assert item["row"] == 5
+
+
+def test_table_import_accepts_manual_column_mapping():
+    table = [
+        ["Employer Label", "Public Contact", "Opening Text"],
+        ["Acme", "jobs@acme.dev", "Python backend developer"],
+    ]
+
+    [item] = importer.rows_from_table(
+        table, field_mapping={"company": 0, "email": 1, "title": 2}
+    )
+
+    assert (item["company"], item["email"], item["title"]) == (
+        "Acme",
+        "jobs@acme.dev",
+        "Python backend developer",
+    )
+    assert item["row"] == 2
+
+
+def test_header_detection_does_not_treat_hr_email_as_a_header():
+    table = [
+        ["Entity label", "Public route", "Opening text"],
+        ["Acme", "hr@acme.dev", "Python backend developer"],
+    ]
+
+    header_index, _, mapping = importer.table_mapping(table)
+
+    assert header_index == 0
+    assert mapping["email"] == 1
+
+
+def test_import_api_can_reprocess_custom_columns_with_manual_mapping(
+    client, monkeypatch  # noqa: F811
+):
+    monkeypatch.setattr(importer, "domain_accepts_mail", lambda domain: True)
+    table = [
+        ["Entity label", "Public route", "Opening text"],
+        ["Acme", "jobs@acme.dev", "Python backend developer"],
+    ]
+    token = client.post(
+        "/api/import/preview",
+        files={"file": ("custom.xlsx", _xlsx(table))},
+    ).json()["token"]
+
+    needs_mapping = client.get(f"/api/import/preview/{token}").json()
+    assert needs_mapping["state"] == "done"
+    assert needs_mapping["headers"] == table[0]
+    assert needs_mapping["column_mapping"]["email"] == 1
+
+    response = client.post(
+        f"/api/import/preview/{token}/mapping",
+        json={"mapping": {"company": 0, "email": 1, "title": 2}},
+    )
+    assert response.status_code == 200
+    done = _wait_for_import(client, token)
+    assert done["state"] == "done"
+    assert done["items"][0]["email"] == "jobs@acme.dev"
+    assert done["items"][0]["title"] == "Python backend developer"
+
+
+def test_import_waits_for_mapping_when_company_header_is_unknown(client):  # noqa: F811
+    table = [["Entity label", "Opening text"], ["Acme", "Python backend"]]
+    token = client.post(
+        "/api/import/preview",
+        files={"file": ("unknown.xlsx", _xlsx(table))},
+    ).json()["token"]
+
+    job = _wait_for_import(client, token)
+
+    assert job["state"] == "needs_mapping"
+    assert job["headers"] == table[0]
+    assert job["column_mapping"] == {}
 
 
 def test_preview_checks(monkeypatch):
@@ -124,18 +228,22 @@ def test_free_text_drops_invented_emails(monkeypatch):
     ]
 
 
-def _import(client, name, data):  # noqa: F811
+def _wait_for_import(client, token):
     import time
 
-    token = client.post(
-        "/api/import/preview", files={"file": (name, data)}
-    ).json()["token"]
     for _ in range(100):
         job = client.get(f"/api/import/preview/{token}").json()
         if job["state"] != "running":
             return job
         time.sleep(0.05)
     raise AssertionError("импорт не закончился")
+
+
+def _import(client, name, data):  # noqa: F811
+    token = client.post(
+        "/api/import/preview", files={"file": (name, data)}
+    ).json()["token"]
+    return _wait_for_import(client, token)
 
 
 def test_big_text_import_in_chunks_keeps_every_email(

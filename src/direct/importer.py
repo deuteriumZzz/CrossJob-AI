@@ -34,13 +34,36 @@ _HEADER_SYNONYMS = {
     "company": (
         "компания",
         "company",
+        "company name",
+        "organization",
+        "organization name",
         "организация",
         "работодатель",
+        "employer name",
         "employer",
         "название",
     ),
-    "email": ("email", "e-mail", "почта", "mail", "электронная"),
+    "email": (
+        "email address",
+        "e-mail address",
+        "contact email",
+        "hr email",
+        "mail address",
+        "электронная почта",
+        "почтовый адрес",
+        "адрес email",
+        "email",
+        "e-mail",
+        "почта",
+        "mail",
+        "электронная",
+    ),
     "name": (
+        "contact name",
+        "contact person",
+        "recruiter name",
+        "hiring manager",
+        "hr name",
         "имя",
         "name",
         "контакт",
@@ -52,19 +75,66 @@ _HEADER_SYNONYMS = {
     ),
     # «Должность» рядом с именем — должность человека; вакансия — «Вакансия».
     "position": (
+        "contact position",
+        "contact role",
+        "должность HR",
         "должность контакта",
         "должность",
         "position",
         "роль",
         "role",
     ),
-    "website": ("сайт", "website", "site", "домен", "domain"),
-    "title": ("вакансия", "vacancy", "job", "позиция", "title"),
+    "website": (
+        "company website",
+        "company site",
+        "careers website",
+        "сайт",
+        "website",
+        "site",
+        "домен",
+        "domain",
+    ),
+    "title": (
+        "vacancy title",
+        "job title",
+        "role title",
+        "role name",
+        "название вакансии",
+        "вакансия",
+        "vacancy",
+        "job",
+        "позиция",
+        "title",
+    ),
     # Где адрес опубликован (например, «Source URL» в careerLauncher) — это
     # не вакансия, а источник контакта. Стоит до «link»: «source url» ⊃ «url».
-    "source_url": ("источник", "source url", "source"),
-    "link": ("ссылка", "link", "url", "линк"),
-    "telegram": ("telegram", "телеграм", "tg"),
+    "source_url": (
+        "email source page",
+        "email source",
+        "source url",
+        "источник контакта",
+        "источник",
+        "source",
+    ),
+    "link": (
+        "application link",
+        "vacancy url",
+        "job url",
+        "job link",
+        "ссылка на вакансию",
+        "ссылка",
+        "link",
+        "url",
+        "линк",
+    ),
+    "telegram": (
+        "telegram handle",
+        "telegram contact",
+        "tg username",
+        "telegram",
+        "телеграм",
+        "tg",
+    ),
     "emphasis": (
         "упор",
         "акцент",
@@ -85,15 +155,26 @@ _EMAIL_RE = re.compile(r"^[\w.+-]+@[\w-]+(\.[\w-]+)+$")
 
 def _field_for(header: str) -> str | None:
     h = header.strip().casefold()
-    if not h:
+    if not h or _EMAIL_RE.fullmatch(h):
         return None
-    for field, words in _HEADER_SYNONYMS.items():
+    fields = list(_HEADER_SYNONYMS.items())
+    for field, words in fields:
         if h in words:
             return field
-    for field, words in _HEADER_SYNONYMS.items():
-        if any(w in h for w in words):
-            return field
-    return None
+    matches = [
+        (len(word), -field_index, field)
+        for field_index, (field, words) in enumerate(fields)
+        for word in words
+        if _header_contains(h, word)
+    ]
+    return max(matches)[2] if matches else None
+
+
+def _header_contains(header: str, alias: str) -> bool:
+    if alias.isascii() and re.fullmatch(r"[a-z0-9 -]+", alias):
+        pattern = re.escape(alias).replace(r"\ ", r"\s+")
+        return re.search(rf"(?<![a-z0-9]){pattern}(?![a-z0-9])", header) is not None
+    return alias in header
 
 
 # --- чтение форматов -----------------------------------------------------
@@ -294,22 +375,95 @@ def read_file(
     return None, _decode(data)
 
 
-def rows_from_table(rows: list[list[str]]) -> list[dict]:
-    header, *body = rows
-    mapping = {i: _field_for(h) for i, h in enumerate(header)}
-    # «Title» рядом с именем и email — должность человека, а не вакансия
-    # (у списка вакансий есть ссылка).
-    if "link" not in mapping.values() and "position" not in mapping.values():
+def _table_header(rows: list[list[str]]) -> tuple[int, dict[int, str]]:
+    """Find the header row even when a workbook starts with title/notes."""
+    candidates: list[tuple[int, int, dict[int, str]]] = []
+    for row_index, row in enumerate(rows[:25]):
         mapping = {
-            i: "position" if f == "title" else f for i, f in mapping.items()
+            column: field
+            for column, value in enumerate(row)
+            if (field := _field_for(value))
         }
+        fields = set(mapping.values())
+        if not fields:
+            continue
+        # A real table header usually names several fields. Company+email is
+        # the strongest signal and prevents a title mentioning "email" from
+        # being mistaken for the header.
+        score = len(fields) + (4 if {"company", "email"} <= fields else 0)
+        candidates.append((score, row_index, mapping))
+    if not candidates:
+        # Keep custom headings available for the manual mapping step. The
+        # widest early row is a safer header candidate than guessing from
+        # arbitrary cell contents later in the workbook.
+        fallback = max(
+            enumerate(rows[:25]),
+            key=lambda item: (sum(bool(value.strip()) for value in item[1]), -item[0]),
+            default=None,
+        )
+        if fallback is None or sum(bool(value.strip()) for value in fallback[1]) < 2:
+            raise ValueError("Не нашёл строку заголовков таблицы.")
+        return fallback[0], {}
+    _, row_index, mapping = max(candidates, key=lambda item: (item[0], -item[1]))
+    return row_index, mapping
+
+
+def table_mapping(rows: list[list[str]]) -> tuple[int, list[str], dict[str, int]]:
+    """Return the selected header row and suggested canonical field mapping."""
+    header_index, mapping = _table_header(rows)
+    if "email" not in mapping.values():
+        matches: dict[int, int] = {}
+        for row in rows[header_index + 1 : header_index + 26]:
+            for column, value in enumerate(row):
+                if extract_emails(value):
+                    matches[column] = matches.get(column, 0) + 1
+        if matches:
+            best = max(matches.values())
+            columns = [column for column, count in matches.items() if count == best]
+            if len(columns) == 1:
+                mapping[columns[0]] = "email"
+    # «Title»/«позиция» рядом с именем и email может значить должность
+    # человека. Явные «Вакансия» и «Job» остаются названием вакансии.
+    if "link" not in mapping.values() and "position" not in mapping.values():
+        ambiguous_titles = {
+            i
+            for i, value in enumerate(rows[header_index])
+            if value.strip().casefold() in ("title", "позиция")
+            and mapping.get(i) == "title"
+        }
+        mapping = {
+            i: "position" if i in ambiguous_titles else field
+            for i, field in mapping.items()
+        }
+    suggested: dict[str, int] = {}
+    for column, field in sorted(mapping.items()):
+        suggested.setdefault(field, column)
+    return header_index, rows[header_index], suggested
+
+
+def rows_from_table(
+    rows: list[list[str]], field_mapping: dict[str, int | None] | None = None
+) -> list[dict]:
+    header_index, _, suggested = table_mapping(rows)
+    body = rows[header_index + 1 :]
+    if field_mapping is None:
+        selected = suggested
+    else:
+        selected = {
+            field: column
+            for field, column in field_mapping.items()
+            if field in FIELDS
+            and column is not None
+            and 0 <= column < len(rows[header_index])
+        }
+    mapping = {column: field for field, column in selected.items()}
     if "email" not in mapping.values() and "company" not in mapping.values():
         raise ValueError(
-            "Не нашёл столбцы «Компания» и «Email» — проверьте первую "
-            "строку-заголовок."
+            "Не нашёл столбцы «Компания» и «Email» — проверьте заголовки "
+            "таблицы."
         )
     result = []
-    for number, row in enumerate(body, start=2):
+    for number, row in enumerate(body, start=header_index + 2):
         item: dict[str, Any] = {f: "" for f in FIELDS}
         for i, value in enumerate(row):
             field = mapping.get(i)

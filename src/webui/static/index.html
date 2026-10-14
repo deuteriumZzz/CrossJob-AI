@@ -357,6 +357,11 @@
           <a class="btn" href="/api/contacts/export" download title="Файл .csv — открывается в Excel и Google Таблицах, можно поправить и загрузить обратно">Скачать в Excel</a>
         </div>
       </header>
+      <div class="import-dropzone" id="import-dropzone" role="region" aria-label="Загрузка списка компаний">
+        <span class="import-dropzone-icon" aria-hidden="true">↓</span>
+        <div class="import-dropzone-copy"><strong>Перетащите сюда таблицу</strong><span class="muted small">Excel, CSV, PDF, Word или текстовый файл</span></div>
+        <button type="button" class="btn btn-ghost btn-small" id="import-dropzone-pick">Выбрать файл</button>
+      </div>
       <div id="import-preview"></div>
       <details class="import-help" id="import-help" hidden>
         <summary>Где взять список компаний?</summary>

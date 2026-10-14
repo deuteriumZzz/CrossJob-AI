@@ -92,7 +92,9 @@ from src.direct.companies import load_companies, save_companies
 from src.direct.dossier import collect_dossier
 from src.direct.email_channel import build_message, send_email
 from src.direct.importer import preview as import_preview
+from src.direct.importer import FIELDS as IMPORT_FIELDS
 from src.direct.importer import read_file, rows_from_table, rows_from_text
+from src.direct.importer import table_mapping as import_table_mapping
 from src.job_sources.applied_log import (
     STAGES,
     AppliedLog,
@@ -2343,6 +2345,85 @@ def _written_emails(ctx: AppContext) -> set[str]:
 # ponytail: задачи импорта живут в памяти процесса — после перезапуска
 # дашборда незаконченный разбор надо запустить заново.
 IMPORT_JOBS: dict[str, dict] = {}
+IMPORT_TABLES: dict[str, tuple[str, list[list[str]]]] = {}
+
+
+def _save_import_preview(
+    ctx: AppContext,
+    token: str,
+    filename: str,
+    rows: list[dict],
+    metadata: Optional[dict] = None,
+) -> None:
+    import json as _json
+
+    job = IMPORT_JOBS[token]
+    if not rows:
+        raise ValueError("Не нашёл в файле ни компаний, ни email.")
+    job.update(stage=f"Проверяю адреса ({len(rows)})", done=0, total=0)
+    known = {
+        contact["value"].lower()
+        for card in ContactBook(ctx.output_folder).all().values()
+        for contact in card["contacts"]
+        if contact["kind"] == "email"
+    }
+    result = import_preview(rows, known, _written_emails(ctx))
+    payload = {"token": token, "filename": filename, **(metadata or {}), **result}
+    (ctx.output_folder / IMPORT_PREVIEW_FILE).write_text(
+        _json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+    )
+    job.update(state="done", stats=result["stats"], items=result["items"][:300])
+
+
+def _run_table_import(
+    ctx: AppContext,
+    token: str,
+    filename: str,
+    table: list[list[str]],
+    field_mapping: Optional[dict[str, Optional[int]]] = None,
+) -> None:
+    """Prepare a table preview using detected or user-selected columns."""
+    job = IMPORT_JOBS[token]
+    try:
+        header_index, headers, suggested = import_table_mapping(table)
+        selected = suggested if field_mapping is None else {
+            field: column
+            for field, column in field_mapping.items()
+            if field in IMPORT_FIELDS
+        }
+        job.update(
+            header_row=header_index + 1,
+            headers=headers,
+            column_mapping=selected,
+        )
+        if not any(
+            selected.get(field) is not None for field in ("company", "email")
+        ):
+            job.update(
+                state="needs_mapping",
+                detail="Выберите столбец компании или email, чтобы продолжить.",
+            )
+            return
+        rows = rows_from_table(
+            table,
+            field_mapping=field_mapping if field_mapping is not None else None,
+        )
+        _save_import_preview(
+            ctx,
+            token,
+            filename,
+            rows,
+            {
+                "header_row": header_index + 1,
+                "headers": headers,
+                "column_mapping": selected,
+            },
+        )
+    except (ValueError, KeyError, IndexError) as e:
+        job.update(state="error", detail=str(e) or "Не удалось разобрать таблицу")
+    except Exception as e:
+        logger.exception("Сопоставление столбцов импорта упало")
+        job.update(state="error", detail=f"Не удалось разобрать таблицу: {e}")
 
 
 def _run_import(
@@ -2350,14 +2431,14 @@ def _run_import(
 ) -> None:
     """Разбор файла в фоне: большой PDF идёт к LLM частями, адреса
     проверяются параллельно — дашборд при этом не замирает."""
-    import json as _json
-
     job = IMPORT_JOBS[token]
     try:
         job["stage"] = "Читаю файл"
         table, text = read_file(filename, data)
         if table is not None:
-            rows = rows_from_table(table)
+            IMPORT_TABLES[token] = (filename, table)
+            _run_table_import(ctx, token, filename, table)
+            return
         else:
             if not ctx.llm_api_key:
                 raise ValueError(
@@ -2376,31 +2457,48 @@ def _run_import(
                 )
 
             rows = rows_from_text(text, ctx.llm_api_key, progress)
-        if not rows:
-            raise ValueError("Не нашёл в файле ни компаний, ни email.")
-        job.update(stage=f"Проверяю адреса ({len(rows)})", done=0, total=0)
-        known = {
-            c["value"].lower()
-            for card in ContactBook(ctx.output_folder).all().values()
-            for c in card["contacts"]
-            if c["kind"] == "email"
-        }
-        result = import_preview(rows, known, _written_emails(ctx))
-        (ctx.output_folder / IMPORT_PREVIEW_FILE).write_text(
-            _json.dumps(
-                {"token": token, "filename": filename, **result},
-                ensure_ascii=False,
-            ),
-            encoding="utf-8",
-        )
-        job.update(
-            state="done", stats=result["stats"], items=result["items"][:300]
-        )
+        _save_import_preview(ctx, token, filename, rows)
     except (ValueError, KeyError, IndexError, zipfile.BadZipFile) as e:
         job.update(state="error", detail=str(e) or "Не удалось разобрать файл")
     except Exception as e:
         logger.exception("Импорт файла упал")
         job.update(state="error", detail=f"Не удалось разобрать файл: {e}")
+
+
+class ImportColumnMapping(BaseModel):
+    mapping: dict[str, Optional[int]]
+
+
+@app.post("/api/import/preview/{token}/mapping")
+def post_import_column_mapping(
+    token: str,
+    body: ImportColumnMapping,
+    ctx: AppContext = Depends(get_ctx),
+) -> dict:
+    """Rebuild a spreadsheet preview with columns selected in the UI."""
+    import threading
+
+    saved = IMPORT_TABLES.get(token)
+    job = IMPORT_JOBS.get(token)
+    if saved is None or job is None:
+        raise HTTPException(404, "Разбор таблицы устарел — загрузите файл ещё раз")
+    filename, table = saved
+    width = len(table[job.get("header_row", 1) - 1])
+    for field, column in body.mapping.items():
+        if field not in IMPORT_FIELDS:
+            raise HTTPException(422, f"Неизвестное поле: {field}")
+        if column is not None and not 0 <= column < width:
+            raise HTTPException(422, "Номер столбца выходит за границы таблицы")
+    used_columns = [column for column in body.mapping.values() if column is not None]
+    if len(used_columns) != len(set(used_columns)):
+        raise HTTPException(422, "Один столбец нельзя назначить двум полям")
+    job.update(state="running", stage="Применяю сопоставление", done=0, total=0)
+    threading.Thread(
+        target=_run_table_import,
+        args=(ctx, token, filename, table, body.mapping),
+        daemon=True,
+    ).start()
+    return {"token": token}
 
 
 @app.post("/api/import/preview")
@@ -2510,6 +2608,8 @@ def post_import_commit(
             companies.add(key)
             contacts += len(found)
     path.unlink(missing_ok=True)
+    IMPORT_TABLES.pop(body.token, None)
+    IMPORT_JOBS.pop(body.token, None)
     return {
         "companies": len(companies),
         "contacts": contacts,
