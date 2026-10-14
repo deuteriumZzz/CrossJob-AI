@@ -2940,13 +2940,10 @@ function telegramChannelsFromText(raw) {
     });
 }
 
-function setTelegramChannels(channels, notifyChange = false) {
+function setTelegramChannels(channels) {
   const input = document.getElementById("tg-channels");
   input.value = telegramChannelsFromText((channels || []).join("\n")).join("\n");
   renderTelegramChannelList();
-  if (notifyChange) {
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  }
 }
 
 function renderTelegramChannelList() {
@@ -2979,15 +2976,70 @@ function renderTelegramChannelList() {
     remove.setAttribute("aria-label", `Удалить @${channel}`);
     remove.textContent = "×";
     remove.addEventListener("click", () => {
-      setTelegramChannels(
-        channels.filter((item) => item !== channel),
-        true
-      );
+      setTelegramChannels(channels.filter((item) => item !== channel));
+      markTelegramChannelsEdited();
       document.getElementById("tg-channel-editor-status").textContent = `Удалён @${channel}.`;
+      requestTelegramSettingsSave();
     });
     item.append(link, remove);
     list.append(item);
   });
+}
+
+let telegramChannelsSavePending = false;
+let telegramChannelsSavePromise = null;
+let telegramChannelsChangedBeforeLoad = false;
+let telegramChannelsRevision = 0;
+let telegramSettingsSaveQueue = Promise.resolve();
+
+function serializeTelegramSettingsSave(save) {
+  const request = telegramSettingsSaveQueue.then(save, save);
+  telegramSettingsSaveQueue = request.catch(() => {});
+  return request;
+}
+
+function markTelegramChannelsEdited() {
+  telegramChannelsRevision += 1;
+}
+
+function requestTelegramSettingsSave() {
+  const pane = document.getElementById("tg-rules-panel");
+  if (pane.dataset.loaded !== "1") {
+    telegramChannelsChangedBeforeLoad = true;
+    document.getElementById("tg-channel-editor-status").textContent =
+      "Сохраню каналы после загрузки настроек…";
+    return Promise.resolve();
+  }
+  telegramChannelsSavePending = true;
+  if (!telegramChannelsSavePromise) {
+    telegramChannelsSavePromise = (async () => {
+      const status = document.getElementById("tg-channel-editor-status");
+      while (telegramChannelsSavePending) {
+        telegramChannelsSavePending = false;
+        const channels = telegramChannelsFromText(
+          document.getElementById("tg-channels").value
+        );
+        status.textContent = "Сохранение каналов…";
+        try {
+          const saved = await serializeTelegramSettingsSave(() =>
+            api("/api/settings/telegram", {
+              method: "POST",
+              body: JSON.stringify({ channels }),
+            })
+          );
+          if (telegramChannelsSavePending) continue;
+          const savedChannels = saved.channels || [];
+          setTelegramChannels(savedChannels);
+          status.textContent = `Сохранено: ${savedChannels.length} каналов.`;
+        } catch (error) {
+          status.textContent = `Не удалось сохранить каналы: ${error.message}`;
+        }
+      }
+      telegramChannelsSavePromise = null;
+      if (telegramChannelsSavePending) requestTelegramSettingsSave();
+    })();
+  }
+  return telegramChannelsSavePromise;
 }
 
 function addTelegramChannels(raw) {
@@ -3008,10 +3060,14 @@ function addTelegramChannels(raw) {
   );
   const next = telegramChannelsFromText([...previous, ...candidates].join("\n"));
   const added = next.length - previous.length;
-  setTelegramChannels(next, true);
+  setTelegramChannels(next);
   status.textContent = added
     ? `Добавлено: ${added}.`
     : "Этот канал уже есть в списке.";
+  if (added) {
+    markTelegramChannelsEdited();
+    requestTelegramSettingsSave();
+  }
   return true;
 }
 
@@ -3043,12 +3099,34 @@ function initTelegramChannelEditor() {
   });
   document
     .getElementById("tg-channels")
-    .addEventListener("input", renderTelegramChannelList);
+    .addEventListener("input", () => {
+      markTelegramChannelsEdited();
+      if (document.getElementById("tg-rules-panel").dataset.loaded !== "1") {
+        telegramChannelsChangedBeforeLoad = true;
+      }
+      renderTelegramChannelList();
+    });
+  document
+    .getElementById("tg-channels")
+    .addEventListener("change", requestTelegramSettingsSave);
   renderTelegramChannelList();
 }
 
-function fillTelegramRules(settings) {
-  setTelegramChannels(settings.channels || []);
+function fillTelegramRules(settings, requestedChannelsRevision = telegramChannelsRevision) {
+  const localChannels = telegramChannelsChangedBeforeLoad
+    ? telegramChannelsFromText(
+        document.getElementById("tg-channels").value
+      )
+    : [];
+  const preserveLocalChannels = requestedChannelsRevision < telegramChannelsRevision;
+  const channels = telegramChannelsChangedBeforeLoad
+    ? telegramChannelsFromText([...(settings.channels || []), ...localChannels].join("\n"))
+    : preserveLocalChannels
+      ? telegramChannelsFromText(
+          document.getElementById("tg-channels").value
+        )
+      : settings.channels || [];
+  setTelegramChannels(channels);
   document.getElementById("tg-max-age").value = settings.max_post_age_days ?? "";
   document.getElementById("tg-daily-limit").value = settings.daily_message_limit ?? "";
   document.getElementById("tg-auto-message").checked = !!settings.auto_message;
@@ -3056,10 +3134,22 @@ function fillTelegramRules(settings) {
   document.getElementById("tg-hours-end").value = settings.active_hours_end ?? "";
   document.getElementById("tg-rules-panel").dataset.loaded = "1";
   document.getElementById("tg-source-auto").dataset.loaded = "1";
+  if (telegramChannelsChangedBeforeLoad) {
+    telegramChannelsChangedBeforeLoad = false;
+    requestTelegramSettingsSave();
+  }
 }
 
 async function loadTelegramWatch() {
-  api("/api/settings/telegram").then(fillTelegramRules).catch(() => {});
+  const channelsRevision = telegramChannelsRevision;
+  api("/api/settings/telegram")
+    .then((settings) => fillTelegramRules(settings, channelsRevision))
+    .catch((error) => {
+      if (telegramChannelsChangedBeforeLoad) {
+        document.getElementById("tg-channel-editor-status").textContent =
+          `Не удалось загрузить настройки каналов: ${error.message}`;
+      }
+    });
   const w = await api("/api/settings/telegram-watch");
   // Строка статуса во вкладке «Общение → Telegram».
   const line = document.getElementById("tg-quick-line-status");
@@ -4656,6 +4746,7 @@ const render = {
   },
 
   async telegram() {
+    const channelsRevision = telegramChannelsRevision;
     loadTelegramWatch();
     const [status, settings, conversations] = await Promise.all([
       api("/api/telegram/status"),
@@ -4663,7 +4754,7 @@ const render = {
       api("/api/telegram/conversations"),
     ]);
     applyTelegramAccountStatus(status);
-    fillTelegramRules(settings);
+    fillTelegramRules(settings, channelsRevision);
 
     const unreadCount = conversations.filter((c) => c.unread).length;
     const navBadge = document.getElementById("telegram-unread-badge");
@@ -5808,6 +5899,7 @@ function initAutosave() {
     pane.addEventListener("pointerdown", remember);
     pane.addEventListener("change", (e) => {
       if (e.target.type === "file" || e.target.type === "password") return;
+      if (e.target.id === "tg-channels") return; // сохраняется канал-специфичной очередью
       if (!loaded()) return; // ещё не загрузили — не затираем пустым
       if (e.target.closest(".no-autosave")) return;
       clearTimeout(timer);
@@ -9182,19 +9274,24 @@ function initDashboard() {
     await withButtonLoading(saveTelegramSettingsButton, async () => {
       status.textContent = "Сохранение…";
       try {
-        const saved = await api("/api/settings/telegram", {
-          method: "POST",
-          body: JSON.stringify({
-            channels: linesOf("tg-channels"),
-            max_post_age_days: numOrNull("tg-max-age"),
-            daily_message_limit: numOrNull("tg-daily-limit"),
-            auto_message: document.getElementById("tg-auto-message").checked,
-            active_hours_start: numOrNull("tg-hours-start"),
-            active_hours_end: numOrNull("tg-hours-end"),
-          }),
-        });
+        const channelsRevisionAtSave = telegramChannelsRevision;
+        const saved = await serializeTelegramSettingsSave(() =>
+          api("/api/settings/telegram", {
+            method: "POST",
+            body: JSON.stringify({
+              channels: linesOf("tg-channels"),
+              max_post_age_days: numOrNull("tg-max-age"),
+              daily_message_limit: numOrNull("tg-daily-limit"),
+              auto_message: document.getElementById("tg-auto-message").checked,
+              active_hours_start: numOrNull("tg-hours-start"),
+              active_hours_end: numOrNull("tg-hours-end"),
+            }),
+          })
+        );
         const channels = saved.channels || [];
-        setTelegramChannels(channels);
+        if (channelsRevisionAtSave === telegramChannelsRevision) {
+          setTelegramChannels(channels);
+        }
         status.textContent = `Сохранено: ${channels.length} каналов.`;
         setTimeout(() => (status.textContent = ""), 2000);
       } catch (e) {
