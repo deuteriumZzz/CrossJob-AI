@@ -5861,6 +5861,7 @@ const AUTOSAVE = [
 function snapshotFields(container) {
   const snap = {};
   container.querySelectorAll("input[id], select[id], textarea[id]").forEach((el) => {
+    if (isNestedAutosaveTarget(container, el)) return;
     if (el.type === "file" || el.type === "password") return;
     if (el.type === "checkbox" || el.type === "radio") snap[el.id] = el.checked;
     else if (el.multiple) snap[el.id] = Array.from(el.selectedOptions).map((o) => o.value);
@@ -5900,6 +5901,7 @@ function initAutosave() {
     pane.addEventListener("change", (e) => {
       if (e.target.type === "file" || e.target.type === "password") return;
       if (e.target.id === "tg-channels") return; // сохраняется канал-специфичной очередью
+      if (isNestedAutosaveTarget(pane, e.target)) return;
       if (!loaded()) return; // ещё не загрузили — не затираем пустым
       if (e.target.closest(".no-autosave")) return;
       clearTimeout(timer);
@@ -5929,6 +5931,18 @@ function initAutosave() {
         }
       }, 700);
     });
+  });
+}
+
+function isNestedAutosaveTarget(pane, target) {
+  return AUTOSAVE.some(([nestedPaneId]) => {
+    if (nestedPaneId === pane.id) return false;
+    const nestedPane = document.getElementById(nestedPaneId);
+    return (
+      nestedPane &&
+      pane.contains(nestedPane) &&
+      nestedPane.contains(target)
+    );
   });
 }
 

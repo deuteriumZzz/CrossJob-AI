@@ -5,6 +5,92 @@ from pathlib import Path
 
 from src.job import Job
 from src.job_sources.applied_log import AppliedLog
+from src.job_sources.contact_book import ContactBook
+
+
+def test_record_saves_explicit_vacancy_contacts_with_source_and_vacancy():
+    with tempfile.TemporaryDirectory() as tmp:
+        job = Job(
+            role="Backend Developer",
+            company="Acme",
+            company_url="https://acme.example",
+            link="https://jobs.example/acme/1",
+            source="headhunter",
+            external_id="1",
+            description=(
+                "Свяжитесь с HR: recruiting@acme.example. "
+                "Профиль: https://www.linkedin.com/in/acme-recruiter/"
+            ),
+        )
+        log = AppliedLog(Path(tmp) / "applied_log.json")
+
+        log.record(job, "", "", "dry_run", 7, [])
+
+        entry = log.find_by_company("Acme")[0]
+        assert entry["contacts"] == ["recruiting@acme.example"]
+        cards = ContactBook(Path(tmp)).all()
+        assert len(cards) == 1
+        card = next(iter(cards.values()))
+        assert card["vacancies"] == [
+            {
+                "title": "Backend Developer",
+                "link": "https://jobs.example/acme/1",
+                "source": "headhunter",
+                "found_at": card["vacancies"][0]["found_at"],
+            }
+        ]
+        assert [
+            (
+                contact["kind"],
+                contact["value"],
+                contact["source"],
+                contact["source_url"],
+            )
+            for contact in card["contacts"]
+        ] == [
+            (
+                "email",
+                "recruiting@acme.example",
+                "описание вакансии",
+                job.link,
+            )
+        ]
+        assert card["website"] == job.company_url
+
+
+def test_low_fit_contacts_are_not_added_to_campaign_contact_book():
+    with tempfile.TemporaryDirectory() as tmp:
+        log = AppliedLog(Path(tmp) / "applied_log.json")
+        job = Job(
+            role="Backend Developer",
+            company="Acme",
+            link="https://example.com/job/1",
+            source="headhunter",
+            external_id="1",
+            description="Email HR at hr@acme.example",
+        )
+
+        log.record(job, "", "", "skipped_low_fit", 2, ["low score"])
+
+        assert "contacts" not in log.find_by_company("Acme")[0]
+        assert ContactBook(Path(tmp)).all() == {}
+
+
+def test_generic_extraction_does_not_bypass_special_source_contact_rules():
+    with tempfile.TemporaryDirectory() as tmp:
+        log = AppliedLog(Path(tmp) / "applied_log.json")
+        job = Job(
+            role="Backend Developer",
+            company="Acme",
+            link="https://example.com/job/1",
+            source="telegram",
+            external_id="1",
+            description="Email: hr@acme.example and https://t.me/acme_hr",
+        )
+
+        log.record(job, "", "", "dry_run", 7, [])
+
+        assert ContactBook(Path(tmp)).all() == {}
 
 
 def test_record_dedup_and_html_report_written():

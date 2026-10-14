@@ -8,9 +8,11 @@ from pathlib import Path
 from typing import Callable, Literal
 
 from src.job import Job
+from src.job_sources.contact_book import ContactBook, contacts_from_text
 from src.job_sources.html_report import render_applications_html
 from src.job_sources.job_fit import SCORING_UNAVAILABLE_GAP
 from src.job_sources.market_stats import extract_skills, remote_region
+from src.logging import logger
 from src.utils.file_lock import atomic_write_text, state_file_lock
 
 Status = Literal[
@@ -24,6 +26,11 @@ Status = Literal[
 Period = Literal["day", "week", "month"]
 EASY_APPLY_MAX_ATTEMPTS = 3
 EASY_APPLY_RETRY_HOURS = 6
+CONTACT_COLLECTION_STATUSES = {"applied", "dry_run"}
+# These sources already have an explicit contact workflow with its own
+# eligibility/verification rules. Keep the generic website-board extraction
+# out of those paths.
+SPECIAL_CONTACT_WORKFLOWS = {"direct", "hirify", "talanto", "telegram"}
 
 # Организационно-правовые формы, из-за которых одна компания на разных
 # площадках пишется по-разному ("ООО Яндекс" / "Яндекс", "Acme Inc." /
@@ -595,9 +602,32 @@ class AppliedLog:
                 f"{job.location}\n{job.description}"
             ),
         }
-        if contacts:
-            # Контакты HR, найденные в самой вакансии (email и т.п.).
-            entry["contacts"] = contacts
+        vacancy_contacts = (
+            [
+                contact
+                for contact in contacts_from_text(
+                    job.description or "", bare_mentions=False
+                )
+                if contact["kind"] == "email"
+            ]
+            if (
+                job.source not in SPECIAL_CONTACT_WORKFLOWS
+                and status in CONTACT_COLLECTION_STATUSES
+            )
+            else []
+        )
+        vacancy_emails = [
+            contact["value"]
+            for contact in vacancy_contacts
+            if contact["kind"] == "email"
+        ]
+        # Сохраняем старый аргумент contacts и дополняем адресами, которые
+        # можно извлечь из описания любой площадки без отдельного запроса.
+        recorded_emails = list(
+            dict.fromkeys([*(contacts or []), *vacancy_emails])
+        )
+        if recorded_emails:
+            entry["contacts"] = recorded_emails
 
         def _mutate(data: dict) -> None:
             # Прежняя запись «оценка недоступна» заменяется новой оценкой.
@@ -650,6 +680,32 @@ class AppliedLog:
             ),
             encoding="utf-8",
         )
+
+        if vacancy_contacts:
+            try:
+                ContactBook(self.path.parent).add(
+                    job.company,
+                    [
+                        {
+                            **contact,
+                            "source": "описание вакансии",
+                            "source_url": job.link,
+                        }
+                        for contact in vacancy_contacts
+                    ],
+                    vacancy={
+                        "title": job.role,
+                        "link": job.link,
+                        "source": job.source,
+                    },
+                    website=job.company_url or "",
+                )
+            except Exception as e:
+                # Запись контактов — дополнительный сбор данных и не должна
+                # ломать журналирование уже обработанного отклика.
+                logger.warning(
+                    f"Не удалось сохранить контакты из вакансии {job.link}: {e}"
+                )
 
     def find_by_company(self, query: str) -> list[dict]:
         needle = query.lower()
