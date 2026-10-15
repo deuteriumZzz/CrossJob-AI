@@ -7,7 +7,9 @@ from src.job_sources.filters import (
     getmatch_seniority,
 )
 from src.job_sources.filters import remote_only as remote_only_filter
-from src.job_sources.filters import work_formats
+from src.job_sources.filters import (
+    work_formats,
+)
 from src.job_sources.getmatch.client import EXPERIENCE_LEVELS, GetMatchClient
 from src.job_sources.getmatch.mapping import parse_search_results
 from src.job_sources.preferences import effective_list
