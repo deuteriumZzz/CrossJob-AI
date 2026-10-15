@@ -3090,11 +3090,64 @@ kbd {
   flex: 1;
 }
 
+.tg-channel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  margin-top: 12px;
+}
+
+.tg-channel-count {
+  color: var(--text-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tg-channel-search {
+  display: block;
+  width: min(100%, 230px);
+}
+
+.tg-channel-search[hidden],
+.tg-channel-expand[hidden] {
+  display: none;
+}
+
+.tg-channel-search input {
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.tg-channel-search input:focus-visible {
+  border-color: var(--focus);
+  outline: 2px solid color-mix(in srgb, var(--focus) 35%, transparent);
+  outline-offset: 1px;
+}
+
 .tg-channel-list {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 10px 0;
+  align-content: flex-start;
+  margin: 6px 0 8px;
+}
+
+.tg-channel-list.is-scrollable {
+  max-height: 250px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 3px 5px 3px 0;
+  scrollbar-color: var(--border-hover) transparent;
+  scrollbar-width: thin;
 }
 
 .tg-channel-card {
@@ -3106,6 +3159,46 @@ kbd {
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--panel);
+}
+
+.tg-channel-enter {
+  animation: tg-channel-enter 160ms var(--motion-ease-out) both;
+  animation-delay: calc(var(--channel-order, 0) * 18ms);
+}
+
+@keyframes tg-channel-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.tg-channel-expand {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--link);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  transition: color var(--t-hover) ease;
+}
+
+.tg-channel-expand:hover {
+  color: var(--link-hover);
+}
+
+.tg-channel-expand:focus-visible {
+  border-radius: var(--radius-xs);
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 .tg-channel-link {
@@ -3157,6 +3250,16 @@ kbd {
 
   .tg-channel-composer input {
     flex-basis: 100%;
+  }
+
+  .tg-channel-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .tg-channel-search {
+    width: 100%;
   }
 }
 
@@ -4990,21 +5093,134 @@ nav.tabs button.nav-gear:hover svg {
   transform: rotate(60deg);
 }
 
-nav.tabs button.nav-bell svg {
+nav.tabs button.nav-gear:focus-visible svg {
+  transform: rotate(60deg);
+}
+
+nav.tabs button[data-tab="overview"]:is(:hover, :focus-visible) svg {
+  animation: nav-home-hop 420ms var(--ease-out);
+}
+
+@keyframes nav-home-hop {
+  35% { transform: translateY(-2px); }
+  70% { transform: translateY(1px); }
+}
+
+nav.tabs button[data-tab="history"]:is(:hover, :focus-visible) .nav-case-handle {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  animation: nav-case-open 360ms var(--ease-out);
+}
+
+@keyframes nav-case-open {
+  45% { transform: translateY(-1.5px) scaleY(1.12); }
+}
+
+.nav-chat-dot {
+  fill: currentColor;
+  opacity: 0;
+  stroke: none;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+nav.tabs button[data-tab="replies"]:is(:hover, :focus-visible) .nav-chat-dot {
+  animation: nav-chat-type 500ms var(--ease-out) both;
+}
+
+nav.tabs button[data-tab="replies"]:is(:hover, :focus-visible) .nav-chat-dot:nth-of-type(2) {
+  animation-delay: 70ms;
+}
+
+nav.tabs button[data-tab="replies"]:is(:hover, :focus-visible) .nav-chat-dot:nth-of-type(3) {
+  animation-delay: 140ms;
+}
+
+@keyframes nav-chat-type {
+  35%, 75% { opacity: 1; transform: scale(1); }
+  0%, 100% { opacity: 0; transform: scale(.25); }
+}
+
+.nav-envelope-flap {
+  transform-box: fill-box;
+  transform-origin: center top;
+}
+
+nav.tabs button[data-tab="contacts"]:is(:hover, :focus-visible) .nav-envelope-flap {
+  animation: nav-envelope-open 440ms var(--ease-out);
+}
+
+@keyframes nav-envelope-open {
+  55% { transform: scaleY(-1); }
+}
+
+.nav-chart-bar {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+}
+
+nav.tabs button[data-tab="analytics"]:is(:hover, :focus-visible) .nav-chart-bar {
+  animation: nav-chart-grow 420ms var(--ease-out) both;
+}
+
+nav.tabs button[data-tab="analytics"]:is(:hover, :focus-visible) .nav-chart-bar:nth-child(2) {
+  animation-delay: 65ms;
+}
+
+nav.tabs button[data-tab="analytics"]:is(:hover, :focus-visible) .nav-chart-bar:nth-child(3) {
+  animation-delay: 130ms;
+}
+
+@keyframes nav-chart-grow {
+  0% { transform: scaleY(.55); }
+  65% { transform: scaleY(1.12); }
+  100% { transform: scaleY(1); }
+}
+
+#help-open:is(:hover, :focus-visible) svg path:nth-child(2) {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: nav-help-pop 420ms var(--ease-out);
+}
+
+@keyframes nav-help-pop {
+  50% { transform: scale(1.15); }
+}
+
+#notif-open:is(:hover, :focus-visible) svg {
   transform-origin: 50% 10%;
+  animation: nav-bell-swing 520ms var(--ease);
 }
 
-nav.tabs button.nav-bell:hover svg {
-  animation: bell-swing 520ms var(--ease);
+@keyframes nav-bell-swing {
+  30% { transform: rotate(14deg); }
+  60% { transform: rotate(-10deg); }
 }
 
-@keyframes bell-swing {
-  30% {
-    transform: rotate(14deg);
-  }
-  60% {
-    transform: rotate(-10deg);
-  }
+#palette-open:is(:hover, :focus-visible) svg {
+  transform-origin: 45% 45%;
+  animation: nav-search-sweep 420ms var(--ease-out);
+}
+
+@keyframes nav-search-sweep {
+  45% { transform: rotate(-18deg) scale(1.08); }
+}
+
+.favorite-nav-item:is(:hover, :focus-visible) svg {
+  transform-origin: center;
+  animation: nav-favorite-twinkle 420ms var(--ease-out);
+}
+
+@keyframes nav-favorite-twinkle {
+  45% { transform: rotate(18deg) scale(1.16); }
+}
+
+#sidebar-collapse-toggle:is(:hover, :focus-visible) svg {
+  animation: nav-collapse-nudge 320ms var(--ease-out);
+}
+
+@keyframes nav-collapse-nudge {
+  55% { transform: translateX(-2px); }
 }
 
 nav.tabs .tab-indicator {

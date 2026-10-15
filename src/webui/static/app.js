@@ -2946,23 +2946,72 @@ function setTelegramChannels(channels) {
   renderTelegramChannelList();
 }
 
+const TELEGRAM_CHANNEL_PREVIEW_COUNT = 8;
+let telegramChannelsExpanded = false;
+let telegramChannelAnimateNextRender = false;
+
 function renderTelegramChannelList() {
   const list = document.getElementById("tg-channel-list");
   if (!list) return;
+  const previousScrollTop = list.scrollTop;
   const channels = telegramChannelsFromText(
     document.getElementById("tg-channels").value
   );
+  const searchWrap = document.getElementById("tg-channel-search-wrap");
+  const searchInput = document.getElementById("tg-channel-search");
+  const count = document.getElementById("tg-channel-count");
+  const expand = document.getElementById("tg-channel-expand");
+  const query = (searchInput?.value || "")
+    .trim()
+    .replace(/^@/, "")
+    .toLocaleLowerCase("ru");
+  const matchingChannels = query
+    ? channels.filter((channel) => channel.toLocaleLowerCase("ru").includes(query))
+    : channels;
+  const collapsed =
+    !query &&
+    !telegramChannelsExpanded &&
+    channels.length > TELEGRAM_CHANNEL_PREVIEW_COUNT;
+  const visibleChannels = collapsed
+    ? channels.slice(0, TELEGRAM_CHANNEL_PREVIEW_COUNT)
+    : matchingChannels;
+  const animateItems = telegramChannelAnimateNextRender;
+  telegramChannelAnimateNextRender = false;
+
+  if (searchWrap) searchWrap.hidden = channels.length <= TELEGRAM_CHANNEL_PREVIEW_COUNT;
+  if (count) {
+    count.textContent = query
+      ? `Найдено ${matchingChannels.length} из ${channels.length}`
+      : `${channels.length} ${plural(channels.length, "канал", "канала", "каналов")}`;
+  }
+  if (expand) {
+    expand.hidden = channels.length <= TELEGRAM_CHANNEL_PREVIEW_COUNT || Boolean(query);
+    expand.textContent = telegramChannelsExpanded
+      ? "Свернуть список"
+      : `Показать все ${channels.length}`;
+    expand.setAttribute("aria-expanded", String(telegramChannelsExpanded));
+  }
+  list.classList.toggle(
+    "is-scrollable",
+    !collapsed && visibleChannels.length > TELEGRAM_CHANNEL_PREVIEW_COUNT
+  );
   list.replaceChildren();
-  if (!channels.length) {
+  if (!visibleChannels.length) {
     const empty = document.createElement("p");
     empty.className = "muted small tg-channel-empty";
-    empty.textContent = "Пока нет каналов. Вставьте ссылку из Telegram.";
+    empty.textContent = channels.length
+      ? "Каналы по этому запросу не найдены."
+      : "Пока нет каналов. Вставьте ссылку из Telegram.";
     list.append(empty);
     return;
   }
-  channels.forEach((channel) => {
+  visibleChannels.forEach((channel, index) => {
     const item = document.createElement("div");
     item.className = "tg-channel-card";
+    if (animateItems) {
+      item.classList.add("tg-channel-enter");
+      item.style.setProperty("--channel-order", String(Math.min(index, 7)));
+    }
     item.setAttribute("role", "listitem");
     const link = document.createElement("a");
     link.href = `https://t.me/${encodeURIComponent(channel)}`;
@@ -2984,6 +3033,9 @@ function renderTelegramChannelList() {
     item.append(link, remove);
     list.append(item);
   });
+  if (list.classList.contains("is-scrollable")) {
+    list.scrollTop = previousScrollTop;
+  }
 }
 
 let telegramChannelsSavePending = false;
@@ -3061,6 +3113,21 @@ function addTelegramChannels(raw) {
   const next = telegramChannelsFromText([...previous, ...candidates].join("\n"));
   const added = next.length - previous.length;
   setTelegramChannels(next);
+  if (added && next.length > TELEGRAM_CHANNEL_PREVIEW_COUNT) {
+    document.getElementById("tg-channel-search").value = "";
+    telegramChannelsExpanded = true;
+    telegramChannelAnimateNextRender = true;
+    renderTelegramChannelList();
+    requestAnimationFrame(() => {
+      const list = document.getElementById("tg-channel-list");
+      list.scrollTo({
+        top: list.scrollHeight,
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
+      });
+    });
+  }
   status.textContent = added
     ? `Добавлено: ${added}.`
     : "Этот канал уже есть в списке.";
@@ -3080,6 +3147,14 @@ function initTelegramChannelEditor() {
     input.focus();
   };
   document.getElementById("tg-channel-add").addEventListener("click", add);
+  document.getElementById("tg-channel-expand").addEventListener("click", () => {
+    telegramChannelsExpanded = !telegramChannelsExpanded;
+    telegramChannelAnimateNextRender = telegramChannelsExpanded;
+    renderTelegramChannelList();
+  });
+  document.getElementById("tg-channel-search").addEventListener("input", () => {
+    renderTelegramChannelList();
+  });
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
