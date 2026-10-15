@@ -22,8 +22,8 @@ def recognize_pdf_pages(
     recognition model on the first use.
     """
     try:
-        import pypdfium2 as pdfium
-        from rapidocr import RapidOCR
+        import pypdfium2 as pdfium  # type: ignore[import-not-found]
+        from rapidocr import RapidOCR  # type: ignore[import-not-found]
     except ImportError as error:
         raise ValueError(
             "Не установлены компоненты локального OCR. Переустановите "

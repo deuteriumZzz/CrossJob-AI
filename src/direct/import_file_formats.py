@@ -7,7 +7,7 @@ import io
 import posixpath
 import re
 import zipfile
-from typing import Callable
+from typing import Any, Callable
 from xml.etree import ElementTree as ET
 
 _XLSX_MAIN_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
@@ -106,7 +106,7 @@ def _skipped_content_warning(names: list[str]) -> list[str]:
 
 
 def _canonical_rows(
-    items: list[dict], fields: tuple[str, ...]
+    items: list[dict[str, Any]], fields: tuple[str, ...]
 ) -> list[list[str]]:
     return [
         [str(item.get(field, "") or "") for field in fields] for item in items
@@ -159,7 +159,7 @@ def _xlsx_rows(
 
     if not sheets:
         raise ValueError("В книге Excel нет непустых листов.")
-    usable: list[tuple[str, list[list[str]]]] = []
+    usable: list[tuple[str, list[dict[str, Any]]]] = []
     skipped: list[str] = []
     for name, rows in sheets:
         try:
@@ -282,7 +282,7 @@ def _docx_rows(
     tables, _ = _docx_content(data)
     if not tables:
         return None
-    usable: list[tuple[int, list[list[str]]]] = []
+    usable: list[tuple[int, list[dict[str, Any]]]] = []
     skipped: list[str] = []
     for index, rows in enumerate(tables, start=1):
         try:
@@ -531,9 +531,9 @@ def read_import_file(
                 for index, page_text in enumerate(pages)
             ]
             return None, "\n\n".join(page for page in pages if page.strip())
-        table = _pdf_table_rows(data, field_for)
-        if table:
-            return table, ""
+        pdf_table = _pdf_table_rows(data, field_for)
+        if pdf_table:
+            return pdf_table, ""
         return None, "\n\n".join(page for page in pages if page.strip())
     if ext == "txt":
         text = _decode(data)

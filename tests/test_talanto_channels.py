@@ -4,10 +4,7 @@ import json
 
 import yaml
 
-from src.job_sources.talanto.channels import (
-    CACHE_FILE,
-    route_telegram_handles,
-)
+from src.job_sources.talanto.channels import CACHE_FILE, route_telegram_handles
 
 
 class _FakeClient:

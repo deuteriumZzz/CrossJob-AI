@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Mapping, Optional, cast
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
@@ -46,14 +46,9 @@ from main import _daily_limit as _effective_daily_limit
 from main import _job_max_applications as _effective_job_max_applications
 from main import _total_daily_limit as _effective_total_daily_limit
 from main import append_to_company_blacklist as _append_to_blacklist
-from main import (
-    apply_llm_provider_override,
-    block_headhunter_employer,
-)
+from main import apply_llm_provider_override, block_headhunter_employer
 from main import bootstrap_data_folder as _bootstrap_data_folder
-from main import (
-    candidate_name,
-)
+from main import candidate_name
 from main import check_campaign_sending as _check_campaign_sending
 from main import create_cover_letter as _create_cover_letter
 from main import create_resume_audit as _create_resume_audit
@@ -64,9 +59,7 @@ from main import force_refresh_plain_text_resume as _refresh_plain_text
 from main import generate_positions_from_resume as _generate_positions
 from main import prefill_direct_application as _prefill_direct_application
 from main import prepare_interview as _prepare_interview
-from main import (
-    run_selected_sources,
-)
+from main import run_selected_sources
 from main import send_headhunter_reminders as _send_headhunter_reminders
 from main import send_hr_draft as _send_hr_draft
 from main import start_campaign_job as _start_campaign_job
@@ -91,8 +84,8 @@ from src.direct.campaign import (
 from src.direct.companies import load_companies, save_companies
 from src.direct.dossier import collect_dossier
 from src.direct.email_channel import build_message, send_email
-from src.direct.importer import preview as import_preview
 from src.direct.importer import FIELDS as IMPORT_FIELDS
+from src.direct.importer import preview as import_preview
 from src.direct.importer import read_file, rows_from_table, rows_from_text
 from src.direct.importer import table_mapping as import_table_mapping
 from src.job_sources.applied_log import (
@@ -115,9 +108,7 @@ from src.job_sources.filters import (
     posted_within_days,
 )
 from src.job_sources.filters import remote_only as remote_only_filter
-from src.job_sources.filters import (
-    work_formats,
-)
+from src.job_sources.filters import work_formats
 from src.job_sources.hr_replies import (
     CATEGORY_LABELS,
     DraftStore,
@@ -129,9 +120,7 @@ from src.job_sources.hr_replies import (
 )
 from src.job_sources.interview_calendar import build_ics
 from src.job_sources.interview_prep import evaluate_answer, generate_questions
-from src.job_sources.llm_provider import (
-    PROVIDER_MODELS,
-)
+from src.job_sources.llm_provider import PROVIDER_MODELS
 from src.job_sources.llm_provider import get_active_provider as _active_llm
 from src.job_sources.llm_provider import (
     set_fallback_base_urls as _set_llm_fallback_base_urls,
@@ -146,9 +135,7 @@ from src.job_sources.llm_usage import (
 from src.job_sources.llm_usage import (
     set_output_folder as set_llm_usage_output_folder,
 )
-from src.job_sources.llm_usage import (
-    summarize_usage,
-)
+from src.job_sources.llm_usage import summarize_usage
 from src.job_sources.market_stats import (
     REGION_LABELS,
     salary_stats,
@@ -2407,15 +2394,13 @@ def _run_table_import(
     job = IMPORT_JOBS[token]
     try:
         header_index, headers, suggested = import_table_mapping(table)
-        selected = (
-            suggested
-            if field_mapping is None
-            else {
-                field: column
-                for field, column in field_mapping.items()
-                if field in IMPORT_FIELDS
-            }
-        )
+        selected: Mapping[str, Optional[int]] = suggested
+        if field_mapping is not None:
+            manual_mapping: dict[str, Optional[int]] = {}
+            for field, column in field_mapping.items():
+                if field in IMPORT_FIELDS:
+                    manual_mapping[field] = column
+            selected = manual_mapping
         job.update(
             header_row=header_index + 1,
             headers=headers,

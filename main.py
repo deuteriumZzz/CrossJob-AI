@@ -75,17 +75,14 @@ from src.job_sources.cover_letter import (
     generate_cover_letter_for_job,
     set_cover_letter_style,
 )
-from src.job_sources.djinni.apply import (
-    DjinniProfileRequired,
-    DjinniSession,
-)
+from src.job_sources.djinni.apply import DjinniProfileRequired, DjinniSession
 from src.job_sources.djinni.apply import apply_to_job as apply_to_djinni_job
 from src.job_sources.djinni.apply import bump_profile as bump_djinni_profile
 from src.job_sources.djinni.apply import (
     unmet_requirements as djinni_unmet_requirements,
 )
 from src.job_sources.djinni.search import search as search_djinni_jobs
-from src.job_sources.filters import skip_remote_only_platform
+from src.job_sources.filters import skip_remote_only_platform, work_formats
 from src.job_sources.geekjob.auth import GeekjobSession
 from src.job_sources.geekjob.client import GeekjobClient
 from src.job_sources.geekjob.source import GeekjobSource
@@ -177,9 +174,7 @@ from src.job_sources.linkedin.auth import LinkedInSession
 from src.job_sources.linkedin.easy_apply import (
     log_failure as log_easy_apply_failure,
 )
-from src.job_sources.linkedin.easy_apply import (
-    run_easy_apply,
-)
+from src.job_sources.linkedin.easy_apply import run_easy_apply
 from src.job_sources.linkedin.source import LinkedInSource
 from src.job_sources.llm_provider import (
     get_active_provider as get_active_llm_provider,
@@ -210,6 +205,7 @@ from src.job_sources.llm_usage import (
 from src.job_sources.llm_usage import (
     set_output_folder as set_llm_usage_output_folder,
 )
+from src.job_sources.preferences import effective_list
 from src.job_sources.reply_answerer import (
     build_preferences_summary,
     generate_reply,
@@ -257,8 +253,6 @@ from src.job_sources.telegram.watcher import (
     update_watch_post,
 )
 from src.job_sources.telegram_control import HELP_TEXT as _TELEGRAM_HELP_TEXT
-from src.job_sources.preferences import effective_list
-from src.job_sources.filters import work_formats
 from src.job_sources.telegram_control import (
     parse_control_commands,
     poll_bot_updates,
