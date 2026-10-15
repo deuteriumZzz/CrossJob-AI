@@ -5,6 +5,10 @@ fastapi==0.110.2
 python-multipart==0.0.9
 uvicorn==0.30.6
 pywebview==5.4
+# Локальный OCR сканированных PDF на Windows и macOS.
+pypdfium2==4.30.0
+rapidocr==3.10.0
+onnxruntime>=1.18,<2
 # Только для сборки exe (pip install -r requirements-desktop.txt уже
 # достаточно для запуска desktop_app.py напрямую из исходников).
 pyinstaller==6.10.0

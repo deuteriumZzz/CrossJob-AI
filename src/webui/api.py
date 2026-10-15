@@ -2329,6 +2329,8 @@ def post_contact_from_application(
 
 
 IMPORT_PREVIEW_FILE = ".import_preview.json"
+MAX_CONTACT_IMPORT_BYTES = 25 * 1024 * 1024
+CONTACT_IMPORT_EXTENSIONS = {".csv", ".tsv", ".xlsx", ".md", ".txt", ".pdf", ".docx"}
 
 
 def _written_emails(ctx: AppContext) -> set[str]:
@@ -2434,21 +2436,29 @@ def _run_import(
     job = IMPORT_JOBS[token]
     try:
         job["stage"] = "Читаю файл"
-        table, text = read_file(filename, data)
+
+        def ocr_progress(done: int, total: int) -> None:
+            job.update(
+                stage=f"Распознаю PDF (OCR): {done}/{total}", done=done, total=total
+            )
+
+        table, text = read_file(filename, data, on_ocr_progress=ocr_progress)
         if table is not None:
+            job["warnings"] = getattr(table, "warnings", [])
             IMPORT_TABLES[token] = (filename, table)
             _run_table_import(ctx, token, filename, table)
             return
         else:
-            if not ctx.llm_api_key:
-                raise ValueError(
-                    "Для текста/PDF нужен ключ ИИ — или сохраните файл как "
-                    "CSV/XLSX."
-                )
             if not text.strip():
                 raise ValueError(
-                    "В файле нет текста (возможно, это скан) — сохраните "
-                    "список как CSV/XLSX."
+                    "Не удалось извлечь текст. Возможно, PDF отсканирован: "
+                    "сначала распознайте его через OCR или сохраните список как CSV/XLSX."
+                )
+            if not ctx.llm_api_key:
+                raise ValueError(
+                    "Для разбора свободного текста из TXT, MD, DOCX или PDF "
+                    "нужен настроенный ключ ИИ. Таблицы XLSX, CSV и TSV "
+                    "разбираются без него."
                 )
 
             def progress(done: int, total: int) -> None:
@@ -2511,9 +2521,18 @@ async def post_import_preview(
     import secrets as _secrets
     import threading
 
-    data = await file.read()
-    token = _secrets.token_hex(4)
-    filename = file.filename or "file.txt"
+    filename = Path((file.filename or "file.txt").replace("\\", "/")).name
+    if Path(filename).suffix.casefold() not in CONTACT_IMPORT_EXTENSIONS:
+        raise HTTPException(
+            415,
+            "Формат не поддерживается. Загрузите XLSX, CSV, TSV, MD, TXT, PDF или DOCX.",
+        )
+    data = await file.read(MAX_CONTACT_IMPORT_BYTES + 1)
+    if not data:
+        raise HTTPException(400, "Файл пустой.")
+    if len(data) > MAX_CONTACT_IMPORT_BYTES:
+        raise HTTPException(413, "Файл слишком большой. Максимальный размер — 25 МБ.")
+    token = _secrets.token_hex(16)
     IMPORT_JOBS[token] = {
         "state": "running",
         "stage": "Загружаю",

@@ -9,15 +9,20 @@
 
 import sys
 
-from PyInstaller.utils.hooks import copy_metadata
+from PyInstaller.utils.hooks import collect_all, copy_metadata
+
+rapidocr_datas, rapidocr_binaries, rapidocr_hiddenimports = collect_all("rapidocr")
+pdfium_datas, pdfium_binaries, pdfium_hiddenimports = collect_all("pypdfium2")
 
 a = Analysis(
     ["desktop_app.py"],
     pathex=[],
-    binaries=[],
+    binaries=[*rapidocr_binaries, *pdfium_binaries],
     datas=[
         ("src/webui/static", "src/webui/static"),
         ("data_folder_example", "data_folder_example"),
+        *rapidocr_datas,
+        *pdfium_datas,
         # ponytail: readchar (зависимость inquirer, зависимости
         # main.py, который грузит src/webui/api.py) читает свою
         # версию через importlib.metadata.version(__package__) при
@@ -77,6 +82,8 @@ a = Analysis(
         "langchain_groq",
         "langchain_google_genai",
         "langchain_ollama",
+        *rapidocr_hiddenimports,
+        *pdfium_hiddenimports,
     ],
     hookspath=[],
     hooksconfig={},

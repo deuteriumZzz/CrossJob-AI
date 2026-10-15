@@ -3374,6 +3374,16 @@ kbd {
   margin-top: 12px;
 }
 .import-map-required { margin: 12px 0 0; }
+.import-warnings {
+  margin-bottom: 12px;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--border-soft));
+  border-radius: var(--radius-sm, 10px);
+  background: color-mix(in srgb, var(--warn) 7%, var(--surface));
+  color: var(--text-2);
+  font-size: 12px;
+}
+.import-warnings p { margin: 0; }
 .import-table {
   max-height: 320px;
   overflow: auto;

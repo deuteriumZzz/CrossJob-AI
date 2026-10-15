@@ -3675,6 +3675,9 @@ async function pollImport(token, file, el) {
 
 async function importPreview(file, el = document.getElementById("import-preview")) {
   const fail = (msg) => (el.innerHTML = `<p class="import-error">${escapeHtml(msg || "Не удалось разобрать файл")}</p>`);
+  if (file.size > 25 * 1024 * 1024) {
+    return fail("Файл слишком большой. Максимальный размер — 25 МБ.");
+  }
   el.innerHTML = `<p class="muted small">Загружаю ${escapeHtml(file.name)}…</p>`;
   const form = new FormData();
   form.append("file", file);
@@ -3711,6 +3714,9 @@ function renderImportResult(data, el, file) {
         <div class="import-map-actions"><button type="button" class="btn btn-small" data-import-map-apply>Проверить сопоставление</button><span class="muted small" data-import-map-status></span></div>
       </details>`
     : "";
+  const warningPanel = (data.warnings || []).length
+    ? `<div class="import-warnings" role="status">${data.warnings.map((warning) => `<p>${escapeHtml(warning)}</p>`).join("")}</div>`
+    : "";
   const s = data.stats;
   const CHECK = { ok: "✓", unknown: "?", bad: "✗", duplicate: "дубль", written: "писали" };
   const needsMapping = data.state === "needs_mapping";
@@ -3723,12 +3729,14 @@ function renderImportResult(data, el, file) {
         дублей ${s.duplicate} · уже писали ${s.already_written}
       </div>
       <div class="table-wrap import-table"><table>
-        <thead><tr><th>#</th><th>Компания</th><th>Email</th><th>Контакт</th><th>Упор</th><th>Проверка</th></tr></thead>
+        <thead><tr><th>#</th><th>Компания</th><th>Email</th><th>Контакт</th><th>Должность</th><th>Вакансия / ссылки</th><th>Telegram</th><th>Заметка</th><th>Проверка</th></tr></thead>
         <tbody>${data.items
           .slice(0, 50)
           .map((i) => `<tr class="check-${i.check}">
             <td>${i.row}</td><td>${escapeHtml(i.company)}</td><td>${escapeHtml(i.email)}</td>
-            <td>${escapeHtml(i.name)}</td><td>${escapeHtml(truncate(i.emphasis || "", 60))}</td>
+            <td>${escapeHtml(i.name)}</td><td>${escapeHtml(i.position)}</td>
+            <td>${escapeHtml(i.title)}${i.link ? `<br><span class="muted small">${escapeHtml(truncate(i.link, 60))}</span>` : ""}${i.website ? `<br><span class="muted small">${escapeHtml(truncate(i.website, 50))}</span>` : ""}${i.source_url ? `<br><span class="muted small">${escapeHtml(truncate(i.source_url, 50))}</span>` : ""}</td>
+            <td>${escapeHtml(i.telegram)}</td><td>${escapeHtml(truncate(i.emphasis || "", 60))}</td>
             <td>${CHECK[i.check] || ""} <span class="muted small">${escapeHtml(i.note)}</span></td></tr>`)
           .join("")}</tbody></table></div>
       ${data.items.length > 50 ? `<p class="muted small">…и ещё ${data.items.length - 50}</p>` : ""}
@@ -3737,7 +3745,7 @@ function renderImportResult(data, el, file) {
         <button type="button" class="btn btn-primary" id="import-commit">Добавить в базу</button>
         <button type="button" class="btn btn-ghost" id="import-cancel">Отмена</button>
       </div>`;
-  el.innerHTML = `${mappingPanel}${preview}`;
+  el.innerHTML = `${warningPanel}${mappingPanel}${preview}`;
 
   const applyButton = el.querySelector("[data-import-map-apply]");
   const commitButton = el.querySelector("#import-commit");

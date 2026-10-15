@@ -6,15 +6,13 @@ email принимается, только если он дословно ест
 
 from __future__ import annotations
 
-import csv
-import io
 import re
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional, cast
-from xml.etree import ElementTree as ET
 
 from src.direct.contacts import extract_emails
+from src.direct.import_file_formats import ParsedTable, read_import_file
 
 FIELDS = (
     "company",
@@ -147,25 +145,29 @@ _HEADER_SYNONYMS = {
     ),
 }
 # accessibility@, candidate.accommodations@, fraud@, eeo@ — не для откликов.
-_NOT_FOR_APPLICATIONS = re.compile(
-    r"accessib|accommodat|fraud|eeo|disability", re.I
-)
+_NOT_FOR_APPLICATIONS = re.compile(r"accessib|accommodat|fraud|eeo|disability", re.I)
 _EMAIL_RE = re.compile(r"^[\w.+-]+@[\w-]+(\.[\w-]+)+$")
 
 
+def _normalize_header(header: str) -> str:
+    value = re.sub(r"[_-]+", " ", header.strip().casefold())
+    return " ".join(re.sub(r"[^\w\s]", " ", value).split())
+
+
 def _field_for(header: str) -> str | None:
-    h = header.strip().casefold()
+    h = _normalize_header(header)
     if not h or _EMAIL_RE.fullmatch(h):
         return None
     fields = list(_HEADER_SYNONYMS.items())
     for field, words in fields:
-        if h in words:
+        aliases = tuple(_normalize_header(word) for word in words)
+        if h in aliases:
             return field
     matches = [
-        (len(word), -field_index, field)
+        (len(alias), -field_index, field)
         for field_index, (field, words) in enumerate(fields)
-        for word in words
-        if _header_contains(h, word)
+        for alias in (_normalize_header(word) for word in words)
+        if _header_contains(h, alias)
     ]
     return max(matches)[2] if matches else None
 
@@ -175,204 +177,6 @@ def _header_contains(header: str, alias: str) -> bool:
         pattern = re.escape(alias).replace(r"\ ", r"\s+")
         return re.search(rf"(?<![a-z0-9]){pattern}(?![a-z0-9])", header) is not None
     return alias in header
-
-
-# --- чтение форматов -----------------------------------------------------
-
-
-def _xlsx_rows(data: bytes) -> list[list[str]]:
-    m = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
-    with zipfile.ZipFile(io.BytesIO(data)) as z:
-        shared: list[str] = []
-        if "xl/sharedStrings.xml" in z.namelist():
-            for si in ET.fromstring(z.read("xl/sharedStrings.xml")).iter(
-                f"{m}si"
-            ):
-                shared.append("".join(t.text or "" for t in si.iter(f"{m}t")))
-        sheet = sorted(
-            n for n in z.namelist() if n.startswith("xl/worksheets/sheet")
-        )[0]
-        rows = []
-        for row in ET.fromstring(z.read(sheet)).iter(f"{m}row"):
-            values: dict[int, str] = {}
-            for cell in row.iter(f"{m}c"):
-                ref = re.match(r"[A-Z]+", cell.get("r", "A"))
-                letters = ref.group(0) if ref else "A"
-                col = 0
-                for ch in letters:
-                    col = col * 26 + ord(ch) - 64
-                v = cell.find(f"{m}v")
-                inline = cell.find(f".//{m}t")
-                if cell.get("t") == "s" and v is not None:
-                    value = shared[int(v.text or 0)]
-                elif inline is not None:
-                    value = inline.text or ""
-                else:
-                    value = v.text if v is not None and v.text else ""
-                values[col - 1] = value
-            if values:
-                rows.append(
-                    [values.get(i, "") for i in range(max(values) + 1)]
-                )
-        return rows
-
-
-def _decode(data: bytes) -> str:
-    for encoding in ("utf-8-sig", "cp1251"):
-        try:
-            return data.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    raise ValueError(
-        "Не удалось прочитать кодировку файла — сохраните его в UTF-8."
-    )
-
-
-def _csv_rows(data: bytes) -> list[list[str]]:
-    text = _decode(data)
-    try:
-        dialect = csv.Sniffer().sniff(text[:4000], delimiters=",;\t")
-    except csv.Error:
-        dialect = csv.excel
-    return [
-        row
-        for row in csv.reader(io.StringIO(text), dialect)
-        if any(c.strip() for c in row)
-    ]
-
-
-def _docx_text(data: bytes) -> str:
-    with zipfile.ZipFile(io.BytesIO(data)) as z:
-        root = ET.fromstring(z.read("word/document.xml"))
-    w = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
-    return "\n".join(
-        "".join(t.text or "" for t in p.iter(f"{w}t"))
-        for p in root.iter(f"{w}p")
-    )
-
-
-def _markdown_rows(text: str) -> list[list[str]] | None:
-    """Таблица Markdown (| a | b |) — строки без разделителя |---|."""
-    rows = [
-        [
-            cell.strip().strip("`")
-            for cell in line.strip().strip("|").split("|")
-        ]
-        for line in text.splitlines()
-        if line.strip().startswith("|") and not re.fullmatch(r"[\s|:-]+", line)
-    ]
-    return rows if len(rows) > 1 else None
-
-
-def _pdf_table_rows(data: bytes) -> list[list[str]] | None:
-    """Таблица из PDF по координатам: строки — по высоте, столбец — по
-    ближайшему заголовку. Без ИИ, так что email не «съедет» в чужую
-    строку. None — в PDF нет таблицы с заголовками «Компания»/«Email»."""
-    from pdfminer.high_level import extract_pages
-    from pdfminer.layout import LTTextContainer, LTTextLine
-
-    header: list[str] = []
-    centers: list[float] = []
-    rows: list[list[str]] = []
-    page_rows: list[tuple[float, list[str]]] = []
-    for page in extract_pages(io.BytesIO(data)):
-        lines = sorted(
-            (
-                (line.y0, (line.x0 + line.x1) / 2, line.get_text().strip())
-                for box in page
-                if isinstance(box, LTTextContainer)
-                for line in box
-                if isinstance(line, LTTextLine) and line.get_text().strip()
-            ),
-            key=lambda t: -t[0],
-        )
-        groups: list[list[tuple[float, float, str]]] = []
-        for (
-            line
-        ) in lines:  # одна строка таблицы — ячейки с почти одной высотой
-            if groups and groups[-1][0][0] - line[0] < 2:
-                groups[-1].append(line)
-            else:
-                groups.append([line])
-        for group in groups:
-            cells = sorted((x, text) for _, x, text in group)
-            texts = [t for _, t in cells]
-            if not header:
-                fields = {_field_for(t) for t in texts}
-                if "email" in fields and ({"company", "name"} & fields):
-                    header, centers = texts, [x for x, _ in cells]
-                continue
-            if texts == header:
-                continue  # заголовок повторяется на каждой странице
-            row = [""] * len(header)
-            for x, text in cells:
-                i = min(range(len(centers)), key=lambda i: abs(centers[i] - x))
-                row[i] = _join_cell(row[i], text)
-            page_rows.append((group[0][0], row))
-        rows += _merge_wrapped(page_rows, len(header))
-        page_rows = []
-    return [header, *rows] if header and rows else None
-
-
-def _join_cell(head: str, tail: str) -> str:
-    """Перенос внутри ячейки: «name@site.» + «com» — без пробела."""
-    if not head:
-        return tail
-    return head + tail if head[-1] in ".@-_" else f"{head} {tail}"
-
-
-def _merge_wrapped(
-    rows: list[tuple[float, list[str]]], width: int
-) -> list[list[str]]:
-    """Длинная ячейка переносится на строку выше/ниже остальных — такой
-    обрывок (заполнено меньше половины ячеек) приклеиваем к ближайшей
-    по высоте полной строке, сверху вниз."""
-    full = [
-        i
-        for i, (_, row) in enumerate(rows)
-        if sum(1 for c in row if c) * 2 >= width
-    ]
-    if not full:
-        return [row for _, row in rows]
-    parts: dict[int, list[int]] = {i: [] for i in full}
-    for i, (y, _) in enumerate(rows):
-        owner = (
-            i if i in parts else min(full, key=lambda f: abs(rows[f][0] - y))
-        )
-        parts[owner].append(i)
-    merged = []
-    for owner in full:
-        row = [""] * width
-        for i in sorted(
-            parts[owner], key=lambda i: -rows[i][0]
-        ):  # сверху вниз
-            for c, text in enumerate(rows[i][1]):
-                if text:
-                    row[c] = _join_cell(row[c], text)
-        merged.append(row)
-    return merged
-
-
-def read_file(
-    filename: str, data: bytes
-) -> tuple[list[list[str]] | None, str]:
-    """(строки таблицы, "") для CSV/XLSX/таблицы Markdown или (None, текст)."""
-    ext = filename.rsplit(".", 1)[-1].lower()
-    if ext == "md":
-        text = _decode(data)
-        return _markdown_rows(text), text
-    if ext == "xlsx":
-        return _xlsx_rows(data), ""
-    if ext in ("csv", "tsv"):
-        return _csv_rows(data), ""
-    if ext == "docx":
-        return None, _docx_text(data)
-    if ext == "pdf":
-        from pdfminer.high_level import extract_text
-
-        table = _pdf_table_rows(data)
-        return (table, "") if table else (None, extract_text(io.BytesIO(data)))
-    return None, _decode(data)
 
 
 def _table_header(rows: list[list[str]]) -> tuple[int, dict[int, str]]:
@@ -422,6 +226,10 @@ def table_mapping(rows: list[list[str]]) -> tuple[int, list[str], dict[str, int]
             columns = [column for column, count in matches.items() if count == best]
             if len(columns) == 1:
                 mapping[columns[0]] = "email"
+    if "company" not in mapping.values() and "email" in mapping.values():
+        company_column = _infer_company_column(rows, header_index, mapping)
+        if company_column is not None:
+            mapping[company_column] = "company"
     # «Title»/«позиция» рядом с именем и email может значить должность
     # человека. Явные «Вакансия» и «Job» остаются названием вакансии.
     if "link" not in mapping.values() and "position" not in mapping.values():
@@ -439,6 +247,84 @@ def table_mapping(rows: list[list[str]]) -> tuple[int, list[str], dict[str, int]
     for column, field in sorted(mapping.items()):
         suggested.setdefault(field, column)
     return header_index, rows[header_index], suggested
+
+
+def _infer_company_column(
+    rows: list[list[str]], header_index: int, mapping: dict[int, str]
+) -> int | None:
+    """Infer a company column only when email-row alignment is strong."""
+    email_column = next(column for column, field in mapping.items() if field == "email")
+    body = rows[header_index + 1 : header_index + 41]
+    email_rows = [
+        row
+        for row in body
+        if email_column < len(row) and extract_emails(row[email_column])
+    ]
+    if len(email_rows) < 2:
+        return None
+    excluded_headers = (
+        "location",
+        "country",
+        "city",
+        "format",
+        "status",
+        "salary",
+        "date",
+        "description",
+        "notes",
+        "source",
+        "website",
+        "domain",
+        "url",
+        "link",
+        "телефон",
+        "город",
+        "страна",
+        "формат",
+        "статус",
+        "зарплат",
+        "дата",
+        "описан",
+        "замет",
+        "источник",
+        "сайт",
+        "домен",
+        "ссыл",
+    )
+    used_columns = set(mapping)
+    header = rows[header_index]
+    scored: list[tuple[float, int]] = []
+    width = max((len(row) for row in email_rows), default=0)
+    for column in range(width):
+        if column in used_columns:
+            continue
+        label = _normalize_header(header[column]) if column < len(header) else ""
+        if any(term in label for term in excluded_headers):
+            continue
+        values = [row[column].strip() for row in email_rows if column < len(row)]
+        valid = [
+            value
+            for value in values
+            if value
+            and len(value) <= 120
+            and len(value.split()) <= 12
+            and re.search(r"[A-Za-zА-Яа-яЁё]", value)
+            and not extract_emails(value)
+            and not re.search(r"https?://|www\.", value, re.I)
+        ]
+        coverage = len(valid) / len(email_rows)
+        if coverage < 0.7:
+            continue
+        unique_ratio = len({value.casefold() for value in valid}) / len(valid)
+        concise_ratio = sum(len(value.split()) <= 5 for value in valid) / len(valid)
+        score = coverage * 0.55 + unique_ratio * 0.25 + concise_ratio * 0.2
+        scored.append((score, column))
+    scored.sort(reverse=True)
+    if not scored or scored[0][0] < 0.72:
+        return None
+    if len(scored) > 1 and scored[0][0] - scored[1][0] < 0.08:
+        return None
+    return scored[0][1]
 
 
 def rows_from_table(
@@ -459,11 +345,14 @@ def rows_from_table(
     mapping = {column: field for field, column in selected.items()}
     if "email" not in mapping.values() and "company" not in mapping.values():
         raise ValueError(
-            "Не нашёл столбцы «Компания» и «Email» — проверьте заголовки "
-            "таблицы."
+            "Не нашёл столбцы «Компания» и «Email» — проверьте заголовки " "таблицы."
         )
     result = []
+    normalized_header = [_normalize_header(value) for value in rows[header_index]]
     for number, row in enumerate(body, start=header_index + 2):
+        normalized_row = [_normalize_header(value) for value in row]
+        if normalized_row == normalized_header:
+            continue
         item: dict[str, Any] = {f: "" for f in FIELDS}
         for i, value in enumerate(row):
             field = mapping.get(i)
@@ -472,18 +361,32 @@ def rows_from_table(
         # В ячейке бывает «hr@x.ru, careers@x.ru» — берём первый адрес.
         emails = extract_emails(item["email"]) if item["email"] else []
         item["email"] = emails[0] if emails else item["email"].lower()
-        item["telegram"] = (
-            item["telegram"].replace("https://t.me/", "").lstrip("@")
-        )
+        item["telegram"] = item["telegram"].replace("https://t.me/", "").lstrip("@")
         item["row"] = number
         if item["company"] or item["email"]:
             result.append(item)
     return result
 
 
-CHUNK_CHARS = (
-    6000  # столько текста за один запрос к LLM — большой PDF идёт частями
-)
+def read_file(
+    filename: str,
+    data: bytes,
+    *,
+    on_ocr_progress: Callable[[int, int], None] | None = None,
+) -> tuple[list[list[str]] | None, str]:
+    """Read a supported file, using the importer's field mapping rules."""
+    return read_import_file(
+        filename,
+        data,
+        fields=FIELDS,
+        field_for=_field_for,
+        table_mapping=table_mapping,
+        rows_from_table=rows_from_table,
+        on_ocr_progress=on_ocr_progress,
+    )
+
+
+CHUNK_CHARS = 6000  # столько текста за один запрос к LLM — большой PDF идёт частями
 
 
 def _chunks(text: str) -> list[str]:
@@ -524,14 +427,10 @@ def rows_from_text(
     class _Company(BaseModel):
         company: str = ""
         email: str = ""
-        name: str = Field(
-            default="", description="Имя контакта/рекрутера, если есть"
-        )
+        name: str = Field(default="", description="Имя контакта/рекрутера, если есть")
         website: str = ""
         title: str = Field(default="", description="Вакансия, если упомянута")
-        emphasis: str = Field(
-            default="", description="На что сделать упор в письме"
-        )
+        emphasis: str = Field(default="", description="На что сделать упор в письме")
 
     class _Companies(BaseModel):
         companies: list[_Company]
@@ -551,9 +450,7 @@ def rows_from_text(
         try:
             parsed += cast(
                 _Companies,
-                llm.with_structured_output(_Companies).invoke(
-                    prompt.format(text=part)
-                ),
+                llm.with_structured_output(_Companies).invoke(prompt.format(text=part)),
             ).companies
         except Exception as e:
             failed += 1
@@ -593,8 +490,7 @@ def rows_from_text(
         # acme.co.uk → Acme, mail.acme.io → Acme
         name = (
             labels[-3]
-            if len(labels) > 2
-            and labels[-2] in ("co", "com", "org", "net", "ac")
+            if len(labels) > 2 and labels[-2] in ("co", "com", "org", "net", "ac")
             else labels[-2]
         )
         item.update(
@@ -646,14 +542,10 @@ def check_email(email: str) -> tuple[str, str]:
     return "ok", ""
 
 
-def preview(
-    rows: list[dict], known_emails: set[str], written_emails: set[str]
-) -> dict:
+def preview(rows: list[dict], known_emails: set[str], written_emails: set[str]) -> dict:
     """Что будет импортировано: сводка и строки с пометками."""
     # Домены проверяем параллельно — иначе сотня адресов ждёт минуты.
-    domains = {
-        r["email"].split("@")[1].lower() for r in rows if "@" in r["email"]
-    }
+    domains = {r["email"].split("@")[1].lower() for r in rows if "@" in r["email"]}
     with ThreadPoolExecutor(max_workers=16) as pool:
         list(pool.map(domain_accepts_mail, domains - set(_MX_CACHE)))
     seen: set[str] = set()
