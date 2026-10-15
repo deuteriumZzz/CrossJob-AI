@@ -80,7 +80,12 @@ def recognize_pdf_pages(
                         "Не удалось распознать текст на странице "
                         f"PDF №{page_number}."
                     ) from error
-                recognized[page_number] = "\n".join(result.txts or [])
+                recognized_texts = getattr(result, "txts", None)
+                if recognized_texts is None:
+                    raise ValueError(
+                        "RapidOCR вернул результат без распознанного текста."
+                    )
+                recognized[page_number] = "\n".join(recognized_texts)
             finally:
                 bitmap.close()
                 page.close()
