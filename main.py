@@ -257,6 +257,8 @@ from src.job_sources.telegram.watcher import (
     update_watch_post,
 )
 from src.job_sources.telegram_control import HELP_TEXT as _TELEGRAM_HELP_TEXT
+from src.job_sources.preferences import effective_list
+from src.job_sources.filters import work_formats
 from src.job_sources.telegram_control import (
     parse_control_commands,
     poll_bot_updates,
@@ -2235,7 +2237,10 @@ def search_telegram(
                 parameters, llm_api_key, job, channel
             )
             if verified is False:
-                logger.info(f"Skipping {job.link}: ИИ — не вакансия.")
+                logger.info(
+                    f"Skipping {job.link}: ИИ — вакансия, роль или формат "
+                    "не подходит настройкам."
+                )
                 applied_log.record(
                     job, "", "", "skipped_low_fit", 0, ["не вакансия (ИИ)"]
                 )
@@ -2357,12 +2362,13 @@ def _collect_telegram_post(
     той же вакансией на других площадках.
 
     Контакты — как у постоянного шлюза (_handle_post): в Базу только email
-    для отклика, который ИИ выбрал в проверенной вакансии (telegram.
-    llm_vacancy_filter). @username и прочее из поста — только после
+    для отклика из поста, который прошёл проверку вакансии и целевой роли
+    (telegram.llm_vacancy_filter). @username и прочее из поста — только после
     отправки сообщения, остальное в Базу не идёт.
 
-    False — ИИ сказал «не вакансия» (резюме, реклама): пост пропускаем.
-    None — ИИ недоступен: пост не теряем, но без Базы и автоотправки."""
+    False — вакансия, роль или формат не подходят.
+    None — ИИ недоступен: пост сохраняется как непроверенный только если
+    пользователь не ограничил форматы работы."""
     try:
         parsed = parse_post(job.description, llm_api_key)
     except Exception as e:
@@ -2371,18 +2377,38 @@ def _collect_telegram_post(
     job.company = parsed["company"] or job.company
     job.role = parsed["role"] or job.role
     job.salary = parsed["salary"] or job.salary
-    if not (parameters.get("telegram") or {}).get("llm_vacancy_filter"):
+    selected_formats = work_formats(parameters)
+    if not (parameters.get("telegram") or {}).get(
+        "llm_vacancy_filter", True
+    ) and not selected_formats:
         return True
     emails = [
         c["value"]
         for c in contacts_from_text(job.description, exclude=(channel,))
         if c["kind"] == "email"
     ]
-    verdict = _llm_check_post(job.description, llm_api_key, emails)
+    verdict = _llm_check_post(
+        job.description,
+        llm_api_key,
+        emails,
+        effective_list(parameters, "telegram", "positions"),
+        (parameters.get("telegram") or {}).get("role_bonus", ""),
+        selected_formats,
+    )
     if verdict is None:
+        if work_formats(parameters):
+            return False
         return None
-    is_vacancy, apply_email = verdict
-    if is_vacancy and apply_email:
+    if len(verdict) == 2:
+        is_vacancy, apply_email = verdict
+        role_matches = True
+        format_matches = True
+    elif len(verdict) == 3:
+        is_vacancy, role_matches, apply_email = verdict
+        format_matches = True
+    else:
+        is_vacancy, role_matches, format_matches, apply_email = verdict
+    if is_vacancy and role_matches and format_matches and apply_email:
         remember_telegram_post_contact(
             parameters["outputFileDirectory"],
             [{"kind": "email", "value": apply_email}],
@@ -2395,7 +2421,7 @@ def _collect_telegram_post(
             },
             sent=False,
         )
-    return is_vacancy
+    return is_vacancy and role_matches and format_matches
 
 
 def search_getmatch(

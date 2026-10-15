@@ -3187,6 +3187,9 @@ async function loadTelegramWatch() {
   document.getElementById("tgq-keywords-hint").textContent = w.keywords.length
     ? ""
     : `Пусто — ищу по словам из ваших должностей: ${w.default_keywords.join(", ") || "—"}`;
+  document.getElementById("tgq-target-roles").textContent =
+    (w.target_roles || []).join(", ") || "Должности пока не заданы";
+  document.getElementById("tgq-role-bonus").value = w.role_bonus || "";
   const stop = document.getElementById("tgq-stop");
   stop.value = w.stop_words.join("\n");
   initTagInput(stop);
@@ -3525,6 +3528,7 @@ async function saveTelegramWatch() {
         smart_greeting: document.getElementById("tgq-smart-greeting").checked,
         llm_vacancy_filter: document.getElementById("tgq-llm-vacancy-filter")
           .checked,
+        role_bonus: document.getElementById("tgq-role-bonus").value.trim(),
         message_delay_min_seconds: Math.max(0, parseInt(document.getElementById("tgq-delay-min").value, 10) || 0) * 60,
         message_delay_max_seconds: Math.max(0, parseInt(document.getElementById("tgq-delay-max").value, 10) || 0) * 60,
         active_hours_start: parseInt(document.getElementById("tgq-hours-start").value, 10) || 0,

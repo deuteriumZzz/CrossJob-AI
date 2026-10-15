@@ -4163,6 +4163,20 @@ def post_search_settings(
         if value is not None:
             set_top_level_bool_field(ctx.config_file, field, value)
     ctx.reload_config()
+    if any(
+        getattr(body, field) is not None
+        for field in ("positions", "remote", "hybrid", "onsite")
+    ):
+        from src.job_sources.telegram.watcher import active_watcher
+
+        watcher = active_watcher()
+        if watcher is not None:
+            watcher.update_role_filter(
+                target_roles=effective_list(
+                    ctx.config, "telegram", "positions"
+                ),
+                allowed_formats=work_formats(ctx.config),
+            )
     return _search_snapshot(ctx)
 
 
@@ -4228,12 +4242,9 @@ def _telegram_settings_snapshot(ctx: AppContext) -> dict:
         # из трёх способов написать HR (она сама, "✍️ письмо",
         # автоотправка), который не использовал LLM вообще.
         "smart_greeting": tg.get("smart_greeting", True),
-        # Короткий LLM-запрос "это вакансия или нет?" после стоп-слов —
-        # только для постов, уже прошедших ключевые слова (не на весь
-        # поток каналов). Выключено по умолчанию — стоп-слова уже
-        # закрывают основной случай (посты кандидатов) бесплатно,
-        # включайте, если каналов много и мусор всё равно проходит.
-        "llm_vacancy_filter": bool(tg.get("llm_vacancy_filter")),
+        # Один запрос после быстрого keyword/stop-word фильтра независимо
+        # проверяет вакансию и соответствие целевой должности.
+        "llm_vacancy_filter": bool(tg.get("llm_vacancy_filter", True)),
         "message_delay_min_seconds": tg.get(
             "message_delay_min_seconds", MIN_TELEGRAM_MESSAGE_DELAY_SECONDS
         ),
@@ -4299,6 +4310,7 @@ class TelegramWatchUpdate(BaseModel):
     auto_message: Optional[bool] = None
     smart_greeting: Optional[bool] = None
     llm_vacancy_filter: Optional[bool] = None
+    role_bonus: Optional[str] = None
     daily_message_limit: Optional[int] = None
     active_hours_start: Optional[int] = None
     active_hours_end: Optional[int] = None
@@ -4326,6 +4338,8 @@ def _telegram_watch_snapshot(ctx: AppContext) -> dict:
         "default_keywords": default_keywords(
             telegram.get("positions") or ctx.config.get("positions") or []
         ),
+        "target_roles": effective_list(ctx.config, "telegram", "positions"),
+        "role_bonus": telegram.get("role_bonus") or "",
         "stop_words": telegram.get("watch_stop_words") or [],
         "builtin_stop_words": list(CANDIDATE_SELF_POST_MARKERS),
         "forward_to": telegram.get("watch_forward_to") or "me",
@@ -4345,7 +4359,9 @@ def _telegram_watch_snapshot(ctx: AppContext) -> dict:
         "bot_connected": bot_credentials(ctx.config) is not None,
         "greeting": telegram.get("intro_message_template") or "",
         "smart_greeting": bool(telegram.get("smart_greeting", True)),
-        "llm_vacancy_filter": bool(telegram.get("llm_vacancy_filter")),
+        "llm_vacancy_filter": bool(
+            telegram.get("llm_vacancy_filter", True)
+        ),
         "resumes": _telegram_resume_list(ctx),
         "resume_route_ru": (lambda r: r.name if r else "")(
             resolve_resume(ctx.config, "telegram", True)
@@ -4467,6 +4483,14 @@ def post_telegram_watch(
         set_source_field(
             prefs, "telegram", "llm_vacancy_filter", body.llm_vacancy_filter
         )
+    if body.role_bonus is not None:
+        set_source_field(
+            prefs,
+            "telegram",
+            "role_bonus",
+            body.role_bonus.strip()[:500],
+            quote=True,
+        )
     for flag in ("preview_before_send", "night_to_morning"):
         if getattr(body, flag) is not None:
             set_source_field(prefs, "telegram", flag, getattr(body, flag))
@@ -4488,6 +4512,12 @@ def post_telegram_watch(
         watcher = active_watcher()
         if watcher is not None:
             watcher.update_llm_vacancy_filter(body.llm_vacancy_filter)
+    if body.role_bonus is not None:
+        from src.job_sources.telegram.watcher import active_watcher
+
+        watcher = active_watcher()
+        if watcher is not None:
+            watcher.update_role_filter(role_bonus=body.role_bonus.strip()[:500])
     daemon_running = (
         ctx.scheduler_thread is not None and ctx.scheduler_thread.is_alive()
     )
