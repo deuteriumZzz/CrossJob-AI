@@ -11,8 +11,12 @@ from typing import Callable
 from xml.etree import ElementTree as ET
 
 _XLSX_MAIN_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
-_XLSX_REL_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
-_PACKAGE_REL_NS = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+_XLSX_REL_NS = (
+    "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+)
+_PACKAGE_REL_NS = (
+    "{http://schemas.openxmlformats.org/package/2006/relationships}"
+)
 _MAX_ARCHIVE_FILES = 2_000
 _MAX_ARCHIVE_EXPANDED_BYTES = 100 * 1024 * 1024
 _MAX_XLSX_ROWS_PER_SHEET = 100_000
@@ -23,7 +27,9 @@ _MAX_XLSX_COLUMNS = 1_024
 class ParsedTable(list[list[str]]):
     """Rows plus non-fatal notes about sheets omitted from an import."""
 
-    def __init__(self, rows: list[list[str]], warnings: list[str] | None = None):
+    def __init__(
+        self, rows: list[list[str]], warnings: list[str] | None = None
+    ):
         super().__init__(rows)
         self.warnings = warnings or []
 
@@ -31,8 +37,13 @@ class ParsedTable(list[list[str]]):
 def _check_archive(z: zipfile.ZipFile) -> None:
     members = z.infolist()
     if len(members) > _MAX_ARCHIVE_FILES:
-        raise ValueError("В архиве слишком много элементов для безопасного разбора.")
-    if sum(member.file_size for member in members) > _MAX_ARCHIVE_EXPANDED_BYTES:
+        raise ValueError(
+            "В архиве слишком много элементов для безопасного разбора."
+        )
+    if (
+        sum(member.file_size for member in members)
+        > _MAX_ARCHIVE_EXPANDED_BYTES
+    ):
         raise ValueError("Файл слишком сложный или большой после распаковки.")
 
 
@@ -56,7 +67,9 @@ def _xlsx_sheet_rows(
                 raise ValueError("В таблице Excel слишком много столбцов.")
             cell_count += 1
             if cell_count > _MAX_XLSX_CELLS_PER_SHEET:
-                raise ValueError("В листе Excel слишком много ячеек для импорта.")
+                raise ValueError(
+                    "В листе Excel слишком много ячеек для импорта."
+                )
             value_node = cell.find(f"{_XLSX_MAIN_NS}v")
             inline = cell.find(f".//{_XLSX_MAIN_NS}t")
             if cell.get("t") == "s" and value_node is not None:
@@ -74,7 +87,9 @@ def _xlsx_sheet_rows(
                 )
             values[column - 1] = value
         if values:
-            rows.append([values.get(index, "") for index in range(max(values) + 1)])
+            rows.append(
+                [values.get(index, "") for index in range(max(values) + 1)]
+            )
             if len(rows) > _MAX_XLSX_ROWS_PER_SHEET:
                 raise ValueError("В листе Excel больше 100 000 строк.")
     return rows
@@ -90,8 +105,12 @@ def _skipped_content_warning(names: list[str]) -> list[str]:
     ]
 
 
-def _canonical_rows(items: list[dict], fields: tuple[str, ...]) -> list[list[str]]:
-    return [[str(item.get(field, "") or "") for field in fields] for item in items]
+def _canonical_rows(
+    items: list[dict], fields: tuple[str, ...]
+) -> list[list[str]]:
+    return [
+        [str(item.get(field, "") or "") for field in fields] for item in items
+    ]
 
 
 def _xlsx_rows(
@@ -107,7 +126,9 @@ def _xlsx_rows(
         if "xl/sharedStrings.xml" in names:
             shared_root = ET.fromstring(z.read("xl/sharedStrings.xml"))
             shared = [
-                "".join(node.text or "" for node in item.iter(f"{_XLSX_MAIN_NS}t"))
+                "".join(
+                    node.text or "" for node in item.iter(f"{_XLSX_MAIN_NS}t")
+                )
                 for item in shared_root.iter(f"{_XLSX_MAIN_NS}si")
             ]
         workbook_path = "xl/workbook.xml"
@@ -160,11 +181,15 @@ def _xlsx_rows(
             f"На листе «{best_name}» не удалось уверенно определить столбцы. "
             "Проверьте и задайте их вручную в блоке сопоставления."
         ]
-        return ParsedTable(best_rows, warnings + _skipped_content_warning(skipped))
+        return ParsedTable(
+            best_rows, warnings + _skipped_content_warning(skipped)
+        )
     if len(usable) == 1:
         selected = usable[0][0]
         skipped.extend(
-            name for name, _ in sheets if name != selected and name not in skipped
+            name
+            for name, _ in sheets
+            if name != selected and name not in skipped
         )
         selected_rows = next(rows for name, rows in sheets if name == selected)
         return ParsedTable(selected_rows, _skipped_content_warning(skipped))
@@ -174,7 +199,9 @@ def _xlsx_rows(
         combined.extend(_canonical_rows(items, fields))
     usable_names = {name for name, _ in usable}
     skipped.extend(
-        name for name, _ in sheets if name not in usable_names and name not in skipped
+        name
+        for name, _ in sheets
+        if name not in usable_names and name not in skipped
     )
     return ParsedTable(combined, _skipped_content_warning(skipped))
 
@@ -187,7 +214,9 @@ def _decode(data: bytes) -> str:
             return data.decode(encoding)
         except UnicodeDecodeError:
             continue
-    raise ValueError("Не удалось прочитать кодировку файла — сохраните его в UTF-8.")
+    raise ValueError(
+        "Не удалось прочитать кодировку файла — сохраните его в UTF-8."
+    )
 
 
 def _csv_rows(data: bytes) -> list[list[str]]:
@@ -217,7 +246,9 @@ def _docx_content(data: bytes) -> tuple[list[list[list[str]]], str]:
     text_lines: list[str] = []
     for block in body:
         if block.tag == f"{w}p":
-            text = "".join(node.text or "" for node in block.iter(f"{w}t")).strip()
+            text = "".join(
+                node.text or "" for node in block.iter(f"{w}t")
+            ).strip()
             if text:
                 text_lines.append(text)
             continue
@@ -227,7 +258,9 @@ def _docx_content(data: bytes) -> tuple[list[list[list[str]]], str]:
         for row in block.findall(f"{w}tr"):
             cells = [
                 " ".join(
-                    "".join(node.text or "" for node in paragraph.iter(f"{w}t")).strip()
+                    "".join(
+                        node.text or "" for node in paragraph.iter(f"{w}t")
+                    ).strip()
                     for paragraph in cell.findall(f"{w}p")
                 ).strip()
                 for cell in row.findall(f"{w}tc")
@@ -274,7 +307,9 @@ def _docx_rows(
             f"В таблице {best_index} Word не удалось уверенно определить столбцы. "
             "Проверьте и задайте их вручную в блоке сопоставления."
         ]
-        return ParsedTable(best_rows, warnings + _skipped_content_warning(skipped))
+        return ParsedTable(
+            best_rows, warnings + _skipped_content_warning(skipped)
+        )
     if len(usable) == 1:
         index = usable[0][0]
         skipped.extend(
@@ -282,7 +317,9 @@ def _docx_rows(
             for other in range(1, len(tables) + 1)
             if other != index and f"таблица {other}" not in skipped
         )
-        return ParsedTable(tables[index - 1], _skipped_content_warning(skipped))
+        return ParsedTable(
+            tables[index - 1], _skipped_content_warning(skipped)
+        )
     combined = [list(fields)]
     for _, items in usable:
         combined.extend(_canonical_rows(items, fields))
@@ -301,7 +338,10 @@ def _docx_text(data: bytes) -> str:
 
 def _markdown_rows(text: str) -> list[list[str]] | None:
     rows = [
-        [cell.strip().strip("`") for cell in line.strip().strip("|").split("|")]
+        [
+            cell.strip().strip("`")
+            for cell in line.strip().strip("|").split("|")
+        ]
         for line in text.splitlines()
         if line.strip().startswith("|") and not re.fullmatch(r"[\s|:-]+", line)
     ]
@@ -331,7 +371,9 @@ def _delimited_text_rows(text: str) -> list[list[str]] | None:
     return max(candidates, key=lambda candidate: candidate[0])[1]
 
 
-def _pdf_table_rows(data: bytes, field_for: Callable) -> list[list[str]] | None:
+def _pdf_table_rows(
+    data: bytes, field_for: Callable
+) -> list[list[str]] | None:
     """Extract text PDF tables by cell coordinates, without assigning emails to the wrong row."""
     from pdfminer.high_level import extract_pages
     from pdfminer.layout import LTTextContainer, LTTextLine
@@ -370,11 +412,16 @@ def _pdf_table_rows(data: bytes, field_for: Callable) -> list[list[str]] | None:
             row = [""] * len(header)
             for x, text in cells:
                 column = min(
-                    range(len(centers)), key=lambda index: abs(centers[index] - x)
+                    range(len(centers)),
+                    key=lambda index: abs(centers[index] - x),
                 )
                 row[column] = (
                     row[column]
-                    + ("" if row[column].endswith((".", "@", "-", "_")) else " ")
+                    + (
+                        ""
+                        if row[column].endswith((".", "@", "-", "_"))
+                        else " "
+                    )
                     + text
                     if row[column]
                     else text
@@ -399,7 +446,9 @@ def _pdf_page_text(data: bytes) -> list[str]:
     ]
 
 
-def _merge_wrapped(rows: list[tuple[float, list[str]]], width: int) -> list[list[str]]:
+def _merge_wrapped(
+    rows: list[tuple[float, list[str]]], width: int
+) -> list[list[str]]:
     full = [
         index
         for index, (_, row) in enumerate(rows)
@@ -424,7 +473,11 @@ def _merge_wrapped(rows: list[tuple[float, list[str]]], width: int) -> list[list
                     previous = row[column]
                     row[column] = (
                         previous
-                        + ("" if previous.endswith((".", "@", "-", "_")) else " ")
+                        + (
+                            ""
+                            if previous.endswith((".", "@", "-", "_"))
+                            else " "
+                        )
                         + text
                         if previous
                         else text

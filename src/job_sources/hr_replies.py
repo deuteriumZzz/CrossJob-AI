@@ -778,9 +778,7 @@ def generate_company_email(
             else f'"Hello {company} team,"'
         )
     else:
-        salutation_instruction = (
-            "«Здравствуйте!»" if russian else '"Hello,"'
-        )
+        salutation_instruction = "«Здравствуйте!»" if russian else '"Hello,"'
     # Название из Telegram-поста бывает «#junior #middle #удаленка» — в
     # письмо (и в тему) хештеги и заготовки не пускаем; пусто — общее.
     target_position = _clean_position_title(target_position) or (

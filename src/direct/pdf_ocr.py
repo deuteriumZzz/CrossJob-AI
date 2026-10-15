@@ -66,7 +66,9 @@ def recognize_pdf_pages(
             pixel_width = max(1, int(width * scale))
             pixel_height = max(1, int(height * scale))
             if pixel_width * pixel_height > _MAX_RENDER_PIXELS:
-                scale *= (_MAX_RENDER_PIXELS / (pixel_width * pixel_height)) ** 0.5
+                scale *= (
+                    _MAX_RENDER_PIXELS / (pixel_width * pixel_height)
+                ) ** 0.5
             bitmap = page.render(scale=scale)
             try:
                 try:

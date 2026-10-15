@@ -68,7 +68,8 @@ def settings(parameters: dict) -> dict:
         "warmup": direct.get("warmup", True) is not False,
         "send_from": int(direct.get("send_from", 9)),
         "send_to": int(direct.get("send_to", 19)),
-        "send_hours_enabled": direct.get("send_hours_enabled", True) is not False,
+        "send_hours_enabled": direct.get("send_hours_enabled", True)
+        is not False,
         "weekdays_only": direct.get("weekdays_only", True) is not False,
         # Возвратов за сутки до стопа — настраивается (Защита почты), но не
         # выключается: волна возвратов уводит в спам письма и живым HR.

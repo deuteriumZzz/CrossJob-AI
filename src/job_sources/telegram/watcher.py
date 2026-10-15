@@ -261,11 +261,7 @@ def _llm_check_post(
             roles=", ".join(role.strip() for role in roles if role.strip())
             or "не заданы",
             bonus=role_bonus.strip() or "нет",
-            formats=(
-                ", ".join(allowed)
-                if allowed
-                else "любой формат"
-            ),
+            formats=(", ".join(allowed) if allowed else "любой формат"),
             text=text[:3000],
         )
     attempts = len(RATE_LIMIT_RETRY_DELAYS_SECONDS) + 1
@@ -275,8 +271,8 @@ def _llm_check_post(
             answer = llm.invoke(prompt)
             content = str(getattr(answer, "content", answer)).casefold()
             if legacy_call:
-                is_vacancy = not content.replace("*", "").strip().startswith(
-                    "нет"
+                is_vacancy = (
+                    not content.replace("*", "").strip().startswith("нет")
                 )
                 return is_vacancy, (
                     _apply_email(text, emails) if is_vacancy else ""

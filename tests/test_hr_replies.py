@@ -627,4 +627,4 @@ def test_company_email_does_not_leak_hashtags_from_telegram_title(monkeypatch):
     # в самом промте хештеги упомянуты как пример запрета — смотрим данные
     data = prompts[0].split("Кандидат:", 1)[1]
     assert "#junior" not in data and "#удаленка" not in data
-    assert 'назови позицию «Python-разработчик»' in prompts[0]
+    assert "назови позицию «Python-разработчик»" in prompts[0]

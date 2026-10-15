@@ -1081,7 +1081,11 @@ def get_inbox(ctx: AppContext = Depends(get_ctx)) -> list[dict]:
         )
         entry = by_link.get(job_link) or {}
         last_outbound = next(
-            (message for message in reversed(conv["messages"]) if message["direction"] == "out"),
+            (
+                message
+                for message in reversed(conv["messages"])
+                if message["direction"] == "out"
+            ),
             None,
         )
         items.append(
@@ -2330,7 +2334,15 @@ def post_contact_from_application(
 
 IMPORT_PREVIEW_FILE = ".import_preview.json"
 MAX_CONTACT_IMPORT_BYTES = 25 * 1024 * 1024
-CONTACT_IMPORT_EXTENSIONS = {".csv", ".tsv", ".xlsx", ".md", ".txt", ".pdf", ".docx"}
+CONTACT_IMPORT_EXTENSIONS = {
+    ".csv",
+    ".tsv",
+    ".xlsx",
+    ".md",
+    ".txt",
+    ".pdf",
+    ".docx",
+}
 
 
 def _written_emails(ctx: AppContext) -> set[str]:
@@ -2370,11 +2382,18 @@ def _save_import_preview(
         if contact["kind"] == "email"
     }
     result = import_preview(rows, known, _written_emails(ctx))
-    payload = {"token": token, "filename": filename, **(metadata or {}), **result}
+    payload = {
+        "token": token,
+        "filename": filename,
+        **(metadata or {}),
+        **result,
+    }
     (ctx.output_folder / IMPORT_PREVIEW_FILE).write_text(
         _json.dumps(payload, ensure_ascii=False), encoding="utf-8"
     )
-    job.update(state="done", stats=result["stats"], items=result["items"][:300])
+    job.update(
+        state="done", stats=result["stats"], items=result["items"][:300]
+    )
 
 
 def _run_table_import(
@@ -2388,11 +2407,15 @@ def _run_table_import(
     job = IMPORT_JOBS[token]
     try:
         header_index, headers, suggested = import_table_mapping(table)
-        selected = suggested if field_mapping is None else {
-            field: column
-            for field, column in field_mapping.items()
-            if field in IMPORT_FIELDS
-        }
+        selected = (
+            suggested
+            if field_mapping is None
+            else {
+                field: column
+                for field, column in field_mapping.items()
+                if field in IMPORT_FIELDS
+            }
+        )
         job.update(
             header_row=header_index + 1,
             headers=headers,
@@ -2422,7 +2445,9 @@ def _run_table_import(
             },
         )
     except (ValueError, KeyError, IndexError) as e:
-        job.update(state="error", detail=str(e) or "Не удалось разобрать таблицу")
+        job.update(
+            state="error", detail=str(e) or "Не удалось разобрать таблицу"
+        )
     except Exception as e:
         logger.exception("Сопоставление столбцов импорта упало")
         job.update(state="error", detail=f"Не удалось разобрать таблицу: {e}")
@@ -2439,7 +2464,9 @@ def _run_import(
 
         def ocr_progress(done: int, total: int) -> None:
             job.update(
-                stage=f"Распознаю PDF (OCR): {done}/{total}", done=done, total=total
+                stage=f"Распознаю PDF (OCR): {done}/{total}",
+                done=done,
+                total=total,
             )
 
         table, text = read_file(filename, data, on_ocr_progress=ocr_progress)
@@ -2491,18 +2518,26 @@ def post_import_column_mapping(
     saved = IMPORT_TABLES.get(token)
     job = IMPORT_JOBS.get(token)
     if saved is None or job is None:
-        raise HTTPException(404, "Разбор таблицы устарел — загрузите файл ещё раз")
+        raise HTTPException(
+            404, "Разбор таблицы устарел — загрузите файл ещё раз"
+        )
     filename, table = saved
     width = len(table[job.get("header_row", 1) - 1])
     for field, column in body.mapping.items():
         if field not in IMPORT_FIELDS:
             raise HTTPException(422, f"Неизвестное поле: {field}")
         if column is not None and not 0 <= column < width:
-            raise HTTPException(422, "Номер столбца выходит за границы таблицы")
-    used_columns = [column for column in body.mapping.values() if column is not None]
+            raise HTTPException(
+                422, "Номер столбца выходит за границы таблицы"
+            )
+    used_columns = [
+        column for column in body.mapping.values() if column is not None
+    ]
     if len(used_columns) != len(set(used_columns)):
         raise HTTPException(422, "Один столбец нельзя назначить двум полям")
-    job.update(state="running", stage="Применяю сопоставление", done=0, total=0)
+    job.update(
+        state="running", stage="Применяю сопоставление", done=0, total=0
+    )
     threading.Thread(
         target=_run_table_import,
         args=(ctx, token, filename, table, body.mapping),
@@ -2531,7 +2566,9 @@ async def post_import_preview(
     if not data:
         raise HTTPException(400, "Файл пустой.")
     if len(data) > MAX_CONTACT_IMPORT_BYTES:
-        raise HTTPException(413, "Файл слишком большой. Максимальный размер — 25 МБ.")
+        raise HTTPException(
+            413, "Файл слишком большой. Максимальный размер — 25 МБ."
+        )
     token = _secrets.token_hex(16)
     IMPORT_JOBS[token] = {
         "state": "running",
@@ -4378,9 +4415,7 @@ def _telegram_watch_snapshot(ctx: AppContext) -> dict:
         "bot_connected": bot_credentials(ctx.config) is not None,
         "greeting": telegram.get("intro_message_template") or "",
         "smart_greeting": bool(telegram.get("smart_greeting", True)),
-        "llm_vacancy_filter": bool(
-            telegram.get("llm_vacancy_filter", True)
-        ),
+        "llm_vacancy_filter": bool(telegram.get("llm_vacancy_filter", True)),
         "resumes": _telegram_resume_list(ctx),
         "resume_route_ru": (lambda r: r.name if r else "")(
             resolve_resume(ctx.config, "telegram", True)
@@ -4536,7 +4571,9 @@ def post_telegram_watch(
 
         watcher = active_watcher()
         if watcher is not None:
-            watcher.update_role_filter(role_bonus=body.role_bonus.strip()[:500])
+            watcher.update_role_filter(
+                role_bonus=body.role_bonus.strip()[:500]
+            )
     daemon_running = (
         ctx.scheduler_thread is not None and ctx.scheduler_thread.is_alive()
     )

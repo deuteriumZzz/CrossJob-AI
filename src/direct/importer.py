@@ -145,7 +145,9 @@ _HEADER_SYNONYMS = {
     ),
 }
 # accessibility@, candidate.accommodations@, fraud@, eeo@ — не для откликов.
-_NOT_FOR_APPLICATIONS = re.compile(r"accessib|accommodat|fraud|eeo|disability", re.I)
+_NOT_FOR_APPLICATIONS = re.compile(
+    r"accessib|accommodat|fraud|eeo|disability", re.I
+)
 _EMAIL_RE = re.compile(r"^[\w.+-]+@[\w-]+(\.[\w-]+)+$")
 
 
@@ -175,7 +177,10 @@ def _field_for(header: str) -> str | None:
 def _header_contains(header: str, alias: str) -> bool:
     if alias.isascii() and re.fullmatch(r"[a-z0-9 -]+", alias):
         pattern = re.escape(alias).replace(r"\ ", r"\s+")
-        return re.search(rf"(?<![a-z0-9]){pattern}(?![a-z0-9])", header) is not None
+        return (
+            re.search(rf"(?<![a-z0-9]){pattern}(?![a-z0-9])", header)
+            is not None
+        )
     return alias in header
 
 
@@ -202,17 +207,27 @@ def _table_header(rows: list[list[str]]) -> tuple[int, dict[int, str]]:
         # arbitrary cell contents later in the workbook.
         fallback = max(
             enumerate(rows[:25]),
-            key=lambda item: (sum(bool(value.strip()) for value in item[1]), -item[0]),
+            key=lambda item: (
+                sum(bool(value.strip()) for value in item[1]),
+                -item[0],
+            ),
             default=None,
         )
-        if fallback is None or sum(bool(value.strip()) for value in fallback[1]) < 2:
+        if (
+            fallback is None
+            or sum(bool(value.strip()) for value in fallback[1]) < 2
+        ):
             raise ValueError("Не нашёл строку заголовков таблицы.")
         return fallback[0], {}
-    _, row_index, mapping = max(candidates, key=lambda item: (item[0], -item[1]))
+    _, row_index, mapping = max(
+        candidates, key=lambda item: (item[0], -item[1])
+    )
     return row_index, mapping
 
 
-def table_mapping(rows: list[list[str]]) -> tuple[int, list[str], dict[str, int]]:
+def table_mapping(
+    rows: list[list[str]],
+) -> tuple[int, list[str], dict[str, int]]:
     """Return the selected header row and suggested canonical field mapping."""
     header_index, mapping = _table_header(rows)
     if "email" not in mapping.values():
@@ -223,7 +238,9 @@ def table_mapping(rows: list[list[str]]) -> tuple[int, list[str], dict[str, int]
                     matches[column] = matches.get(column, 0) + 1
         if matches:
             best = max(matches.values())
-            columns = [column for column, count in matches.items() if count == best]
+            columns = [
+                column for column, count in matches.items() if count == best
+            ]
             if len(columns) == 1:
                 mapping[columns[0]] = "email"
     if "company" not in mapping.values() and "email" in mapping.values():
@@ -253,7 +270,9 @@ def _infer_company_column(
     rows: list[list[str]], header_index: int, mapping: dict[int, str]
 ) -> int | None:
     """Infer a company column only when email-row alignment is strong."""
-    email_column = next(column for column, field in mapping.items() if field == "email")
+    email_column = next(
+        column for column, field in mapping.items() if field == "email"
+    )
     body = rows[header_index + 1 : header_index + 41]
     email_rows = [
         row
@@ -298,10 +317,14 @@ def _infer_company_column(
     for column in range(width):
         if column in used_columns:
             continue
-        label = _normalize_header(header[column]) if column < len(header) else ""
+        label = (
+            _normalize_header(header[column]) if column < len(header) else ""
+        )
         if any(term in label for term in excluded_headers):
             continue
-        values = [row[column].strip() for row in email_rows if column < len(row)]
+        values = [
+            row[column].strip() for row in email_rows if column < len(row)
+        ]
         valid = [
             value
             for value in values
@@ -316,7 +339,9 @@ def _infer_company_column(
         if coverage < 0.7:
             continue
         unique_ratio = len({value.casefold() for value in valid}) / len(valid)
-        concise_ratio = sum(len(value.split()) <= 5 for value in valid) / len(valid)
+        concise_ratio = sum(len(value.split()) <= 5 for value in valid) / len(
+            valid
+        )
         score = coverage * 0.55 + unique_ratio * 0.25 + concise_ratio * 0.2
         scored.append((score, column))
     scored.sort(reverse=True)
@@ -345,10 +370,13 @@ def rows_from_table(
     mapping = {column: field for field, column in selected.items()}
     if "email" not in mapping.values() and "company" not in mapping.values():
         raise ValueError(
-            "Не нашёл столбцы «Компания» и «Email» — проверьте заголовки " "таблицы."
+            "Не нашёл столбцы «Компания» и «Email» — проверьте заголовки "
+            "таблицы."
         )
     result = []
-    normalized_header = [_normalize_header(value) for value in rows[header_index]]
+    normalized_header = [
+        _normalize_header(value) for value in rows[header_index]
+    ]
     for number, row in enumerate(body, start=header_index + 2):
         normalized_row = [_normalize_header(value) for value in row]
         if normalized_row == normalized_header:
@@ -361,7 +389,9 @@ def rows_from_table(
         # В ячейке бывает «hr@x.ru, careers@x.ru» — берём первый адрес.
         emails = extract_emails(item["email"]) if item["email"] else []
         item["email"] = emails[0] if emails else item["email"].lower()
-        item["telegram"] = item["telegram"].replace("https://t.me/", "").lstrip("@")
+        item["telegram"] = (
+            item["telegram"].replace("https://t.me/", "").lstrip("@")
+        )
         item["row"] = number
         if item["company"] or item["email"]:
             result.append(item)
@@ -386,7 +416,9 @@ def read_file(
     )
 
 
-CHUNK_CHARS = 6000  # столько текста за один запрос к LLM — большой PDF идёт частями
+CHUNK_CHARS = (
+    6000  # столько текста за один запрос к LLM — большой PDF идёт частями
+)
 
 
 def _chunks(text: str) -> list[str]:
@@ -427,10 +459,14 @@ def rows_from_text(
     class _Company(BaseModel):
         company: str = ""
         email: str = ""
-        name: str = Field(default="", description="Имя контакта/рекрутера, если есть")
+        name: str = Field(
+            default="", description="Имя контакта/рекрутера, если есть"
+        )
         website: str = ""
         title: str = Field(default="", description="Вакансия, если упомянута")
-        emphasis: str = Field(default="", description="На что сделать упор в письме")
+        emphasis: str = Field(
+            default="", description="На что сделать упор в письме"
+        )
 
     class _Companies(BaseModel):
         companies: list[_Company]
@@ -450,7 +486,9 @@ def rows_from_text(
         try:
             parsed += cast(
                 _Companies,
-                llm.with_structured_output(_Companies).invoke(prompt.format(text=part)),
+                llm.with_structured_output(_Companies).invoke(
+                    prompt.format(text=part)
+                ),
             ).companies
         except Exception as e:
             failed += 1
@@ -490,7 +528,8 @@ def rows_from_text(
         # acme.co.uk → Acme, mail.acme.io → Acme
         name = (
             labels[-3]
-            if len(labels) > 2 and labels[-2] in ("co", "com", "org", "net", "ac")
+            if len(labels) > 2
+            and labels[-2] in ("co", "com", "org", "net", "ac")
             else labels[-2]
         )
         item.update(
@@ -542,10 +581,14 @@ def check_email(email: str) -> tuple[str, str]:
     return "ok", ""
 
 
-def preview(rows: list[dict], known_emails: set[str], written_emails: set[str]) -> dict:
+def preview(
+    rows: list[dict], known_emails: set[str], written_emails: set[str]
+) -> dict:
     """Что будет импортировано: сводка и строки с пометками."""
     # Домены проверяем параллельно — иначе сотня адресов ждёт минуты.
-    domains = {r["email"].split("@")[1].lower() for r in rows if "@" in r["email"]}
+    domains = {
+        r["email"].split("@")[1].lower() for r in rows if "@" in r["email"]
+    }
     with ThreadPoolExecutor(max_workers=16) as pool:
         list(pool.map(domain_accepts_mail, domains - set(_MX_CACHE)))
     seen: set[str] = set()

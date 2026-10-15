@@ -2378,9 +2378,10 @@ def _collect_telegram_post(
     job.role = parsed["role"] or job.role
     job.salary = parsed["salary"] or job.salary
     selected_formats = work_formats(parameters)
-    if not (parameters.get("telegram") or {}).get(
-        "llm_vacancy_filter", True
-    ) and not selected_formats:
+    if (
+        not (parameters.get("telegram") or {}).get("llm_vacancy_filter", True)
+        and not selected_formats
+    ):
         return True
     emails = [
         c["value"]

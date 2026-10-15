@@ -76,14 +76,30 @@ def test_table_import_skips_title_and_notes_before_headers():
         ["Проверено 14.10.2026; адреса явно опубликованы в источниках."],
         ["Профиль: Python backend, коммерческий опыт."],
         [
-            "Группа", "Компания", "Страна / команда", "Вакансия",
-            "Удалёнка и география", "Совпадение", "Опубликованный email",
-            "Тип адреса", "На что сделать упор", "Источник", "Статус проверки",
+            "Группа",
+            "Компания",
+            "Страна / команда",
+            "Вакансия",
+            "Удалёнка и география",
+            "Совпадение",
+            "Опубликованный email",
+            "Тип адреса",
+            "На что сделать упор",
+            "Источник",
+            "Статус проверки",
         ],
         [
-            "Россия", "Kotelov", "Россия", "Python-разработчик", "Worldwide",
-            "Хорошее совпадение", "hr@kotelov.com", "HR", "Python backend",
-            "https://kotelov.com/hr", "Активная вакансия",
+            "Россия",
+            "Kotelov",
+            "Россия",
+            "Python-разработчик",
+            "Worldwide",
+            "Хорошее совпадение",
+            "hr@kotelov.com",
+            "HR",
+            "Python backend",
+            "https://kotelov.com/hr",
+            "Активная вакансия",
         ],
     ]
 
@@ -155,7 +171,9 @@ def test_import_api_can_reprocess_custom_columns_with_manual_mapping(
     assert done["items"][0]["title"] == "Python backend developer"
 
 
-def test_import_waits_for_mapping_when_company_header_is_unknown(client):  # noqa: F811
+def test_import_waits_for_mapping_when_company_header_is_unknown(
+    client,
+):  # noqa: F811
     table = [["Entity label", "Opening text"], ["Acme", "Python backend"]]
     token = client.post(
         "/api/import/preview",
