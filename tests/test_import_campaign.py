@@ -33,6 +33,23 @@ def _xlsx(rows):
             + "".join(f"<si><t>{v}</t></si>" for v in shared)
             + "</sst>",
         )
+        z.writestr(
+            "xl/workbook.xml",
+            '<workbook xmlns="http://schemas.openxmlformats.org/'
+            'spreadsheetml/2006/main" '
+            'xmlns:r="http://schemas.openxmlformats.org/'
+            'officeDocument/2006/relationships"><sheets>'
+            '<sheet name="Sheet1" sheetId="1" r:id="rId1"/>'
+            "</sheets></workbook>",
+        )
+        z.writestr(
+            "xl/_rels/workbook.xml.rels",
+            '<Relationships xmlns="http://schemas.openxmlformats.org/'
+            'package/2006/relationships"><Relationship Id="rId1" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/'
+            'relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+            "</Relationships>",
+        )
         cells, i = [], 0
         for r_idx, row in enumerate(rows, start=1):
             cs = []
@@ -1250,17 +1267,16 @@ def test_pdf_table_wrapped_cell_rejoins_its_row():
         (689.0, ["", "", "com", "", ""]),
         (684.0, ["3", "Bob", "bob@b.com", "HR", "B"]),
     ]
-    merged = importer._merge_wrapped(rows, 5)
+    from src.direct.import_file_formats import _join_cell, _merge_wrapped
+
+    merged = _merge_wrapped(rows, 5)
     assert [r[2] for r in merged] == [
         "ann@a.com",
         "very.long.name@excelencia.com",
         "bob@b.com",
     ]
     assert merged[1][4] == "Excelencia"
-    assert (
-        importer._join_cell("Lakshmi", "Radhakrishnan")
-        == "Lakshmi Radhakrishnan"
-    )
+    assert _join_cell("Lakshmi", "Radhakrishnan") == "Lakshmi Radhakrishnan"
 
 
 def test_mail_guard_warmup_window_and_bounces(tmp_path):

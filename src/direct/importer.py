@@ -156,8 +156,10 @@ def _normalize_header(header: str) -> str:
 
 
 def _field_for(header: str) -> str | None:
+    if _EMAIL_RE.fullmatch(header.strip().casefold()):
+        return None
     h = _normalize_header(header)
-    if not h or _EMAIL_RE.fullmatch(h):
+    if not h:
         return None
     fields = list(_HEADER_SYNONYMS.items())
     for field, words in fields:

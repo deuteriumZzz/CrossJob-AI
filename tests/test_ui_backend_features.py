@@ -616,6 +616,9 @@ def test_preview_before_send_makes_draft_instead_of_queue(
 
     sent = []
     monkeypatch.setattr(
+        w, "_llm_check_post", lambda *args: (True, True, True, "")
+    )
+    monkeypatch.setattr(
         w, "bot_request", lambda token, method, payload: sent.append(payload)
     )
     monkeypatch.setattr(w, "get_or_create_topic", lambda *a, **k: None)

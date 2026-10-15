@@ -89,7 +89,10 @@ def test_collect_telegram_post_fills_job_and_book(monkeypatch):
             description="Acme ищет Python Backend. Пишите @anna_hr или "
             "jobs@acme.ru. #geekjobs @geekjobs",
         )
-        params = {"outputFileDirectory": Path(tmp)}
+        params = {
+            "outputFileDirectory": Path(tmp),
+            "telegram": {"llm_vacancy_filter": False},
+        }
         # ИИ-проверка выключена — пост разобран, но в Базу ничего: контакты
         # из постов попадают туда только после проверки или отправки.
         assert main._collect_telegram_post(params, "key", job, "geekjobs")
@@ -107,7 +110,7 @@ def test_collect_telegram_post_fills_job_and_book(monkeypatch):
         monkeypatch.setattr(
             main,
             "_llm_check_post",
-            lambda text, key, emails: checked.append(emails)
+            lambda text, key, emails, *_: checked.append(emails)
             or (True, "jobs@acme.ru"),
         )
         assert main._collect_telegram_post(params, "key", job, "geekjobs")
@@ -119,18 +122,14 @@ def test_collect_telegram_post_fills_job_and_book(monkeypatch):
         assert card["vacancies"][0]["text"].startswith("Acme ищет")
 
         # «Не вакансия» (резюме, реклама) — пост пропускается, База не растёт.
-        monkeypatch.setattr(
-            main, "_llm_check_post", lambda text, key, emails: (False, "")
-        )
+        monkeypatch.setattr(main, "_llm_check_post", lambda *args: (False, ""))
         verdict = main._collect_telegram_post(params, "key", job, "geekjobs")
         assert verdict is False
         assert len(ContactBook(Path(tmp)).all()) == 1
 
         # ИИ недоступен — None: пост не теряем, но search_telegram не шлёт
         # по нему автосообщение (как шлюз с пометкой «не проверено ИИ»).
-        monkeypatch.setattr(
-            main, "_llm_check_post", lambda text, key, emails: None
-        )
+        monkeypatch.setattr(main, "_llm_check_post", lambda *args: None)
         assert main._collect_telegram_post(params, "key", job, "x") is None
 
 

@@ -417,17 +417,7 @@ def _pdf_table_rows(
                     range(len(centers)),
                     key=lambda index: abs(centers[index] - x),
                 )
-                row[column] = (
-                    row[column]
-                    + (
-                        ""
-                        if row[column].endswith((".", "@", "-", "_"))
-                        else " "
-                    )
-                    + text
-                    if row[column]
-                    else text
-                )
+                row[column] = _join_cell(row[column], text)
             page_rows.append((group[0][0], row))
         rows.extend(_merge_wrapped(page_rows, len(header)))
         page_rows = []
@@ -446,6 +436,17 @@ def _pdf_page_text(data: bytes) -> list[str]:
         )
         for page in extract_pages(io.BytesIO(data))
     ]
+
+
+def _join_cell(head: str, tail: str) -> str:
+    """Join wrapped PDF cell text without breaking partial email tokens."""
+    if not head:
+        return tail
+    return (
+        head + tail
+        if head.endswith((".", "@", "-", "_"))
+        else f"{head} {tail}"
+    )
 
 
 def _merge_wrapped(
@@ -473,17 +474,7 @@ def _merge_wrapped(
             for column, text in enumerate(rows[index][1]):
                 if text:
                     previous = row[column]
-                    row[column] = (
-                        previous
-                        + (
-                            ""
-                            if previous.endswith((".", "@", "-", "_"))
-                            else " "
-                        )
-                        + text
-                        if previous
-                        else text
-                    )
+                    row[column] = _join_cell(previous, text)
         merged.append(row)
     return merged
 

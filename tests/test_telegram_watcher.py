@@ -222,7 +222,11 @@ def test_handle_post_skips_llm_call_when_flag_disabled(monkeypatch):
             ["python"],
             [],
             "me",
-            {"outputFileDirectory": Path(tmp), "dataFolder": Path(tmp)},
+            {
+                "outputFileDirectory": Path(tmp),
+                "dataFolder": Path(tmp),
+                "telegram": {"llm_vacancy_filter": False},
+            },
         )
         watcher.client = _FakeClient()
         asyncio.run(
@@ -1222,7 +1226,9 @@ def test_verified_post_saves_only_apply_email_to_base(monkeypatch):
     """Проверенная вакансия: email для отклика — сразу в Базу (как адреса
     с сайтов компаний), @username — только после отправки из бота."""
     monkeypatch.setattr(
-        w, "_llm_check_post", lambda text, key, emails: (True, "hr@acme.io")
+        w,
+        "_llm_check_post",
+        lambda *args: (True, True, True, "hr@acme.io"),
     )
     monkeypatch.setattr(w, "bot_request", lambda *a: {})
     with tempfile.TemporaryDirectory() as tmp:
