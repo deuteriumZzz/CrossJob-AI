@@ -6,6 +6,7 @@ from bs4 import BeautifulSoup
 from src.job import Job
 from src.job_sources.block_detection import raise_if_blocked_after_wait
 from src.job_sources.himalayas.mapping import parse_search_html
+from src.utils.chrome_utils import get_with_retry
 
 SEARCH_URL = "https://himalayas.app/jobs"
 PAGE_LOAD_WAIT_SECONDS = 4
@@ -34,7 +35,7 @@ def search_jobs(driver, position: str, query: str = "") -> list[Job]:
     url = f"{SEARCH_URL}/{slug}" if slug else SEARCH_URL
     if query:
         url += "?" + query.lstrip("&")
-    driver.get(url)
+    get_with_retry(driver, url, retries=1, pause_seconds=5)
     time.sleep(PAGE_LOAD_WAIT_SECONDS)
     raise_if_blocked_after_wait(driver)
 

@@ -64,7 +64,9 @@ def init_loguru_logger():
                 "<cyan>{line}</cyan> - <level>{message}</level>"
             ),
             backtrace=True,
-            diagnose=True,
+            # diagnose=True includes local variables in exception traces;
+            # scheduler parameters can contain API keys and other secrets.
+            diagnose=False,
         )
 
     # Консольный логгер добавляем, только если включён LOG_TO_CONSOLE
@@ -79,7 +81,7 @@ def init_loguru_logger():
                 "<cyan>{line}</cyan> - <level>{message}</level>"
             ),
             backtrace=True,
-            diagnose=True,
+            diagnose=False,
         )
 
 
