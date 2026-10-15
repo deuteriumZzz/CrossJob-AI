@@ -11,7 +11,8 @@ from src.direct import importer
 from src.job_sources.contact_book import ContactBook
 from src.job_sources.hr_replies import DraftStore
 from src.webui import api
-from tests.test_webui_api import client  # noqa: F401  (fixture)
+
+pytest_plugins = ("tests.test_webui_api",)
 
 CSV = (
     "Компания;E-mail;Имя HR;Сайт;На что сделать упор\n"

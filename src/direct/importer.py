@@ -7,12 +7,11 @@ email принимается, только если он дословно ест
 from __future__ import annotations
 
 import re
-import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional, cast
 
 from src.direct.contacts import extract_emails
-from src.direct.import_file_formats import ParsedTable, read_import_file
+from src.direct.import_file_formats import read_import_file
 
 FIELDS = (
     "company",

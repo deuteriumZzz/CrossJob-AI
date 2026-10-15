@@ -2424,7 +2424,9 @@ def _run_table_import(
         ):
             job.update(
                 state="needs_mapping",
-                detail="Выберите столбец компании или email, чтобы продолжить.",
+                detail=(
+                    "Выберите столбец компании или email, чтобы продолжить."
+                ),
             )
             return
         rows = rows_from_table(
@@ -2477,7 +2479,8 @@ def _run_import(
             if not text.strip():
                 raise ValueError(
                     "Не удалось извлечь текст. Возможно, PDF отсканирован: "
-                    "сначала распознайте его через OCR или сохраните список как CSV/XLSX."
+                    "сначала распознайте его через OCR или сохраните список "
+                    "как CSV/XLSX."
                 )
             if not ctx.llm_api_key:
                 raise ValueError(
@@ -2558,7 +2561,8 @@ async def post_import_preview(
     if Path(filename).suffix.casefold() not in CONTACT_IMPORT_EXTENSIONS:
         raise HTTPException(
             415,
-            "Формат не поддерживается. Загрузите XLSX, CSV, TSV, MD, TXT, PDF или DOCX.",
+            "Формат не поддерживается. Загрузите XLSX, CSV, TSV, MD, "
+            "TXT, PDF или DOCX.",
         )
     data = await file.read(MAX_CONTACT_IMPORT_BYTES + 1)
     if not data:

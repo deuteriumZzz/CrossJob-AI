@@ -101,7 +101,8 @@ def _skipped_content_warning(names: list[str]) -> list[str]:
     preview = ", ".join(names[:5])
     suffix = " и другие" if len(names) > 5 else ""
     return [
-        f"Не удалось автоматически распознать таблицу в: {preview}{suffix}. Проверьте, что нужные данные попали в предпросмотр."
+        f"Не удалось автоматически распознать таблицу в: {preview}{suffix}. "
+        "Проверьте, что нужные данные попали в предпросмотр."
     ]
 
 
@@ -304,7 +305,8 @@ def _docx_rows(
             if index != best_index
         )
         warnings = [
-            f"В таблице {best_index} Word не удалось уверенно определить столбцы. "
+            f"В таблице {best_index} Word не удалось уверенно определить "
+            "столбцы. "
             "Проверьте и задайте их вручную в блоке сопоставления."
         ]
         return ParsedTable(
@@ -374,7 +376,7 @@ def _delimited_text_rows(text: str) -> list[list[str]] | None:
 def _pdf_table_rows(
     data: bytes, field_for: Callable
 ) -> list[list[str]] | None:
-    """Extract text PDF tables by cell coordinates, without assigning emails to the wrong row."""
+    """Extract PDF tables by cell coordinates, preserving row associations."""
     from pdfminer.high_level import extract_pages
     from pdfminer.layout import LTTextContainer, LTTextLine
 

@@ -27,7 +27,8 @@ def recognize_pdf_pages(
     except ImportError as error:
         raise ValueError(
             "Не установлены компоненты локального OCR. Переустановите "
-            "зависимости приложения командой pip install -r requirements-desktop.txt."
+            "зависимости приложения командой "
+            "pip install -r requirements-desktop.txt."
         ) from error
 
     document = pdfium.PdfDocument(data)
@@ -35,7 +36,8 @@ def recognize_pdf_pages(
     if page_count > _MAX_PAGES:
         document.close()
         raise ValueError(
-            f"В PDF {page_count} страниц. Для OCR поддерживаются файлы до {_MAX_PAGES} страниц."
+            f"В PDF {page_count} страниц. Для OCR поддерживаются файлы "
+            f"до {_MAX_PAGES} страниц."
         )
 
     recognized: dict[int, str] = {}
@@ -75,7 +77,8 @@ def recognize_pdf_pages(
                     result = engine(bitmap.to_pil())
                 except Exception as error:
                     raise ValueError(
-                        f"Не удалось распознать текст на странице PDF №{page_number}."
+                        "Не удалось распознать текст на странице "
+                        f"PDF №{page_number}."
                     ) from error
                 recognized[page_number] = "\n".join(result.txts or [])
             finally:
