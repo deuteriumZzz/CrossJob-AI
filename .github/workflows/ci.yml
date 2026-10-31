@@ -8,7 +8,9 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # ponytail: ubuntu-latest с 19.10.2026 — Ubuntu 26.04, а Python 3.9 для
+    # неё нет (setup-python падает). Пин до перехода проекта на 3.10+.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
