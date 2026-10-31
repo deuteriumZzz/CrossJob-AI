@@ -1948,7 +1948,17 @@ def get_todo(ctx: AppContext = Depends(get_ctx)) -> dict:
         for k, d in all_drafts.items()
         if not d.get("campaign") and not d.get("starter")
     }
-    campaign_drafts = len(all_drafts) - len(drafts)
+    # Считаем по самой рассылке, а не по файлу черновиков: там же лежат
+    # заготовки первых сообщений в Telegram-постах (starter) и черновики
+    # адресов, уже пропущенных/упавших, — живьём 2026-10-31 «32 письма
+    # ждут», а в «Рассылке» ждало 0.
+    _drop_lost_drafts(ctx)
+    campaign_drafts = sum(
+        1
+        for c in CampaignStore(ctx.output_folder).all().values()
+        for item in c["items"].values()
+        if item["status"] == "draft" and item.get("code") in all_drafts
+    )
     if campaign_drafts:
         items.append(
             {

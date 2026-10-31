@@ -1627,3 +1627,25 @@ def test_falsely_deleted_letter_comes_back_as_draft(client):  # noqa: F811
     r = client.post("/api/campaigns", json={"keys": [key]})
     assert r.status_code == 400 and "ждут отправки" in r.json()["detail"]
     assert store.get(cid)["items"]["a@x.io"]["status"] == "draft"
+
+
+def test_todo_counts_only_letters_waiting_in_campaign(client):  # noqa: F811
+    """«Письма рассылки ждут отправки» — по самой рассылке: заготовки
+    Telegram-постов и черновики уже упавших адресов не в счёт."""
+    ctx = api.get_ctx()
+    store = camp.CampaignStore(ctx.output_folder)
+    cid = store.create(
+        "t",
+        [
+            {"key": "a", "email": "a@x.io", "company": "A"},
+            {"key": "b", "email": "b@x.io", "company": "B"},
+        ],
+    )
+    drafts = DraftStore(ctx.output_folder / main.HR_DRAFTS_FILE)
+    for email, status in (("a@x.io", "draft"), ("b@x.io", "failed")):
+        code = drafts.add(email, "t", "email", "", campaign=cid)
+        store.update_item(cid, email, status=status, code=code)
+    drafts.add("someone", "t", "first", "", post_id="p", starter=True)
+
+    items = {i["id"]: i for i in client.get("/api/todo").json()["items"]}
+    assert items["campaign_drafts"]["count"] == 1
