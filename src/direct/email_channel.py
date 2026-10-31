@@ -47,6 +47,25 @@ def build_message(
     return message
 
 
+# Gmail недоступен из сети (VPN режет почтовые порты, обрыв связи) — письмо
+# не виновато: остаётся черновиком до следующей попытки, а не «ошибкой».
+_NETWORK_ERRORS = (
+    "EOF occurred in violation of protocol",
+    "Connection reset by peer",
+    "Connection unexpectedly closed",
+    "Network is unreachable",
+    "timed out",
+)
+GMAIL_UNREACHABLE_HINT = (
+    "Gmail недоступен из этой сети — похоже, VPN блокирует почту "
+    "(smtp.gmail.com:465). Отключите VPN или смените его сервер."
+)
+
+
+def is_network_error(text: str) -> bool:
+    return any(marker in text for marker in _NETWORK_ERRORS)
+
+
 def send_email(credentials: dict, message: EmailMessage) -> str:
     """Отправляет письмо, возвращает его Message-ID (для напоминания)."""
     with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=30) as smtp:

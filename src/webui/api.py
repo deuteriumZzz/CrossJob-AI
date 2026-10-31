@@ -90,7 +90,11 @@ from src.direct.campaign import (
 )
 from src.direct.companies import load_companies, save_companies
 from src.direct.dossier import collect_dossier
-from src.direct.email_channel import build_message, send_email
+from src.direct.email_channel import (
+    build_message,
+    is_network_error,
+    send_email,
+)
 from src.direct.importer import FIELDS as IMPORT_FIELDS
 from src.direct.importer import preview as import_preview
 from src.direct.importer import read_file, rows_from_table, rows_from_text
@@ -2702,10 +2706,16 @@ def _drop_lost_drafts(ctx: AppContext) -> None:
                 store.update_item(
                     cid, email, status="skipped", reason="письмо удалено"
                 )
-            elif (
-                item["status"] == "skipped"
-                and item.get("reason") == "письмо удалено"
-                and item.get("code") in drafts
+            elif item.get("code") in drafts and (
+                (
+                    item["status"] == "skipped"
+                    and item.get("reason") == "письмо удалено"
+                )
+                # Gmail был недоступен (VPN) — письмо не виновато, повторим.
+                or (
+                    item["status"] == "failed"
+                    and is_network_error(item.get("reason", ""))
+                )
             ):
                 store.update_item(cid, email, status="draft", reason="")
 
@@ -2779,16 +2789,7 @@ def get_outreach_sent(ctx: AppContext = Depends(get_ctx)) -> dict:
 @app.get("/api/campaigns")
 def get_campaigns(ctx: AppContext = Depends(get_ctx)) -> dict:
     """Рассылки и сколько адресов из базы ещё можно в них взять."""
-    in_campaigns = (
-        set().union(
-            *[
-                set(c["items"])
-                for c in CampaignStore(ctx.output_folder).all().values()
-            ]
-        )
-        if CampaignStore(ctx.output_folder).all()
-        else set()
-    )
+    in_campaigns = CampaignStore(ctx.output_folder).emails_taken()
     sources: dict[str, int] = {}
     available = 0
     for card in get_contacts(ctx):
@@ -2866,11 +2867,7 @@ def _campaign_targets(
     """Кому можно написать: по одному новому email на компанию, которой ещё
     нет ни в одной рассылке и которую не отметили «не писать»."""
     store = CampaignStore(ctx.output_folder)
-    in_campaigns = (
-        set().union(*[set(c["items"]) for c in store.all().values()])
-        if store.all()
-        else set()
-    )
+    in_campaigns = store.emails_taken()
     targets = []
     for card in get_contacts(ctx):
         if card["status"] == "skip":
@@ -6742,8 +6739,10 @@ def _mail_status(ctx: AppContext) -> Optional[dict]:
             **base,
             "state": "active",
             "goto": "outreach",
+            # «из» — сколько реально уйдёт сегодня: лимит, если писем
+            # больше, иначе отправленные + оставшиеся (а не «0 из 50» при 8).
             "text": f"Отправляю письма: {plan['sent_today']} из "
-            f"{plan['limit']} сегодня"
+            f"{min(plan['limit'], plan['sent_today'] + waiting)} сегодня"
             + (f" · следующее через ~{minutes} мин" if minutes else ""),
         }
     reason = plan["reason"] or "продолжу в ближайшие минуты"

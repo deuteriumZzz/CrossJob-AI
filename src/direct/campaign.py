@@ -28,6 +28,13 @@ STATUSES = (
     "replied",
     "skipped",
 )
+# Пропуски не по решению человека: компанию/контакт удалили из Базы или
+# черновик потерялся. Вернувшаяся в Базу компания снова доступна рассылке.
+REVIVABLE_SKIP_REASONS = (
+    "компании больше нет в Базе",
+    "контакт удалён из базы",
+    "письмо удалено",
+)
 PAUSE_SECONDS = (60, 120)  # между письмами — чтобы Gmail не счёл рассылкой
 
 
@@ -151,6 +158,24 @@ class CampaignStore:
             if campaign_id in data:
                 data[campaign_id].update(fields)
                 self._save(data)
+
+    def emails_taken(self) -> set[str]:
+        """Адреса, которым новая рассылка писать не должна: всё, что есть в
+        рассылках, кроме писем, закрытых без отправки потому, что компанию
+        или письмо убрали. Компания вернулась в Базу — ей снова можно
+        написать (живьём 2026-10-31: 1782 адреса после удаления и повторного
+        импорта навсегда застряли в «не писали», а «Написать письма»
+        отвечал «уже писали»)."""
+        return {
+            email
+            for c in self._load().values()
+            for email, item in c["items"].items()
+            if not (
+                item["status"] == "skipped"
+                and not item.get("sent_at")
+                and item.get("reason") in REVIVABLE_SKIP_REASONS
+            )
+        }
 
     def emails_with_status(self, *statuses: str) -> set[str]:
         return {

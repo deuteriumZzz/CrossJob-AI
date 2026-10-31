@@ -1649,3 +1649,40 @@ def test_todo_counts_only_letters_waiting_in_campaign(client):  # noqa: F811
 
     items = {i["id"]: i for i in client.get("/api/todo").json()["items"]}
     assert items["campaign_drafts"]["count"] == 1
+
+
+def test_campaign_can_rewrite_company_back_in_base(client):  # noqa: F811
+    """Компанию удалили из Базы (письмо закрылось «компании больше нет в
+    Базе»), потом вернули — «Написать письма» снова берёт её адрес."""
+    ctx = api.get_ctx()
+    key = main.ContactBook(ctx.output_folder).add(
+        "A",
+        [
+            {
+                "kind": "email",
+                "source": "t",
+                "source_url": "",
+                "value": "a@x.io",
+            }
+        ],
+    )
+    store = camp.CampaignStore(ctx.output_folder)
+    old = store.create(
+        "old", [{"key": key, "email": "a@x.io", "company": "A"}]
+    )
+    store.update_item(
+        old, "a@x.io", status="skipped", reason="компании больше нет в Базе"
+    )
+
+    r = client.post("/api/campaigns", json={"keys": [key]})
+    assert r.status_code == 200, r.text
+
+
+def test_gmail_unreachable_keeps_letter_as_draft():
+    from src.direct.email_channel import is_network_error
+
+    assert is_network_error(
+        "Не удалось отправить письмо a@x.io: EOF occurred in violation of "
+        "protocol (_ssl.c:1129)"
+    )
+    assert not is_network_error("535 Username and Password not accepted")

@@ -39,8 +39,10 @@ from src.direct.companies import all_companies
 from src.direct.contacts import extract_emails
 from src.direct.dossier import collect_dossier
 from src.direct.email_channel import (
+    GMAIL_UNREACHABLE_HINT,
     bounced_addresses,
     build_message,
+    is_network_error,
     reply_texts,
     send_email,
     senders_replied,
@@ -4760,6 +4762,10 @@ def start_campaign_job(
                     "новый в Настройках → Почта и письма",
                 )
                 return "Gmail не принял пароль приложения"
+            if is_network_error(result):
+                # Почта недоступна (VPN, обрыв) — упадут и остальные письма.
+                # Стоп до следующей проверки, письмо остаётся черновиком.
+                return GMAIL_UNREACHABLE_HINT
             if result.startswith("Отправлено"):
                 store.update_item(
                     campaign_id,
@@ -7657,7 +7663,8 @@ def _send_email_draft(
     try:
         message_id = send_email(credentials, email_message)
     except Exception as e:
-        return f"Не удалось отправить письмо {draft['contact']}: {e}"
+        hint = f" {GMAIL_UNREACHABLE_HINT}" if is_network_error(str(e)) else ""
+        return f"Не удалось отправить письмо {draft['contact']}: {e}.{hint}"
     _remember_draft_post(output_folder, draft)
     if draft.get("campaign"):
         # Для напоминания в той же ветке письма рассылки.
