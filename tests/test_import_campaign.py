@@ -1597,3 +1597,33 @@ def test_blacklist_button_adds_companies(client):  # noqa: F811
     res = client.post("/api/blacklist", json={"companies": ["Ромашка"]})
     assert res.status_code == 200 and res.json() == {"added": ["Ромашка"]}
     assert "Ромашка" in api.get_ctx().config.get("company_blacklist", [])
+
+
+def test_falsely_deleted_letter_comes_back_as_draft(client):  # noqa: F811
+    """Черновик на месте, а адрес «письмо удалено» (файл черновиков
+    прочитали посреди записи) — письмо возвращается в рассылку, а
+    «Написать письма» говорит, что оно ждёт отправки, а не «уже писали»."""
+    ctx = api.get_ctx()
+    key = main.ContactBook(ctx.output_folder).add(
+        "A",
+        [
+            {
+                "kind": "email",
+                "source": "t",
+                "source_url": "",
+                "value": "a@x.io",
+            }
+        ],
+    )
+    store = camp.CampaignStore(ctx.output_folder)
+    cid = store.create("t", [{"key": key, "email": "a@x.io", "company": "A"}])
+    code = DraftStore(ctx.output_folder / main.HR_DRAFTS_FILE).add(
+        "a@x.io", "t", "email", "", channel="email", campaign=cid
+    )
+    store.update_item(
+        cid, "a@x.io", status="skipped", reason="письмо удалено", code=code
+    )
+
+    r = client.post("/api/campaigns", json={"keys": [key]})
+    assert r.status_code == 400 and "ждут отправки" in r.json()["detail"]
+    assert store.get(cid)["items"]["a@x.io"]["status"] == "draft"

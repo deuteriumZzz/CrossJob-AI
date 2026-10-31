@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
-from src.utils.file_lock import state_file_lock
+from src.utils.file_lock import atomic_write_text, state_file_lock
 
 CAMPAIGNS_FILE = "campaigns.json"
 STATUSES = (
@@ -42,9 +42,10 @@ class CampaignStore:
             return {}
 
     def _save(self, data: dict) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        # Атомарно: _load() без блокировки посреди write_text видел пустой
+        # файл → {} → _drop_lost_drafts помечал все письма «письмо удалено».
+        atomic_write_text(
+            self.path, json.dumps(data, ensure_ascii=False, indent=2)
         )
 
     def all(self) -> dict:

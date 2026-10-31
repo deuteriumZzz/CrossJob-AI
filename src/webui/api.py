@@ -2679,7 +2679,11 @@ def post_import_commit(
 def _drop_lost_drafts(ctx: AppContext) -> None:
     """Письмо рассылки удалили в обход неё (во «Входящих», чисткой
     черновиков) — адрес остался «черновиком» без текста: карточка обещала
-    «готово 1 письмо», а показать нечего. Такие — «пропущено»."""
+    «готово 1 письмо», а показать нечего. Такие — «пропущено».
+    И обратно: «письмо удалено», а черновик на месте — пометка ложная
+    (файл черновиков читался посреди записи и казался пустым, живьём
+    2026-10-31: 11 писем рассылки пропали из «Рассылки», а в Базе висели
+    «черновиком», и «Написать письма» отвечал «уже писали»)."""
     store = CampaignStore(ctx.output_folder)
     drafts = DraftStore(ctx.output_folder / HR_DRAFTS_FILE).all()
     for cid, campaign in store.all().items():
@@ -2688,6 +2692,12 @@ def _drop_lost_drafts(ctx: AppContext) -> None:
                 store.update_item(
                     cid, email, status="skipped", reason="письмо удалено"
                 )
+            elif (
+                item["status"] == "skipped"
+                and item.get("reason") == "письмо удалено"
+                and item.get("code") in drafts
+            ):
+                store.update_item(cid, email, status="draft", reason="")
 
 
 def _campaign_view(ctx: AppContext, campaign: Optional[dict]) -> dict:
@@ -2931,6 +2941,18 @@ def post_campaign(
     """Новая рассылка: по одному адресу на компанию, кому ещё не писали."""
     store = CampaignStore(ctx.output_folder)
     targets = _campaign_targets(ctx, body.source, body.keys)
+    if not targets and body.keys:
+        _drop_lost_drafts(ctx)  # ложное «письмо удалено» — снова черновик
+        if any(
+            card["status"] == "draft"
+            for card in get_contacts(ctx)
+            if card["key"] in body.keys
+        ):
+            raise HTTPException(
+                400,
+                "Письма выбранным уже написаны и ждут отправки — "
+                "откройте «Рассылку» или «Общение → Ждут вашего решения»",
+            )
     if not targets:
         raise HTTPException(
             400,
