@@ -1,5 +1,8 @@
+import random
+import time
+
 from src.job import Job
-from src.job_sources.applied_log import max_new_per_run, seen_ids_for
+from src.job_sources.applied_log import seen_ids_for
 from src.job_sources.blacklist_filter import passes_blacklists
 from src.job_sources.block_detection import PlatformBlockedError
 from src.job_sources.preferences import effective_list
@@ -12,6 +15,9 @@ from src.logging import logger
 
 # /role/...?page=N подтверждён вживую 1.11 (page=2 — 26 новых id из 28).
 ROLE_PAGES = 10
+# С пагинацией выдача — сотни вакансий; каждую ещё оценивает ИИ. Без
+# предела ход Wellfound шёл десятки минут (1.11), остальные площадки ждали.
+DEFAULT_NEW_PER_RUN = 40
 
 
 class WellfoundSource:
@@ -21,7 +27,11 @@ class WellfoundSource:
     def search(self, preferences: dict) -> list[Job]:
         seen_ids: set = set()
         already_seen = seen_ids_for(preferences, "wellfound")
-        max_new = max_new_per_run(preferences, "wellfound")
+        max_new = int(
+            (preferences.get("wellfound") or {}).get(
+                "max_new_per_run", DEFAULT_NEW_PER_RUN
+            )
+        )
         opened = 0
         jobs: list[Job] = []
 
@@ -49,6 +59,7 @@ class WellfoundSource:
                         return jobs
                     opened += 1
 
+                    time.sleep(random.uniform(1.0, 2.5))  # вежливо к сайту
                     try:
                         detail_html = self.client.get_vacancy_html(job_id, slug)
                     except PlatformBlockedError:

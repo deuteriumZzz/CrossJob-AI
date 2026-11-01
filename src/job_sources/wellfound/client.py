@@ -67,6 +67,12 @@ class WellfoundClient:
 
     def get_vacancy_html(self, job_id: str, slug: str) -> str:
         response = self._client.get(f"/jobs/{job_id}-{slug}")
+        if response.status_code == 429:
+            # 1.11: после пагинации бот открывал ~170 вакансий подряд и
+            # ловил 429 — ждём, сколько просит сайт (не дольше минуты).
+            retry_after = response.headers.get("retry-after", "")
+            time.sleep(min(int(retry_after) if retry_after.isdigit() else 20, 60))
+            response = self._client.get(f"/jobs/{job_id}-{slug}")
         response.raise_for_status()
         raise_if_blocked(response)
         return response.text

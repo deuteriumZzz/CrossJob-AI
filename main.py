@@ -173,7 +173,11 @@ from src.job_sources.interview_calendar import (
     extract_interview_time,
 )
 from src.job_sources.interview_prep import generate_interview_prep
-from src.job_sources.job_fit import classify_fit, score_job_fit
+from src.job_sources.job_fit import (
+    SCORING_UNAVAILABLE_GAP,
+    classify_fit,
+    score_job_fit,
+)
 from src.job_sources.linkedin.answerer import EasyApplyAnswerer
 from src.job_sources.linkedin.auth import LinkedInSession
 from src.job_sources.linkedin.easy_apply import (
@@ -1542,6 +1546,8 @@ def _notify_hh_blocked(parameters: dict, error: Exception) -> None:
 
 
 HH_CAPTCHA_WAIT_SECONDS = 180
+# Сколько оценок подряд «ИИ недоступен», прежде чем бросить ход площадки.
+AI_DOWN_STREAK = 3
 HH_CAPTCHA_POLL_SECONDS = 2
 
 
@@ -3245,6 +3251,7 @@ def search_and_apply_wellfound(
     sent_count = 0
     job_max_applications = _job_max_applications(parameters, "wellfound")
     daily_limit = randomized_daily_limit(_daily_limit(parameters, "wellfound"))
+    scoring_down = 0
     for job in jobs:
         if stop_event is not None and stop_event.is_set():
             logger.info("Stop requested — прерываю перед следующей вакансией.")
@@ -3277,6 +3284,17 @@ def search_and_apply_wellfound(
                 profile.salary_expectations.salary_range_usd or ""
             ),
         )
+        # ИИ лёг — не перебирать сотню вакансий вслепую (каждая ждёт все
+        # фолбэки), а уступить ход остальным площадкам.
+        scoring_down = (
+            scoring_down + 1 if SCORING_UNAVAILABLE_GAP in fit.gaps else 0
+        )
+        if scoring_down >= AI_DOWN_STREAK:
+            logger.warning(
+                f"wellfound.com: ИИ недоступен {scoring_down} раза подряд — "
+                "прерываю ход, продолжу в следующем."
+            )
+            break
         tier = classify_fit(
             fit.score,
             _job_min_score(parameters),

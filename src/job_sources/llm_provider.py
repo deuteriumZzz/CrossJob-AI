@@ -1,3 +1,5 @@
+import contextvars
+import threading
 from typing import Any, Optional
 
 from langchain_core.language_models import BaseChatModel
@@ -32,6 +34,7 @@ _fallback_order: list = []
 # переключает на следующего провайдера только по исключению, а
 # бесконечное ожидание исключением не является.
 _LLM_REQUEST_TIMEOUT: float = 60
+LLM_CALL_DEADLINE_SECONDS: float = 180
 
 # ponytail: free/paid + актуальность ID — сверено веб-поиском 2026-08-21
 # (свежие модели/цены/депрекейшены меняются быстрее, чем стоит
@@ -635,6 +638,35 @@ class _ChatModelWithFallbacks(RunnableWithFallbacks):
     output переопределён здесь вручную в обход этой генерик-проверки:
     применяет её к основной модели и к каждому фолбэку, оборачивая
     результат в новый экземпляр того же класса."""
+
+    def invoke(self, input, config=None, **kwargs):
+        """Общий срок на весь вызов со всеми фолбэками. timeout=60 у
+        клиентов — на одно сетевое чтение, а не на запрос: 1.11 ход
+        Wellfound 25+ минут висел в одном вызове, пока Groq/OpenAI/Gemini
+        отказывали, и остальные площадки ждали.
+        ponytail: зависший поток не убить — он доживает в фоне (daemon),
+        вызывающий код получает TimeoutError и идёт дальше."""
+        box: dict = {}
+        context = contextvars.copy_context()
+
+        def run() -> None:
+            try:
+                box["value"] = context.run(super_invoke, input, config, **kwargs)
+            except BaseException as error:
+                box["error"] = error
+
+        super_invoke = super().invoke
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        thread.join(LLM_CALL_DEADLINE_SECONDS)
+        if thread.is_alive():
+            raise TimeoutError(
+                f"ИИ не ответил за {LLM_CALL_DEADLINE_SECONDS:.0f} с "
+                "(все провайдеры)"
+            )
+        if "error" in box:
+            raise box["error"]
+        return box["value"]
 
     def with_structured_output(self, *args, **kwargs):
         return _ChatModelWithFallbacks(
