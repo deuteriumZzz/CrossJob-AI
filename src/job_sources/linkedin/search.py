@@ -20,6 +20,16 @@ _GEO_IDS = {
     "european union": "91000000",
     "eu": "91000000",
     "worldwide": "92000000",
+    # Сверено вживую 1.11 (выдача из этих стран). Удалёнки там мало:
+    # на первой странице UK 4/12, Канада 2/17, Израиль и Сингапур 0.
+    "united kingdom": "101165590",
+    "uk": "101165590",
+    "canada": "101174742",
+    "australia": "101452733",
+    "israel": "101620260",
+    "united arab emirates": "104305776",
+    "uae": "104305776",
+    "singapore": "102454443",
 }
 SCROLL_PAUSE_SECONDS = 1.5
 SCROLL_STEPS = 8
@@ -81,7 +91,14 @@ def search_easy_apply_jobs(
     # Выдача — страницами по 25 (start=0, 25, 50…): раньше читалась только
     # первая, и бот видел 7–9 карточек вместо сотен. Идём, пока страница
     # приносит новые карточки.
-    for page in range(MAX_PAGES):
+    # Регионов много — страниц на каждый меньше (linkedin.pages_per_location),
+    # иначе ход LinkedIn тянется больше часа (~20 с на страницу).
+    max_pages = int(
+        ((preferences or {}).get("linkedin") or {}).get(
+            "pages_per_location", MAX_PAGES
+        )
+    )
+    for page in range(max_pages):
         page_params = dict(params)
         if page:
             page_params["start"] = page * PAGE_SIZE

@@ -98,3 +98,13 @@ def test_region_names_become_geo_ids(monkeypatch):
         search.search_easy_apply_jobs(driver, "python", location, {})
         query = parse_qs(urlparse(driver.urls[0]).query)
         assert query["geoId"] == [geo] and "location" not in query
+
+
+def test_pages_per_location_caps_paging(monkeypatch):
+    monkeypatch.setattr(search.time, "sleep", lambda s: None)
+    driver = _Driver({i: _card(i) for i in range(10)})
+    search.search_easy_apply_jobs(
+        driver, "python", "Canada", {"linkedin": {"pages_per_location": 3}}
+    )
+    assert len(driver.urls) == 3
+    assert parse_qs(urlparse(driver.urls[0]).query)["geoId"] == ["101174742"]
