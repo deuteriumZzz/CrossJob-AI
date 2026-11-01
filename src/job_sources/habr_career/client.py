@@ -52,6 +52,8 @@ class HabrCareerClient:
     на каждый вызов, есть жалоба пользователя на это же поведение).
     Без `with` — свой одноразовый driver на вызов apply()."""
 
+    letter_attached = False
+
     def __init__(
         self,
         profile_dir: Optional[Path] = None,
@@ -150,6 +152,7 @@ class HabrCareerClient:
         считаем, что сессия не аутентифицирована (сработала анонимная
         ветка с капчей или что-то ещё), и возвращаем False, ничего
         больше не нажимая."""
+        self.letter_attached = False
         driver, owns_it = self._acquire_driver()
         try:
             driver.get(vacancy_url)
@@ -183,6 +186,7 @@ class HabrCareerClient:
                 # повторно, а в журнале её нет).
                 try:
                     failed_at = self._attach_cover_letter(driver, cover_letter)
+                    self.letter_attached = not failed_at
                     if failed_at:
                         logger.warning(
                             f"Отклик на {vacancy_url} отправлен, письмо НЕ "
@@ -203,53 +207,62 @@ class HabrCareerClient:
     def _attach_cover_letter(self, driver, cover_letter: str) -> str:
         """Best-effort: отклик уже отправлен (applied=True в apply()
         выше) независимо от того, получится ли дописать письмо здесь.
-        Возвращает "" при успехе или стадию, на которой сорвалось, —
-        раньше сбой был молчаливым, и не было видно, уходят ли письма."""
-        view_buttons = [
-            el
-            for el in driver.find_elements(By.CSS_SELECTOR, "button, a")
-            if el.is_displayed()
-            and (el.text or "").strip().lower() == "посмотреть отклик"
-        ]
-        if not view_buttons:
-            return "кнопку «Посмотреть отклик»"
-        driver.execute_script("arguments[0].click();", view_buttons[0])
+        Возвращает "" только если текст письма потом виден на странице,
+        иначе — стадию, на которой сорвалось.
+
+        Сразу после отклика Хабр показывает блок «Ваш отклик» с полем
+        «Сопроводительное письмо» и кнопкой «Дополнить отклик» (1.11,
+        скриншот пользователя). Раньше бот искал только «Посмотреть
+        отклик» → «Редактировать», молча сдавался — и письма не уходили,
+        хотя в журнал записывались. Тот путь оставлен запасным."""
+        letter = html_letter_to_plain_text(cover_letter)
+        if not self._fill_and_submit(driver, letter, "дополнить отклик"):
+            view_buttons = self._visible(driver, "button, a", "посмотреть отклик")
+            if not view_buttons:
+                return "поле письма с «Дополнить отклик» или «Посмотреть отклик»"
+            driver.execute_script("arguments[0].click();", view_buttons[0])
+            time.sleep(1.5)
+            if not self._fill_and_submit(driver, letter, "дополнить отклик"):
+                edit_buttons = self._visible(
+                    driver, ".create-vacancy-response__button", "редактировать"
+                )
+                if not edit_buttons:
+                    return "кнопку «Редактировать»"
+                driver.execute_script("arguments[0].click();", edit_buttons[0])
+                time.sleep(1)
+                if not self._fill_and_submit(driver, letter, "сохранить"):
+                    return "поле письма с кнопкой «Сохранить»"
         time.sleep(1.5)
+        sample = " ".join(letter.split()[:8]).lower()
+        body = " ".join(
+            (driver.execute_script("return document.body.innerText") or "")
+            .lower()
+            .split()
+        )
+        if sample and sample not in body:
+            return "текст письма на странице после отправки"
+        return ""
 
-        edit_buttons = [
+    @staticmethod
+    def _visible(driver, selector: str, text: str) -> list:
+        return [
             el
-            for el in driver.find_elements(
-                By.CSS_SELECTOR, ".create-vacancy-response__button"
-            )
-            if el.is_displayed()
-            and "редактировать" in (el.text or "").strip().lower()
+            for el in driver.find_elements(By.CSS_SELECTOR, selector)
+            if el.is_displayed() and text in (el.text or "").strip().lower()
         ]
-        if not edit_buttons:
-            return "кнопку «Редактировать»"
-        driver.execute_script("arguments[0].click();", edit_buttons[0])
-        time.sleep(1)
 
+    def _fill_and_submit(self, driver, letter: str, button_text: str) -> bool:
+        """Видимое поле письма + кнопка с текстом button_text рядом.
+        Разметку поля в блоке «Ваш отклик» вживую не видели (он есть
+        только сразу после отклика) — берём любой видимый textarea."""
         textareas = [
             t
-            for t in driver.find_elements(
-                By.CSS_SELECTOR, "textarea[name='body']"
-            )
+            for t in driver.find_elements(By.CSS_SELECTOR, "textarea")
             if t.is_displayed()
         ]
-        if not textareas:
-            return "поле письма"
-        textareas[0].send_keys(html_letter_to_plain_text(cover_letter))
-
-        save_buttons = [
-            el
-            for el in driver.find_elements(
-                By.CSS_SELECTOR, "button[type='submit']"
-            )
-            if el.is_displayed()
-            and "сохранить" in (el.text or "").strip().lower()
-        ]
-        if not save_buttons:
-            return "кнопку «Сохранить»"
-        save_buttons[0].click()
-        time.sleep(1.5)
-        return ""
+        buttons = self._visible(driver, "button", button_text)
+        if not textareas or not buttons:
+            return False
+        textareas[0].send_keys(letter)
+        driver.execute_script("arguments[0].click();", buttons[0])
+        return True

@@ -3093,6 +3093,10 @@ def search_and_apply_habr_career(
             if auto_apply:
                 try:
                     applied = client.apply(job.link, cover_letter)
+                    # В журнал — только реально приложенное письмо: раньше
+                    # писалось сгенерированное, хотя до Хабра оно не дошло.
+                    if applied and not client.letter_attached:
+                        cover_letter = ""
                 except Exception as e:
                     logger.exception(
                         f"habr.career apply form crashed for {job.role} at "

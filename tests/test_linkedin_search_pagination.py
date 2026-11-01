@@ -62,3 +62,25 @@ def test_reads_new_search_results_cards(monkeypatch):
         )
     ]
     assert jobs[0].link == "https://www.linkedin.com/jobs/view/4484930138/"
+
+
+def test_remote_filter_is_applied_locally_not_via_f_wt(monkeypatch):
+    """f_WT=2 новая выдача подменяет и режет до ~31 — фильтруем сами."""
+    monkeypatch.setattr(search.time, "sleep", lambda s: None)
+
+    def card(i, where):
+        return (
+            f'<div componentkey="job-card-component-ref-{i}">'
+            f"<p>Python {i}</p><p>Acme</p><p>{where}</p></div>"
+        )
+
+    driver = _Driver(
+        {0: card(1, "Jakarta (Remote)") + card(2, "Jakarta (On-site)")
+         + card(3, "Worldwide")}
+    )
+    monkeypatch.setattr(
+        search, "linkedin_search_params", lambda p: {"f_AL": "true", "f_WT": "2"}
+    )
+    jobs = search.search_easy_apply_jobs(driver, "python", "", {})
+    assert [j.external_id for j in jobs] == ["1", "3"]
+    assert "f_WT" not in driver.urls[0]

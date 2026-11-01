@@ -10,6 +10,7 @@ from src.job_sources.filters import linkedin_search_params
 from src.job_sources.user_agents import random_user_agent
 
 SEARCH_URL = "https://www.linkedin.com/jobs/search/"
+_WORK_TYPE_LABELS = {"1": "on-site", "2": "remote", "3": "hybrid"}
 SCROLL_PAUSE_SECONDS = 1.5
 SCROLL_STEPS = 8
 PAGE_SIZE = 25
@@ -49,6 +50,14 @@ def search_easy_apply_jobs(
     params = {
         "keywords": keywords,
         **linkedin_search_params(preferences or {}),
+    }
+    # Новая выдача (/jobs/search-results/, 1.11) подменяет f_WT своим
+    # фильтром и оставляет ~31 вакансию вместо тысяч — формат работы
+    # проверяем сами по пометке в карточке «(Remote)/(Hybrid)/(On-site)».
+    work_types = {
+        _WORK_TYPE_LABELS[code]
+        for code in params.pop("f_WT", "").split(",")
+        if code in _WORK_TYPE_LABELS
     }
     if location:
         params["location"] = location
@@ -120,13 +129,19 @@ def search_easy_apply_jobs(
             fields = [p.get_text(" ", strip=True) for p in card.find_all("p")]
             if not fields or not fields[0]:
                 continue
+            location = fields[2] if len(fields) > 2 else ""
+            label = location.rsplit("(", 1)[-1].rstrip(")").lower()
+            if work_types and "(" in location and label not in work_types:
+                seen_ids.add(job_id)
+                added += 1  # карточка на странице есть — выдача не кончилась
+                continue
             seen_ids.add(job_id)
             added += 1
             jobs.append(
                 Job(
                     role=fields[0],
                     company=fields[1] if len(fields) > 1 else "",
-                    location=fields[2] if len(fields) > 2 else "",
+                    location=location,
                     link=f"https://www.linkedin.com/jobs/view/{job_id}/",
                     description="",
                     source="linkedin",
