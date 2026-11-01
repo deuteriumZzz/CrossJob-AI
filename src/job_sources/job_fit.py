@@ -50,6 +50,14 @@ FitTier = Literal["good", "weak", "skip"]
 # записью не «закрывается» — журнал считает её готовой к повторной оценке.
 SCORING_UNAVAILABLE_GAP = "оценка недоступна (сбой ИИ)"
 SCORE_RETRY_PAUSES = (3.0, 10.0)
+# Предохранитель: после оценки, на которую ИИ не ответил ни разу, следующие
+# AI_DOWN_COOLDOWN_SECONDS оценки сразу возвращают «недоступна». Иначе каждая
+# вакансия ждала 3 попытки × до 180 с: Himalayas с 244 вакансиями занимал
+# весь демон 3+ часа (2026-11-01). Одна защита для всех площадок.
+# ponytail: один таймер на процесс без учёта провайдера — разделить, если
+# оценка начнёт ходить к разным ИИ.
+AI_DOWN_COOLDOWN_SECONDS = 600
+_ai_down_until = 0.0
 
 
 class FitAssessment(BaseModel):
@@ -132,6 +140,9 @@ def score_job_fit(
     if forced:
         # «Откликнуться всё равно»: вы уже решили — не тратим вызов ИИ.
         return FitAssessment(score=10, gaps=[])
+    global _ai_down_until
+    if time.monotonic() < _ai_down_until:
+        return FitAssessment(score=1, gaps=[SCORING_UNAVAILABLE_GAP])
     resume_text = extract_text(str(resume_pdf_path))
     llm = cast(
         BaseChatModel,
@@ -164,4 +175,9 @@ def score_job_fit(
     # Fail closed: раньше при сбое возвращалось 10/10 («fail open»), и при
     # лимите ИИ отклики уходили на любые вакансии (живьём 2026-10-08:
     # «Программист 1С» и «Продуктовый аналитик» получили 10/10).
+    _ai_down_until = time.monotonic() + AI_DOWN_COOLDOWN_SECONDS
+    logger.warning(
+        f"ИИ не отвечает — следующие {AI_DOWN_COOLDOWN_SECONDS // 60} мин "
+        "вакансии не оцениваются (переоценятся в следующем ходе)."
+    )
     return FitAssessment(score=1, gaps=[SCORING_UNAVAILABLE_GAP])

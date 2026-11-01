@@ -23,8 +23,31 @@ def _score_with(chain_invoke):
         "src.job_sources.job_fit.get_chat_llm"
     ), patch.object(job_fit, "_SCORE_PROMPT", prompt), patch.object(
         job_fit, "SCORE_RETRY_PAUSES", (0.0, 0.0)
-    ):
+    ), patch.object(job_fit, "_ai_down_until", 0.0):
         return score_job_fit(Path("r.pdf"), Job(role="Dev"), "k"), chain
+
+
+def test_ai_down_skips_next_vacancies_without_calling_ai():
+    """Himalayas, 2026-11-01: 244 вакансии × 3 попытки по 180 с занимали
+    демон 3+ часа. После полного отказа следующие оценки — сразу."""
+    chain = MagicMock()
+    chain.invoke.side_effect = RuntimeError("ИИ не ответил за 180 с")
+    prompt = MagicMock()
+    prompt.__or__.return_value = chain
+    with patch.object(job_fit, "extract_text", return_value="resume"), patch(
+        "src.job_sources.job_fit.get_chat_llm"
+    ), patch.object(job_fit, "_SCORE_PROMPT", prompt), patch.object(
+        job_fit, "SCORE_RETRY_PAUSES", (0.0, 0.0)
+    ), patch.object(job_fit, "_ai_down_until", 0.0):
+        score_job_fit(Path("r.pdf"), Job(role="Dev"), "k")
+        assert chain.invoke.call_count == 3
+        fit = score_job_fit(Path("r.pdf"), Job(role="Dev 2"), "k")
+        assert chain.invoke.call_count == 3  # ИИ больше не дёргали
+        assert fit.gaps == [SCORING_UNAVAILABLE_GAP]
+        job_fit._ai_down_until = 0.0  # кулдаун прошёл
+        chain.invoke.side_effect = None
+        chain.invoke.return_value = FitAssessment(score=7, gaps=[])
+        assert score_job_fit(Path("r.pdf"), Job(role="Dev 3"), "k").score == 7
 
 
 def test_failure_after_retries_is_score_one_with_marker():

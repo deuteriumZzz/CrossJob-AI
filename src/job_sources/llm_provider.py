@@ -384,6 +384,11 @@ def _build_llm(
                 temperature=temperature,
                 max_retries=0,
                 timeout=_LLM_REQUEST_TIMEOUT,
+                # gRPC-транспорт по умолчанию вешается намертво (>60 с даже
+                # на «ответь одним словом», timeout его не прерывает) —
+                # 2026-11-01 ели весь общий дедлайн вызова; REST отвечает
+                # сразу, на тех же моделях и ключе.
+                transport="rest",
             ),
             resolved_model,
         )
