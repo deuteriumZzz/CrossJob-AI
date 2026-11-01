@@ -11,6 +11,16 @@ from src.job_sources.user_agents import random_user_agent
 
 SEARCH_URL = "https://www.linkedin.com/jobs/search/"
 _WORK_TYPE_LABELS = {"1": "on-site", "2": "remote", "3": "hybrid"}
+# Новая выдача (1.11) молча выбрасывает текстовый location=… и ищет у
+# локации профиля (Индонезия) — регион понимает только как geoId.
+# Сверено вживую: США → New York/Denver…, ЕС → Польша/Литва/Румыния.
+_GEO_IDS = {
+    "united states": "103644278",
+    "usa": "103644278",
+    "european union": "91000000",
+    "eu": "91000000",
+    "worldwide": "92000000",
+}
 SCROLL_PAUSE_SECONDS = 1.5
 SCROLL_STEPS = 8
 PAGE_SIZE = 25
@@ -59,10 +69,13 @@ def search_easy_apply_jobs(
         for code in params.pop("f_WT", "").split(",")
         if code in _WORK_TYPE_LABELS
     }
-    if location:
-        params["location"] = location
-    else:
-        params["geoId"] = "92000000"
+    geo_id = _GEO_IDS.get(location.strip().lower(), "92000000")
+    if location and location.strip().lower() not in _GEO_IDS:
+        geo_id = location if location.isdigit() else ""
+        if not geo_id:
+            params["location"] = location
+    if geo_id:
+        params["geoId"] = geo_id
     jobs: list[Job] = []
     seen_ids: set = set()
     # Выдача — страницами по 25 (start=0, 25, 50…): раньше читалась только

@@ -84,3 +84,17 @@ def test_remote_filter_is_applied_locally_not_via_f_wt(monkeypatch):
     jobs = search.search_easy_apply_jobs(driver, "python", "", {})
     assert [j.external_id for j in jobs] == ["1", "3"]
     assert "f_WT" not in driver.urls[0]
+
+
+def test_region_names_become_geo_ids(monkeypatch):
+    """Новая выдача игнорирует location=… — регион только через geoId."""
+    monkeypatch.setattr(search.time, "sleep", lambda s: None)
+    for location, geo in (
+        ("United States", "103644278"),
+        ("European Union", "91000000"),
+        ("", "92000000"),
+    ):
+        driver = _Driver({})
+        search.search_easy_apply_jobs(driver, "python", location, {})
+        query = parse_qs(urlparse(driver.urls[0]).query)
+        assert query["geoId"] == [geo] and "location" not in query
