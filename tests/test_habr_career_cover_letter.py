@@ -125,3 +125,15 @@ def test_apply_still_reports_applied_when_cover_letter_step_crashes():
     ):
         client = HabrCareerClient("profile")
         assert client.apply("https://career.habr.com/vacancies/1", "x") is True
+
+
+def test_attach_reports_the_missing_stage():
+    driver, _, _ = _make_driver(with_cover_letter_form=False)
+    client = HabrCareerClient("profile")
+    with patch("src.job_sources.habr_career.client.time.sleep"):
+        assert client._attach_cover_letter(driver, "x") == (
+            "кнопку «Редактировать»"
+        )
+    driver, _, _ = _make_driver(with_cover_letter_form=True)
+    with patch("src.job_sources.habr_career.client.time.sleep"):
+        assert client._attach_cover_letter(driver, "x") == ""

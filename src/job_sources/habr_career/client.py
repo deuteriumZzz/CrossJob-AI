@@ -182,7 +182,14 @@ class HabrCareerClient:
                 # терять отметку «откликнулся» (иначе вакансию возьмут
                 # повторно, а в журнале её нет).
                 try:
-                    self._attach_cover_letter(driver, cover_letter)
+                    failed_at = self._attach_cover_letter(driver, cover_letter)
+                    if failed_at:
+                        logger.warning(
+                            f"Отклик на {vacancy_url} отправлен, письмо НЕ "
+                            f"приложено: не нашли {failed_at}."
+                        )
+                    else:
+                        logger.info(f"Письмо приложено к отклику {vacancy_url}.")
                 except Exception as e:
                     logger.warning(
                         f"Отклик на {vacancy_url} отправлен, письмо не "
@@ -193,11 +200,11 @@ class HabrCareerClient:
             if owns_it:
                 driver.quit()
 
-    def _attach_cover_letter(self, driver, cover_letter: str) -> None:
+    def _attach_cover_letter(self, driver, cover_letter: str) -> str:
         """Best-effort: отклик уже отправлен (applied=True в apply()
-        выше) независимо от того, получится ли дописать письмо здесь
-        — поэтому любая непройденная стадия просто return, без
-        исключения наружу."""
+        выше) независимо от того, получится ли дописать письмо здесь.
+        Возвращает "" при успехе или стадию, на которой сорвалось, —
+        раньше сбой был молчаливым, и не было видно, уходят ли письма."""
         view_buttons = [
             el
             for el in driver.find_elements(By.CSS_SELECTOR, "button, a")
@@ -205,7 +212,7 @@ class HabrCareerClient:
             and (el.text or "").strip().lower() == "посмотреть отклик"
         ]
         if not view_buttons:
-            return
+            return "кнопку «Посмотреть отклик»"
         driver.execute_script("arguments[0].click();", view_buttons[0])
         time.sleep(1.5)
 
@@ -218,7 +225,7 @@ class HabrCareerClient:
             and "редактировать" in (el.text or "").strip().lower()
         ]
         if not edit_buttons:
-            return
+            return "кнопку «Редактировать»"
         driver.execute_script("arguments[0].click();", edit_buttons[0])
         time.sleep(1)
 
@@ -230,7 +237,7 @@ class HabrCareerClient:
             if t.is_displayed()
         ]
         if not textareas:
-            return
+            return "поле письма"
         textareas[0].send_keys(html_letter_to_plain_text(cover_letter))
 
         save_buttons = [
@@ -241,6 +248,8 @@ class HabrCareerClient:
             if el.is_displayed()
             and "сохранить" in (el.text or "").strip().lower()
         ]
-        if save_buttons:
-            save_buttons[0].click()
-            time.sleep(1.5)
+        if not save_buttons:
+            return "кнопку «Сохранить»"
+        save_buttons[0].click()
+        time.sleep(1.5)
+        return ""
