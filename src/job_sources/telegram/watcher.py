@@ -172,7 +172,9 @@ _VACANCY_CLASSIFIER_PROMPT = (
     "Дополнительный плюс (не обязательное требование): {bonus}\n"
     "FORMAT: REMOTE, HYBRID, OFFICE или UNKNOWN. Определи формат по "
     "самому тексту: remote/удалённо — REMOTE, гибрид — HYBRID, "
-    "офис/на месте — OFFICE. Не угадывай: если формат не указан, UNKNOWN.\n"
+    "офис/на месте — OFFICE. Если на выбор несколько форматов и среди них "
+    "есть удалёнка («удалённо или гибрид») — REMOTE. "
+    "Не угадывай: если формат не указан, UNKNOWN.\n"
     "Разрешённые форматы пользователя: {formats}\n"
     "Если целевые должности не заданы, ответь ROLE: ДА.\n\nПост:\n{text}"
 )
@@ -269,7 +271,12 @@ def _llm_check_post(
         try:
             llm = get_chat_llm(llm_api_key, temperature=0)
             answer = llm.invoke(prompt)
-            content = str(getattr(answer, "content", answer)).casefold()
+            # «**VACANCY:** ДА» — разметка ломала разбор ниже.
+            content = (
+                str(getattr(answer, "content", answer))
+                .casefold()
+                .replace("*", "")
+            )
             if legacy_call:
                 is_vacancy = (
                     not content.replace("*", "").strip().startswith("нет")
@@ -285,8 +292,13 @@ def _llm_check_post(
             )
             if not vacancy or not role or not work_format:
                 logger.warning(
-                    "Telegram-парсер: классификатор вернул неполный ответ"
+                    "Telegram-парсер: классификатор вернул неполный ответ "
+                    f"(попытка {attempt + 1}/{attempts}): {content[:200]!r}"
                 )
+                # При выбранном формате None = пост выброшен — переспросить
+                # дешевле, чем потерять вакансию.
+                if attempt < attempts - 1:
+                    continue
                 return None
             is_vacancy = vacancy.group(1) == "да"
             role_matches = role.group(1) == "да"
@@ -355,6 +367,7 @@ class TelegramWatcher(threading.Thread):
         self._channel_names_by_chat_id: dict[int, str] = {}
         self._last_deleted_reconcile_at = 0.0
         self._reconcile_in_progress: set[str] = set()
+        self._polls_in_progress: set[str] = set()
         # Закрытый/забанивший канал (@jobstash) иначе давал WARNING на
         # каждой переподписке, ~400 раз за двое суток; до перезапуска
         # больше не сверяем.
@@ -601,6 +614,15 @@ class TelegramWatcher(threading.Thread):
                     asyncio.ensure_future(
                         self._backfill_channel(entity, channel)
                     )
+                elif (
+                    channel in backfilled
+                    and channel not in self._polls_in_progress
+                    and channel not in self._unreadable_channels
+                ):
+                    self._polls_in_progress.add(channel)
+                    asyncio.ensure_future(
+                        self._poll_missed_posts(entity, channel)
+                    )
             except Exception as e:
                 logger.warning(
                     f"Telegram-шлюз: канал @{channel} недоступен: {e}"
@@ -645,6 +667,45 @@ class TelegramWatcher(threading.Thread):
             f"Telegram-шлюз: досмотрел @{channel} за {days} дн. "
             f"({found} постов проверено)"
         )
+
+    async def _poll_missed_posts(self, entity, channel: str) -> None:
+        """Telegram не гарантирует NewMessage по каждому посту: при
+        десятках каналов и переподключениях живые обновления из спокойных
+        каналов теряются (вживую: @p_rabota — 1 из ~15 вакансий за две
+        недели, при этом 53 поста из сверхактивного @jobstash). Поэтому
+        при каждой переподписке (~5 мин) дочитываем посты новее
+        последнего обработанного id — заодно и вышедшие, пока приложение
+        было выключено."""
+        try:
+            last_id = _load_last_post_ids(self.output_folder).get(channel)
+            if last_id is None:
+                # Первый раз: историю уже досмотрел _backfill_channel,
+                # просто запоминаем, откуда считать дальше.
+                latest = await self.client.get_messages(entity, limit=1)
+                if latest:
+                    _remember_last_post_id(
+                        self.output_folder, channel, latest[0].id
+                    )
+                return
+            missed = [
+                m
+                async for m in self.client.iter_messages(
+                    entity, min_id=last_id, limit=MISSED_POSTS_LIMIT
+                )
+            ]
+            for message in reversed(missed):
+                await self._handle_post(channel, message)
+            if missed:
+                logger.info(
+                    f"Telegram-шлюз: @{channel} — дочитал {len(missed)} "
+                    "пропущенных постов"
+                )
+        except Exception as e:
+            logger.warning(
+                f"Telegram-шлюз: не удалось дочитать @{channel}: {e}"
+            )
+        finally:
+            self._polls_in_progress.discard(channel)
 
     async def _watch_settings(self) -> None:
         """Каналы, ключевые и стоп-слова меняются в дашборде на ходу —
@@ -790,6 +851,9 @@ class TelegramWatcher(threading.Thread):
         """Общая логика для живого поста (_on_channel_post) и досмотра
         истории нового канала (_backfill_channel) — фильтр, дедуп,
         автоотправка/доставка на модерацию одинаковы в обоих случаях."""
+        # Любой путь (живой, досмотр, дочитывание) сдвигает отметку — иначе
+        # после перезапуска _poll_missed_posts повторил бы уже доставленное.
+        _remember_last_post_id(self.output_folder, channel, message.id)
         text = (message.message or "").strip()
         if not text:
             return
@@ -1234,6 +1298,31 @@ def start_telegram_watcher(
 # ~25 секунд длинным поллингом, ничего нового заводить не нужно).
 PENDING_SENDS_FILE = ".pending_telegram_sends.json"
 BACKFILLED_CHANNELS_FILE = ".telegram_backfilled_channels.json"
+
+
+LAST_POST_IDS_FILE = ".telegram_last_post_ids.json"
+# ponytail: за один обход — не больше 50 постов на канал; при долгом
+# простое старшие из пропущенных не дочитаются, поднять при надобности.
+MISSED_POSTS_LIMIT = 50
+
+
+def _load_last_post_ids(output_folder: Path) -> dict[str, int]:
+    return _load_json_file(output_folder / LAST_POST_IDS_FILE, {})
+
+
+def _remember_last_post_id(
+    output_folder: Path, channel: str, message_id: int
+) -> None:
+    import json
+
+    with _BACKFILLED_CHANNELS_LOCK:
+        ids = _load_last_post_ids(output_folder)
+        if message_id <= ids.get(channel, 0):
+            return
+        ids[channel] = message_id
+        (output_folder / LAST_POST_IDS_FILE).write_text(
+            json.dumps(ids, ensure_ascii=False), encoding="utf-8"
+        )
 
 
 def _load_backfilled_channels(output_folder: Path) -> set[str]:

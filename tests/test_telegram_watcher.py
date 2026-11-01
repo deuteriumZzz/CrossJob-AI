@@ -1642,3 +1642,50 @@ def test_call_runs_sync_style_client_method_inside_gateway_loop():
         assert name == "chan" and used_loop is loop
     finally:
         loop.call_soon_threadsafe(loop.stop)
+
+
+def test_poll_missed_posts_picks_up_posts_live_updates_lost():
+    """Telegram терял NewMessage из спокойных каналов (@p_rabota):
+    обход дочитывает посты новее последнего обработанного id, по порядку,
+    и не повторяет уже обработанные."""
+
+    class _HistoryClient(_FakeClient):
+        async def get_messages(self, entity, limit=1):
+            return sorted(self._history, key=lambda m: -m.id)[:limit]
+
+        async def iter_messages(self, entity, min_id=0, limit=300):
+            for message in sorted(self._history, key=lambda m: -m.id):
+                if message.id > min_id:
+                    yield message
+
+    with tempfile.TemporaryDirectory() as tmp:
+        watcher = w.TelegramWatcher(
+            1,
+            "h",
+            Path(tmp) / "s",
+            ["p_rabota"],
+            ["python"],
+            [],
+            "me",
+            {
+                "outputFileDirectory": Path(tmp),
+                "dataFolder": Path(tmp),
+                "telegram": {"llm_vacancy_filter": False},
+            },
+        )
+        history = [SimpleNamespace(message="старый пост", id=1853)]
+        watcher.client = _HistoryClient(history=history)
+        # Первый обход только ставит отметку — историю досматривает backfill.
+        asyncio.run(watcher._poll_missed_posts(object(), "p_rabota"))
+        assert w._load_last_post_ids(Path(tmp)) == {"p_rabota": 1853}
+
+        history += [
+            SimpleNamespace(message="KVINT: Python Backend Developer", id=1854),
+            SimpleNamespace(message="QSOFT: Python-разработчик", id=1856),
+        ]
+        asyncio.run(watcher._poll_missed_posts(object(), "p_rabota"))
+        assert watcher.client.forwarded == [("me", 1854), ("me", 1856)]
+        assert w._load_last_post_ids(Path(tmp)) == {"p_rabota": 1856}
+
+        asyncio.run(watcher._poll_missed_posts(object(), "p_rabota"))
+        assert watcher.client.forwarded == [("me", 1854), ("me", 1856)]
