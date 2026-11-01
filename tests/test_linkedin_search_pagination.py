@@ -40,3 +40,25 @@ def test_walks_pages_until_one_brings_nothing_new(monkeypatch):
     assert [j.external_id for j in jobs] == ["1", "2", "3", "4", "5"]
     assert len(driver.urls) == 3
     assert "start=25" in driver.urls[1] and "start=50" in driver.urls[2]
+
+
+def test_reads_new_search_results_cards(monkeypatch):
+    """С 22.10 залогиненная выдача — /jobs/search-results/ без data-job-id."""
+    monkeypatch.setattr(search.time, "sleep", lambda s: None)
+    card = (
+        '<div role="button" componentkey="job-card-component-ref-4484930138">'
+        '<div componentkey="job-card-component-ref-4484930138">'
+        '<p><span aria-hidden="true">Senior Backend Engineer</span></p>'
+        "<p>Pashouses</p><p>Jakarta, Indonesia (Remote)</p></div></div>"
+    )
+    jobs = search.search_easy_apply_jobs(_Driver({0: card}), "python", "", {})
+
+    assert [(j.external_id, j.role, j.company, j.location) for j in jobs] == [
+        (
+            "4484930138",
+            "Senior Backend Engineer",
+            "Pashouses",
+            "Jakarta, Indonesia (Remote)",
+        )
+    ]
+    assert jobs[0].link == "https://www.linkedin.com/jobs/view/4484930138/"

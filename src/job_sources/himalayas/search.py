@@ -1,14 +1,24 @@
 import re
 import time
+from urllib.parse import urlparse
 
+import httpx
 from bs4 import BeautifulSoup
 
 from src.job import Job
-from src.job_sources.block_detection import raise_if_blocked_after_wait
-from src.job_sources.himalayas.mapping import parse_search_html
+from src.job_sources.block_detection import (
+    raise_if_blocked,
+    raise_if_blocked_after_wait,
+)
+from src.job_sources.himalayas.mapping import _JOB_LINK_RE, parse_search_html
+from src.job_sources.html_text import strip_html
 from src.utils.chrome_utils import get_with_retry
 
 SEARCH_URL = "https://himalayas.app/jobs"
+# Официальный публичный JSON-поиск (20 на страницу, ?page=N) — без
+# Cloudflare и сразу с описанием. Страница /jobs/{slug} за Cloudflare
+# отдавала ~1 вакансию за ход, API — тысячи (1.11).
+API_SEARCH_URL = "https://himalayas.app/jobs/api/search"
 PAGE_LOAD_WAIT_SECONDS = 4
 SCROLL_PAUSE_SECONDS = 1.5
 SCROLL_STEPS = 5
@@ -56,3 +66,33 @@ def load_job_description(driver, job: Job) -> Job:
     if main:
         job.description = main.get_text("\n", strip=True)
     return job
+
+
+def search_jobs_api(position: str, page: int = 1) -> list[Job]:
+    response = httpx.get(
+        API_SEARCH_URL,
+        params={"q": position, "page": page},
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=30,
+    )
+    raise_if_blocked(response)
+    response.raise_for_status()
+    jobs: list[Job] = []
+    for item in response.json().get("jobs") or []:
+        match = _JOB_LINK_RE.match(urlparse(item.get("guid") or "").path)
+        if not match:
+            continue
+        company_slug, job_slug = match.groups()
+        jobs.append(
+            Job(
+                role=item.get("title") or "",
+                company=item.get("companyName") or "",
+                location=", ".join(item.get("locationRestrictions") or []),
+                link=item["guid"],
+                description=strip_html(item.get("description") or ""),
+                source="himalayas",
+                external_id=f"{company_slug}/{job_slug}",
+                apply_method="himalayas_manual",
+            )
+        )
+    return jobs

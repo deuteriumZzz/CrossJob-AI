@@ -61,6 +61,18 @@ def test_long_vacancy_mentioning_captcha_is_not_a_block():
         raise_if_blocked(vacancy + " Подтвердите, что вы не робот")
 
 
+def test_antibot_vacancy_naming_smartcaptcha_is_not_a_block():
+    """31.10: vacancy/138824612 («нейтрализация SmartCaptcha, Cloudflare
+    Bot Management») сутки стопорила весь HH."""
+    vacancy = "Python-разработчик. " + "Обязанности и требования. " * 300
+    vacancy += (
+        "Исследование триггеров систем защиты (SmartCaptcha, Cloudflare "
+        "Bot Management, Akamai), unusual traffic, подозрительная "
+        "активность, Ray ID: в логах."
+    )
+    raise_if_blocked(vacancy)
+
+
 def test_short_vacancy_can_ignore_weak_keyword_with_page_evidence():
     vacancy = "Python-разработчик: опыт обхода captcha-сервисов"
     raise_if_blocked(vacancy, ignore_weak_keywords=True)

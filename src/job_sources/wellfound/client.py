@@ -49,18 +49,21 @@ class WellfoundClient:
         raise_if_blocked(response)
         if response.status_code != 200:
             return None
-        if urlparse(str(response.url)).path.rstrip("/") != path.rstrip("/"):
+        if urlparse(str(response.url)).path.rstrip("/") != (
+            urlparse(path).path.rstrip("/")
+        ):
             return None
         return response.text
 
-    def search_role_html(self, position: str) -> Optional[str]:
+    def search_role_html(self, position: str, page: int = 1) -> Optional[str]:
         slug = slugify(position)
         if not slug:
             return None
-        html = self._get_if_matches(f"/role/r/{slug}")
+        query = f"?page={page}" if page > 1 else ""
+        html = self._get_if_matches(f"/role/r/{slug}{query}")
         if html is not None:
             return html
-        return self._get_if_matches(f"/role/{slug}")
+        return self._get_if_matches(f"/role/{slug}{query}")
 
     def get_vacancy_html(self, job_id: str, slug: str) -> str:
         response = self._client.get(f"/jobs/{job_id}-{slug}")

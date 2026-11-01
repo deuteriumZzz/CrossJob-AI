@@ -151,10 +151,10 @@ class HeadHunterBrowserClient:
                 and title[0].is_displayed()
                 and description[0].is_displayed()
             )
-        if visible_vacancy:
-            raise_if_page_blocked(driver, ignore_weak_keywords=True)
-        else:
-            raise_if_page_blocked(driver)
+        # На отрисованной вакансии блокируют только точные фразы окна
+        # проверки и редирект: описание бывает про обход капчи
+        # (vacancy/138824612 «SmartCaptcha» — сутки HH стоял).
+        raise_if_page_blocked(driver, ignore_weak_keywords=visible_vacancy)
         self._raise_if_captcha_redirect(driver)
 
     def captcha_cleared(self) -> bool:
@@ -219,7 +219,16 @@ class HeadHunterBrowserClient:
                 params += f"&search_period={period_days}"
             driver.get(f"{HH_BASE}/search/vacancy?{params}")
             time.sleep(PAGE_LOAD_WAIT_SECONDS)
-            raise_if_page_blocked(driver)
+            # Карточки на месте — выдача, сниппеты бывают про captcha:
+            # блокируют только точные фразы и редирект.
+            raise_if_page_blocked(
+                driver,
+                ignore_weak_keywords=bool(
+                    driver.find_elements(
+                        By.CSS_SELECTOR, '[data-qa="vacancy-serp__vacancy"]'
+                    )
+                ),
+            )
             self._raise_if_captcha_redirect(driver)
             return driver.page_source
         finally:

@@ -15,7 +15,8 @@ SCROLL_STEPS = 8
 PAGE_SIZE = 25
 MAX_PAGES = 20  # до 500 карточек на запрос
 _SCROLL_JS = """
-let el = document.querySelector('[data-job-id]');
+let el = document.querySelector(
+  '[data-job-id], [componentkey^="job-card-component-ref-"]');
 while (el && el !== document.body) {
   const o = getComputedStyle(el).overflowY;
   if (/(auto|scroll)/.test(o) && el.scrollHeight > el.clientHeight) {
@@ -101,6 +102,31 @@ def search_easy_apply_jobs(
                         company_el.get_text(strip=True) if company_el else ""
                     ),
                     location="",
+                    link=f"https://www.linkedin.com/jobs/view/{job_id}/",
+                    description="",
+                    source="linkedin",
+                    external_id=job_id,
+                    apply_method="linkedin_easy_apply",
+                )
+            )
+        # С 22.10 залогиненный LinkedIn редиректит на /jobs/search-results/
+        # с новой разметкой: data-job-id нет, классы обфусцированы — id
+        # только в componentkey, поля — первые <p> карточки (название,
+        # компания, место; сверено вживую 1.11). Без этого — 0 карточек.
+        for card in soup.select('[componentkey^="job-card-component-ref-"]'):
+            job_id = card["componentkey"].rsplit("-", 1)[-1]
+            if not job_id.isdigit() or job_id in seen_ids:
+                continue
+            fields = [p.get_text(" ", strip=True) for p in card.find_all("p")]
+            if not fields or not fields[0]:
+                continue
+            seen_ids.add(job_id)
+            added += 1
+            jobs.append(
+                Job(
+                    role=fields[0],
+                    company=fields[1] if len(fields) > 1 else "",
+                    location=fields[2] if len(fields) > 2 else "",
                     link=f"https://www.linkedin.com/jobs/view/{job_id}/",
                     description="",
                     source="linkedin",

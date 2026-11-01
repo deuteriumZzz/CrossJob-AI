@@ -355,6 +355,10 @@ class TelegramWatcher(threading.Thread):
         self._channel_names_by_chat_id: dict[int, str] = {}
         self._last_deleted_reconcile_at = 0.0
         self._reconcile_in_progress: set[str] = set()
+        # Закрытый/забанивший канал (@jobstash) иначе давал WARNING на
+        # каждой переподписке, ~400 раз за двое суток; до перезапуска
+        # больше не сверяем.
+        self._unreadable_channels: set[str] = set()
 
     # --- запуск/остановка -------------------------------------------
 
@@ -583,6 +587,7 @@ class TelegramWatcher(threading.Thread):
                 if (
                     reconcile_deleted
                     and channel not in self._reconcile_in_progress
+                    and channel not in self._unreadable_channels
                 ):
                     self._reconcile_in_progress.add(channel)
                     asyncio.ensure_future(
@@ -756,9 +761,10 @@ class TelegramWatcher(threading.Thread):
                         entity, ids=batch
                     )
                 except Exception as exc:
+                    self._unreadable_channels.add(channel)
                     logger.warning(
                         f"Не удалось сверить посты @{channel} с "
-                        f"Telegram: {exc}"
+                        f"Telegram (больше не пробую до перезапуска): {exc}"
                     )
                     return
                 if len(messages) != len(batch):
