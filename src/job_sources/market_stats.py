@@ -36,6 +36,35 @@ _GLOBAL_RE = re.compile(
     re.IGNORECASE,
 )
 
+_COUNTRIES = (
+    "india|pakistan|bangladesh|sri lanka|nepal|philippines|indonesia|"
+    "vietnam|thailand|malaysia|singapore|china|japan|south korea|australia|"
+    "new zealand|south africa|nigeria|kenya|egypt|morocco|ghana|brazil|"
+    "argentina|mexico|colombia|chile|peru|canada|"
+    "united kingdom|uk|ireland|germany|france|spain|italy|portugal|"
+    "netherlands|belgium|poland|romania|bulgaria|serbia|croatia|ukraine|"
+    "turkey|israel|uae|united arab emirates|saudi arabia|latam|apac|asia|"
+    "africa|north america|south america|middle east"
+)
+_COUNTRY_ONLY_RE = re.compile(
+    rf"\b({_COUNTRIES})[- ]?(only|based|residents?|nationals?)\b",
+    re.IGNORECASE,
+)
+_WORLDWIDE_RE = re.compile(r"worldwide|anywhere|global", re.IGNORECASE)
+
+
+def country_restriction(job_location: str, text: str, source: str = ""):
+    """Страна/регион, к которым привязана вакансия, или None. Живьём
+    2026-11-04: «India only» на Himalayas — отклик заведомо мимо, принять
+    человека из другой страны не могут. Himalayas отдаёт список стран
+    структурно (location), для остальных — фраза «X only/based» в тексте."""
+    loc = (job_location or "").strip()
+    if source == "himalayas" and loc and not _WORLDWIDE_RE.search(loc):
+        return loc
+    match = _COUNTRY_ONLY_RE.search(f"{loc}\n{text}")
+    return match.group(0) if match else None
+
+
 REGION_LABELS = {
     "us_only": "🇺🇸 только США",
     "europe_only": "🇪🇺 только Европа",

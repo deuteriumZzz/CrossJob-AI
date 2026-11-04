@@ -19,7 +19,16 @@ from src.utils.chrome_utils import init_browser
 WF_BASE = "https://wellfound.com"
 PAGE_LOAD_WAIT_SECONDS = 3
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
-_SUBMIT_TEXT_MARKERS = ("submit", "send application", "apply")
+# Порядок важен: ищем по приоритету. Голое "apply" убрано — на странице
+# вакансии есть своя кнопка "Apply", она раньше "Submit application" в DOM,
+# и бот кликал её, а потом писал "откликнулся" (2026-11-04).
+_SUBMIT_TEXT_MARKERS = ("submit application", "send application", "submit")
+CONFIRM_WAIT_SECONDS = 12
+_CONFIRM_RE = re.compile(
+    r"application (has been )?(sent|submitted)|you('ve| have)? applied|"
+    r"thanks for applying|\bapplied\b",
+    re.IGNORECASE,
+)
 
 
 def slugify(position: str) -> str:
@@ -82,6 +91,7 @@ class WellfoundClient:
         vacancy_url: str,
         profile_dir: Path,
         answer_fn: Optional[Callable[[str], str]] = None,
+        resume_path: Optional[Path] = None,
     ) -> bool:
         """Best-effort, НЕ проверено на живом залогиненном аккаунте.
         Подтверждено вживую (2026-09-02, анонимно, без входа): кнопка
@@ -109,6 +119,17 @@ class WellfoundClient:
 
             if driver.find_elements(By.CSS_SELECTOR, 'input[type="password"]'):
                 return False
+            # Модалка рисуется с задержкой (живьём 2026-11-04 бывало >5 с) —
+            # ждём кнопку отправки, а не фиксированные 3 с.
+            if not _wait_for_submit(driver):
+                return False
+
+            if resume_path is not None:
+                for file_input in driver.find_elements(
+                    By.CSS_SELECTOR, 'input[type="file"]'
+                ):
+                    if not file_input.get_attribute("value"):
+                        file_input.send_keys(str(Path(resume_path).resolve()))
 
             for field in driver.find_elements(
                 By.CSS_SELECTOR,
@@ -123,20 +144,91 @@ class WellfoundClient:
                     continue
                 _select_first_reasonable_option(select_el)
 
-            for radio in driver.find_elements(
-                By.CSS_SELECTOR, 'input[type="radio"]'
-            ):
-                if radio.is_displayed() and not radio.is_selected():
-                    driver.execute_script("arguments[0].click();", radio)
+            _answer_radio_groups(driver, answer_fn)
 
             submit = _find_button_by_visible_text(driver, _SUBMIT_TEXT_MARKERS)
             if submit is None:
                 return False
             driver.execute_script("arguments[0].click();", submit)
-            time.sleep(1.5)
-            return True
+            return _wait_confirmed(driver)
         finally:
             driver.quit()
+
+
+# Группа радио = одинаковый name. Вопрос — текст самого большого предка,
+# который ещё содержит только эту группу, минус подписи вариантов (живьём
+# 2026-11-04: у Wellfound подпись вопроса не связана с input через for).
+_RADIO_GROUPS_JS = """
+const groups = {};
+for (const r of document.querySelectorAll('input[type="radio"]')) {
+  if (!r.offsetParent) continue;
+  (groups[r.name] = groups[r.name] || []).push(r);
+}
+const label = r => ((r.labels && r.labels[0]) || r.parentElement).innerText.trim();
+return Object.values(groups).map(els => {
+  const opts = els.map(label);
+  let top = els[0].parentElement;
+  for (let i = 0; i < 4; i++) {
+    const up = top.parentElement;
+    if (!up || up.querySelectorAll('input[type="radio"]').length !== els.length) break;
+    top = up;
+  }
+  let q = top.innerText;
+  for (const o of opts) q = q.replace(o, '');
+  return {question: q.trim().slice(0, 400), options: opts, elements: els};
+});
+"""
+
+
+def _answer_radio_groups(driver, answer_fn) -> None:
+    """Раньше кликались все невыбранные радио подряд — в каждой паре
+    Yes/No оставалось последнее ("No"), в том числе на "legally eligible
+    to work?". Теперь ответ выбирает ИИ из вариантов; нет ответа или он
+    не совпал ни с одним вариантом — группа остаётся пустой, форма не
+    пройдёт и отклик честно не засчитается."""
+    for group in driver.execute_script(_RADIO_GROUPS_JS):
+        if any(el.is_selected() for el in group["elements"]):
+            continue
+        reply = _answer_with_options(
+            group["question"], group["options"], answer_fn
+        ).strip().lower()
+        for el, option in zip(group["elements"], group["options"]):
+            if reply and reply == option.strip().lower():
+                driver.execute_script("arguments[0].click();", el)
+                break
+
+
+def _answer_with_options(question, options, answer_fn) -> str:
+    if answer_fn is None or not question:
+        return ""
+    try:
+        return answer_fn(question, options=options)
+    except Exception:
+        return ""
+
+
+def _wait_for_submit(driver, timeout: float = 25) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _find_button_by_visible_text(driver, _SUBMIT_TEXT_MARKERS):
+            return True
+        time.sleep(1)
+    return False
+
+
+def _wait_confirmed(driver) -> bool:
+    """Клик по кнопке — не отклик: без обязательного поля (резюме, ответ)
+    модалка остаётся открытой, а бот раньше всё равно рапортовал успех.
+    Успех = кнопки "Submit application" больше нет в DOM или на странице
+    появилась фраза-подтверждение."""
+    deadline = time.monotonic() + CONFIRM_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        time.sleep(1)
+        if _find_button_by_visible_text(driver, ("submit application",)) is None:
+            return True
+        if _CONFIRM_RE.search(driver.find_element(By.TAG_NAME, "body").text):
+            return True
+    return False
 
 
 def _answer(question: str, answer_fn: Optional[Callable[[str], str]]) -> str:
@@ -184,12 +276,15 @@ def _label_text_for(driver, field) -> str:
 
 
 def _find_button_by_visible_text(driver, needles: tuple[str, ...]):
-    for el in driver.find_elements(
-        By.CSS_SELECTOR, 'button, a[role="button"]'
-    ):
-        if not el.is_displayed():
-            continue
-        text = (el.text or "").strip().lower()
-        if any(needle in text for needle in needles):
-            return el
+    visible = [
+        (el, (el.text or "").strip().lower())
+        for el in driver.find_elements(
+            By.CSS_SELECTOR, 'button, a[role="button"]'
+        )
+        if el.is_displayed()
+    ]
+    for needle in needles:  # приоритет по порядку needles, не по DOM
+        for el, text in visible:
+            if needle in text:
+                return el
     return None

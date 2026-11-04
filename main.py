@@ -3335,7 +3335,9 @@ def search_and_apply_wellfound(
                 resume_text, profile, job, llm_api_key
             )
             try:
-                applied = client.apply(job.link, profile_dir, answerer.answer)
+                applied = client.apply(
+                    job.link, profile_dir, answerer.answer, resume_pdf_path
+                )
             except Exception as e:
                 logger.exception(
                     f"Wellfound apply form crashed for {job.role} at "

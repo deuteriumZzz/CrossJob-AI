@@ -91,6 +91,16 @@ def init_linkedin_browser(profile_dir: Path) -> uc.Chrome:
         options.add_experimental_option(
             "prefs", {"intl.accept_languages": "en-US,en"}
         )
-        return uc.Chrome(options=options, version_main=version_main)
+        # ponytail: 2026-11-04 каждый ход LinkedIn висел 17+10 мин и падал с
+        # "Timed out receiving message from renderer: 300" — у uc.Chrome
+        # таймаут загрузки по умолчанию 300 с, а LinkedIn никогда не
+        # доходит до события load (бесконечные трекеры). Список карточек
+        # и так дожидается sleep+скролл в search.py, поэтому достаточно
+        # DOMContentLoaded (eager) и короткого таймаута; повтор при
+        # таймауте уже делает chrome_utils._with_resilient_get.
+        options.page_load_strategy = "eager"
+        driver = uc.Chrome(options=options, version_main=version_main)
+        driver.set_page_load_timeout(60)
+        return driver
 
     return hide_extra_window(launch_chrome_with_retry(_build, profile_dir))

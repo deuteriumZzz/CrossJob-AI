@@ -8,13 +8,11 @@ from selenium.webdriver.support.ui import Select
 from src.job_sources.block_detection import raise_if_blocked_after_wait
 
 PAGE_LOAD_WAIT_SECONDS = 3
-_SUBMIT_TEXT_MARKERS = (
-    "submit application",
-    "submit",
-    "send application",
-    "apply",
-)
+# Порядок = приоритет (не порядок в DOM). Голое "apply" убрано из submit:
+# оно находило ту же "Apply now" и вакансия шла как отправленная.
+_SUBMIT_TEXT_MARKERS = ("submit application", "send application", "submit")
 _APPLY_TEXT_MARKERS = ("apply now", "apply")
+CONFIRM_WAIT_SECONDS = 10
 _READY_TEXT_MARKERS = ("i'm ready to apply", "ready to apply")
 
 
@@ -45,9 +43,22 @@ def apply_to_job(
     if apply_button is None:
         return False
     original_host = urlparse(driver.current_url).netloc
+    handles_before = set(driver.window_handles)
     driver.execute_script("arguments[0].click();", apply_button)
     time.sleep(2)
 
+    # 2026-11-04 сверка с /plus/job-application-tracker: из 35 "applied"
+    # бота в трекере Himalayas только 2 (micro1). У остальных "Apply now" —
+    # переход на сайт работодателя, чаще в НОВОЙ вкладке: домен текущей
+    # вкладки не менялся, и бот шёл дальше и рапортовал успех.
+    new_tabs = set(driver.window_handles) - handles_before
+    if new_tabs:
+        main_handle = driver.current_window_handle
+        for handle in new_tabs:
+            driver.switch_to.window(handle)
+            driver.close()
+        driver.switch_to.window(main_handle)
+        return False
     if urlparse(driver.current_url).netloc != original_host:
         return False
 
@@ -62,7 +73,12 @@ def apply_to_job(
             By.CSS_SELECTOR,
             'textarea, input[type="text"], input[type="number"]',
         ):
-            return True
+            return _wait_confirmed(driver)
+    elif not driver.find_elements(
+        By.CSS_SELECTOR, 'textarea, input[type="text"], input[type="number"]'
+    ):
+        # Ни nudge-модалки, ни формы — это не собственный отклик Himalayas.
+        return False
 
     for field in driver.find_elements(
         By.CSS_SELECTOR, 'textarea, input[type="text"], input[type="number"]'
@@ -80,16 +96,27 @@ def apply_to_job(
                 Select(select_el).select_by_value(value)
                 break
 
-    for radio in driver.find_elements(By.CSS_SELECTOR, 'input[type="radio"]'):
-        if radio.is_displayed() and not radio.is_selected():
-            driver.execute_script("arguments[0].click();", radio)
-
     submit = _find_button_by_visible_text(driver, _SUBMIT_TEXT_MARKERS)
     if submit is None:
         return False
     driver.execute_script("arguments[0].click();", submit)
-    time.sleep(1.5)
-    return True
+    return _wait_confirmed(driver)
+
+
+def _wait_confirmed(driver) -> bool:
+    """Успех = модалка закрылась (кнопки "I'm ready"/"Submit" больше нет) и
+    на странице нет текста ошибки. Клик сам по себе — не отклик."""
+    deadline = time.monotonic() + CONFIRM_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        time.sleep(1)
+        body = driver.find_element(By.TAG_NAME, "body").text.lower()
+        if "something went wrong" in body or "try again" in body:
+            return False
+        if _find_button_by_visible_text(
+            driver, _READY_TEXT_MARKERS + _SUBMIT_TEXT_MARKERS
+        ) is None:
+            return True
+    return False
 
 
 def _answer(question: str, answer_fn: Optional[Callable[[str], str]]) -> str:
@@ -113,12 +140,15 @@ def _label_text_for(driver, field) -> str:
 
 
 def _find_button_by_visible_text(driver, needles: tuple[str, ...]):
-    for el in driver.find_elements(
-        By.CSS_SELECTOR, 'button, a[role="button"]'
-    ):
-        if not el.is_displayed():
-            continue
-        text = (el.text or "").strip().lower()
-        if any(needle in text for needle in needles):
-            return el
+    visible = [
+        (el, (el.text or "").strip().lower())
+        for el in driver.find_elements(
+            By.CSS_SELECTOR, 'button, a[role="button"]'
+        )
+        if el.is_displayed()
+    ]
+    for needle in needles:  # приоритет по порядку needles, не по DOM
+        for el, text in visible:
+            if needle in text:
+                return el
     return None

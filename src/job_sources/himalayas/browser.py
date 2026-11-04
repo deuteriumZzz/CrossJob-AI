@@ -53,6 +53,8 @@ def init_himalayas_browser(profile_dir: Path) -> uc.Chrome:
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
         options.add_argument("--no-sandbox")
-        return uc.Chrome(options=options, version_main=version_main)
+        driver = uc.Chrome(options=options, version_main=version_main)
+        driver.set_page_load_timeout(90)  # по умолчанию 300 с (см. linkedin)
+        return driver
 
     return hide_extra_window(launch_chrome_with_retry(_build, profile_dir))

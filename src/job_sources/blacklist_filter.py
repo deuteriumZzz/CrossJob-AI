@@ -2,7 +2,7 @@ import re
 from typing import Optional
 
 from src.job import Job
-from src.job_sources.market_stats import remote_region
+from src.job_sources.market_stats import country_restriction, remote_region
 from src.job_sources.preferences import effective_list
 from src.logging import logger
 
@@ -106,6 +106,24 @@ def passes_blacklists(job: Job, preferences: dict) -> bool:
         and remote_region(f"{job.location}\n{job.description}") in excluded
     ):
         return False
+
+    # Вакансия привязана к стране/региону («India only», список стран
+    # Himalayas) — отсекаем, если ни одна из них не в remote_allowed_countries
+    # (по умолчанию пусто = отсекать все такие). country_restriction_filter:
+    # false — выключить.
+    if preferences.get("country_restriction_filter", True):
+        restriction = country_restriction(
+            job.location, job.description, job.source
+        )
+        allowed = [
+            c.lower() for c in preferences.get("remote_allowed_countries") or []
+        ]
+        if restriction and not any(c in restriction.lower() for c in allowed):
+            logger.info(
+                f"Вакансия только для другой страны, пропускаю: "
+                f"{job.role!r} ({restriction[:60]!r})"
+            )
+            return False
 
     # locations — общий allowlist для площадок, которые ищут широко
     # (например HH — по всей area=113 "Россия") и полагаются на этот
