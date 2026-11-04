@@ -375,10 +375,23 @@ class TelegramWatcher(threading.Thread):
 
     # --- запуск/остановка -------------------------------------------
 
+    def _seed_seen(self) -> None:
+        """Виденное хранится не только в памяти: после каждого перезапуска
+        досмотр истории заново присылал в бот одну вакансию из p_rabota,
+        job_python и rabotapython (13 повторов с идентичным текстом на 310
+        сохранённых постов). Дедуп по одной почте не годится — у Альфа-Банка
+        и Альвенты одна почта у разных вакансий."""
+        for post in list_watch_posts(self.output_folder).values():
+            if post.get("text"):
+                self._seen[_fingerprint(post["text"])] = None
+        while len(self._seen) > _SEEN_LIMIT:
+            self._seen.popitem(last=False)
+
     def run(self) -> None:
         global _ACTIVE
         from telethon import TelegramClient
 
+        self._seed_seen()
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
         self.client = TelegramClient(

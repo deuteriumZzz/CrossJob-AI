@@ -1689,3 +1689,35 @@ def test_poll_missed_posts_picks_up_posts_live_updates_lost():
 
         asyncio.run(watcher._poll_missed_posts(object(), "p_rabota"))
         assert watcher.client.forwarded == [("me", 1854), ("me", 1856)]
+
+
+def test_reposted_vacancy_is_not_delivered_again_after_restart():
+    """Виденное переживает перезапуск: тот же текст из другого канала не
+    приходит в бот повторно (13 повторов p_rabota/job_python/rabotapython)."""
+    post = "Python-разработчик, удалённо. hr@acme.ru\n" + "описание " * 20
+    with tempfile.TemporaryDirectory() as tmp:
+        params = {
+            "outputFileDirectory": Path(tmp),
+            "dataFolder": Path(tmp),
+            "telegram": {"llm_vacancy_filter": False},
+        }
+        make = lambda: w.TelegramWatcher(  # noqa: E731
+            1, "h", Path(tmp) / "s", ["job_python"], ["python"], [], "me", params
+        )
+        first = make()
+        first.client = _FakeClient()
+        asyncio.run(first._handle_post("p_rabota", SimpleNamespace(message=post, id=1)))
+        assert first.client.forwarded == [("me", 1)]
+
+        restarted = make()  # новый процесс: память пуста
+        restarted.client = _FakeClient()
+        restarted._seed_seen()
+        asyncio.run(
+            restarted._handle_post("job_python", SimpleNamespace(message=post, id=7))
+        )
+        assert restarted.client.forwarded == []
+        other = "Python-разработчик, другая компания. hr@acme.ru\n" + "иное " * 20
+        asyncio.run(
+            restarted._handle_post("job_python", SimpleNamespace(message=other, id=8))
+        )
+        assert restarted.client.forwarded == [("me", 8)]  # та же почта, другая вакансия
