@@ -1721,3 +1721,20 @@ def test_reposted_vacancy_is_not_delivered_again_after_restart():
             restarted._handle_post("job_python", SimpleNamespace(message=other, id=8))
         )
         assert restarted.client.forwarded == [("me", 8)]  # та же почта, другая вакансия
+
+
+def test_llm_check_post_accepts_format_without_label(monkeypatch):
+    """Gemini отвечает «vacancy: да / role: да / remote» без слова FORMAT:."""
+    from unittest.mock import MagicMock
+
+    llm = MagicMock()
+    llm.invoke.return_value = SimpleNamespace(
+        content="VACANCY: ДА\nROLE: ДА\nremote"
+    )
+    monkeypatch.setattr(
+        "src.job_sources.llm_provider.get_chat_llm", lambda *a, **k: llm
+    )
+    verdict = w._llm_check_post(
+        "Python разработчик, hr@acme.ru", "key", ["hr@acme.ru"], ["Python"], "", ["remote"]
+    )
+    assert verdict == (True, True, True, "hr@acme.ru")

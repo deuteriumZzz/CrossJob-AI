@@ -289,6 +289,8 @@ def _llm_check_post(
             work_format = re.search(
                 r"\bformat\s*:\s*(remote|hybrid|office|unknown)\b",
                 content,
+            ) or re.search(  # Gemini иногда пишет значение без «FORMAT:»
+                r"^\s*(remote|hybrid|office|unknown)\s*$", content, re.M
             )
             if not vacancy or not role or not work_format:
                 logger.warning(
