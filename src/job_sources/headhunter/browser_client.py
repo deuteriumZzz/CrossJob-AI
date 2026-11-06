@@ -19,7 +19,7 @@ from src.job_sources.headhunter.browser_test_answer import (
 )
 from src.job_sources.html_text import html_letter_to_plain_text
 from src.logging import logger
-from src.utils.chrome_utils import init_browser, is_driver_dead
+from src.utils.chrome_utils import init_browser, is_driver_dead, is_shown
 
 HH_BASE = "https://hh.ru"
 # Российский регион целиком — переопределяет сохранённый в аккаунте
@@ -28,6 +28,10 @@ HH_BASE = "https://hh.ru"
 HH_AREA_RUSSIA = "113"
 PAGE_LOAD_WAIT_SECONDS = 4
 _RESUME_LINK_RE = re.compile(r"/resume/([a-f0-9]{20,})")
+# После отклика на странице вакансии «Откликнуться» сменяется на «Чат»
+# (вживую 2026-11-06: УАЗ/Colvir — есть, Битрикс24 после анкеты — нет).
+_RESPONDED_SELECTOR = '[data-qa="vacancy-response-link-view-topic"]'
+RESPONDED_WAIT_SECONDS = 10
 
 
 def _wait_for_any(
@@ -48,7 +52,7 @@ def _wait_for_any(
     while True:
         for selector in selectors:
             elements = driver.find_elements(By.CSS_SELECTOR, selector)
-            if elements and elements[0].is_displayed():
+            if any(is_shown(e) for e in elements):
                 return True
         if time.monotonic() >= deadline:
             return False
@@ -262,9 +266,10 @@ class HeadHunterBrowserClient:
         -> answer) передаётся в answer_vacancy_test_if_present — если
         вакансия требует пройти тест/анкету перед откликом (см.
         browser_test_answer.py); без него используется эвристика без AI.
-        Возвращает (True/False — была ли нажата "Откликнуться", письмо —
-        то, что реально ушло, или "" если поля не было). False — если
-        кнопки нет (уже откликались/вакансия недоступна) — вызывающий код
+        Возвращает (True/False — подтвердил ли HH отклик на странице
+        вакансии, см. _responded; письмо — то, что реально ушло, или ""
+        если поля не было). False — если кнопки нет (уже откликались/
+        вакансия недоступна) или отклик не подтвердился — вызывающий код
         должен записать это как dry-run, не падая."""
         driver, owns_it = self._acquire_driver()
         try:
@@ -276,6 +281,10 @@ class HeadHunterBrowserClient:
                 By.CSS_SELECTOR, '[data-qa="vacancy-response-link-top"]'
             )
             if not buttons or not buttons[0].is_displayed():
+                if driver.find_elements(By.CSS_SELECTOR, _RESPONDED_SELECTOR):
+                    # Повтор после капчи: HH уже принял отклик.
+                    logger.info(f"Отклик на {vacancy_url} уже принят HH.")
+                    return True, ""
                 logger.warning(
                     "Кнопка 'Откликнуться' не найдена/не видна на "
                     f"{vacancy_url} (current_url={driver.current_url}) — "
@@ -297,7 +306,7 @@ class HeadHunterBrowserClient:
             )
 
             if answer_full_page_questionnaire(driver, ai_answer_fn):
-                return True, ""
+                return self._responded(driver, vacancy_url), ""
 
             test_answered = answer_vacancy_test_if_present(
                 driver, ai_answer_fn
@@ -312,7 +321,8 @@ class HeadHunterBrowserClient:
                 '[data-qa="vacancy-response-submit-popup"], '
                 'button[data-qa*="response-submit"]',
             )
-            if submit and submit[0].is_displayed():
+            submit = [s for s in submit if is_shown(s)]
+            if submit:
                 submit[0].click()
                 time.sleep(1.5)
             elif not test_answered and not cover_letter:
@@ -323,10 +333,37 @@ class HeadHunterBrowserClient:
                     "возможно быстрый отклик без модалки (тогда всё в "
                     "порядке) либо разметка изменилась, проверьте вручную."
                 )
-            return True, cover_letter
+            return self._responded(driver, vacancy_url), cover_letter
         finally:
             if owns_it:
                 driver.quit()
+
+    def _responded(self, driver, vacancy_url: str) -> bool:
+        """Клик — ещё не отклик: 2026-11-06 Битрикс24 после анкеты был
+        записан как applied, а на HH так и висело «Откликнуться» (~60 из
+        476 applied так и не появились в «Моих откликах»). Верим только
+        состоянию страницы вакансии: сначала ждём на месте (HH обновляет
+        её сам, и перезагрузка не оборвёт отправку на лету), не дождались —
+        перезагружаем и смотрим ещё раз."""
+        responded = _wait_for_any(
+            driver, [_RESPONDED_SELECTOR], timeout=RESPONDED_WAIT_SECONDS
+        )
+        if not responded:
+            # Капча-модалка после клика исчезнет при перезагрузке —
+            # ловим её до (вживую 2026-11-06, Finstar).
+            self._raise_if_vacancy_blocked(driver)
+            driver.get(vacancy_url)
+            responded = _wait_for_any(
+                driver, [_RESPONDED_SELECTOR], timeout=RESPONDED_WAIT_SECONDS
+            )
+        self._raise_if_vacancy_blocked(driver)
+        if not responded:
+            logger.warning(
+                f"Отклик на {vacancy_url} не подтвердился: на странице "
+                "вакансии нет «Чат» вместо «Откликнуться» — HH его не "
+                "принял (анкета/модалка не отправилась)."
+            )
+        return responded
 
     def attach_cover_letter(self, vacancy_url: str, text: str) -> str:
         """Сразу после отклика без поля письма — письмо кнопкой
@@ -428,7 +465,8 @@ class HeadHunterBrowserClient:
         toggles = driver.find_elements(
             By.CSS_SELECTOR, '[data-qa*="letter-toggle"]'
         )
-        if toggles and toggles[0].is_displayed():
+        toggles = [t for t in toggles if is_shown(t)]
+        if toggles:
             # ponytail: обычный .click() падает с "element click
             # intercepted" — центр bounding box карточки перекрыт её
             # же дочерним текстовым div (magritte-card), подтверждено
@@ -439,7 +477,8 @@ class HeadHunterBrowserClient:
         textareas = driver.find_elements(
             By.CSS_SELECTOR, 'textarea[data-qa*="letter"]'
         )
-        if not textareas or not textareas[0].is_displayed():
+        textareas = [t for t in textareas if is_shown(t)]
+        if not textareas:
             return ""
         cover_letter = html_letter_to_plain_text(cover_letter_fn())
         textareas[0].send_keys(cover_letter)

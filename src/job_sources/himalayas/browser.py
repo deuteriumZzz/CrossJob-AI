@@ -53,6 +53,10 @@ def init_himalayas_browser(profile_dir: Path) -> uc.Chrome:
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
         options.add_argument("--no-sandbox")
+        # Окно за краем экрана (shared_browser._hide) — без этих флагов
+        # Chrome может счесть его перекрытым и душить страницу.
+        options.add_argument("--disable-background-timer-throttling")
+        options.add_argument("--disable-backgrounding-occluded-windows")
         driver = uc.Chrome(options=options, version_main=version_main)
         driver.set_page_load_timeout(90)  # по умолчанию 300 с (см. linkedin)
         return driver

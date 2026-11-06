@@ -303,6 +303,7 @@ from src.utils.constants import (
 )
 from src.utils.file_lock import state_file_lock
 from src.utils.pause_all import is_paused, set_paused
+from src.utils.shared_browser import reveal_shared_browser
 from src.utils.vocabulary import STATUS_WORDS, platform_name, platform_state
 
 # Профиль HH нельзя открывать двумя WebDriver одновременно: Chrome оставляет
@@ -1564,6 +1565,9 @@ def _is_hh_manual_captcha(error: PlatformBlockedError) -> bool:
             "капч",
             "робот",
             "verify you are a human",
+            "not a robot",
+            "картинк",
+            "picture",
             "подозрительная активность",
             "проверка безопасности",
         )
@@ -1586,6 +1590,8 @@ def _run_hh_action_with_captcha_wait(
                 raise
             if deadline is None:
                 deadline = time.monotonic() + HH_CAPTCHA_WAIT_SECONDS
+                # Общий Chrome свёрнут — без этого капчу некуда вводить.
+                reveal_shared_browser()
                 notify(
                     parameters,
                     f"hh.ru: нужна ручная капча ({error}). У вас есть "
@@ -1895,8 +1901,9 @@ def _search_and_apply_headhunter_with_session(
                 else:
                     status = "dry_run"
                     logger.warning(
-                        "Кнопка 'Откликнуться' не найдена на "
-                        f"{job.link} — записано как dry-run."
+                        f"Отклик на {job.link} не подтверждён HH (нет "
+                        "кнопки или форма не отправилась) — записано как "
+                        "dry-run."
                     )
             else:
                 try:
@@ -6556,10 +6563,50 @@ def _sync_headhunter_negotiation_states(
             "Дальше буду присылать только новые ответы.",
             category="headhunter",
         )
+    _alert_hh_responses_missing(parameters, entries, states, applied_log)
     logger.info(
         f"Статусы откликов hh: {len(states)} на площадке, "
         f"обновлено {updated}."
     )
+
+
+def _alert_hh_responses_missing(
+    parameters: dict, entries: list, states: dict, applied_log: AppliedLog
+) -> None:
+    """Сторож (6.11): ~60 «applied» на HH так и не дошли — бот кликал, HH
+    отклик не принимал, и это заметил только пользователь руками. Отклик
+    записан 3 ч – 3 дня назад, а в «Моих откликах» его нет — одно
+    уведомление со ссылками."""
+    now = datetime.now().astimezone()
+
+    def recent(entry: dict) -> bool:
+        try:
+            age = now - datetime.fromisoformat(entry["applied_at"])
+        except (KeyError, TypeError, ValueError):
+            return False
+        return timedelta(hours=3) < age < timedelta(days=3)
+
+    missing = [
+        e
+        for e in entries
+        if e["external_id"] not in states
+        and not e.get("last_known_state")
+        and not e.get("missing_on_hh_alerted")
+        and recent(e)
+    ]
+    if not missing:
+        return
+    links = "\n".join(f"{e['company']}: {e['link']}" for e in missing[:20])
+    notify(
+        parameters,
+        f"hh: ⚠️ {len(missing)} откликов записаны как отправленные, но их "
+        f"нет в «Моих откликах» на HH — проверьте:\n{links}",
+        category="headhunter",
+    )
+    for e in missing:
+        applied_log.update_fields(
+            "headhunter", e["external_id"], missing_on_hh_alerted=True
+        )
 
 
 def _format_telegram_status(parameters: dict, applied_log: AppliedLog) -> str:

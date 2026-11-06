@@ -81,6 +81,14 @@ def init_linkedin_browser(profile_dir: Path) -> uc.Chrome:
         # ever balloons again, as a backstop regardless of root cause.
         options.add_argument("--no-first-run")
         options.add_argument("--no-default-browser-check")
+        # Окно свёрнуто (hide_extra_window) — без этих флагов Chrome
+        # душит фоновую вкладку, и через несколько минут хода страница
+        # выдачи виснет «Timed out receiving message from renderer»
+        # (каждый ход 6.11). У остальных площадок они есть в
+        # chrome_browser_options().
+        options.add_argument("--disable-background-timer-throttling")
+        options.add_argument("--disable-backgrounding-occluded-windows")
+        options.add_argument("--disable-renderer-backgrounding")
         # ponytail: подтверждено живьём 2026-09-19 — без закрепления языка
         # LinkedIn то отдаёт русский UI ("Простая подача заявки"), то
         # английский; все XPath кнопок в easy_apply.py матчатся по

@@ -141,3 +141,17 @@ def test_notify_keeps_unsent_message_and_delivers_it_later(
     assert sent[1] == "geekjob: 0 новых"
     tn.notify_from_secrets(params, "ещё")  # отложенное не уходит дважды
     assert sent[2:] == ["ещё"]
+
+
+def test_telegram_notification_is_cut_to_api_limit():
+    """Трейсбек на 5000 символов отклонялся Telegram и стопорил всю
+    очередь недоставленных уведомлений (капча, отклики) с 5.11."""
+    from src.job_sources import telegram_notify
+    from unittest.mock import patch
+
+    with patch.object(telegram_notify.httpx, "post") as post, patch.object(
+        telegram_notify, "raise_for_telegram_status"
+    ):
+        telegram_notify.send_notification("token", "chat", "x" * 5000)
+    sent = post.call_args.kwargs["json"]["text"]
+    assert len(sent) == telegram_notify.TELEGRAM_MAX_TEXT

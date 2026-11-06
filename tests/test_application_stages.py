@@ -195,3 +195,33 @@ def test_market_compares_with_resume_pdf_not_stale_yaml(
         "Python": True,
         "Kubernetes": True,
     }
+
+
+def test_sync_hh_states_alerts_once_about_applies_missing_on_hh(monkeypatch):
+    """6.11: ~60 «applied» на HH не дошли, заметил только пользователь.
+    Сверка статусов сама сообщает об отклике, которого нет на HH."""
+    import main
+    from datetime import timedelta
+
+    with tempfile.TemporaryDirectory() as tmp:
+        log = AppliedLog(Path(tmp) / "applied_log.json")
+        for n in ("old", "fresh", "ok"):
+            log.record(_job(n), "", "", "applied", 8, [])
+        hours_ago = datetime.now(timezone.utc) - timedelta(hours=5)
+        for n in ("old", "ok"):
+            log.update_fields("headhunter", n, applied_at=hours_ago.isoformat())
+        monkeypatch.setattr(
+            main, "list_negotiation_states", lambda driver: {"ok": "Просмотрен"}
+        )
+        sent: list[str] = []
+        monkeypatch.setattr(
+            main, "notify", lambda p, text, *a, **k: sent.append(text)
+        )
+        monkeypatch.setattr(main, "notify_routine", lambda *a, **k: None)
+
+        main._sync_headhunter_negotiation_states({}, None, log)
+        main._sync_headhunter_negotiation_states({}, None, log)
+
+        missing_alerts = [t for t in sent if "нет в «Моих откликах»" in t]
+        assert len(missing_alerts) == 1  # один раз, не на каждой сверке
+        assert "1 откликов" in missing_alerts[0]  # «fresh» моложе 3 ч — ждём

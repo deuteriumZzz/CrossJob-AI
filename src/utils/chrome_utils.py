@@ -116,6 +116,21 @@ def _reset_bloated_preferences(profile_dir: Path) -> None:
         prefs.unlink(missing_ok=True)
 
 
+def is_shown(element) -> bool:
+    """is_displayed(), но без ложного «скрыт» в свёрнутом окне: там не идут
+    анимации, и открытая модалка навсегда остаётся с opacity 0 у предка
+    (вживую 6.11, HH АСКОН: поле письма и «Send application» на экране,
+    is_displayed() — False, отклик не уходил). Смотрим на сам элемент:
+    есть высота и он не visibility:hidden."""
+    try:
+        return element.is_displayed() or (
+            element.rect["height"] > 0
+            and element.value_of_css_property("visibility") == "visible"
+        )
+    except Exception:
+        return False
+
+
 def is_driver_dead(driver) -> bool:
     """Общая проверка живости для клиентов, кеширующих один driver на
     весь прогон площадки (десятки driver.get() подряд по страницам/

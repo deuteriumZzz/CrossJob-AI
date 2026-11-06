@@ -21,10 +21,11 @@ class FakeDriver:
         self.window_handles = ["w0"]
         self.current_window_handle = "w0"
         self.switch_to = _Switch(self)
-        self.launched_minimized = False
+        self.hidden_offscreen = False
 
-    def minimize_window(self):
-        self.launched_minimized = True
+    def set_window_rect(self, x, y, width, height):
+        # за край экрана, а не свернуть — страница остаётся «visible»
+        self.hidden_offscreen = x < 0
 
     def close(self):
         self.window_handles.remove(self.current_window_handle)
@@ -48,7 +49,7 @@ def test_one_browser_many_tabs(tmp_path: Path):
     b = sb.open_tab(tmp_path / ".chrome_profile_b", launch)
     assert len(launches) == 1 and launches[0].parent == tmp_path
     assert launches[0].name == sb.SHARED_PROFILE_NAME
-    assert len(a._real.window_handles) == 2 and a._real.launched_minimized
+    assert len(a._real.window_handles) == 2 and a._real.hidden_offscreen
     a.quit()
     assert len(b._real.window_handles) == 1
     b.quit()  # последняя вкладка остаётся — окно не умирает

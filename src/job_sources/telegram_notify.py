@@ -11,6 +11,7 @@ from src.utils.file_lock import state_file_lock
 from src.utils.shared_browser import reveal_shared_browser
 
 TELEGRAM_API_BASE = "https://api.telegram.org"
+TELEGRAM_MAX_TEXT = 4096
 TOPICS_CACHE_FILE = ".telegram_topics.json"
 
 
@@ -347,7 +348,13 @@ def send_notification(
     """Прямой httpx.post вместо Telethon (юзер-сессия, нужна для
     чтения каналов в TelegramSourceClient) — для простого "уведомить
     себя" достаточно обычного бота через @BotFather, без входа под
-    личным аккаунтом."""
+    личным аккаунтом.
+
+    Лимит Telegram — 4096 символов: с 5.11 трейсбек падения на 5000
+    стоял первым в очереди недоставленных, отклонялся, и очередь с
+    капчами и откликами не уходила вообще (142 «message is too long»)."""
+    if len(text) > TELEGRAM_MAX_TEXT:
+        text = text[: TELEGRAM_MAX_TEXT - 1] + "…"
     payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
     if message_thread_id is not None:
         payload["message_thread_id"] = message_thread_id

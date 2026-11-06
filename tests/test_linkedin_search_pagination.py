@@ -108,3 +108,31 @@ def test_pages_per_location_caps_paging(monkeypatch):
     )
     assert len(driver.urls) == 3
     assert parse_qs(urlparse(driver.urls[0]).query)["geoId"] == ["101174742"]
+
+
+def test_hung_page_keeps_found_jobs_and_opens_fresh_tab(monkeypatch):
+    """6.11: страница выдачи висла («Timed out receiving message from
+    renderer»), и падал весь ход LinkedIn — найденное терялось."""
+    from selenium.common.exceptions import TimeoutException
+
+    monkeypatch.setattr(search.time, "sleep", lambda s: None)
+
+    class _HangingDriver(_Driver):
+        fresh_tabs = 0
+
+        def get(self, url):
+            if "start=25" in url:
+                raise TimeoutException("Timed out receiving message from renderer")
+            super().get(url)
+
+        class switch_to:  # noqa: N801
+            @staticmethod
+            def new_window(kind):
+                _HangingDriver.fresh_tabs += 1
+
+    driver = _HangingDriver({0: "".join(_card(i) for i in (1, 2))})
+
+    jobs = search.search_easy_apply_jobs(driver, "python", "", {})
+
+    assert [j.external_id for j in jobs] == ["1", "2"]
+    assert _HangingDriver.fresh_tabs == 1

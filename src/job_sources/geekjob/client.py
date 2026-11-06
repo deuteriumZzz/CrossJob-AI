@@ -151,9 +151,17 @@ class GeekjobClient:
                     By.XPATH,
                     '//button[contains(normalize-space(), "Отправить")]',
                 )
-                if submit_buttons:
-                    submit_buttons[0].click()
-                    time.sleep(1)
-            return True
+                if not submit_buttons:
+                    # Без кнопки письмо не ушло, а было «отправлено» (6.11).
+                    return False
+                submit_buttons[0].click()
+                time.sleep(1)
+            # Вживую 6.11: после отклика кнопка вакансии становится «УЖЕ
+            # ОТКЛИКНУЛИСЬ». Клик сам по себе — не отклик.
+            time.sleep(2)
+            driver.get(vacancy_url)
+            time.sleep(PAGE_LOAD_WAIT_SECONDS)
+            body = driver.find_element(By.TAG_NAME, "body").text.lower()
+            return "уже откликнулись" in body
         finally:
             driver.quit()

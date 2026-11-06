@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import re
+import sys
 import time
 from typing import Callable
 
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 
 from src.logging import logger
+from src.utils.chrome_utils import is_shown
 
 # ponytail: селекторы НЕ подтверждены прямым просмотром живой страницы
 # (нет доступа к вакансии с прикреплённым тестом на живом аккаунте) —
@@ -27,6 +31,44 @@ _FREE_TEXT_SELECTOR = 'textarea, input[type="text"]'
 # а не на догаданные data-qa/классы hh.
 VACANCY_RESPONSE_URL_MARKER = "/applicant/vacancy_response"
 _SUBMIT_BUTTON_TEXT_MARKERS = ("respond", "откликнуться", "отправить", "send")
+_SELECT_ALL = Keys.COMMAND if sys.platform == "darwin" else Keys.CONTROL
+
+# Живьём 2026-11-06 (Битрикс24, vacancy_response): radio прозрачные
+# (opacity 0) — Selenium считал их невидимыми, бот не отвечал ни на один
+# вариант, и HH не принимал форму. У textarea нет <label for> — бот не
+# видел вопроса, и AI ответил сопроводительным на «В каком городе вы
+# проживаете?». Вопрос — ближайший предок с текстом (минус подписи
+# вариантов/текущий ответ), варианты — подписи radio.
+_QUESTIONS_JS = r"""
+const textOf = (el, minus) => {
+  for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+    let t = n.innerText || '';
+    for (const m of minus) if (m) t = t.split(m).join('');
+    if (t.trim()) return t.trim();
+  }
+  return '';
+};
+const groups = {};
+// Галочки «выберите несколько» (вживую 6.11, МТС) — только вопросы анкеты
+// (task_*), отвечаем одним вариантом; «Свой вариант» требует текста — не берём.
+const label = r => ((r.labels && r.labels[0]) || r.parentElement).innerText.trim();
+for (const r of document.querySelectorAll('input[type="radio"], input[type="checkbox"][name^="task_"]'))
+  (groups[r.name] = groups[r.name] || []).push(r);
+const radios = Object.values(groups).map(all => {
+  const els = all.filter(r => !/свой вариант|own variant/i.test(label(r)));
+  const opts = els.map(label);
+  let top = all[0].parentElement;
+  while (top.parentElement && top.parentElement.querySelectorAll('input[type="radio"], input[type="checkbox"]').length === all.length)
+    top = top.parentElement;
+  let q = top.innerText;
+  for (const o of opts) q = q.split(o).join('');
+  return {q: (q.trim() || textOf(top, opts)).slice(0, 500), opts, els, checked: all.some(r => r.checked)};
+});
+const texts = [...document.querySelectorAll('textarea, input[type="text"]')]
+  .filter(t => t.offsetParent !== null)
+  .map(t => ({q: textOf(t, [t.value]).slice(0, 500), el: t}));
+return {radios, texts};
+"""
 
 
 def answer_vacancy_test_if_present(
@@ -44,7 +86,8 @@ def answer_vacancy_test_if_present(
     сам автор называл её грубым приближением, не надёжной логикой,
     держим тот же статус здесь."""
     blocks = driver.find_elements(By.CSS_SELECTOR, _QUESTION_BLOCK_SELECTOR)
-    if not blocks or not blocks[0].is_displayed():
+    blocks = [b for b in blocks if is_shown(b)]
+    if not blocks:
         return False
 
     logger.info(
@@ -53,8 +96,7 @@ def answer_vacancy_test_if_present(
         "про статус селекторов."
     )
     for block in blocks:
-        if block.is_displayed():
-            _answer_one_question(block, ai_answer_fn)
+        _answer_one_question(block, ai_answer_fn)
     return True
 
 
@@ -69,7 +111,8 @@ def _answer_one_question(
     free_text_fields = block.find_elements(
         By.CSS_SELECTOR, _FREE_TEXT_SELECTOR
     )
-    if not free_text_fields or not free_text_fields[0].is_displayed():
+    free_text_fields = [f for f in free_text_fields if is_shown(f)]
+    if not free_text_fields:
         logger.warning(
             "Вопрос теста вакансии без узнаваемых полей ответа — "
             "пропускаем (см. ponytail про непроверенные селекторы)."
@@ -82,8 +125,10 @@ def _answer_multiple_choice(options: list) -> None:
     # ponytail: эвристика в лоб из hh-applicant-tool — предпочесть вариант
     # со словом "да", иначе средний по счёту (автор: "по статистике
     # правильный ответ чаще посередине" — не доказано, просто fallback).
+    # Слово «да», не подстрока: «Не работал ранее с данными языками».
     yes_option = next(
-        (o for o in options if "да" in (o.text or "").strip().lower()), None
+        (o for o in options if re.search(r"\bда\b", (o.text or "").lower())),
+        None,
     )
     chosen = yes_option or options[len(options) // 2]
     try:
@@ -127,33 +172,34 @@ def answer_full_page_questionnaire(
     """Отвечает на анкету на отдельной странице .../applicant/
     vacancy_response (см. VACANCY_RESPONSE_URL_MARKER) — детект по
     URL, а не по разметке, потому что сам переход туда подтверждён
-    живым скриншотом пользователя, а вёрстка полей внутри — нет.
-    Группирует radio-инпуты по стандартному HTML-атрибуту name (одна
-    группа = один вопрос) и находит текст вопроса для textarea/
-    input[text] через <label for=...> — то есть переиспользует ту же
-    эвристику ответов (_answer_multiple_choice/_answer_free_text), что
-    и модалка теста, только определяет вопросы иначе.
+    живым скриншотом пользователя. Вопросы и варианты — _QUESTIONS_JS.
+    Вариант выбирает AI; не выбрал/не совпало — группа остаётся пустой,
+    HH форму не примет, и apply() честно не засчитает отклик (без
+    угадывания «да»/середины, как в модалке). Текстовые поля HH хранит
+    черновиком между попытками — старый ответ стираем, а не дописываем.
 
-    Возвращает True, только если реально нашли и нажали кнопку
-    отправки по видимому тексту — иначе False, чтобы вызывающий код
-    (apply()) не считал отклик отправленным, пока форма не отправлена
-    на самом деле."""
+    True — кнопку отправки нашли и нажали. Ушёл ли отклик, решает
+    HeadHunterBrowserClient._responded по странице вакансии."""
     if VACANCY_RESPONSE_URL_MARKER not in driver.current_url:
         return False
 
     logger.info(
         "HH перевёл на отдельную страницу анкеты отклика "
-        f"({driver.current_url}) — отвечаем на вопросы эвристикой/AI."
+        f"({driver.current_url}) — отвечаем на вопросы через AI."
     )
 
-    for options in _group_radio_options_by_name(driver):
-        _answer_multiple_choice(options)
-
-    for field in driver.find_elements(By.CSS_SELECTOR, _FREE_TEXT_SELECTOR):
-        if not field.is_displayed():
-            continue
-        question_text = _label_text_for(driver, field)
-        _answer_free_text(field, question_text, ai_answer_fn)
+    questions = driver.execute_script(_QUESTIONS_JS) or {}
+    for group in questions.get("radios") or []:
+        _answer_radio_group(driver, group, ai_answer_fn)
+    for text in questions.get("texts") or []:
+        field = text["el"]
+        try:
+            if field.get_attribute("value"):
+                field.send_keys(_SELECT_ALL, "a")
+                field.send_keys(Keys.BACKSPACE)
+        except Exception as e:
+            logger.warning(f"Не удалось стереть старый ответ анкеты: {e}")
+        _answer_free_text(field, text["q"], ai_answer_fn)
 
     submit = _find_button_by_visible_text(driver, _SUBMIT_BUTTON_TEXT_MARKERS)
     if submit is None:
@@ -172,67 +218,50 @@ def answer_full_page_questionnaire(
     return True
 
 
-class _RadioOption:
-    """<input type=radio> сам по себе не имеет .text (это не текстовый
-    контент) — _answer_multiple_choice ищет "да" именно по .text,
-    поэтому без обёртки эвристика "предпочесть да" никогда бы не
-    сработала на настоящих radio-инпутах. click() бьёт по самому
-    радио, а не по label — оба варианта валидны в HTML, но так
-    исключается двойной toggle, если label визуально не оборачивает
-    инпут."""
-
-    def __init__(self, driver, radio):
-        self._radio = radio
-        self.text = _label_text_for(driver, radio)
-
-    def click(self) -> None:
-        self._radio.click()
-
-
-def _group_radio_options_by_name(driver) -> list[list]:
-    groups: dict[str, list] = {}
-    for radio in driver.find_elements(By.CSS_SELECTOR, 'input[type="radio"]'):
-        if not radio.is_displayed():
-            continue
-        name = radio.get_attribute("name") or ""
-        groups.setdefault(name, []).append(_RadioOption(driver, radio))
-    return list(groups.values())
-
-
-def _label_text_for(driver, field) -> str:
-    """Текст вопроса/варианта ответа для произвольного поля (radio,
-    textarea, input[text]) — пробует по нарастающей: явную связку
-    label[for=id], затем ближайший <label>-предок (частый паттерн для
-    radio: <label><input type=radio> Да</label>), и только в конце —
-    ближайший предшествующий текстовый узел через JS (для полей без
-    явной связки, например текстового вопроса перед textarea)."""
-    field_id = field.get_attribute("id")
-    if field_id:
-        labels = driver.find_elements(
-            By.CSS_SELECTOR, f'label[for="{field_id}"]'
+def _answer_radio_group(
+    driver, group: dict, ai_answer_fn: Callable[[str], str] | None
+) -> None:
+    if group.get("checked") or ai_answer_fn is None:
+        return
+    options = group["opts"]
+    try:
+        numbered = "\n".join(f"{i}. {o}" for i, o in enumerate(options, 1))
+        reply = ai_answer_fn(
+            f"{group['q']}\nВарианты ответа:\n{numbered}\n"
+            "Ответьте только номером одного варианта, без пояснений."
         )
-        if labels:
-            return labels[0].text.strip()
-    try:
-        ancestor_labels = field.find_elements(By.XPATH, "./ancestor::label[1]")
-        if ancestor_labels:
-            return ancestor_labels[0].text.strip()
-    except Exception:
-        pass
-    try:
-        return (
-            driver.execute_script(
-                "let n = arguments[0];"
-                "while (n && !n.previousElementSibling && n.parentElement)"
-                " { n = n.parentElement; }"
-                "return n && n.previousElementSibling"
-                " ? n.previousElementSibling.innerText : '';",
-                field,
-            )
-            or ""
-        ).strip()
-    except Exception:
-        return ""
+    except Exception as e:
+        logger.warning(f"AI не смог выбрать вариант анкеты: {e}")
+        return
+    index = _pick_option(reply or "", options)
+    if index is None:
+        logger.warning(
+            f"Ответ AI {reply!r} не совпал ни с одним вариантом вопроса "
+            f"{group['q'][:80]!r} — вопрос без ответа, HH форму не примет."
+        )
+        return
+    driver.execute_script("arguments[0].click();", group["els"][index])
+
+
+def _pick_option(reply: str, options: list[str]) -> int | None:
+    """Индекс варианта: точное совпадение, текст варианта в ответе (AI
+    любит добавить пояснение) или голый номер «2»/«2.». Номер из прозы
+    («у меня 4 года») не угадываем — вопрос останется без ответа."""
+    number = re.fullmatch(r"\s*(\d{1,2})[.)]?\s*", reply)
+    if number and 1 <= int(number.group(1)) <= len(options):
+        return int(number.group(1)) - 1
+
+    def norm(text: str) -> str:
+        return re.sub(r"[–—]", "-", text).strip().strip(".").lower()
+
+    answer = norm(reply)
+    normalized = [norm(o) for o in options]
+    if answer in normalized:
+        return normalized.index(answer)
+    hits = [
+        (answer.find(o), i) for i, o in enumerate(normalized) if o and o in answer
+    ]
+    return min(hits)[1] if hits else None
 
 
 def _find_button_by_visible_text(driver, needles: tuple[str, ...]):

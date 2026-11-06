@@ -37,6 +37,8 @@ def test_apply_fills_textarea_when_present():
             return [textarea]  # By.TAG_NAME, "textarea"
 
         driver.find_elements.side_effect = find_elements
+        # После отклика кнопка вакансии — «УЖЕ ОТКЛИКНУЛИСЬ» (вживую 6.11).
+        driver.find_element.return_value.text = "Python · УЖЕ ОТКЛИКНУЛИСЬ"
 
         client = GeekjobClient(profile_dir="profile")
         applied = client.apply(
@@ -78,3 +80,20 @@ def test_apply_refuses_to_submit_without_letter_field():
             )
 
         respond_button.click.assert_not_called()
+
+
+def test_apply_not_counted_until_geekjob_shows_already_applied():
+    """Клик «Отправить» — ещё не отклик: если кнопка вакансии не стала
+    «УЖЕ ОТКЛИКНУЛИСЬ», отклик не засчитываем (6.11, как на HH)."""
+    with patch("src.job_sources.geekjob.client.init_browser") as mock_init, patch(
+        "src.job_sources.geekjob.client.raise_if_page_blocked"
+    ), patch("src.job_sources.geekjob.client.time.sleep"):
+        driver = mock_init.return_value
+        driver.find_elements.side_effect = lambda by, value: [MagicMock()]
+        driver.find_element.return_value.text = "Python · Откликнуться"
+
+        applied = GeekjobClient(profile_dir="profile").apply(
+            "https://geekjob.ru/vacancy/abc", "profile", "Здравствуйте!"
+        )
+
+        assert applied is False

@@ -268,9 +268,13 @@ class GetMatchClient:
             submit_buttons = driver.find_elements(
                 By.XPATH, '//button[normalize-space()="Отправить отклик"]'
             )
-            if submit_buttons:
-                submit_buttons[0].click()
-                time.sleep(1.5)
+            if not submit_buttons:
+                # Раньше без кнопки всё равно было «отправлено» — та же
+                # ошибка, что на HH (6.11): клик ≠ отклик.
+                _close_modal(driver)
+                return False
+            submit_buttons[0].click()
+            time.sleep(1.5)
             return True
         finally:
             if owns_it:

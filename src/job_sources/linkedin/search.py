@@ -4,9 +4,11 @@ from urllib.parse import urlencode
 
 import httpx
 from bs4 import BeautifulSoup
+from selenium.common.exceptions import TimeoutException
 
 from src.job import Job
 from src.job_sources.filters import linkedin_search_params
+from src.logging import logger
 from src.job_sources.user_agents import random_user_agent
 
 SEARCH_URL = "https://www.linkedin.com/jobs/search/"
@@ -102,7 +104,18 @@ def search_easy_apply_jobs(
         page_params = dict(params)
         if page:
             page_params["start"] = page * PAGE_SIZE
-        driver.get(f"{SEARCH_URL}?{urlencode(page_params)}")
+        try:
+            driver.get(f"{SEARCH_URL}?{urlencode(page_params)}")
+        except TimeoutException as e:
+            # 6.11 каждый ход: страница N зависала, и падал весь ход —
+            # найденное на прошлых страницах терялось. Берём его и идём
+            # к следующему запросу.
+            logger.warning(
+                f"LinkedIn: страница {page + 1} «{keywords}» зависла, "
+                f"беру найденное ({len(jobs)}): {e.msg}"
+            )
+            _open_fresh_tab(driver)
+            break
         time.sleep(3)
         for _ in range(SCROLL_STEPS):
             # Список в залогиненном LinkedIn лежит в своей прокручиваемой
@@ -266,7 +279,12 @@ def load_job_description(driver, job: Job) -> Job:
     if text:
         job.description = text
         return job
-    driver.get(job.link)
+    try:
+        driver.get(job.link)
+    except TimeoutException as e:
+        logger.warning(f"LinkedIn: вакансия {job.link} зависла: {e.msg}")
+        _open_fresh_tab(driver)
+        return job  # без описания — оценка соответствия отсеет
     deadline = time.monotonic() + _DESCRIPTION_WAIT_SECONDS
     while True:
         time.sleep(2)
@@ -275,3 +293,12 @@ def load_job_description(driver, job: Job) -> Job:
             break
     job.description = text
     return job
+
+
+def _open_fresh_tab(driver) -> None:
+    """После «Timed out receiving message from renderer» рендерер вкладки
+    мёртв: следующий get() тут же падает тем же таймаутом (-0.004 в
+    логе). Новая вкладка — новый рендерер. ponytail: зависшую не
+    закрываем (close() на ней тоже виснет) — браузер и так закрывается
+    в конце хода."""
+    driver.switch_to.new_window("tab")

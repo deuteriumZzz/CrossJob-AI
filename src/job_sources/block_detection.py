@@ -30,6 +30,10 @@ _BLOCK_KEYWORDS = (
     "unusual traffic",
     "verify you are a human",
     "confirm you are not a robot",
+    # Капча-модалка HH прямо на вакансии после «Откликнуться» (вживую
+    # 2026-11-06, Finstar): без редиректа, бот считал её быстрым откликом.
+    "введите текст с картинки",
+    "enter the text from the picture",
     "доступ ограничен",
     "access denied",
     # Cloudflare-интерстишл (himalayas.app, подтверждено вживую

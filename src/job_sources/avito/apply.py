@@ -32,6 +32,22 @@ def apply_to_job(driver, job_link: str) -> bool:
         text = (el.text or "").strip().lower()
         if any(marker in text for marker in _APPLY_TEXT_MARKERS):
             driver.execute_script("arguments[0].click();", el)
-            time.sleep(1.5)
+            return _wait_responded(driver)
+    return False
+
+
+# Вживую 6.11: отклик на Авито — сам клик «Откликнуться» (кнопка потом не
+# меняется), а в открывшемся чате с работодателем появляется системное
+# «Вы откликнулись на вакансию». Нет его — отклик не засчитываем.
+_RESPONDED_TEXT = "вы откликнулись"
+RESPONDED_WAIT_SECONDS = 10
+
+
+def _wait_responded(driver) -> bool:
+    deadline = time.monotonic() + RESPONDED_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        time.sleep(1)
+        body = driver.find_element(By.TAG_NAME, "body").text.lower()
+        if _RESPONDED_TEXT in body:
             return True
     return False

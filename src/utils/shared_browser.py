@@ -40,10 +40,16 @@ def _alive(driver) -> bool:
 
 
 def _hide(driver) -> None:
+    """За край экрана, а не свернуть: в свёрнутом окне страница «hidden» —
+    анимации и requestAnimationFrame стоят (замер 6.11: 1 кадр за 3 с против
+    182), модалка отклика HH застревала прозрачной и бот её «не видел».
+    macOS не даёт увести окно целиком — остаётся уголок ~40×100 px слева
+    внизу, страница при этом «visible». Показ (капча/вход) —
+    reveal_shared_browser() → maximize_window()."""
     try:
-        driver.minimize_window()
+        driver.set_window_rect(x=-10000, y=10000, width=1280, height=900)
     except Exception as e:
-        logger.debug(f"Could not minimize the shared browser: {e}")
+        logger.debug(f"Could not hide the shared browser: {e}")
 
 
 def _hide_unless_visible(driver) -> None:
