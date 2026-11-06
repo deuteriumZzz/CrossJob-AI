@@ -136,3 +136,29 @@ def test_hung_page_keeps_found_jobs_and_opens_fresh_tab(monkeypatch):
 
     assert [j.external_id for j in jobs] == ["1", "2"]
     assert _HangingDriver.fresh_tabs == 1
+
+
+def test_hung_scroll_keeps_found_jobs(monkeypatch):
+    """16:55 6.11: повис execute_script прокрутки — chromedriver ответил
+    «Read timed out» через 120 с, и падал весь ход LinkedIn."""
+    from urllib3.exceptions import ReadTimeoutError
+
+    monkeypatch.setattr(search.time, "sleep", lambda s: None)
+    tabs = []
+
+    class _HungScrollDriver(_Driver):
+        def execute_script(self, _js):
+            if any("start=25" in u for u in self.urls):
+                raise ReadTimeoutError(None, None, "Read timed out.")
+
+        class switch_to:  # noqa: N801
+            @staticmethod
+            def new_window(kind):
+                tabs.append(kind)
+
+    driver = _HungScrollDriver({0: "".join(_card(i) for i in (1, 2))})
+
+    jobs = search.search_easy_apply_jobs(driver, "python", "", {})
+
+    assert [j.external_id for j in jobs] == ["1", "2"]
+    assert tabs == ["tab"]

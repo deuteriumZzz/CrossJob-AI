@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 import httpx
 from bs4 import BeautifulSoup
 from selenium.common.exceptions import TimeoutException
+from urllib3.exceptions import ReadTimeoutError
 
 from src.job import Job
 from src.job_sources.filters import linkedin_search_params
@@ -105,26 +106,21 @@ def search_easy_apply_jobs(
         if page:
             page_params["start"] = page * PAGE_SIZE
         try:
-            driver.get(f"{SEARCH_URL}?{urlencode(page_params)}")
-        except TimeoutException as e:
-            # 6.11 каждый ход: страница N зависала, и падал весь ход —
-            # найденное на прошлых страницах терялось. Берём его и идём
-            # к следующему запросу.
+            html = _load_results_page(
+                driver, f"{SEARCH_URL}?{urlencode(page_params)}"
+            )
+        except _HANG_ERRORS as e:
+            # 6.11 каждый ход: вкладка выдачи зависала (на загрузке или на
+            # прокрутке — «Read timed out» от chromedriver), и падал весь
+            # ход — найденное терялось. Берём его и идём дальше.
             logger.warning(
                 f"LinkedIn: страница {page + 1} «{keywords}» зависла, "
-                f"беру найденное ({len(jobs)}): {e.msg}"
+                f"беру найденное ({len(jobs)}): {e}"
             )
             _open_fresh_tab(driver)
             break
-        time.sleep(3)
-        for _ in range(SCROLL_STEPS):
-            # Список в залогиненном LinkedIn лежит в своей прокручиваемой
-            # панели — прокрутка всей страницы подгружает только первые
-            # карточки; крутим и панель, и страницу.
-            driver.execute_script(_SCROLL_JS)
-            time.sleep(SCROLL_PAUSE_SECONDS)
 
-        soup = BeautifulSoup(driver.page_source, "html.parser")
+        soup = BeautifulSoup(html, "html.parser")
         added = 0
         for card in soup.select("[data-job-id]"):
             job_id = str(card.get("data-job-id", ""))
@@ -281,18 +277,35 @@ def load_job_description(driver, job: Job) -> Job:
         return job
     try:
         driver.get(job.link)
-    except TimeoutException as e:
-        logger.warning(f"LinkedIn: вакансия {job.link} зависла: {e.msg}")
+        deadline = time.monotonic() + _DESCRIPTION_WAIT_SECONDS
+        while True:
+            time.sleep(2)
+            text = _read_description(driver)
+            if text or time.monotonic() >= deadline:
+                break
+    except _HANG_ERRORS as e:
+        logger.warning(f"LinkedIn: вакансия {job.link} зависла: {e}")
         _open_fresh_tab(driver)
         return job  # без описания — оценка соответствия отсеет
-    deadline = time.monotonic() + _DESCRIPTION_WAIT_SECONDS
-    while True:
-        time.sleep(2)
-        text = _read_description(driver)
-        if text or time.monotonic() >= deadline:
-            break
     job.description = text
     return job
+
+
+# Зависшая вкладка LinkedIn: таймаут загрузки у Selenium или «Read timed
+# out» у самого chromedriver, если повис execute_script (16:55 6.11).
+_HANG_ERRORS = (TimeoutException, ReadTimeoutError)
+
+
+def _load_results_page(driver, url: str) -> str:
+    driver.get(url)
+    time.sleep(3)
+    for _ in range(SCROLL_STEPS):
+        # Список в залогиненном LinkedIn лежит в своей прокручиваемой
+        # панели — прокрутка всей страницы подгружает только первые
+        # карточки; крутим и панель, и страницу.
+        driver.execute_script(_SCROLL_JS)
+        time.sleep(SCROLL_PAUSE_SECONDS)
+    return driver.page_source
 
 
 def _open_fresh_tab(driver) -> None:
